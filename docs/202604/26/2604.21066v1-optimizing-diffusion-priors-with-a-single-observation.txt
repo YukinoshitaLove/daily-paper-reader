@@ -1,0 +1,882 @@
+Title: Optimizing Diffusion Priors with a Single Observation
+
+URL Source: https://arxiv.org/pdf/2604.21066v1
+
+Published Time: Fri, 24 Apr 2026 00:10:51 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# Optimizing Diffusion Priors in Image Reconstruction from a Single Observation 
+
+Frederic Wang 1 and Katherine L. Bouman 1
+
+Caltech, Pasadena CA 91125, USA 
+
+Abstract. While diffusion priors generate high-quality posterior sam-ples across many inverse problems, they are often trained on limited training sets or purely simulated data, thus inheriting the errors and bi-ases of these underlying sources. Current approaches to finetuning diffu-sion models rely on a large number of observations with varying forward operators, which can be difficult to collect for many applications, and thus lead to overfitting when the measurement set is small. We propose a method for tuning a prior from only a single observation by combining existing diffusion priors into a single product-of-experts prior and iden-tifying the exponents that maximize the Bayesian evidence. We validate our method on real-world inverse problems, including black hole imag-ing, where the true prior is unknown a priori , and image deblurring with text-conditioned priors. We find that the evidence is often maximized by priors that extend beyond those trained on a single dataset. By generaliz-ing the prior through exponent weighting, our approach enables posterior sampling from both tempered and combined diffusion models, yielding more flexible priors that improve the trustworthiness of the resulting posterior image distribution. 
+
+Keywords: Computational imaging · Diffusion models · Product-of-experts · Posterior sampling · Model selection 
+
+## 1 Introduction 
+
+In under-constrained inverse imaging problems, our reconstructions are only as good as the assumptions we make. These assumptions, often encoded as prior probability distributions p(x), describe what we believe plausible image solutions should look like before seeing the data. Yet in practice, the true prior distribution that governs nature’s variability is never known. Instead, we rely on approxima-tions: models that are convenient, interpretable, or empirically motivated, but almost certainly wrong in subtle ways. These mismatches can bias the resulting reconstructions, leading us to underestimate uncertainty or to impose features that reflect our model more than reality. Diffusion models [20, 31] are state-of-the-art data-driven priors for imaging inverse problems, but existing posterior sampling methods [7, 9, 23, 29, 36, 38, 42] treat the pretrained diffusion models as if they have exactly captured the true prior. However, many diffusion models used for scientific priors are trained on  
+
+> arXiv:2604.21066v1 [cs.CV] 22 Apr 2026 2F. Wang and K.L. Bouman
+
+images from simulations or highly limited training data, inheriting potentially incorrect physical assumptions about the world, simulation constraints, missing coverage of rare phenomenon, and a variety of other human biases. Strong, spe-cific priors can yield high-quality reconstructions but risk overconfidence and bias, while weak, general priors produce safer but less informative results. One approach to addressing an incorrect data-driven prior involves pooling reconstructions from many different priors and finding common structures [17]. Another approach directly learns or fine-tunes a prior using many independent corrupted observations [3,4,18,26]; however, with only one highly ill-posed mea-surement, directly finetuning or learning a prior introduces too many degrees of freedom, potentially causing the model to overfit to the measurement noise as well as null space components of the forward operator. Furthermore, these fine-tuning approaches are less interpretable, as we are not constraining our prior to a predetermined set of physics or assumptions. In the classical inverse problem literature, the priors are often simple ana-lytic functions, such as total variation or ℓ1 norm. While these generic priors are usually not ideal, we can still recover reasonable solutions by carefully tuning their regularization weights, preventing them from dominating the reconstruc-tion or from being too uninformative. Under a Bayesian formulation [32], these regularization weights can be interpreted as exponents that control the temper-ature of each prior distribution, and using multiple regularizers corresponds to a product-of-experts prior. Under this framework, the Bayesian evidence also provides a principled metric to choose between competing priors. By limiting ourselves to optimizing just these regularization weights, we avoid any issues of over-fitting to measurement noise or the forward operator null space. 
+
+Our contributions: We provide a principled approach to handling misspeci-fied data-driven priors for inverse problems by extending product-of-experts sam-pling of diffusion models to posterior sampling. We also present two principled strategies to choose the exponents that maximize the Bayesian evidence: (1) an 
+
+evidence scalar field strategy, where evidence gradients are computed on a fixed grid and used to solve an optimization problem approximating the underlying scalar, which can be used to identify the global maximizer, and (2) a generalized expectation-maximization (EM) method that finds exponents that locally max-imize the evidence. By continuously bridging between different diffusion model priors to find the right balance, we can identify an optimal degree of prior influ-ence – strong enough to stabilize the reconstruction, without introducing bias that conflicts with the data. Crucially, this balance can be inferred from a single measurement (i.e., a single image observed through a single forward operator). We validate our posterior sampling and exponent selection methods on a toy Gaussian model where the evidence for all product-of-expert combinations can be computed analytically. We find that our reconstructed evidence field closely matches the ground truth field, despite being evaluated on a coarse 11x11 grid. We also find that over multiple EM iterations, the prior exponents move in the direction that increases analytic evidence before reaching the optimum. We also validate our results on black hole imaging, where the true prior is unknown; priors Optimizing Diffusion Priors with a Single Observation 3
+
+trained on simulated black hole images generated from physics-based models [24] have been successfully used to reconstruct real M87* observations [17,34,36,40]. Despite simulated black hole priors achieving higher evidence on real M87* data than priors trained on generic space images [2, 34], we find that combining these models as a product-of-experts yields a prior with even higher evidence than the black hole prior alone, suggesting that a prior extending beyond those trained purely on simulations may better explain the observations. Finally, we perform deblurring on natural images, where the true prior is unknown and candidate priors are proposed using different text conditions in Stable Diffusion [25]. Our method is able to find the right balance between useful text conditions while eliminating incorrect conditions, leading to both a semantic interpretation of the underlying image as well as better reconstruction of semantic features. The proposed approach serves two purposes. First, it yields reconstructions that are more trustworthy by adaptively balancing prior strength based on data evidence. Second, it can reveal how much prior information is truly required; in other words, the weakest level of regularization that still achieves high evidence under the measurement. In doing so, our method reframes prior selection not as a fixed choice but as an inference problem in its own right – one that quantifies how much structure we can safely assume, and how much the observation alone can tell us. 
+
+## 2 Background 
+
+2.1 Diffusion Models 
+
+Given an image or latent x0 ∼ p(x0), the variance exploding (VE) forward diffusion process at time t ∈ [0 , T ] is given by: 
+
+xt = x0 + σtzt, zt ∼ N (0 , I ) (1) where σt is the noise schedule. We can sample from the diffusion model by discretizing the reverse SDE (Eq. 2) or probability flow ODE (PF-ODE, Eq. 3): 
+
+dx t = −2σtσ′
+
+> t
+
+∇xt log p(xt)dt + p2σtσ′
+
+> t
+
+dw t (2) 
+
+dx t = −σtσ′
+
+> t
+
+∇xt log p(xt)dt  (3) where wt is Brownian motion and ∇xt log p(xt) is learned. We use the VE process and PF-ODE throughout this paper for ease of notation, but our method can be extended to other diffusion noise schedules or the reverse SDE formulation sampling under a reparameterization. Given a noisy image xt ∼ p(xt), Tweedie’s formula gives us the posterior mean: 
+
+E[x0 | xt] = xt + σ2 
+
+> t
+
+∇xt log p(xt). (4) Many approaches for combining or tempering pretrained diffusion priors have been proposed. Classifier-free guidance (CFG) [21] strengthens conditioning for 4 F. Wang and K.L. Bouman 
+
+a desired condition c during sampling using a combination of the conditional and unconditional score γ∇ log p(x | c) + (1 − γ)∇ log p(x), where γ is a guid-ance strength; however, as this does not correspond to any forward diffusion process [14], both the marginals and underlying sampled distribution are ill-defined, making it not a useful or interpretable prior in practice. Approximate temperature sampling from diffusion models by approximating the prior as a Gaussian mixture [37] has been studied, but this generates noisy samples when the temperature is below 1, limiting its usefulness for posterior sampling. An-other method to sample from product or tempered diffusion models is to per-form annealed MCMC sampling in a predictor-corrector fashion along a set of predetermined marginals [14]. Feynman-Kac correctors [27] have been used as resampling weights for Sequential Monte Carlo (SMC) [12] to sample from these same distributions. The Ito density estimator [28] has also been used to sample from the AND and OR distributions of two models, although this does not have a closed form target distribution like previous approaches. 
+
+2.2 Solving Inverse Problems with Diffusion 
+
+Given a ground truth image or signal x, forward operator A(·), and measurement noise ε, we can obtain a measurement y = A(x) + ε. Classical inverse problem solvers minimize: 
+
+min  
+
+> x
+
+∥y − A(x)∥2 + λR (x) (5) where λ is a tunable regularization strength and R(x) is a handcrafted regu-larizer. From a Bayesian viewpoint, the term ∥y − A(x)∥2 is proportional to a Gaussian log-likelihood log p(y | x) whereas R(x) is proportional to the negative log-likelihood of some prior − log p(x). Therefore, tuning λ means that our prior is actually p(x)λ, which serves as a principled way to control the strength of the prior. If multiple regularizers are used with regularization weights λ1, λ 2, . . . ,then the equivalent Bayesian prior is a product-of-experts p1(x)λ1 p2(x)λ2 · · · .Diffusion models can be used as data-driven priors for posterior sampling. Early approaches to diffusion posterior sampling [6, 7, 29] guide the sampling trajectory with approximations of ∇x log p(y | xt). Recently, posterior samplers that anneal along specified marginals using invariant transition kernels [35, 36, 38, 42] have led to more accurate posterior samplers. Another related line of work uses measurements to train or finetune a dif-fusion model. Ambient diffusion methods [1, 10, 11] train a diffusion model us-ing many corrupted observations {yi} with different forward operators {Ai}.Expectation-maximization methods can learn a prior from only noisy observa-tions and an initial diffusion model prior [3, 4, 26]. However, these works assume many observations while we target situations where only a single observation may be available. EM methods have also been used to optimize the input condition in latent diffusion models for solving inverse problems [8], offering an alternative approach of adapting the prior for latent diffusion models. Optimizing Diffusion Priors with a Single Observation 5
+
+## 3 Method Overview 
+
+Given pretrained diffusion models on priors pi(x), i = 1 , . . . , n , a measurement 
+
+y, and corresponding likelihood log p(y | x), our goal is to determine exponents 
+
+ai such that the normalized product prior πa(x) ∝ Qni=1 pi(x)ai maximizes the Bayesian evidence log pa(y) = log R p(y | x)πa(x)dx . To this end, we develop two complementary approaches that both rely on estimating gradients of the evidence with respect to the exponents ai, which we obtain using unconditional and posterior samples from the product prior. In the first approach, we evaluate these gradients on a grid of exponent values and integrate them via constrained least squares to recover the full evidence field. Because this can be computa-tionally expensive, we also introduce a second method: a generalized expecta-tion–maximization (EM) procedure that directly optimizes the exponents and converges to a local maximizer of the evidence. Mathematical derivations and proofs are provided in the supplement. 
+
+3.1 Computing the Gradient of the Evidence 
+
+In this section, we describe how to compute gradients of the Bayesian evidence with respect to the exponents ai in a product-of-experts diffusion prior. Our procedure consists of three steps: sampling from the product prior, sampling from the corresponding posterior for a given observation, and using these samples to estimate the evidence gradients. 
+
+Unconditional sampling In order to sample from the product prior πa(x0) ∝Qni=1 pi(x0)ai , we follow [14, 39] and perform annealed MCMC sampling along the marginals πa(xt) ∝ Qni=1 pi(xt)ai in a predictor-corrector fashion. The pre-dictor step typically uses one step of the PF-ODE [39] or reverse SDE [14], while the corrector step mixes using the score ∇ log πa(xt) = Pni=1 ai∇ log pi(xt) along with sampling methods such as Unadjusted Langevin Dynamics (ULA). This score can be obtained easily from pretrained diffusion models on pi.Under the commonly adopted Gaussian approximation of pi(x0 | xt) [6, 38], we find that the marginals πa(xt) correspond to an effective noise level σt,ef f 
+
+that can differ from the original diffusion noise σt. This perspective provides us with a more accurate predictor step and thus fewer required mixing steps as well as a surrogate denoiser mean for our posterior sampling method. It also justifies a commonly used diffusion sampling heuristic: when sampling from a tempered prior π(x) = p(x)a, the reverse SDE with effective noise reduces to the standard SDE update with a scaled noise term, providing a principled explanation for the common heuristic used to sample from sharper or broader distributions [19]. 
+
+Proposition 1. Assume that for all models, pi(x0 | xt) ≈ N (μpi (xt), Σ t),where μ(xt) comes from each diffusion model and Σt is some covariance. De-fine the surrogate conditional πa(x0 | xt) ∝ Qni=1 pi(x0 | xt)ai . Given a tar-get prior πa(x0) ∝ Qni=1 pi(x0)ai with P 
+
+> i
+
+ai > 0 and an intermediate sample 6 F. Wang and K.L. Bouman 
+
+x ∼ πa(xt) ∝ Qni=1 pi(xt)ai , we can create a surrogate denoiser mean by using Tweedie’s formula at an effective noise σt,ef f = σt√Pni=1 ai
+
+:
+
+Eπa [x0 | xt] ≈ xt + σ2 
+
+> t,ef f
+
+∇xt log πa(xt). (6) We can use this effective noise intuition to improve the predictor step. Given 
+
+xt ∼ πa(xt), existing predictors for xt−1 discretize the PF-ODE or reverse SDE from σt to σt−1. Adjusting this to account for the effective noise and discretizing from σt,ef f to σt−1,ef f gives: 
+
+dx t = −σt,ef f σ′ 
+
+> t,ef f
+
+∇xt log πa(xt)dt = − σtσ′
+
+> t
+
+Pni=1 ai
+
+∇xt log πa(xt)dt  (7) Furthermore, consider the product distribution at high noise. If pi(xT ) ≈N (0 , σ 2 
+
+> T
+
+) for all models i, then the initial distribution πa(xT ) ∝ Qni=1 pi(xT )ai ≈N
+
+
+
+0, σ2 
+
+> TPni=1 ai
+
+
+
+, lending credence to our effective noise interpretation despite the Gaussian approximations of pi(x0 | xt) being poor at higher noise. As a result, we also initialize our reverse diffusion with the effective noise. See Algorithm 1. 
+
+Posterior sampling As we already perform annealed MCMC for unconditional sampling, we can naturally extend to posterior sampling by annealing along any path of intermediate marginals that approaches πa(x0)p(y | x0) as t → 0, as long as there is sufficient mixing at each annealing iteration. While the path 
+
+πa(xt)p(y | xt) is ideal for efficient mixing, the score ∇ log p(y | xt) is intractable. To address this, [35, 41] proposes a twisted annealing path p(xt)p(y | μp(xt)) βt
+
+to generate posterior samples for a single prior p, which we extend to πa(xt)p(y |
+
+μπ (xt)) βt for the product-of-experts case. We use Eq. 13 as a surrogate denoiser mean in the product prior case, which is asymptotically accurate as t → 0 as the Gaussian approximation becomes exact in that limit. The likelihood scaling schedule βt with βT = 0 , β 0 = 1 helps account for uncertainty in the posterior 
+
+πa(x0 | xt), which is ignored when only using the denoiser mean. The sampling path we use was originally designed to be used with Sequential Monte Carlo (SMC) resampling to improve mixing. In practice, we find 10-20 mixing iterations without SMC to be enough to generate diverse posterior samples with proper data fit. This also avoids the extra tuning burden of SMC and its potential cost to sample diversity when generating many particles in parallel [27,35]. The full posterior sampling method can be seen in Algorithm 1. 
+
+Computing the evidence gradient We use both our unconditional and pos-terior samples to construct an unbiased Monte Carlo estimator for the evidence gradient: 
+
+Proposition 2. Given prior πa(x) ∝ Qnj=1 pj (x)aj , measurement y, and likeli-hood p(y | x), the evidence gradient w.r.t. ai can be written as: 
+
+∂∂a i
+
+log pa(y) = Ex∼πa(x|y)[log pi(x)] − Ex∼πa(x)[log pi(x)] . (8) Optimizing Diffusion Priors with a Single Observation 7
+
+Algorithm 1 Unconditional and posterior sampling of π(x0) ∝ Qni=1 pi(x0)ai
+
+Require: annealing steps T , mixing steps M , exponents {ai}, likelihood scaling βt
+
+1: Initialize xT ∼ N (0 , σ2  
+
+> TP
+> iai
+
+)
+
+2: ∇ log π(xT ) ← P 
+
+> i
+
+ai∇ log pi(xT )
+
+3: for t = T − 1, ..., 0 do 
+
+4: ˆxt ← xt+1 + 0 .5 σ2  
+
+> t+1 −σ2
+> tP
+> iai
+
+∇ log π(xt+1 )
+
+5: for m = 1 , . . . , M do 
+
+6: ∇ log π(ˆ xt) ← P 
+
+> i
+
+ai∇ log pi(ˆ xt)
+
+7: if unconditional then 
+
+8: Langevin step on ˆxt using ∇ log π(ˆ xt)
+
+9: else 
+
+10: μ ← ˆxt + σ2  
+
+> tPai
+
+∇ log π(ˆ xt).
+
+11: Langevin step on ˆxt using ∇ log π(ˆ xt) + βt∇ log p(y | μ(ˆ xt)) 
+
+12: end if 
+
+13: end for 
+
+14: xt ← ˆxt
+
+15: end for 
+
+16: return x0
+
+Algorithm 2 Generalized expectation-maximization to optimize evidence 
+
+Require: EM iterations M , exponent initialization a(1) ∈ Rn, observation y
+
+1: for i = 1 , ..., M do 
+
+2: xpost ∼ πa(i) (x)p(y | x)
+
+3: xprior ∼ πa(i) (x)
+
+4: for j = 1 , ..., n do 
+
+5: gj ← Expost [log pj (x)] − Exprior [log pj (x)] 
+
+6: end for 
+
+7: a(i+1) ← GradientStep (a(i), g )
+
+8: end for 
+
+9: return a, x post 
+
+In order to compute log pi(x) for each diffusion prior, we can integrate the Jacobian along the PF-ODE using the Hutchinson trace estimator [30] [22], re-using the same probe vectors for all models ai to reduce variance. Sometimes, it is desirable to preserve the temperature of the product distri-bution by constraining the sum of exponents to be equal to 1. For example, with some latent diffusion models, adjusting the temperature rescales the underlying latent Gaussian prior, leading to out-of-distribution latents and poorly decoded images. Alternatively, fixing the temperature can improve interpretability of an optimized product prior by focusing on relative weighting rather than overall prior strength. We derive the gradient under these constraints: 
+
+Corollary 1. Given prior πa(x) ∝ Qni=1 pi(x0)ai such that an = 1 − P 
+
+> i
+
+ai,measurement y, and likelihood p(y | x), the evidence gradient w.r.t. ai can be 8 F. Wang and K.L. Bouman 
+
+written as: 
+
+∂∂a i
+
+log pa(y) = Ex∼πa(x)p(y|x)[log pi(x) − log pn(x)] (9) 
+
+− Ex∼πa(x)[log pi(x) − log pn(x)] . (10) 
+
+3.2 Selecting Product Prior Exponents 
+
+Here we describe two complementary approaches that leverage evidence gradi-ents, computed using the method of Section 3.1, to select the prior exponents. 
+
+Grid-Based Evidence Field Estimation When there are only two candi-date priors i = 1 , 2, we can evaluate dda i log pa(y) over a grid of a indexed by m, n and fit an underlying evidence field ϕ. Since the gradients typically have some Monte Carlo noise, we recover ϕ by solving a weighted constrained least-squares problem. We can define boundary conditions by computing the absolute evidence log Zp1 , log Zp2 of each individual prior using DiME [34]. Let 
+
+g(i) 
+
+> m,n
+
+:= dda i log pa1=m,a 2=n(y). Our optimization becomes: 
+
+min 
+
+> ϕ
+
+X
+
+> m,n
+> 2
+
+X
+
+> i=1
+
+w(i)
+
+> m,n
+
+∥(Diϕ)m,n − g(i)
+
+> m,n
+
+∥2 (11) s.t. ϕ(1 , 0) = log Zp1 , ϕ (0 , 1) = log Zp2 . (12) where Di is the finite difference operator for index i. We weight each term in the least squares by w(i) 
+
+> m,n
+
+∝ 1 
+
+> |g(i)
+> m,n |2
+
+, as the Monte Carlo variance generally grows with the squared norm of the gradient. 
+
+EM-Based Exponent Optimization When there are more than two priors, or if computational efficiency is desired, generalized expectation-maximization can find a local maximizer of the evidence in few iterations. We can alternate between sampling the unconditional and posterior distributions of the current product prior and updating the exponents with a normalized evidence gradient. The full EM loop is shown in Algorithm 2. This method is most appropriate when the evidence field is smooth and exhibits a well-defined maximum. 
+
+## 4 Experiments 
+
+4.1 Gaussian toy ablations 
+
+We first validate our method on two 1000-D Gaussian priors, p(x) = N (μp, Σ p)
+
+and q(x) = N (μq , Σ q ) with μp = 1 and μq = 0. The diagonal covariance of p was randomly sampled to represent a very strong but narrow prior with Optimizing Diffusion Priors with a Single Observation 9In -distribution y Slightly out -of -distribution y Out -of -distribution y 
+
+> Log -evidence
+> Log -evidence
+> Log -evidence
+
+Fig. 1: Top: Expectation-maximization iterations for the exponents a, b of the 1000-dimensional product prior ∝ p(x)aq(x)b. Here, p(x) represents a narrow Gaussian prior while q represents a wider Gaussian prior. Paths for an in-distribution, slightly out-of-distribution, and fully out-of-distribution measurement (with respect to prior p)with different initializations are shown. The analytic evidence is also shown. Bottom: 
+
+reconstructed evidence field from a discretized 11x11 grid with da = db = 0 .1. The reconstructed field closely matches the ground truth. 
+
+σp,i ∼ Unif [0 .1, 0.2] , while the diagonal covariance of q was randomly sampled to represent a much broader prior with σq,i ∼ Unif [0 .1, 1.0] . We take three dif-ferent ground truth x = [0 .9, 0.9] , x = [0 .8, 0.8] , x = [0 .7, 0.7] representing in-distribution, slightly out-of-distribution, and significantly out-of-distribution of our strong prior p. We simulate a measurement using a linear forward model 
+
+y = Ax + ε, A ∈ Rm×n, ε ∼ N (0 , σ 2 
+
+> y
+
+) with m = 200 and σy = 0 .2. Under this unimodal Gaussian prior and linear likelihood, the evidence field for all products and temperatures of priors can be analytically computed for comparison. We compute evidence gradients over a 11x11 grid with grid spacing 0.1 in order to reconstruct the evidence field, using the ground truth evidence for in-dividual priors p and q as boundary conditions. For EM optimization of the exponents we simulate the conditions of a diffusion model by sampling 20 un-conditional and 20 posterior samples using Algorithm 1 with 50 annealing steps and 20 mixing steps per annealing iteration. We perform the M-step by integrat-ing along the PF-ODE using trace estimation, as done with a diffusion model. For each measurement, we perform three EM trajectories, each with 12 iterations. We plot the results for all three measurements in Figure 1. With 20 samples, we are able to get accurate gradients. Using our EM approach, the exponents converge to the evidence maximizer in all cases despite the high dimensionality. Furthermore, the reconstructed evidence field closely resembles the analytic field, indicating that our optimization is robust to noise in the gradients. 10 F. Wang and K.L. Bouman Unconditional samples of 𝒑 𝒈𝒓𝒎𝒉𝒅 𝒙 𝒂 𝒑 𝒔𝒑𝒂𝒄𝒆 𝒙 𝒃           
+
+> a=0.0, b=1.0 a=0.1, b=0.9 a=0.2, b=0.8 a=0.3, b=0.7 a=0.4, b=0.6 a=0.5, b=0.5 a=0.6, b=0.4 a=0.7, b=0.3 a=0.8, b=0.2 a=0.9, b=0.1 a=1.0, b=0.0
+
+Fig. 2: Unconditional samples of the product of the GRMHD and space priors. Ground Truth  
+
+> 1
+> Evidence of prior exponents from
+> a GRMHD ground truth image
+> Ground Truth
+> EM Trajectories overlayed on evidence
+> from a GRMHD ground truth image
+> 2
+> posterior samples from
+> max 1 max 2
+
+Fig. 3: Evidence fields for measurements of two in-distribution GRMHD images. Left: 
+
+Because the ring size is unusually large relative to the training set, the evidence is maximized by tempering the GRMHD prior and combining it with the more general space prior. Posterior samples at the evidence-maximizing exponents are shown. Right: 
+
+Evidence field and EM trajectories for a highly typical GRMHD image. The evidence favors sharpening the GRMHD prior (increasing temperature), indicating that the observation is so characteristic of GRMHD that a narrower prior improves the fit. 
+
+4.2 Black hole imaging 
+
+Black hole images cannot be observed directly; instead they must be inferred from sparse measurements in a highly ill-posed inverse problem whose solutions depend critically on prior assumptions. Physical models of black holes, such as General-Relativistic Magnetohydrodynamics (GRMHD) [24], can be used to generate simulations from which physically motivated priors can be learned. However, these models arise from our current limited understanding of physics. Furthermore, even if the physics is accurate, the resulting simulations remain limited by spatial and temporal sampling constraints and by the small number of simulations that can be generated due to their high computational cost. Thus, it is natural to ask: can we improve our black hole priors by augmenting them with a weak generic prior, or by mixing with an alternative strong assumption? In the black hole imaging problem, we obtain measurements from a network of telescopes around the world called the Event Horizon Telescope (EHT) [16]. Given true frequency-domain measurements v∗ of an image, we obtain measure-ments from pairs of telescopes i, j through the forward model vi,j = gigj ei(ϕi−ϕj )v∗
+
+i,j +
+
+εi,j , where gi is a station-dependent gain error, ϕi is a station-dependent phase error from atmospheric noise and εi,j is thermal noise. We define two quan-tities to decouple the noise sources into approximately independent Bayesian likelihoods: the closure phase ycp = vi,j vj,k vk,i , which requires data from a min-imal set of 3 telescopes (i, j, k ), and the closure amplitude yca = vi,j vk,l 
+
+vi,k vj,l , which Optimizing Diffusion Priors with a Single Observation 11 Ground Truth Ground Truth   
+
+> Evidence of prior exponents from
+> an OOD image obtained by sampling
+> from pGRMHD (x) 0.5 pSpace (x) 0.5
+> 1
+> 2
+> EM trajectories overlayed on evidence for
+> an OOD image obtained by stretching a
+> GRMHD image
+> posterior samples from
+> max 1 max 2
+
+Fig. 4: Evidence fields for measurements for two slightly out-of-distribution images. 
+
+Left: as the ground truth was drawn from p0.5 
+
+> GRM HD
+
+p0.5
+
+> space
+
+, the evidence is maximized near this region, and posterior samples reconstruct the bright areas correctly up to translation invariance. Right: EM trajectories for an observation generated from a stretched GRMHD image. The evidence is maximized by relaxing the GRMHD prior, either through tempering or by incorporating the more general space prior. 
+
+requires data from a minimal set of 4 telescopes (i, j, k, l ) [5, 33]. The EHT mea-sures only sparse coverage of the Fourier domain, and captures only low spatial frequencies relative to the ground-truth images shown in our figures, thus leav-ing much of the high-frequency structure unconstrained. Furthermore, because closure phases remove absolute phase information, the reconstruction problem is invariant to translations in image space. We generate an 11x11 evidence field for each example observation, with the base GRMHD model being shown in the bottom right and either a weak prior trained on generic space images [2] or a strong prior trained on handwritten MNIST digits of the number 0 [13] – chosen because its ring-like structure re-sembles a black hole – being shown on the top left. We also perform EM on a subset of these examples. Computing the evidence gradient for a set of expo-nents takes 5 minutes on one NVIDIA A100. We generate 20 unconditional and conditional samples for each set, using 200 annealing steps and 20 mixing steps. We also constrain the exponents to be between [0 , 1] for interpretability. 
+
+How much should we generalize the black hole prior? As helpful context, we first visualize unconditional samples from product priors formed by combining the GRMHD and generic Space priors with different exponents in Figure 2. We then examine evidence fields for observations of ground-truth images that are both in- and out-of-distribution for the GRMHD prior. Evidence fields of measurements from two in-distribution GRMHD images are shown in Figure 3. On the left, we consider an atypical but still in-distribution GRMHD image. The evidence field identifies two high-evidence exponent set-tings, p0.2 
+
+> GRM HD
+
+p0.7 
+
+> space
+
+and p0.5 
+
+> GRM HD
+
+p0.3
+
+> space
+
+, and posterior samples corresponding to these are shown. Because the simulated black hole has an unusually large diameter relative to the training set, the evidence favors both tempering the GRMHD prior and combining it with the more general space prior. Despite 12 F. Wang and K.L. Bouman Evidence of Space -GRMHD prior exponents      
+
+> from real M87* black hole data
+> 1
+> 2
+> EM trajectories overlayed on MNIST -GRMHD
+> evidence for real M87* black hole data
+> posterior samples from
+> max 1 max 2
+
+Fig. 5: Evidence fields for real M87* black hole observations collected by the Event Horizon Telescope. Left: similar to previous atypical images, the evidence is maximized here by relaxing the GRMHD prior, either through tempering or by incorporating the more general space prior. Posterior samples show an increased range of possible struc-tures compared to only using GRMHD as a prior (see supplement). Right: Evidence field of M87* between two strong priors: GRMHD and handwritten MNIST 0 digits, as well as EM trajectories. The evidence maximizer prefers tempering the GRMHD prior without using any information from MNIST, but interestingly, there is a local maximum at the tempered MNIST prior that two EM trajectories converge to. 
+
+deviating from the base GRMHD model, these exponent choices still produce plausible reconstructions, indicating that modestly relaxing the prior can ac-commodate atypical observations. On the right, we consider a highly typical GRMHD image. The resulting evidence field exhibits a broad, relatively flat re-gion of high evidence. We visualize three EM trajectories initialized at (1 , 0) ,
+
+(1 , 1) , and (0 , 1) . Although these trajectories converge to different local maxima within this plateau, the resulting posterior samples are all of high quality and ap-pear sharper than those obtained from the initializations. Even the initialization corresponding to the base GRMHD prior moves toward stronger regularization, suggesting that the base prior is slightly too broad for this specific observation. We next use two slightly out-of-distribution measurements: one generated by sampling from the product prior p0.5 
+
+> GRM HD
+
+p0.5
+
+> space
+
+, and another obtained by ap-plying a spatial stretch to a GRMHD image. The results are shown in Figure 4. For the “product-prior sample,” the evidence is maximized near the ground-truth exponents (0 .5, 0.5) , and the resulting posterior samples recover the main bright structures, up to the translation invariance of the imaging problem. The stretched GRMHD image produces a similar evidence field to the atypical GRMHD image: the preferred exponents again favor both tempering the GRMHD prior and incorporating the more general space prior. The EM trajectories initialized at (1 , 0) , (1 , 1) , and (0 , 1) all converge toward regions of higher evidence and pro-duce posterior samples that are visually improved relative to the initializations. Across these experiments we also observe a consistent diagonal structure in the evidence fields. We believe this arises because the space prior implicitly acts as a smoothness regularizer: reducing the weight of the strong GRMHD prior (which broadens the distribution through tempering) can often be compensated Optimizing Diffusion Priors with a Single Observation 13 
+
+by increasing the weight of the space prior, leading to families of exponent com-binations with comparable evidence. We now examine the evidence field for the real M87* black hole observations measured by the EHT from April 6, 2017 [15]. Results are shown in Figure 5 for the GRMHD/space priors (left) and the GRMHD/MNIST 0 priors (right). For the GRMHD/space combination, the evidence can be increased relative to the base GRMHD model by either tempering the GRMHD prior or combin-ing it with the more general space prior, consistent with the behavior observed for the slightly out-of-distribution GRMHD images. The evidence is maximized near p0.5 
+
+> GRM HD
+
+p0.3 
+
+> space
+
+and p0.4 
+
+> GRM HD
+
+p0.5
+
+> space
+
+, with corresponding posterior samples shown in the figure. In contrast, when combining GRMHD with the MNIST 0 prior, the evidence is maximized by ignoring the MNIST prior entirely and in-stead tempering the GRMHD model. Nevertheless, the evidence field contains a secondary local maximum around p0.7 
+
+> M N IST
+
+, to which two different EM initial-izations converge. 
+
+4.3 Text-conditioned image restoration 
+
+Combining multiple text conditions can lead to detailed, higher quality uncon-ditional samples [14, 39]. Here, we use EM to determine the optimal weighting of conditions for blurry measurements. We used a blurring forward model with 
+
+y = K ⋆ x + ε, where K is a Gaussian blur kernel with a standard deviation of 10 pixels and the noise ε has standard deviation σy = 0 .1. For these exper-iments, we use Stable Diffusion 1.5. While Stable Diffusion is a latent diffusion model, our posterior sampling method naturally extends to latent space by an-nealing along the marginals πa(zt)p(y | D(μ(zt)) , where D represents the latent space decoder. We use the constrained gradient update (Corollary 2) to avoid producing OOD latents. We used 25 annealing steps, 20 corrector steps and 10 EM iterations, and we generate 10 posterior and prior samples at each iteration. Each EM iteration took around 15 minutes on a NVIDIA A100, with the main bottleneck being backpropagation through the decoder for the likelihood term. 4  
+
+> Ground truth Posterior samples Prior samples
+> Measurement y
+> EM iteration 1 EM iteration 10
+
+Fig. 6: Top: Exponents over many EM iterations for the golden corgi mixed-breed dog image. The EM converges to a large weight on the "golden retriever" and "corgi" priors and negative weight on the "poodle" prior. Bottom: Posterior and prior samples for iteration 1, which used the incorrect prior p(x | poodle ), and iteration 10, which used the optimized prior. The reconstructions at iteration 10 are more semantically accurate. 14 F. Wang and K.L. Bouman 4  
+
+> Ground truth Posterior samples Prior samples
+> Measurement y
+> EM iteration 1 EM iteration 10
+
+Fig. 7: Left: Exponents over many EM iterations for a low exposure nighttime image of the Sacre Coeur, taken using the author’s smartphone and is unlikely to come from any training set. The EM converges to a large weight on the "cathedral" and "temple" priors, indicating that both priors are useful despite the ground truth not technically coming from either, as well as a large negative weight on the palace and castle priors. 
+
+Right: Posterior and prior samples for iteration 1 and iteration 10. The reconstructions at iteration 10 are more semantically accurate. 
+
+For our first experiment, we have a ground truth image of a golden corgi ,a mixed-breed dog from a golden retriever and a corgi. We propose the can-didate conditions "golden retriver", "corgi", "poodle", and unconditional (null condition). EM results are shown in Figure 6. Despite the poor initialization, the exponents converge with high weight on "golden retriever" and "corgi", which not only gives us better posterior samples, but also tells us that the measure-ment is likely a mix of a golden retriever and a corgi, but not a poodle. We also find that the EM converges to the exact same set of exponents at other initializations, supporting an evidence maxima (see supplemental material). For the second experiment, we take a real-world photo of the Sacre Coeur using a phone as the ground truth and apply blurring, simulating poor expo-sure from low light. We propose the candidate conditions "cathedral", "palace", "temple", "castle", as well as no condition, and initialize with a high weight on all conditions. Results are shown in Figure 7. Even though the Sacre Coeur is not any of these, our EM method still finds that a prior of "cathedral" and "tem-ple" conditions along with negation of the "palace" and "castle" conditions has higher evidence. This can also be seen visually, as the combined prior generates spikes and ridges on top of the dome, likely due to the castle prior. Initializing EM at other locations also converges to the same exponents. 
+
+## 5 Conclusion 
+
+While diffusion priors are often imperfect representations of the true image dis-tribution, we demonstrate that combining or tempering existing diffusion models can yield product-of-experts priors with higher Bayesian evidence than any in-dividual prior. To enable this, we develop a method for computing gradients of the evidence with respect to the prior exponents, allowing these exponents to be optimized for a given observation. Overall, our framework enables diffusion priors to be adapted in a principled, evidence-driven manner for scientific imag-ing, providing insight into how different prior assumptions are supported by the measurements. Optimizing Diffusion Priors with a Single Observation 15 
+
+## Acknowledgments 
+
+This work was supported by NSF Award 2048237, an Amazon AI4Science Dis-covery Award, OpenAI, and a Sloan Research Fellowship. FW is supported by a Kortschak Fellowship. 
+
+## References 
+
+1. Aali, A., Daras, G., Levac, B., Kumar, S., Dimakis, A.G., Tamir, J.I.: Ambient diffusion posterior sampling: Solving inverse problems with diffusion models trained on corrupted data. arXiv preprint arXiv:2403.08728 (2024) 2. Alam, M.T., Imam, R., Guizani, M., Karray, F.: Flare up your data: Diffusion-based augmentation method in astronomical imaging (2024) 3. Bai, W., Wang, Y., Chen, W., Sun, H.: An expectation-maximization algorithm for training clean diffusion models from corrupted observations. Advances in Neural Information Processing Systems 37 , 19447–19471 (2024) 4. Barco, G.M., Adam, A., Stone, C., Hezaveh, Y., Perreault-Levasseur, L.: Tack-ling the problem of distributional shifts: Correcting misspecified, high-dimensional data-driven priors for inverse problems. The Astrophysical Journal 980 (1), 108 (2025) 5. Blackburn, L., Pesce, D.W., Johnson, M.D., Wielgus, M., Chael, A.A., Christian, P., Doeleman, S.S.: Closure statistics in interferometric data. The Astrophysical Journal 894 (1), 31 (2020) 6. Boys, B., Girolami, M., Pidstrigach, J., Reich, S., Mosca, A., Akyildiz, O.D.: Tweedie moment projected diffusions for inverse problems. arXiv preprint arXiv:2310.06721 (2023) 7. Chung, H., Kim, J., Mccann, M.T., Klasky, M.L., Ye, J.C.: Diffusion posterior sam-pling for general noisy inverse problems. arXiv preprint arXiv:2209.14687 (2022) 8. Chung, H., Ye, J.C., Milanfar, P., Delbracio, M.: Prompt-tuning latent diffusion models for inverse problems. arXiv preprint arXiv:2310.01110 (2023) 9. Coeurdoux, F., Dobigeon, N., Chainais, P.: Plug-and-play split gibbs sampler: em-bedding deep generative priors in bayesian inference. IEEE Transactions on Image Processing 33 , 3496–3507 (2024) 10. Daras, G., Dimakis, A.G., Daskalakis, C.: Consistent diffusion meets tweedie: Training exact ambient diffusion models with noisy data. arXiv preprint arXiv:2404.10177 (2024) 11. Daras, G., Shah, K., Dagan, Y., Gollakota, A., Dimakis, A., Klivans, A.: Ambient diffusion: Learning clean distributions from corrupted data. Advances in Neural Information Processing Systems 36 , 288–313 (2023) 12. Del Moral, P., Doucet, A., Jasra, A.: Sequential monte carlo samplers. Journal of the Royal Statistical Society Series B: Statistical Methodology 68 (3), 411–436 (2006) 13. Deng, L.: The mnist database of handwritten digit images for machine learning research [best of the web]. IEEE signal processing magazine 29 (6), 141–142 (2012) 14. Du, Y., Durkan, C., Strudel, R., Tenenbaum, J.B., Dieleman, S., Fergus, R., Sohl-Dickstein, J., Doucet, A., Grathwohl, W.S.: Reduce, reuse, recycle: Compositional generation with energy-based diffusion models and mcmc. In: International confer-ence on machine learning. pp. 8489–8510. PMLR (2023) 15. EHTC: First m87 eht results: Calibrated data (2019) 16 F. Wang and K.L. Bouman 16. EHTC: First m87 event horizon telescope results. i. the shadow of the supermassive black hole. The Astrophysical Journal Letters 875 (1) (2019) 17. Feng, B.T., Bouman, K.L., Freeman, W.T.: Event-horizon-scale imaging of m87* under different assumptions via deep generative image priors. The Astrophysical Journal 975 (2), 201 (2024) 18. Gao, A.F., Leong, O., Sun, H., Bouman, K.L.: Image reconstruction without ex-plicit priors. In: ICASSP 2023-2023 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP). pp. 1–5. IEEE (2023) 19. Geffner, T., Didi, K., Zhang, Z., Reidenbach, D., Cao, Z., Yim, J., Geiger, M., Dallago, C., Kucukbenli, E., Vahdat, A., et al.: Proteina: Scaling flow-based protein structure generative models. arXiv preprint arXiv:2503.00710 (2025) 20. Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models. Advances in neural information processing systems 33 , 6840–6851 (2020) 21. Ho, J., Salimans, T.: Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 (2022) 22. Hutchinson, M.F.: A stochastic estimator of the trace of the influence matrix for laplacian smoothing splines. Communications in Statistics-Simulation and Com-putation 18 (3), 1059–1076 (1989) 23. Li, X., Kwon, S.M., Liang, S., Alkhouri, I.R., Ravishankar, S., Qu, Q.: Decoupled data consistency with diffusion purification for image restoration. arXiv preprint arXiv:2403.06054 (2024) 24. Mizuno, Y.: Grmhd simulations and modeling for jet formation and acceleration region in agns. Universe 8(2), 85 (2022) 25. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution image synthesis with latent diffusion models. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 10684–10695 (2022) 26. Rozet, F., Andry, G., Lanusse, F., Louppe, G.: Learning diffusion priors from obser-vations by expectation maximization. Advances in Neural Information Processing Systems 37 , 87647–87682 (2024) 27. Skreta, M., Akhound-Sadegh, T., Ohanesian, V., Bondesan, R., Aspuru-Guzik, A., Doucet, A., Brekelmans, R., Tong, A., Neklyudov, K.: Feynman-kac correc-tors in diffusion: Annealing, guidance, and product of experts. arXiv preprint arXiv:2503.02819 (2025) 28. Skreta, M., Atanackovic, L., Bose, A.J., Tong, A., Neklyudov, K.: The super-position of diffusion models using the it \ˆ o density estimator. arXiv preprint arXiv:2412.17762 (2024) 29. Song, J., Vahdat, A., Mardani, M., Kautz, J.: Pseudoinverse-guided diffusion mod-els for inverse problems. In: International Conference on Learning Representations (2023) 30. Song, Y., Durkan, C., Murray, I., Ermon, S.: Maximum likelihood training of score-based diffusion models. Advances in neural information processing systems 34 ,1415–1428 (2021) 31. Song, Y., Sohl-Dickstein, J., Kingma, D.P., Kumar, A., Ermon, S., Poole, B.: Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 (2020) 32. Stuart, A.M.: Inverse problems: a bayesian perspective. Acta numerica 19 , 451–559 (2010) 33. Thompson, A.R., Moran, J.M., Swenson, G.W.: Interferometry and synthesis in radio astronomy. Springer Nature (2017) 34. Wang, F., Bouman, K.L.: Sample-efficient evidence estimation of score based priors for model selection. arXiv preprint arXiv:2602.20549 (2026) Optimizing Diffusion Priors with a Single Observation 17 35. Wu, L., Trippe, B., Naesseth, C., Blei, D., Cunningham, J.P.: Practical and asymp-totically exact conditional sampling in diffusion models. Advances in Neural Infor-mation Processing Systems 36 , 31372–31403 (2023) 36. Wu, Z., Sun, Y., Chen, Y., Zhang, B., Yue, Y., Bouman, K.: Principled proba-bilistic imaging using diffusion models as plug-and-play priors. Advances in Neural Information Processing Systems 37 , 118389–118427 (2024) 37. Xu, Y., Wu, Y., Park, S., Zhou, Z., Tulsiani, S.: Temporal score rescaling for tem-perature sampling in diffusion and flow models. arXiv preprint arXiv:2510.01184 (2025) 38. Zhang, B., Chu, W., Berner, J., Meng, C., Anandkumar, A., Song, Y.: Improving diffusion inverse problem solving with decoupled noise annealing. In: Proceedings of the Computer Vision and Pattern Recognition Conference. pp. 20895–20905 (2025) 39. Zhang, Y., Murtuza-Lanier, C., Li, Z., Du, Y., Wu, J.: Product of experts for visual generation. arXiv preprint arXiv:2506.08894 (2025) 40. Zheng, H., Chu, W., Zhang, B., Wu, Z., Wang, A., Feng, B.T., Zou, C., Sun, Y., Ko-vachki, N., Ross, Z.E., et al.: Inversebench: Benchmarking plug-and-play diffusion priors for inverse problems in physical sciences. arXiv preprint arXiv:2503.11043 (2025) 41. Zhu, Y., Dou, Z., Zheng, H., Zhang, Y., Wu, Y.N., Gao, R.: Think twice before you act: Improving inverse problem solving with mcmc, 2024. URL https://arxiv. org/abs/2409.08551 1(2) 42. Zhu, Y., Zhang, K., Liang, J., Cao, J., Wen, B., Timofte, R., Van Gool, L.: De-noising diffusion models for plug-and-play image restoration. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 1219–1229 (2023) 18 F. Wang and K.L. Bouman 
+
+## Supplemental for "Optimizing Diffusion Priors in Image Reconstruction from a Single Observation" 
+
+5.1 Proofs Proposition 3. Assume that for all models, pi(x0 | xt) ≈ N (μpi (xt), Σ t),where μ(xt) comes from each diffusion model and Σt is some covariance. De-fine the surrogate conditional πa(x0 | xt) ∝ Qni=1 pi(x0 | xt)ai . Given a tar-get prior πa(x0) ∝ Qni=1 pi(x0)ai with P 
+
+> i
+
+ai > 0 and an intermediate sample 
+
+x ∼ πa(xt) ∝ Qni=1 pi(xt)ai , we can create a surrogate denoiser mean by using Tweedie’s formula at an effective noise σt,ef f = σt√Pni=1 ai
+
+:
+
+Eπa [x0 | xt] ≈ xt + σ2 
+
+> t,ef f
+
+∇xt log πa(xt). (13) 
+
+Proof. Define m =    
+
+> Pni=1 aiμpi(xt)
+> Pni=1 ai
+
+. Using our Gaussian approximations and com-pleting the square, while absorbing x0-independent terms into the normalizing constant, we get: 
+
+πa(x0 | xt) ∝ exp − 12
+
+" nX
+
+> i=1
+
+ai(x0 − μpi (xt)) ⊤Σ−1 
+
+> t
+
+(x0 − μpi (xt)) 
+
+#! 
+
+(14) 
+
+∝ exp − 12
+
+> n
+
+X
+
+> i=1
+
+ai
+
+!
+
+(x0 − m)⊤ Σ−1 
+
+> t
+
+(x0 − m)
+
+!
+
+. (15) 
+
+∝ N 
+
+
+
+x0; m, Σt
+
+Pni=1 ai
+
+
+
+(16) which is a normalizable Gaussian density if Pni=1 ai > 0. Therefore, the conditional mean under πa is 
+
+Eπa [x0 | xt] = m =
+
+Pni=1 aiμpi (xt)
+
+Pni=1 ai
+
+. (17) We can use Tweedie’s formula to write this in terms of the scores of pi:
+
+μpi (xt) = xt + σ2 
+
+> t
+
+∇ log pi(xt), (18) 
+
+=⇒ Eπa [x0 | xt] = 
+
+Pni=1 ai
+
+ xt + σ2 
+
+> t
+
+∇ log pi(xt)Pni=1 ai
+
+(19) 
+
+= xt + σ2
+
+> t
+
+Pni=1 ai∇ log pi(xt)
+
+Pni=1 ai
+
+(20) 
+
+= xt + σ2
+
+> t
+
+Pni=1 ai
+
+∇ log πa(xt) (21) 
+
+= xt + σ2 
+
+> t,ef f
+
+∇ log πa(xt). (22) Optimizing Diffusion Priors with a Single Observation 19 
+
+Proposition 4. Given prior πa(x) ∝ Qnj=1 pj (x)aj , measurement y, and likeli-hood p(y | x), the evidence gradient w.r.t. ai can be written as: 
+
+∂∂a i
+
+log pa(y) = Ex∼πa(x)p(y|x)[log pi(x)] − Ex∼πa(x)[log pi(x)] . (23) 
+
+Proof. Let Z(a) = R Q nj=1 pj (x)aj dx be the normalizing constant for Qnj=1 pj (x)aj .We have: 
+
+∂∂a i
+
+log pa(y) = ∂∂a i
+
+log 
+
+Z
+
+p(y | x)πa(x)dx (24) 
+
+= ∂∂a i
+
+log 
+
+Z
+
+p(y | x)
+
+Qnj=1 pj (x)aj
+
+Z(a) dx (25) 
+
+= ∂∂a i
+
+log 
+
+Z
+
+p(y | x)
+
+> n
+
+Y
+
+> j=1
+
+pj (x)aj dx (26) 
+
+− ∂∂a i
+
+log 
+
+Z nY
+
+> j=1
+
+pj (x)aj dx  (27) Under usual regularity assumptions, the first term can be decomposed as: 
+
+∂∂a i
+
+log 
+
+Z
+
+p(y | x)
+
+> n
+
+Y
+
+> j=1
+
+pj (x)aj dx (28) 
+
+=
+
+> ∂∂a i
+
+R p(y | x) Qnj=1 pj (x)aj dx 
+
+R p(y | x) Qnj=1 pj (x)aj dx (29) 
+
+=
+
+Z
+
+log pi(x) p(y | x) Qnj=1 pj (x)aj
+
+R p(y | x) Qnj=1 pj (x)aj dx dx (30) 
+
+= Ex∼πa(x)p(y|x)[log pi(x)] . (31) Similarly, the second term: 
+
+∂∂a i
+
+log 
+
+Z nY
+
+> j=1
+
+pj (x)aj dx (32) 
+
+=
+
+> ∂∂a i
+
+R Q nj=1 pj (x)aj dx 
+
+R Q nj=1 pj (x)aj dx (33) 
+
+=
+
+Z
+
+log pi(x)
+
+Qnj=1 pj (x)aj
+
+Z(a) dx (34) 
+
+= Ex∼πa(x)[log pi(x)] . (35) 20 F. Wang and K.L. Bouman 
+
+Corollary 2. Given prior πa(x) ∝ Qni=1 pi(x0)ai such that an = 1 − P 
+
+> i
+
+ai,measurement y, and likelihood p(y | x), the evidence gradient w.r.t. ai can be written as: 
+
+∂∂a i
+
+log pa(y) = Ex∼πa(x)p(y|x)[log pi(x) − log pn(x)] (36) 
+
+− Ex∼πa(x)[log pi(x) − log pn(x)] . (37) 
+
+Proof. Denote dda i log pa(y) as the constrained derivative and ∂∂a i log pa(y) as the unconstrained. We can rewrite the constrained derivative using the chain rule: 
+
+dda i
+
+log pa(y) = ∂∂a i
+
+log pa(y) + ∂a n
+
+∂a i
+
+∂∂a n
+
+log pa(y) (38) 
+
+= ∂∂a i
+
+log pa(y) − ∂∂a n
+
+log pa(y). (39) Applying Proposition 4 gives us the desired result. Optimizing Diffusion Priors with a Single Observation 21 
+
+5.2 Implementation details 
+
+For all experiments, we used σmax,ef f = 50 and σmin,ef f = 0 .01 and followed the annealing noise schedule 
+
+
+
+σ1/7 
+
+> max,ef f
+
++ i
+
+
+
+σ1/7 
+
+> min,ef f
+
+− σ1/7
+
+> max,ef f
+
+ 7
+
+for i spaced uniformly between 0 and 1. At the annealing iteration with noise level σt,ef f we used the Langevin dynamics learning rate of 0.05 σ2 
+
+> t,ef f
+
+. We also use likelihood scaling βt = min(1 .0, 0.005 /σ 2 
+
+> t,ef f
+
+) similar to other annealed MCMC posterior sampling methods [41], which worked well across all experiments. To compute log pi(x) for the evidence gradient, we used a fixed 200 integra-tion steps with the same schedule as above regardless of how many annealing iterations were used to reduce integration bias. For our EM M-step, given gra-dient g := ∇a log p(y), we update the current exponents with the normalized gradient a ← η g 
+
+> ∥g∥+c
+
+. For the Gaussian examples, we used η = 0 .5 and c = 200 .For the black hole imaging, we used η = 0 .5 and c = 3000 . For the Stable Dif-fusion experiments, we used η = 2 .0 and c = 50 : empirically, for a fixed latent, the difference in log-probabilities between different conditions is really small. 
+
+Speeding up inference for Stable Diffusion experiments With a greater required number of mixing steps, computing ∇zt log p(y | D(μ(zt))) can become computationally expensive due to having to differentiate through the diffusion model and the decoder D at every step. As a result, we make the approximation: 
+
+∇zt log p(y | D(μ(zt))) = 
+
+ ∂μ (zt)
+
+∂z t
+
+T
+
+∇μ log p(y | D(μ(zt))) (40) 
+
+≈ ∇ μ log p(y | D(μ(zt)))  (41) where we approximate the Jacobian as identity. As t → 0, we have μ(zt) → zt
+
+so the approximation disappears at low noise. Therefore, we get the surrogate mixing score ∇zt log πa(zt) + βt∇μ log p(y | D(μ(zt))) , which also induces a path of marginals that also reaches the target posterior as t → 0. We find that this approximation can speed up each Stable Diffusion mixing iteration by around 
+
+3× with no cost to posterior sample quality or difference in EM optimum. This approximation also does not affect the posterior sample quality, EM convergence or evidence field landscape for the pixel-space black hole models, but results in less speedup (around 1.5×). 22 F. Wang and K.L. Bouman 
+
+5.3 Baseline methods on a single measurement 
+
+In this section, we demonstrate that existing diffusion model finetuning ap-proaches [3, 26] do not work with only a single measurement, first with a 2D Gaussian example, and then a real diffusion model example. These methods alternate between sampling the current posterior (E-step) and using these pos-terior samples to finetune the current prior (M-step). 
+
+2D Gaussian In this section, we use a 2D Gaussian mixture prior and linear forward model y = Ax + ε, with A ∈ R1×2. This setting gives us the ability to perform exact posterior sampling, fine-tuning and visualization. To simulate exact "fine-tuning" on the posterior, we use the computed analytic posterior density as the next prior, which also helps to avoids any finite-sample issues. As can be seen in Figure 8, the expressive initial prior overfits and ultimately collapses to the likelihood adjusted for measurement noise. Due to this mea-surement noise, the ground truth image actually has low probability under this converged prior, indicating that this approach is not suitable for a single mea-surement. Furthermore, there is still large uncertainty in the prior in the null space direction of A.Likelihood  Iteration 0 (initial prior)  Iteration 1 Iteration 2 Iteration 10  
+
+> ……
+> Iteration 100
+
+Fig. 8: Baseline finetuning method using a single measurement and a linear forward model. Likelihood p(y | x) is shown on the left. Starting from a Gaussian mixture prior at iteration 0, after many EM iterations the prior collapses onto the likelihood, indicating overfitting to the measurement. 
+
+Diffusion EM Now we run the same ablation study but with the pre-trained GRMHD prior as our initialization, and the M87* black hole observations as our measurements. At every EM iteration, we generate 3000 posterior samples using the current prior and then finetune the diffusion model using those samples for 10000 steps; each iteration took 1.5 hours. Results are shown in Figure 9. Similar to the toy example, the prior represented by the diffusion model overfits to the M87* likelihood over time, and it becomes narrower at each iteration, with the unconditional samples looking nearly identical at iteration 3 (bottom row). Optimizing Diffusion Priors with a Single Observation 23 Unconditional samples  Posterior samples 
+
+Iteration 0 
+
+Iteration 1 
+
+Iteration 2 
+
+Iteration 3 
+
+Fig. 9: Diffusion finetuning approaches from a single observation of the M87* black hole. As expected, the diffusion prior collapses onto the M87* likelihood and gets narrower at every iteration, to the point where all the unconditional samples at iteration 3 are nearly the same, making it an overfitted prior. 24 F. Wang and K.L. Bouman 
+
+5.4 Ablation of weighting in evidence field optimization 
+
+In Section 3.2 we describe weighting the least squares by w(i)
+
+m,n ∝ 1
+
+|g(i)
+
+> m,n
+
+|2 , as the variance of Monte Carlo noise scales with the squared norm of the estimate. We test different weightings w(i)
+
+m,n ∝ 1
+
+|g(i)
+
+> m,n
+
+|p , with p ∈ [0 , 1, 2, 3, 4, 5, 6] and the same Gaussian example described in Section 4.1. NRMSE to the ground truth field is displayed in Figure 10. At p = 2 , the metric is minimized for in-distribution and slightly OOD y, while still having low error for OOD y (which is minimized at 
+
+p = 4 ). Reconstructions of different weightings p are displayed in Figure 11. If p
+
+is too high, the evidence field gets overfit to gradient noise, as seen in the right hand side. As a result, p = 2 is both theoretically and empirically justifified. 
+
+Fig. 10: NRMSE for different p in the least squares weighting w(i) 
+
+> m,n
+
+∝ 1 
+
+> |g(i)
+> m,n |p
+
+. The error metrics are good for p ≥ 2, with p = 2 being the best for the in-distribution and slightly OOD y, and p = 4 being the best for OOD y.GT for in -distribution y  p= 0 p=1  p=2  p=4  p=6                                         
+
+> GT for slightly OOD y p= 0p=1 p=2 p=4 p=6
+> GT for OOD y p= 0p=1 p=2 p=4 p=6 GT for in -distribution y p= 0p=1 p=2 p=4 p=6
+> GT for slightly OOD y p= 0p=1 p=2 p=4 p=6
+> GT for OOD y p= 0p=1 p=2 p=4 p=6 GT for in -distribution y p= 0p=1 p=2 p=4 p=6
+> GT for slightly OOD y p= 0p=1 p=2 p=4 p=6
+> GT for OOD y p= 0p=1 p=2 p=4 p=6
+
+Fig. 11: Evidence field reconstruction for different least squares weightings p. When 
+
+p < 2, the least squares puts too much weight in the areas with high gradients (left side) and reconstructs the rest poorly. When p is too large, it starts overfitting to the gradient noise in flat regions. Optimizing Diffusion Priors with a Single Observation 25 
+
+5.5 More EM trajectories with Stable Diffusion 
+
+In this section, we show other EM trajectories of the Stable Diffusion experiments described in Section 4.3. In Figure 12, we use the golden corgi example and in Figure 13, we use the Sacre Coeur example. For the same set of priors, all EM trajectories converge to the same exponents. Even for a slightly different set of priors, where the unconditional is missing (Figure 12, right) we obtain a similar set of exponents. 
+
+Fig. 12: EM trajectories of different initializations for the golden corgi experiment. All trajectories converge to a high weight on the "golden retriever" and "corgi" text conditions, and no weight on the "poodle" condition. 
+
+Fig. 13: Left, middle: EM trajectories of different initializations for the Sacre Coeur experiment. Both trajectories converge to a high weight on the "cathedral" and "tem-ple" text conditions, and negative weight on the "palace" and "castle" conditions. 
+
+Right: when the unconditional prior is removed from the set of priors, we still con-verge to a high weight on the "cathedral" and "temple" conditions and a negative weight on the "castle" condition. The unconditional prior becomes absorbed into the "palace" condition.
