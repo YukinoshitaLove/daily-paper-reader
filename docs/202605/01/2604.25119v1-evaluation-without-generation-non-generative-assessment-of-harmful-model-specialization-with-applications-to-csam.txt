@@ -1,0 +1,1994 @@
+Title: Evaluation without Generation: Non-Generative Assessment of Harmful Model Specialization with Applications to CSAM
+
+URL Source: https://arxiv.org/pdf/2604.25119v1
+
+Published Time: Wed, 29 Apr 2026 00:28:40 GMT
+
+Number of Pages: 38
+
+Markdown Content:
+# Evaluation without Generation: Non-Generative Assessment of Harmful Model Specialization with Applications to CSAM 
+
+Vinith M. Suriyakumar 1∗
+
+, Ayush Sekhari 2†
+
+, Lena Stempfle 1†
+
+, Robertson Wang 3†
+
+,Michael Simpson 3, Rebecca Portnoff 3, Marzyeh Ghassemi 1, Ashia C. Wilson 1∗
+
+> 1
+
+MIT, 2BU, 3Thorn 
+
+Abstract 
+
+Auditing the fine-tunes of open-weight generative models for harmful specialization has become a new governance challenge for model hosting platforms. The standard toolkit, generative evaluation via curated prompts or red-teaming, does not scale to platform-level auditing and breaks down entirely for domains like child sexual abuse material (CSAM) where generation is legally constrained. This motivates the Eval-uation without Generation problem: assessing model capabilities without producing outputs. In such settings, capability must be inferred from the model’s state, either its parameters or internal representations, rather than its outputs. We introduce Gaus-sian probing , a method that characterizes how LoRA adaptors functionally perturb a model by measuring its internal responses to a reference ensemble of Gaussian latent states. Unlike raw-weight baselines, Gaussian probing reliably distinguishes benign from harmful specialization without sampling outputs. We demonstrate effectiveness in high-risk domains, including detecting models specialized for CSAM under realistic constraints. Our results show that Gaussian probing provides a scalable non-generative alternative for evaluating high-risk generative systems and remains robust to weight rescaling, a representative adversarial manipulation. 
+
+## 1 Introduction 
+
+The proliferation of open weight generative models, such as Stable Diffusion [45], FLUX [28], and Wan [60], has made high-quality image and video generation widely accessible [64, 11]. In tandem, low-rank adaptation (LoRA), a commonly used finetuning algorithm, enables cheap and efficient specialization of generative models at a fraction of the cost of tra-ditional finetuning [17]. Accessibility has also been improved by user-friendly graphical interfaces such as InvokeAI [20], which allow amateurs and hobbyists to finetune models for their own creative purposes. As a result, powerful image and video models can be eas-ily specialized, and those specializations can be shared through multiple different services, including public model-sharing platforms. This shift has created new governance challenges for open model-sharing platforms. Platforms such as CivitAI and Hugging Face host and distribute base models, fine-tuned variants, and, crucially, lightweight LoRA adaptors that users can combine, circulate, and redeploy widely before any output is ever inspected. This includes models optimized to produce child sexual abuse material (CSAM), with offenders producing bespoke models through fine-tuning that target particular children, victims and survivors of child sexual abuse [53]. Governance, therefore, becomes a problem of screening reusable model artifacts before they are broadly distributed.                         
+
+> ∗Corresponding authors: vinithms@mit.edu, ashia07@mit.edu
+> †These authors contributed equally.
+> arXiv:2604.25119v1 [cs.LG] 28 Apr 2026 Gaussian Probing Pipeline (No Generation)
+> 1
+> 4
+> Sample Gaussian noise 𝑧 ~Ν(0,𝐼 𝑑 )
+> Run diffusion model +LoRA
+> Aggregate Feature vector 𝝓 (𝚫 ,𝜽 )
+> No images are generated Only forward pass
+> Classifier
+> SFW
+> NSFW
+> CSAM Record activations ℎ𝑖 across timesteps
+> Time steps
+> LoRA
+> LMD
+> Temporal pooling
+> 2
+> 3
+> Key insight: LoRA shifts model behaviour
+> Base model,
+> 𝜽 𝑩
+> +LoRA
+> (fine -tuning)
+> 𝜽 𝑭𝑻
+> Changes distribution in feature space
+> Benign Explicit
+> (NSFW, CSAM)
+
+(a) Macro AUROC AUROC (sfw) AUROC (nsfw) AUROC (csam)          
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0 0.921 0.882 0.882
+> 1.000
+> 0.943 0.914 0.915
+> 1.000
+> 0.908 0.868 0.859
+> 0.996
+> Gaussian Probes CSAM Detection AUROC across architectures
+> FLUX1dev
+> SDXL
+> SD15
+
+(b) 
+
+Figure 1: (a) Key insight: LoRA fine-tuning shifts the model’s feature distribution, sepa-rating benign and explicit outputs in latent space. Proposed Gaussian probing pipeline, which samples Gaussian noise, runs the diffusion model with LoRA, records intermediate activations across timesteps, and aggregates them into feature vectors without generating images. (b) Example results for all three architectures (SD 1.5, SDXL 1.0, FLUX.1-dev) for NSFW and CSAM detection in the wild. At present, model assessment for first-party model providers is still largely organized around generative evaluation : prompting an adapted model, inspecting its outputs, and using those outputs to infer whether the model has acquired a harmful capability [55]. This approach does not scale to model hosting platforms. It depends on prompt coverage, requires iterative red-teaming and review, and becomes increasingly costly as the number of uploaded variants grows. The scale of adaptors to be screened is substantial: CivitAI alone reports hundreds of thousands of new LoRAs trained in a single month, alongside millions of generations 1. At this scale, output-based auditing cannot serve as the sole mechanism for pre-distribution governance. For several categories of harmful content, the limitations are even more acute. Evaluat-ing outputs related to bioweapons, cyberattacks, hate speech, or non-consensual intimate imagery can impose substantial psychological burdens, and the expertise required for reli-able evaluation may be scarce [44, 51, 16]. For CSAM, our central motivating application, generative evaluation breaks down entirely: attempting to generate CSAM, regardless of intent or success, is unlawful behavior in several regulatory regimes and jurisdictions, including the United States [50]. This leaves platforms and auditors with limited ability to determine whether a user-uploaded adaptor has specialized a model toward CSAM generation before that adaptor is shared. LoRAs represent a unique risk, since their small and portable format makes them easy for offenders to exchange [53]. That limitation matters given AI-generated CSAM is a large and accelerating crisis, with cross-sector impact across hotlines, content moderators, law enforcement [53, 19], creating significant human harm 2. In its most recent report analyzing 2024 reports, NCMEC (the National Center for Missing and Exploited Children, which acts as a global clearinghouse for reports related to child sexual abuse and exploitation) received 67,000 reports of AI-generated CSAM, up from 4,700 in 2023 [9]. Taken together, this harm landscape motivates our core questions: 
+
+Can harmful specialization be detected from weights alone, without ever generating an output? 
+
+We call this the Evaluation without Generation problem. In this work, we study a concrete and narrower instance that arises in open ecosystems: screening LoRA adap-tors for evidence of direct specialization toward two sensitive content categories, adult 
+
+> 1
+
+https://www.runpod.io/case-studies/civitai-runpod-case-study 
+
+> 2
+
+https://www.cbsnews.com/news/sextortion-generative-ai-scam-elijah-heacock-take-it-dow n-act/ 
+
+2sexual content (NSFW) and CSAM, without generating outputs. We focus on LoRAs because they are the primary unit through which specialization is created, packaged, and distributed. We answer this in the affirmative by shifting evaluation from output space to the model’s state. Rather than measuring what a model generates, we measure how fine-tuning changes its parameters or internal computation. This reframes capability eval-uation as an inference problem over model state rather than outputs. We propose Gaussian probing , a method that characterizes how a LoRA functionally perturbs a base diffusion model by measuring its internal responses to random Gaussian inputs. These responses provide a scalable, prompt-free signature of adaptor specializa-tion without requiring image generation. We evaluate the method in two settings. First, in controlled experiments on in-house trained safe-for-work (SFW) and not-safe-for-work (NSFW) LoRAs spanning variation in datasets, styles, architectures, and training condi-tions. Second in a naturalistic setting using LoRAs collected from public platforms such as CivitAI and CSAM LoRAs accessed through authorized entities and in accordance with applicable laws, where heterogeneity, label noise, and shortcut opportunities better reflect deployment conditions. Across both regimes, Gaussian probing reliably detects harmful NSFW and CSAM specialization while remaining more robust than raw-weight baselines to superficial training artifacts. To our knowledge, this is the first scalable, non-generative method for pre-distribution screening of CSAM-related specialization in user-uploaded gen-erative models. 
+
+## 2 Problem Formulation 
+
+2.1 Defining the Governance Target and Scope 
+
+Open platforms face a practical question when users upload LoRA adaptors: does this warrant intervention before it is widely shared? Put differently, can an uploaded adaptor contribute to harmful downstream use? Answering that question requires some care, because capability is not an intrinsic property of a LoRA in isolation. Whether an adaptor is treated as harmful depends on how it is expected to be used and on what kind of behavior a platform is prepared to tolerate. For example, a platform might choose to permit adaptors with moderate adult-content propensity, while adopting a zero-tolerance rule for any minors-related propensity. In full generality, a capability definition is difficult to identify. The relevant use dis-tribution may be uncertain, institution-specific, or strategically shaped by users, and the policy itself is partly normative. In this work, we therefore study a narrower but still useful case of direct harmful specialization : whether a LoRA was directly fine-tuned on data drawn from a target harmful content category, specifically, CSAM. This does not capture every route by which harmful capability may arise, such as LoRA composition, model merging, or more complex downstream chaining. But it does capture an important and operationally meaningful slice of the broader governance problem, namely the one most directly tied to the uploaded artifact itself and most amenable to pre-distribution screening. Even under this narrower target, the auditing problem remains difficult. The auditor must detect harmful specialization from the uploaded adaptor and base model alone, under constraints of observability, scale, and robustness. We formalize these constraints as the following methodological desiderata: 
+
+(D1) Non-generative observability. The representation must be computable from the up-loaded adaptor and the base model alone, without requiring prompt design, output generation, or human review. 
+
+(D2) Scalability. A practical auditor must operate under realistic storage and compute constraints. First, the resulting representation must be much smaller than the full 3parameter dimension, so that a large repository of adaptors can be stored and pro-cessed in memory. Second, the cost of constructing the representation for a single adaptor must remain feasible at audit scale. 
+
+(D3) Robustness. The representation should reflect direct harmful specialization rather than incidental features of how a LoRA was produced. We identify three types of signal that can be predictive and describe which are the ideal ones to utilize: 
+
+• development artifacts such as rank, learning-rate schedules, or update magni-tude 
+
+• dataset identity such as stylistic or distributional peculiarities of a particular training image datasets 
+
+• content signal or information tied to the underlying harmful category that per-sists across datasets, fine-tuning runs, and implementation choices This distinction matters for generalization and robustness to adversarial changes. 
+
+2.2 Formalizing the Screening Task 
+
+Fix a harmful content category c and a pretrained base diffusion model fθbase . For a LoRA adaptor ∆, let fθ(∆) := fθbase +∆ denote the adapted model. For each adaptor ∆, let 
+
+y(∆) ∈ { 0, 1} indicate whether ∆ was directly fine-tuned on data drawn from category c.The auditor observes ( θbase , ∆), but not the underlying training data and not any generated outputs. The auditing task of interest is given labeled adaptors {(∆ i, y (∆ i)) }ni=1 ,predict y(∆) from weights alone. We consider screening rules of the form g ◦ Φ, where Φ(∆; θbase ) ∈ H , is a fixed representation map and g : H → { 0, 1}, is a learned classifier. The auditor solves ˆgΦ ∈ arg min 
+
+> g
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(y(∆ i), g (Φ(∆ i; θbase ))) + λ∥g∥2.
+
+The central technical question is therefore how to construct a representation Φ(∆; θbase )that recovers direct harmful specialization from restricted, non-generative evidence while satisfying the scalability and robustness desiderata. 
+
+## 3 Gaussian Probing 
+
+We instantiate the representation map Φ(∆; θbase ) by probing the adapted model on a reference ensemble of Gaussian latent states. This representation summarizes how the adaptor changes the computation implemented by the base model. Let H, W , and C denote the height, width, and number of channels of the diffusion model input, and define ¯d = HW C . Let θ(∆) = θbase + ∆ denote the adapted parameters. We draw m i.i.d. Gaussian probes 
+
+νj ∼ N (0 , I ¯d), j = 1 , . . . , m. 
+
+Each probe ν is propagated through the diffusion process using the adapted model 
+
+fθ(∆) for T denoising steps. During this process, we extract intermediate hidden rep-resentations from a fixed layer, or fixed set of layers, of the denoising network. 3 Let 
+
+H(T )(∆; ν), H (T −1) (∆; ν), . . . , H (1) (∆; ν) denote the resulting hidden representations across diffusion timesteps. For a single probe ν, we aggregate these hidden states into a probe-specific feature ¯H(∆; ν) = ψ
+
+
+
+H(1) (∆; ν), . . . , H (T )(∆; ν)
+
+
+
+,
+
+> 3In practice, we extract activations from one or more designated internal layers of the denoising network, such as a mid-block feature map of the U-Net in Stable Diffusion 1.5.
+
+4where ψ is a fixed pooling map across timesteps and, when relevant, across layers, spatial positions, and channels. In the simplest case, ψ is the timestep average ¯H(∆; ν) = 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+H(t)(∆; ν).
+
+The population object underlying Gaussian probing is the probe functional Ψ(∆) := Eν∼N (0 ,I ¯d)
+
+ ¯H(∆; ν). (1) This function summarizes how the adapted model responds, on average, to a reference ensemble of Gaussian latent states. Our empirical representation is the corresponding Monte Carlo estimator Φ(∆; θbase ) := bΨm(∆) = 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+¯H(∆; νj ). (2) As we will illustrate, this can be interpreted as the expected pushforward of the LoRA perturbation through the model’s denoising dynamics under the native latent distribution. 
+
+3.1 Motivation for Gaussian Probing 
+
+What the auditor ultimately cares about is whether a LoRA changes the model in a way that supports harmful downstream use. In principle, the most direct object of study would therefore be the distribution of model outputs under some reference input ensemble. But in the settings that motivate this work, outputs cannot be generated. Therefore our approach replaces outputs with internal activations: rather than asking what the adapted model renders, we ask how the adaptor changes the model’s internal response profile on the diffusion process’s native Gaussian state space. This substitution is meaningful only if intermediate activations carry semantically rel-evant information. Prior work suggests that they do. In particular, diffusion models appear to organize high-level concepts in internal latent representations that remain co-herent across denoising steps, and those representations can be used to decode or steer semantic attributes of generation [27]. We leverage the same structure for a different pur-pose. Rather than steering outputs, we use internal responses to detect whether a LoRA systematically shifts the model toward a harmful specialization. This intuition can be made more precise through a local linearization. Fix a timestep 
+
+t and probe ν, and suppose the extracted hidden state is differentiable with respect to the model parameters. Then for a LoRA-induced perturbation ∆, 
+
+H(t)(∆; ν) − H(t)(0; ν) = DθH(t)(θbase ; ν)[∆] + o(∥∆∥),
+
+where DθH(t) denotes the Fr´ echet derivative of the hidden state mapping at the base parameter configuration. Equivalently, after vectorization, 
+
+H(t)(∆; ν) − H(t)(0; ν) ≈ Jt(θbase ; ν) vec(∆) ,
+
+where Jt is the Jacobian matrix representing the sensitivity of the internal representations to parameter changes. Under this view, Gaussian probing is not an arbitrary feature extractor. It measures how the LoRA is pushed forward into activation space by the denoising dynamics of the base model. Averaging over Gaussian probes emphasizes parameter directions that actu-ally affect the model’s computation on its native latent state space, rather than treating all directions in weight space as equally meaningful. Because LoRA updates are low-rank, the resulting activation shift is constrained to a locally low-dimensional subspace. This 5gives a principled reason to expect that harmful and benign specializations may be distin-guishable by relatively simple decision rules, including linear classifiers, if their induced activation responses differ systematically. We use Gaussian noise as the reference ensemble for two reasons. First, it is native to the diffusion process itself, so it provides a prompt-free way to interrogate the model’s denoising dynamics without making assumptions about future user prompts. Second, the probes are sampled independently of the fine-tuning pipeline. Because they do not inherently encode dataset metadata or rank selection, these responses provide a cleaner signal for desideratum (D3) . If a classifier built on Gaussian probe responses separates harmful from benign adaptors, that separation will likely come from how the LoRA func-tionally perturbs the model on the reference state space instead of superficial traces of how the LoRA was produced. In this sense, Gaussian probing is designed to privilege content-relevant functional signal over incidental training artifacts. Since Φ(∆; θbase ) is a Monte Carlo estimator of Ψ(∆), standard law-of-large-numbers arguments imply consistency under mild moment assumptions; we state this formally in Appendix A. The central question is therefore empirical: whether the induced shift in this representation is both sufficiently large and sufficiently well-estimated at finite sample sizes to support reliable screening in practice. 
+
+Gaussian probing satisfies the desiderata. Computing Φ(∆; θbase ) requires only for-ward passes through the adapted model on Gaussian inputs: no outputs are decoded, no images are rendered, and no prompt is designed or reviewed, satisfying (D1) . The compu-tation requires O(mT ) forward passes, is parallelizable across the audit set, and produces a representation of fixed dimension |H| regardless of the adaptor’s rank or structure. This representation is orders of magnitude smaller than the full parameter dimension d, satis-fying (D2) . Finally, because the representation captures the functional effect of ∆ on in-termediate activations rather than its footprint in weight space, in principle, two adaptors with identical functional behavior but different weight norms or training configurations will produce similar probe activations, while two adaptors with different specialization will not, satisfying (D3) . The remainder of the paper evaluates whether it succeeds in doing so empirically. 
+
+## 4 Evaluating Gaussian Probing Against the Desiderata 
+
+We evaluate how well the representation Φ satisfies the desiderata introduced in Sec-tion 2.1. We begin with a controlled setting, using LoRAs trained on SFW and adult pornography (NSFW) content to isolate separability and signal quality. We then consider a naturalistic setting using LoRAs from CivitAI to study robustness to training artifacts. We compare Gaussian probing to classifiers built on raw weight representations, in-cluding random projections of weight matrices. While these methods are simple and non-generative, they treat all directions in parameter space as equally meaningful and may therefore rely on incidental features of the training process rather than underlying content specialization. We evaluate three questions: (1) Does harmful specialization induce sufficient separa-tion in representation space? (2) Do representations capture content signal rather than dataset identity or artifacts? (3) Are these properties preserved in naturalistic settings and under adversarial conditions? 
+
+4.1 Controlled Study 
+
+Experimental Setup To produce our SFW LoRAs, we use six different datasets: COCO2017 [32], Flickr30K [41], Conceptual Captions 12M [3], LAION-Aesthetics [47], OpenImages [26], Unsplash-Lite [57], and Wikiart [46]. Together, these cover a broad 6SD15 SDXL FLUX1dev         
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> AUROC
+> 0.874
+> 0.988
+> 0.911 0.925
+> 0.960
+> 0.839
+> AUROC
+> Gaussian Probes
+> Raw Weights
+> SD15 SDXL FLUX1dev
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Precision
+> 0.876 0.903
+> 0.858 0.866 0.853
+> 0.733
+> Precision
+> Gaussian Probes
+> Raw Weights
+> SD15 SDXL FLUX1dev
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> FPR
+> 0.165
+> 0.093 0.079
+> 0.275
+> 0.151 0.163
+> FPR
+> Gaussian Probes
+> Raw Weights
+> Leave-Dataset-Out: Gaussian Probes vs Raw Weights across architectures
+
+Figure 2: Average AUROC, precision, and FPR across 5 fold CV fo all architectures on the leave-dataset-out evaluation. Randomly projected weights outperform Gaussian probing depending on the model, but we identify that this is due to dataset identity signal in Section 4.1.2, which does not satisfy our desiderata. Meanwhile, Gaussian probing still performs well while primarily leveraging the content signal in accordance with our robustness desiderata. range of benign content, including images of humans (faces, poses, non-explicit sugges-tive content), landscapes, objects, art, and fashion. We also use three adult pornography datasets in this task: NSFW Video Still [39], Danbooru2023 [40], Amaye15 [38]. All datasets are filtered using Thorn’s Safer hashing and classification technology to ensure removal of CSAM. 4 For each adult dataset we create 10 different random samples, along with additional subsets (e.g., cartoon-only and varying levels of nudity) to support our investigation into the kind of signal being encoded by these representations. We train 1,000 LoRAs per class (SFW and NSFW), varying dataset, sample, rank, learning rate, modules, training steps, and data size. This randomization ensures that models cannot rely on spurious correlations tied to specific training configurations, forcing representations to capture underlying content signal. In order to avoid the failure mode we already identified, we intentionally choose to remove these potential confounds. For Gaussian probing, we sample 1024 probes for each model and for raw weights we use a projection dimension of 256 for every layer. We evaluate across Stable Diffusion 1.5, SDXL 1.0, and FLUX.1-dev, spanning a range of model sizes and architectures from 860M to 12B parameters, including both U-Net and transformer-based diffusion models. This diversity allows us to study the impact of architecture and scale, as well as the role of layer selection for representation extraction. In particular, we examine which layers carry the most semantic signal, especially for SDXL and FLUX where prior guidance is limited. We report accuracy, precision, recall, F1, FPR, and FNR under two settings: (1) stan-dard 5-fold cross-validation, and (2) a leave-dataset-out (LDO) setting to test conceptual generalization. For this particular application, we are most interested in the AUROC, the precision and the false positive rate (FPR). Thus, these are the metrics we report throughout the plots in the main paper. All other metrics are reported in Appendix C.2. It is important to note that this controlled study eliminates many of the confounds which make this task inherently more difficult in the wild. These confounds include: which base checkpoint the LoRA was finetuned from, biases in which layers of the model are finetuned, and each individual LoRA being trained on a different dataset. As a result, we expect that the performance we see in this controlled setting will be higher than what we would see in the wild. Nevertheless, it more cleanly allows us to investigate the questions we outlined without the confounds playing a role. 
+
+> 4
+
+https://safer.io/solutions/ 
+
+7intra-SFW intra-NSFW cross             
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> AUROC
+> 0.509 0.492
+> 0.898
+> 0.998
+> 0.943
+> 0.998
+> n=10 n=3 n=15
+> SD15
+> intra-SFW intra-NSFW cross
+> 0.653
+> 0.813
+> 0.988
+> 0.947
+> 0.800
+> 0.965
+> n=10 n=6 n=20
+> SDXL
+> intra-SFW intra-NSFW cross
+> 0.534
+> 0.488
+> 0.992 0.993
+> 0.843
+> 0.998
+> n=10 n=3 n=15
+> FLUX1dev
+> Gaussian Probes
+> Raw Weights
+> Pairwise dataset classification AUROC: Gaussian Probes vs Raw Weights
+
+Figure 3: Average AUROC values for intra-SFW, intra-NSFW, and cross-class dataset pairs for both raw weights and Gaussian probing. For SD 1.5 and FLUX.1-dev Gaussian probing clearly is relying on content signal given both intra-SFW and intra-NSFW AUROC are near random while cross-class AUROC is high. This suggests that Gaussian probing encodes a signal that is useful for distinguishing the two concepts, without relying on lower-level dataset-specific properties. 
+
+4.1.1 Separability of SFW and NSFW Specialization 
+
+We begin with SD 1.5, as this is the simplest of the models and the most studied in the interpretability literature. Both representations achieve strong performance under stan-dard cross-validation (Figure 11), with Gaussian probing showing slightly lower FPR. The performance is exceptionally strong and we believe shows the ceiling of what is possible when all confounds are controlled. A more appropriate metric is the leave-dataset-out (LDO) setting. Given that we are leaving one entire SFW and NSFW dataset out during training, we get a better sense of conceptual generalization . Randomly projected weights generalize better than gaussian probing but both do well (Figure 2). However, this appar-ent advantage relies on stable dataset-level artifacts. As we illustrate in the next section, in settings where such artifacts can be manipulated, these representations degrade under even simple transformations, whereas Gaussian probing targets invariant functional signal. For SDXL 1.0 and FLUX.1-dev, we see similarly high performance in the standard CV evaluation (Figure 13 and Figure 15). For LDO evaluation, we find that for SDXL 1.0, probes generalize better. Meanwhile, for FLUX.1-dev, raw weights generalize bet-ter. In the next section, we investigate whether this generalization comes from signal that satisfies our auditor desiderata or if it is due to spurious signals that will inevitably undermine robustness. Overall, these results demonstrate that both representations we have presented are capable of distinguishing SFW trained LoRAs from NSFW trained Lo-RAs. We ensemble probes from both latent diffusion and text encoder modules across all three architectures in Appendix C.3 show this is essential for detecting text-encoder-only finetunes for SD 1.5. 
+
+4.1.2 Content Signal vs. Dataset Identity 
+
+We next evaluate how well the representations satisfy the robustness desideratum, in particular whether they capture content signal rather than dataset identity. The leave-dataset-out results in Section 4.1.1 left open whether raw weights’ advantage reflects gen-uine signal or exploitable artifacts. This section shows it’s the latter. To isolate the source of this signal, we construct a pairwise dataset classification task over SFW and NSFW LoRAs. For each pair of datasets, we train classifiers using both ran-domly projected weight and Gaussian probing features, and measure performance within and across classes. A representation that primarily encodes dataset identity will achieve high and consistent performance across intra-SFW, intra-NSFW, and cross-class compar-isons, whereas a representation that captures content signal should perform well only on cross-class distinctions. 8First, we examine whether simple training artifacts could explain the observed sep-arability. In particular, we compare the norms of LoRAs across and within classes and find them to be similar, reducing the likelihood that magnitude alone drives classifica-tion. Additionally, given that we randomly selected across all training hyperparameters we capture the vast space of possible configurations. Thus, we are less concerned that the representations are separable by training artifact information alone. A representation that encodes dataset identity will separate any two datasets regardless of class. A representation that encodes content signal will separate only across class (SFW vs. NSFW), not within. Figure 3 shows which regime each method is in. Overall, we find that Gaussian probes exhibit a stronger reliance on content signal. This is most evident in SD 1.5 and FLUX.1-dev, where projected raw weights can distinguish between datasets regardless of class, indicating sensitivity to dataset-specific artifacts rather than underlying content. Interestingly, for SDXL 1.0 where Gaussian probes do look like they use a combination of dataset identity and content signal it outperforms the randomly projected weights in the LDO evaluation. These results demonstrate that while Gaussian probes tend to perform worse on the LDO evaluation than randomly projected weights, they are using the ideal signal. Thus, we believe they are more robust and satisfy the auditor desiderata we outlined. 
+
+4.2 In the Wild Study 
+
+4.2.1 Are we relying on development artifacts & community norms? 
+
+The focus on classifying purely using content signal over both dataset identity and training artifacts may seem unnecessarily restrictive. Instead, one might argue for leveraging all available signals to maximize classification accuracy, regardless of whether it is based on the content or the training development artifacts. If such artifacts are stable and consistent in the wild on platforms such as HuggingFace, CivitAI, or CivArchive, why not exploit them? This line of reasoning seems reasonable, especially for high-stake domains like CSAM, where errors can have enormous costs. The problem is that relying on these artifacts introduces a fundamental vulnerability. Unlike content signals, which require meaningful manipulation to the model’s behavior, training artifacts are superficial. Adversaries can easily manipulate them, mimicking be-nign training patterns, without altering what the LoRA actually does. As a result, defenses that rely on such artifacts are likely to degrade quickly once adversaries adapt. 
+
+Experimental Setup To illustrate this vulnerability, we conduct a small experiment using LoRAs sourced from CivitAI. We collect 1,118 SDXL 1.0 LoRAs from the CivitAI platform, 493 of which are trained on SFW content and 525 on adult sexual content. Assignment of LoRAs into SFW vs. NSFW classes is based on a combination of LoRA metadata, an NSFW classifier applied to associated gallery images, and user-reported flags. We analyze metadata across both classes and observe systematic differences in training practices. Specifically, the median number of training steps, the median learning rate, and the median LoRAs rank are all higher for the NSFW LoRAs (Table 1), suggesting larger update magnitudes. We perform k-fold cross-validation using random train-test splits of our data, comparing the random projections classifier with the Gaussian probes classifier. We find that both perform equally well, initially suggesting that perhaps the main benefit of Gaussian probing is its memory efficiency. However, further analysis reveals that classifiers trained on raw weights are brittle. In fact, we found that if we simply train a classifier on feature vectors comprised of the Frobenius norm of each layer, this performed comparably to the random projections method. The classifier suggested that it was using the magnitude as a shortcut, given the differences in training procedures shown by the metadata. 9Field SFW NSFW 
+
+Training steps 1616 [1000–3342] (n = 363) 1776 [864–4000] (n = 349) 
+
+Learning rate 0.0001 [0.0001–0.0005] (n = 359) 0.0002 [0.0001–0.0005] (n = 346) 
+
+Network dim 32 [16–66] (n = 376) 64 [32–256] (n = 520) 
+
+Network alpha 16 [8–64] (n = 375) 32 [16–256] (n = 520) 
+
+LoRA rank 32 [16–70] (n = 418) 64 [32–256] (n = 546) 
+
+Num. train images 360 [202–1482] (n = 361) 590 [220–1260] (n = 349) 
+
+Num. epochs 10 [8–14] (n = 361) 10 [8–20] (n = 349) 
+
+Num. tensors 792 [792–792] (n = 508) 792 [792–834] (n = 547) 
+
+Table 1: Training configuration comparison between SFW and NSFW SDXL 1.0 LoRA models (median [Q25–Q75]). 
+
+Figure 4: Robustness to weight rescaling under an adversarial setting. Both methods are trained on unmodified CivitAI LoRAs and evaluated on LoRAs whose per-layer weight deltas have been rescaled to unit Frobenius norm, removing magnitude infor-mation while preserving functional behavior. (a) Classification using random projections of weight matrices degrades substantially across all metrics, with AUROC dropping from 0.920 to 0.832 and confidence interval widening from ±0.012 to ±0.095. (b) Gaussian probing is robust to the same manipulation, with AUROC increasing slightly from 0.924 to 0.943 and variance decreasing. This confirms the importance of relying on content signal over training artifacts differences. This leaves a clear vulnerability for an adversary to manipulate by simply equalizing the norms of their NSFW (or CSAM) LoRAs to match those of publicly available SFW LoRAs. We simulate this attack with our sample of SDXL LoRAs. We train classifiers on the unnormalized LoRAs and then test them on LoRAs where each layer’s norm is set to unit Frobenius norm. We see that the raw weights classifier experiences a significant drop in performance across most metrics, particularly AUROC, AUPRC, precision, and FPR. FPR in particular increases by 20%. Meanwhile the Gaussian probes classifier remains the same or even improves slightly (depending on the metric) on these normalized LoRAs at test time (Figure 4). 
+
+## 5 Detecting CSAM Specialization in the Wild 
+
+In this section, we focus on the motivating application of this work: detecting LoRAs specialized for generating child sexual abuse material using Gaussian Probing. Having demonstrated the effectiveness of the different representations for LoRA classification in satisfying our desiderata of non-generative, scalability, and robustness (Sections 4.1.2 and 10 SD15 SDXL FLUX1dev              
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> AUROC
+> 0.999 1.000 1.000
+> 0.737
+> 0.879 0.809
+> CSAM vs SFW
+> SD15 SDXL FLUX1dev
+> 0.994 1.000 1.000
+> 0.810 0.904 0.826
+> CSAM vs NSFW
+> SD15 SDXL FLUX1dev
+> 0.855 0.911 0.868 0.831
+> 0.916
+> 0.593
+> NSFW vs SFW
+> Probes
+> Raw Weights
+> Pairwise AUROC by Architecture
+
+Figure 5: AUROC across our three models (SD 1.5, SDXL 1.0, and FLUX.1-dev) com-puted for each pair of classes (SFW vs. CSAM), (NSFW vs. CSAM), and (SFW vs. NSFW). Gaussian probing separates CSAM from both SFW and NSFW across all three architectures. Raw weights fail on small-sample CSAM detection (AUROC 0.68-0.87). NSFW vs CSAM should be viewed as the most difficult of the three. Although, raw weights do perform comparably on some of the folds, there is high variance. Meanwhile the methods perform more comparably when looking at SFW vs NSFW. 4.2.1), we focus on applying our algorithm on separating between LoRAs specialized to generate SFW, NSFW, and CSAM content. We did not possess or generate any CSAM data or CSAM-specific LoRAs, nor did we train any LoRAs on such material; all such data remained solely with authorized entities and handling of the data was done in accordance with applicable laws and organizational safeguards. We intentionally omit further details to reduce misuse risk and preserve operational security. We discuss our reasoning for omitting further details in Section 7. 
+
+Experimental Setup For this section, our goal is to simulate deployment of this ap-proach in the wild. Thus, we source around 1,000 LoRAs from CivitAI for the SFW and NSFW classes. Additionally, for the purposes of this research, we accessed CSAM-specialized LoRAs through authorized entities, without handling underlying CSAM data and in compliance with applicable laws and organizational safeguards. We discuss our choice to intentionally omit all other details regarding access to these LoRAs in the Ethical Considerations section of the paper. For SD 1.5, our sample size consists of 18 CSAM-specialized LoRAs, for SDXL 1.0 our sample size is 34 CSAM-specialized LoRAs, and for FLUX.1-dev our sample size is 74 CSAM-specialized LoRAs. We test the performance of the different representations in this prediction task across the same three models as in the previous section. For Gaussian probing, we sample 512 probes for SD 1.5 and SDXL 1.0. Due to computational and operational security constraints surrounding our CSAM-specialized FLUX.1-dev LoRAs we only use 4 probes. For raw weights we use a projection dimension of 256 for every layer. Given that we no longer are controlling for any of the confounds we expect to see in the wild, we expect our method to perform well but less strong as our controlled experiments. As in Section 4, we focus on AUROC, precision, and FPR as our primary metrics of interest. We report additional metrics in the Appendix. 
+
+Pairwise Detection Across all three models and classes, Gaussian probing stands out as the better representation for detection. Raw weight projections, given their high di-mensionality, struggle to classify CSAM-specialized LoRAs given their small sample size. Meanwhile, Gaussian probing is effective at correctly classifying all CSAM-specialized Lo-RAs (Figure 5 and Figure 7)). We view these results as promising for the effectiveness of Gaussian probing for our motivating application. At the same time, these results should 11 sfw                   
+
+> nsfw
+> csam
+> Predicted
+> sfw
+> nsfw
+> csam
+> True
+> 77.53% 21.23% 1.23%
+> 21.97% 74.76% 3.28%
+> 0.00% 0.00% 100.00%
+> SD15
+> (ens_weighted)
+> sfw
+> nsfw
+> csam
+> Predicted
+> sfw
+> nsfw
+> csam
+> 79.11% 20.89% 0.00%
+> 17.33% 82.67% 0.00%
+> 0.00% 0.00% 100.00%
+> SDXL
+> (ens_stacking)
+> sfw
+> nsfw
+> csam
+> Predicted
+> sfw
+> nsfw
+> csam
+> 77.63% 21.99% 0.38%
+> 17.14% 82.67% 0.19%
+> 0.00% 0.00% 100.00%
+> FLUX1dev
+> (ens_stacking)
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Row-normalized (%)
+> CSAM Detection Per-Class Error Rates
+
+Figure 6: CSAM detection error rates by true class, across architectures averaged over 5 folds. Gaussian probing achieves 100% recall on CSAM across SD 1.5, SDXL, and FLUX.1-dev (bottom row), with under 1% of SFW LoRAs misclassified as CSAM for SD 1.5 and SDXL. The 2–4% of NSFW LoRAs predicted as CSAM may reflect genuine CSAM contamination in CivitAI uploads rather than classifier errors, and warrant follow-up inspection about which of the two they are. be interpreted as evidence of separability under the current data conditions, rather than as a claim of near-perfect detection in deployment settings. 
+
+Per-Class Results and Errors Within our results, we investigate the distribution of errors made by our probe classifier. In particular, we are interested in understanding how many SFW and NSFW LoRAs are classified as being CSAM-specialized LoRAs. While SFW LoRAs can most likely be considered true errors, it is possible that some of the NSFW LoRAs that are classified as being CSAM-specialized were in fact trained with some amount of CSAM data during finetuning. We find that across model architectures, probes classify all CSAM models correctly and have low false positive rates for classifying both SFW and NSFW models as CSAM. We see the highest FPR for FLUX.1-dev models at 4.21% of SFW models being classified as CSAM specialized and 1.90% of NSFW models being classified as CSAM (Figure 6). We view the confusion between SFW and CSAM as true errors, while the NSFW models could in fact be undetected CSAM-specialized models, warranting further inspection to distinguish true errors from contamination. 
+
+Design Choices In order to maximize the performance of Gaussian probing, for we needed to ensemble predictions across multiple layers. We show in Appendix D.3 that without doing so Gaussian probing performs worse. While not surprising given the scale of these models, it does point to layer choice being an important consideration for applying Gaussian probing to future architectures. For SD 1.5, in accordance with existing literature on the existence of the h-space [27], we used the representation from after the mid-block in the U-Net as a starting point, combined with additional layers. Based on this insight, we started with a mid-block representation for all three models. For SDXL 1.0 we expanded to representations in the middle of the beginning block of the U-Net and the middle of the end block of the U-Net. For FLUX.1-dev we simply took one layer in the first third, second third, and last third of the transformer model for both the text and image inputs. We also explore different ensembling strategies across our different model architectures to combine the classifiers trained on each individual layer’s probes into a single prediction. The four strategies we try are all-concat, soft voting, weight soft-voting, and stacking. All-concat simply concatenates all the probes into one vector and trains a linear classifier on this concatentated vector. Soft voting averages the predicted class probabilities across all per-layer classifiers with equal weight, yielding the simplest and assumption-free com-bination. Weighted soft voting generalises this by learning a single non-negative weight 12 SD15 SDXL FLUX1dev          
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> AUPRC
+> 0.990 1.000 1.000
+> 0.322
+> 0.556
+> 0.703
+> CSAM vs SFW
+> SD15 SDXL FLUX1dev
+> 0.873
+> 1.000 1.000
+> 0.266
+> 0.469
+> 0.722
+> CSAM vs NSFW
+> SD15 SDXL FLUX1dev
+> 0.887 0.921
+> 0.847
+> 0.853 0.924
+> 0.591
+> NSFW vs SFW
+> Probes
+> Raw Weights
+> Pairwise AUPRC by Architecture
+
+Figure 7: AUPRC across our three models (SD 1.5, SDXL 1.0, and FLUX.1-dev) com-puted for each pair of classes (SFW vs. CSAM), (NSFW vs. CSAM), and (SFW vs. NSFW). Note that Gaussian probing outperforms raw weights significantly when tasked with distinguishing CSAM from either SFW or NSFW. NSFW vs CSAM should be viewed as the most difficult of the three. The methods perform more comparably when looking at SFW vs NSFW. per layer on a held-out validation split weights are parameterised through a softmax and optimised by Nelder-Mead to minimise the cross-entropy of the weighted-average proba-bilities, so keys that are individually more informative dominate the ensemble. Stacking instead trains a multinomial logistic-regression meta-learner on the validation set using the concatenated per-layer class-probability vectors as meta-features; this allows the meta-learner to capture interactions between keys rather than only re-scaling them. Overall the best strategy varies between architectures but the differences between them are marginal indicating that there isn’t much optimization over which strategy to use needed (Ap-pendix D.5). 
+
+## 6 Related Work 
+
+Standard safety evaluation for image generation models Safety evaluation of open-weight generative models typically relies on a set of tools similar to those used for closed-weight generative models. Relying on prompt-based testing [29, 24, 35] and red teaming [14, 31, 42] where a large number of prompts are produced, and their output is generated to measure the frequency with which these models generate harmful con-tent. There have been many documented failure modes of generative evaluation, jailbreak-ing [21, 61, 37, 65] and finetuning [56, 68, 30] attacks being the most notable. Jailbreaking involves either the automated or manual construction of prompts that bypass any safety training that the model has undergone. Finetuning attacks involve finetuning the model on unrelated or related data to undo safety training. Both have also become standard evaluation techniques to assess the efficacy of safety training against adversarial attacks. 
+
+Safety interventions for open-weight model deployment Due to the safety vul-nerabilities that have surfaced for open-weight image generation models, there has been a push for developing interventions to address these threats. The main challenge for open-weight models is that input and output classifiers can be easily removed [43]. To be effective, interventions need to modify the model itself in ways that are much harder to undo. Concept unlearning [63, 10, 67, 25, 34, 8, 62, 18, 12, 13], a form of post-training where the weights of the models are modified to remove a concept, has become the primary technique of choice for improving the safety of open-weight models. Broadly, these tech-niques all develop an objective function that represents what the underlying model would 13 be, had it not been trained on the harmful concept, and aims to steer the weights towards this idealized version. CivitAI currently uses a form of concept unlearning to prevent CSAM from being generated in its web-based content generation tool [36, 4]. Neverthe-less, they must still rely on user or external notifications to discover harmful models, so it does not provide a pre-distribution safeguard. In addition, there have been numerous studies showing weaknesses in concept unlearning as a safeguard for open-weight mod-els [52, 15, 33]. Overall, concept unlearning remains a promising tool for addressing safety post-distribution on platforms, but does not tackle the core governance channel of our work on pre-distribution screening. While there has been one related work attempting to address evaluation without generation they make assumptions which do not satisfy our problem setting and the motivating application. Specifically, the study introduces prompt agnostic image-free auditing (PAIA) [66] which aims to formalize and address evaluation without generation. Yet they require using a small set of images from the target concept that the LoRA was specialized on. This is unlawful in the CSAM domain. Our work formalizes the problem at hand in a more applicable form for AIG-CSAM, proposes an algorithm which only operates on the weights, and shows success in identifying in the wild CSAM specialization. 
+
+Weight-space learning There is a growing line of research investigating model parame-ters as a data modality, called weight-space learning . We lean on this research to construct our baselines and to inspire our idea for Gaussian probing. Neural network weights have been shown to encode information about training data, task structure, and fine-tuning objectives, motivating weight-space learning for model auditing without content gener-ation [48, 58, 49]. Prior work includes hyper-representation learning on neural network weights [48], predicting accuracy from weight statistics [58], sequential transformer em-beddings of weights [49], interpreting customized diffusion models [7], and Deep Linear Probe Generators [22]. Broadly, these approaches can be categorized into mechanistic approaches and func-tional approaches. Mechanistic approaches typically train a model to learn an embedding of the weights that are then used for classification downstream. At the current moment, most of these methods are simply not effective at the parameter scale of diffusion models, especially with the small sample size of CSAM-specialized LoRAs. Additionally, some make assumptions, such as that the LoRAs modify the same weights across all finetunes. These assumptions are not realistic for the distribution of LoRAs observed in the wild. Functional approaches usually start with random probes, as in our technique, but then aim to optimize the probes directly to maximize classification performance. We choose not to explore these probe optimization approaches because they may inadvertently lead to probes that would generate CSAM, and we recommend proceeding with caution when exploring these approaches, since they may constitute intent to generate the content, which may be unlawful for CSAM. Related advances in mechanistic interpretability further show that internal model com-ponents can be systematically analyzed to reveal functional structure and learned repre-sentations [1, 5]. However, these approaches are not designed to detect specific harmful capabilities or to operate in settings where output generation is prohibited, and there is currently no scalable method to assess whether a model has been specialized for harmful content without generating outputs. 
+
+Addressing AIG-CSAM in Generative Models There has been a limited amount of research and guidance written about addressing AIG-CSAM in generative models. The main source of guidance thus far has been from a collaborative effort spearheaded by Thorn on Safety by Design [55, 54]. This initiative outlined the different touchpoints in the generative AI lifecycle where AIG-CSAM concerns can arise, the different technical affordances that could be useful to address these concerns, and the status of these across 14 participating organizations. Some of the technical affordances discussed include training data filtering, unlearning, and measuring capabilities via latent spaces without prompting. This work directly addresses the latter. Initial research has started to study the efficacy of potential interventions proposed in this initiative. So far, it has been demonstrated that training data filtering is not fully effective in preventing AIG-CSAM because of concept fusion of benign child generation and adult sexual content capabilities [6]. At the same time, several open challenges in AI safety have been identified that are relevant for child safety [23]. Our work is the first to our knowledge to successfully build a method that effectively addresses one of open problems, namely evaluation restrictions on assessing AIG-CSAM capabilities. Nonetheless, additional open problems remain that complicate the development of effective safety mechanisms for AIG-CSAM. 
+
+## 7 Discussion and Conclusion 
+
+Assessing model capabilities and specialization for harmful content has so far focused solely on generative evaluations . Generative evaluations capture what models generate under curated prompts, not what they are capable of generating under adversarial or untested conditions. In domains where generation is restricted or unlawful, this creates a measurement gap precisely where risk is highest. In applications such as CSAM detection, output-based evaluation is both limited and legally challenging, motivating alternative approaches to capability assessment. In particular, these applications warrant the need for non-generative assessments .In this work, we show that analyzing model weights, whether via mechanistic or functional representations, provides a suitable approach for non-generative evaluations of model specialization; a narrower problem within broader capability assessment moti-vated by open-weight platform governance challenges. This work provides a practical and scalable solution to address this broad governance challenge. We validate our method on our motivating application, which is detecting CSAM specialization in the wild. Non-generative evaluation is essential in limited and legally challenging applications such as CSAM or NCII detection. In addition, we view it as complementary in harmful content areas where generative evaluations are allowed, such as bioweapons, hate speech, and cyberattack knowledge. Non-generative evaluations can help reduce the need for man-ual human review of large scale outputs produced in the generative evaluation paradigm, helping to reduce the psychological harms experienced by human reviewers. Our approach, Gaussian probing, supports the ongoing discussions in the weight-space learning commu-nity about the importance of mechanistic vs. functional representations. In particular, we show the value of functional representations across scalability/efficiency and robustness. We provide specific criteria that can be useful for future weight-space learning research to use for evaluating new methods for applications where weights are the data modality. Our work addresses a central open problem in AI child safety regarding evaluation restrictions on AIG-CSAM capabilities. Having demonstrated the effectiveness of differ-ent representations we show that non-generative evaluation is possible. We believe that this now sets the stage for future research to continue to study this direction answering questions related to potential vulnerabilities, theoretical underpinnings, and building more robust algorithms. Solutions to the evaluation without generation problem are widely applicable for a va-riety of stakeholders including open-weight hosting platforms, child safety organizations, and regulatory authorities. Model hosting platforms represent the most immediate appli-cation of this approach. It enables scalable pre-screening of uploaded LoRAs, addressing a key limitation of output-based moderation workflows. This tool can also help improve existing concept tagging systems on these platforms. NSFW labeling on model hosting platforms can be quite noisy, as it is creator-driven. Many SFW LoRAs are often labeled incorrectly and are in fact NSFW specialized. Our tool can help reduce these incorrectly 15 labeled uploads and provide a better user experience. At the same time, capability-level filtering raises important questions about modera-tion and censorship. Any system that flags model capabilities must previously define which capabilities are unacceptable. Setting these boundaries does not just include technical de-cisions; it also requires discussions around (moral) values, defining which model behaviors should be restricted. Screening systems must therefore balance preventing harm and lim-iting legitimate uses of generative models. Without clear policies and human oversight, automated filtering could easily drift towards forms of censorship. Additionally, much more research is required to fully characterize this problem and building a system that is robust to many kinds of adversarial attacks that could evade detection. In this work, we demonstrate one kind of attack via weight rescaling but we encourage further research to understand how other kinds of weight manipulations can evade both our projected weights classifier and our Gaussian probing classifier. We also focus on a narrow version of the evaluation without generation problem which is harmful LoRA finetuning. Further work is needed to determine whether it is possible to answer this question affirmatively using pretrained models alone. In the pretrained model setting, issues of scale and label availability become even more pertinent. Overall, this work reframes evaluation as a weight-space auditing problem and demon-strates a scalable approach to pre-deployment screening of harmful specialization. Having answered our original question in the affirmative it lays a foundation for further work in this important research and application area. Such methods may reduce reliance on human review and enable capability assessment in domains where output-based evalua-tion is constrained or infeasible. In practice, this provides a pathway for platform-level risk screening of fine-tuned models, supporting safer deployment while balancing open innovation with preventive governance. 
+
+## Ethical Considerations 
+
+This work presents a new paradigm for assessing the extent to which image generation models have been finetuned on harmful content, specifically CSAM, without any content generation. In this research process and its communication in this paper, numerous steps were taken to conduct it ethically. First, in the curation of adult sexual content from the internet, we ran Thorn’s Safer detection technology over the image datasets and removed any images flagged as poten-tially containing CSAM. However, we recognize that it is still possible for adult non-consensual intimate imagery (NCII) to exist in the dataset we used for training and the re-victimization harm that may arise from this. Any presence of such material, regardless of scale, can cause trauma and must not be minimized. We believe that research such as this is critical to building scalable mechanisms by which to prevent the proliferation of models specialized for the creation of CSAM and NCII. We want to highlight that this work is another example of why research into adult content datasets collected consensually are essential. Upon publication of this paper, we will be deleting all of the adult content datasets and LoRAs specialized on adult content. Second, we intentionally omitted and abstracted significant details about the LoRAs specialized for CSAM generation on which we evaluate our methodology. We do not disclose details on their whereabouts, verification, names, or how they were obtained. In doing so, we ensure that no information is provided that would enable individuals to locate these models beyond what is publicly available, thereby reducing misuse risk and preserving operational security. We affirm that we never possessed, accessed, attempted to, or generated CSAM. We also did not train any LoRAs on CSAM ourselves or possess CSAM specialized LoRAs. All such data remained solely with authorized entities, and all testing was conducted in compliance with applicable laws and organizational safeguards. In order to justify our approach and to show its efficacy in detection, we have evaluated 16 the approach on non-CSAM tasks, as demonstrated in the experimental section of this paper. Third, we believe that publication of these results is beneficial to the AI safety ecosys-tem as a whole and will help prevent additional harm. By demonstrating a method that can assess abuse capabilities in generative models without having to generate illicit content, we provide model hosting platforms, AI developers, policy makers, and safety researchers with a legally viable tool for scalable proactive detection of abuse enabled generative mod-els. We aim to support continued innovation while equipping stakeholders with technology to detect and curb the proliferation of such models. 
+
+## Responsible Disclosure System 
+
+At the time of release of this work, there may be organizations that start to deploy this method in partnership with Thorn. As such, we want to encourage responsible disclosure of vulnerabilities of this system. Given the high-risk nature of CSAM, as a community we should aim to prevent providing individuals with techniques to obfuscate these detection systems before they have been addressed. At the same time, we view follow-up research to improve and identify vulnerabilities in this system as essential to making non-generative auditing robust. Therefore, we strongly encourage researchers to responsibly disclose vulnerabilities to our team at ewg@mit.edu . Our team will engage with reports in a timely manner and work with you to patch the vulnerability. After the patch has been deployed to all current users, we encourage publication of the vulnerability to advance our collective knowledge of the field. We encourage researchers to submit vulnerability disclosures with the following included: 
+
+• A detailed description of the vulnerability, including how it was discovered, its im-mediate impact, and whether an immediate patch has been identified 
+
+• A proof-of-concept notebook demonstrating how the vulnerability can be exploited 
+
+• Information about plans for public disclosure including timelines 
+
+## Acknowledgements 
+
+VMS was supported by a Bridgewater AIA Labs Research Fellowship. We thank MIT ORCD for providing technical support and managing the GPU clusters used to perform our LoRA training and probe extraction. 17 References 
+
+[1] Leonard Bereska and Efstratios Gavves. Mechanistic interpretability for ai safety – a review, 2024. URL https://arxiv.org/abs/2404.14082 .[2] bmaltais. kohya ss: Gui and cli for training diffusion models. https://github.com /bmaltais/kohya_ss , 2025. Accessed: 2026-04-23. [3] Soravit Changpinyo, Piyush Sharma, Nan Ding, and Radu Soricut. Conceptual 12m: Pushing web-scale image-text pre-training to recognize long-tail visual concepts. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 3558–3568, 2021. [4] Civitai. Introducing Civitai Green: Our Continued Commitment to Community Safety — Civitai — civitai.com. https://civitai.com/articles/7078/introduc ing-civitai-green-our-continued-commitment-to-community-safety , 2024. [Accessed 21-04-2026]. [5] Arthur Conmy, Augustine Mavor-Parker, Aengus Lynch, Stefan Heimersheim, and Adri` a Garriga-Alonso. Towards automated circuit discovery for mechanistic inter-pretability. Advances in Neural Information Processing Systems , 36:16318–16352, 2023. [6] Ana-Maria Cretu, Klim Kireev, Amro Abdalla, Wisdom Obinna, Raphael Meier, Sarah Adel Bargal, Elissa M Redmiles, and Carmela Troncoso. Evaluating concept filtering defenses against child sexual abuse material generation by text-to-image mod-els. arXiv preprint arXiv:2512.05707 , 2025. [7] Amil Dravid, Yossi Gandelsman, Kuan-Chieh Wang, Rameen Abdal, Gordon Wet-zstein, Alexei Efros, and Kfir Aberman. Interpreting the weight space of customized diffusion models. Advances in Neural Information Processing Systems , 37:137334– 137371, 2024. [8] Chongyu Fan, Jiancheng Liu, Yihua Zhang, Eric Wong, Dennis Wei, and Sijia Liu. Salun: Empowering machine unlearning via gradient-based weight saliency in both image classification and generation. arXiv preprint arXiv:2310.12508 , 2023. [9] National Center for Missing & Exploited Children. 2024 cybertipline report. https: //www.missingkids.org/content/dam/missingkids/pdfs/cybertiplinedata202 4/2024-CyberTipline-Report.pdf , 2025. [10] Masane Fuchi and Tomohiro Takagi. Erasing concepts from text-to-image diffusion models with few-shot unlearning. arXiv preprint arXiv:2405.07288 , 2024. [11] Michael Fuest, Pingchuan Ma, Ming Gui, Johannes Schusterbauer, Vincent Tao Hu, and Bj¨ orn Ommer. Diffusion models and representation learning: A survey. IEEE Transactions on Pattern Analysis and Machine Intelligence , 2026. [12] Rohit Gandikota, Joanna Materzynska, Jaden Fiotto-Kaufman, and David Bau. Eras-ing concepts from diffusion models. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 2426–2436, 2023. [13] Rohit Gandikota, Hadas Orgad, Yonatan Belinkov, Joanna Materzy´ nska, and David Bau. Unified concept editing in diffusion models. In Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , pages 5111–5120, 2024. [14] Deep Ganguli, Liane Lovitt, Jackson Kernion, Amanda Askell, Yuntao Bai, Saurav Kadavath, Ben Mann, Ethan Perez, Nicholas Schiefer, Kamal Ndousse, et al. Red teaming language models to reduce harms: Methods, scaling behaviors, and lessons learned. arXiv preprint arXiv:2209.07858 , 2022. 18 [15] Hongcheng Gao, Tianyu Pang, Chao Du, Taihang Hu, Zhijie Deng, and Min Lin. Meta-unlearning on diffusion models: Preventing relearning unlearned concepts. In 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 2131–2141, 2025. [16] Tarleton Gillespie. Custodians of the Internet: Platforms, content moderation, and the hidden decisions that shape social media . Yale University Press, 2018. [17] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen, et al. Lora: Low-rank adaptation of large language models. ICLR , 1(2):3, 2022. [18] Chi-Pin Huang, Kai-Po Chang, Chung-Ting Tsai, Yung-Hsuan Lai, Fu-En Yang, and Yu-Chiang Frank Wang. Receler: Reliable concept erasing of text-to-image diffusion models via lightweight erasers, 2024. URL https://arxiv.org/abs/2311.17717 .[19] Internet Watch Foundation (IWF). Harm without limits: Ai child sexual abuse material through the eyes of our analysts, March 2026. URL https://www.iwf.or g.uk/media/hl1nvdti/iwf-ai-csam-report-2026.pdf .[20] Invoke AI Contributors. Invokeai, 2026. URL https://github.com/invoke-ai/In vokeAI .[21] Xiaolong Jin, Zixuan Weng, Hanxi Guo, Chenlong Yin, Siyuan Cheng, Guangyu Shen, and Xiangyu Zhang. Jailbreakdiffbench: A comprehensive benchmark for jail-breaking diffusion models. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 16461–16471, 2025. [22] Jonathan Kahana, Eliahu Horwitz, Imri Shuval, and Yedid Hoshen. Deep linear probe generators for weight space learning, 2024. URL https://arxiv.org/abs/2410.1 0811 .[23] Neil Kale*, Rebecca Portnoff*, Pratiksha Thaker, Michael Simpson, Robertson Wang, Kevin Kuo, Chhavi Yadav, and Virginia Smith. Child safety necessitates new ap-proaches to ai safety. 2026. URL https://papers.ssrn.com/sol3/papers.cfm?ab stract_id=6206860 . * Equal contribution. [24] Massine El Khader, Elias Al Bouzidi, Abdellah Oumida, Mohammed Sbaihi, Eliott Binard, Jean-Philippe Poli, Wassila Ouerdane, Boussad Addad, and Katarzyna Ka-pusta. Diffguard: Text-based safety checker for diffusion models. arXiv preprint arXiv:2412.00064 , 2024. [25] Myeongseob Ko, Henry Li, Zhun Wang, Jonathan Patsenker, Jiachen Tianhao Wang, Qinbin Li, Ming Jin, Dawn Song, and Ruoxi Jia. Boosting alignment for post-unlearning text-to-image generative models. Advances in Neural Information Pro-cessing Systems , 37:85131–85154, 2024. [26] Alina Kuznetsova, Hassan Rom, Neil Alldrin, Jasper Uijlings, Ivan Krasin, Jordi Pont-Tuset, Shahab Kamali, Stefan Popov, Matteo Malloci, Alexander Kolesnikov, et al. The open images dataset v4: Unified image classification, object detection, and visual relationship detection at scale. International journal of computer vision , 128 (7):1956–1981, 2020. [27] Mingi Kwon, Jaeseok Jeong, and Youngjung Uh. Diffusion models already have a semantic latent space. arXiv preprint arXiv:2210.10960 , 2022. [28] Black Forest Labs. Flux. https://github.com/black-forest-labs/flux , 2024. 19 [29] Tony Lee, Michihiro Yasunaga, Chenlin Meng, Yifan Mai, Joon Sung Park, Agrim Gupta, Yunzhi Zhang, Deepak Narayanan, Hannah Teufel, Marco Bellagente, et al. Holistic evaluation of text-to-image models. Advances in Neural Information Process-ing Systems , 36:69981–70011, 2023. [30] Zhangheng Li, Junyuan Hong, Bo Li, and Zhangyang Wang. Shake to leak: Fine-tuning diffusion models can amplify the generative privacy risk. In 2024 IEEE Con-ference on Secure and Trustworthy Machine Learning (SaTML) , pages 18–32. IEEE, 2024. [31] Zherui Li, Zheng Nie, Zhenhong Zhou, Yue Liu, Yitong Zhang, Yu Cheng, Qingsong Wen, Kun Wang, Yufei Guo, and Jiaheng Zhang. Diffuguard: How intrinsic safety is lost and found in diffusion large language models. arXiv preprint arXiv:2509.24296 ,2025. [32] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays, Pietro Perona, Deva Ra-manan, Piotr Doll´ ar, and C Lawrence Zitnick. Microsoft coco: Common objects in context. In Computer Vision–ECCV 2014: 13th European Conference, Zurich, Switzerland, September 6-12, 2014, Proceedings, Part V 13 , pages 740–755. Springer, 2014. [33] Kevin Lu, Nicky Kriplani, Rohit Gandikota, Minh Pham, David Bau, Chinmay Hegde, and Niv Cohen. When are concepts erased from diffusion models? arXiv preprint arXiv:2505.17013 , 2025. [34] Shilin Lu, Zilan Wang, Leyang Li, Yanzhu Liu, and Adams Wai-Kin Kong. Mace: Mass concept erasure in diffusion models. In Proceedings of the IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition , pages 6430–6440, 2024. [35] Sasha Luccioni, Christopher Akiki, Margaret Mitchell, and Yacine Jernite. Stable bias: Evaluating societal representations in diffusion models. Advances in Neural Information Processing Systems , 36:56338–56351, 2023. [36] Mengyao Lyu, Yuhong Yang, Haiwen Hong, Hui Chen, Xuan Jin, Yuan He, Hui Xue, Jungong Han, and Guiguang Ding. One-dimensional adapter to rule them all: Concepts, diffusion models and erasing applications. In 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 7559–7568, 2024. doi: 10.1109/CVPR52733.2024.00722. [37] Jiachen Ma, Yijiang Li, Zhiqing Xiao, Anda Cao, Jie Zhang, Chao Ye, and Junbo Zhao. Jailbreaking prompt attack: A controllable adversarial attack against diffusion models. In Findings of the Association for Computational Linguistics: NAACL 2025 ,pages 3141–3157, 2025. [38] Andrew Mayes. Object segmentation dataset. https://huggingface.co/dataset s/amaye15/object-segmentation , 2025. Accessed: 2024-04-08. [39] Andres Morelli et al. Opennsfw: A dataset for nsfw image classification. Yahoo open source project, 2016. URL https://github.com/yahoo/open_nsfw .[40] Nyanko. Danbooru2023. https://huggingface.co/datasets/nyanko7/danbooru 2023 , 2023. Accessed: 2024-04-08. [41] Bryan A Plummer, Liwei Wang, Chris M Cervantes, Juan C Caicedo, Julia Hocken-maier, and Svetlana Lazebnik. Flickr30k entities: Collecting region-to-phrase corre-spondences for richer image-to-sentence models. In Proceedings of the IEEE interna-tional conference on computer vision , pages 2641–2649, 2015. 20 [42] Yiting Qu, Xinyue Shen, Xinlei He, Michael Backes, Savvas Zannettou, and Yang Zhang. Unsafe diffusion: On the generation of unsafe images and hateful memes from text-to-image models. In Proceedings of the 2023 ACM SIGSAC conference on computer and communications security , pages 3403–3417, 2023. [43] Javier Rando, Daniel Paleka, David Lindner, Lennart Heim, and Florian Tram` er. Red-teaming the stable diffusion safety filter. arXiv preprint arXiv:2210.04610 , 2022. [44] Sarah T Roberts. Behind the screen . Yale University Press, 2019. [45] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Om-mer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684– 10695, 2022. [46] Babak Saleh and Ahmed Elgammal. Large-scale classification of fine-art paintings: Learning the right metric on the right feature, 2015. URL https://arxiv.org/ab s/1505.00855 .[47] Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon, Ross Wightman, Mehdi Cherti, Theo Coombes, Aarush Katta, Clayton Mullis, Mitchell Wortsman, et al. Laion-5b: An open large-scale dataset for training next generation image-text models. Advances in neural information processing systems , 35:25278– 25294, 2022. [48] Konstantin Sch¨ urholt, Dimche Kostadinov, and Damian Borth. Self-supervised rep-resentation learning on neural network weights for model characteristic prediction. In M. Ranzato, A. Beygelzimer, Y. Dauphin, P.S. Liang, and J. Wortman Vaughan, editors, Advances in Neural Information Processing Systems , volume 34, pages 16481– 16493. Curran Associates, Inc., 2021. URL https://proceedings.neurips.cc/pap er_files/paper/2021/file/89562dccfeb1d0394b9ae7e09544dc70-Paper.pdf .[49] Konstantin Sch¨ urholt, Michael W Mahoney, and Damian Borth. Towards scalable and versatile weight space learning. In Proceedings of the 41st International Conference on Machine Learning , pages 43947–43966, 2024. [50] Toby Shevlane, Sebastian Farquhar, Ben Garfinkel, Mary Phuong, Jess Whittlestone, Jade Leung, Daniel Kokotajlo, Nahema Marchal, Markus Anderljung, Noam Kolt, Lewis Ho, Divya Siddarth, Shahar Avin, Will Hawkins, Been Kim, Iason Gabriel, Vijay Bolina, Jack Clark, Yoshua Bengio, Paul Christiano, and Allan Dafoe. Model evaluation for extreme risks, 2023. URL https://arxiv.org/abs/2305.15324 .[51] Miriah Steiger, Timir J Bharucha, Sukrit Venkatagiri, Martin J Riedl, and Matthew Lease. The psychological well-being of content moderators: the emotional labor of commercial moderation and avenues for improving support. In Proceedings of the 2021 CHI conference on human factors in computing systems , pages 1–14, 2021. [52] Vinith Menon Suriyakumar, Rohan Alur, Ayush Sekhari, Manish Raghavan, and Ashia C Wilson. Unstable unlearning: The hidden risk of concept resurgence in diffu-sion models. In ICLR 2025 Workshop on Navigating and Addressing Data Problems for Foundation Models , 2024. [53] David Thiel, Melissa Stroebel, and Rebecca Portnoff. Generative ml and csam: Im-plications and mitigations. Stanford Digital Repository , 2023. [54] Thorn. Safety by design three-month progress report #3: November 2024 to january 2025. https://info.thorn.org/hubfs/Thorn-SafetybyDesign-ThreeMonthProgr essReport-3.pdf? , 2025. 21 [55] Thorn and All Tech is Human. Safety by design for generative ai: Preventing child sexual abuse. https://info.thorn.org/hubfs/thorn-safety-by-design-for-g enerative-AI.pdf , 2024. [56] Vu Tuan Truong, Luan Ba Dang, and Long Bao Le. Attacks and defenses for gen-erative diffusion models: A comprehensive survey. ACM Computing Surveys , 57(8): 1–44, 2025. [57] Unsplash. Unsplash lite dataset. https://github.com/unsplash/datasets , 2017. [58] Thomas Unterthiner, Daniel Keysers, Sylvain Gelly, Olivier Bousquet, and Ilya Tol-stikhin. Predicting neural network accuracy from weights, 2021. URL https: //arxiv.org/abs/2002.11448 .[59] Patrick von Platen, Suraj Patil, Anton Lozhkov, Pedro Cuenca, Nathan Lambert, Kashif Rasul, Mishig Davaadorj, Dhruv Nair, Sayak Paul, William Berman, Yiyi Xu, Steven Liu, and Thomas Wolf. Diffusers: State-of-the-art diffusion models, 2022. [60] Team Wan, Ang Wang, Baole Ai, Bin Wen, Chaojie Mao, Chen-Wei Xie, Di Chen, Feiwu Yu, Haiming Zhao, Jianxiao Yang, et al. Wan: Open and advanced large-scale video generative models. arXiv preprint arXiv:2503.20314 , 2025. [61] Alexander Wei, Nika Haghtalab, and Jacob Steinhardt. Jailbroken: How does llm safety training fail? Advances in neural information processing systems , 36:80079– 80110, 2023. [62] Jing Wu and Mehrtash Harandi. Scissorhands: Scrub data influence via connection sensitivity in networks. In European Conference on Computer Vision , pages 367–384. Springer, 2024. [63] Jing Wu, Trung Le, Munawar Hayat, and Mehrtash Harandi. Erasediff: Erasing data influence in diffusion models. arXiv preprint arXiv:2401.05779 , 2024. [64] Ling Yang, Zhilong Zhang, Yang Song, Shenda Hong, Runsheng Xu, Yue Zhao, Wen-tao Zhang, Bin Cui, and Ming-Hsuan Yang. Diffusion models: A comprehensive survey of methods and applications. ACM computing surveys , 56(4):1–39, 2023. [65] Yuchen Yang, Bo Hui, Haolin Yuan, Neil Gong, and Yinzhi Cao. Sneakyprompt: Jailbreaking text-to-image generative models. In 2024 IEEE symposium on security and privacy (SP) , pages 897–912. IEEE, 2024. [66] Xiaoyong Yuan, Xiaolong Ma, Linke Guo, and Lan Zhang. What lurks within? concept auditing for shared diffusion models at scale. In Proceedings of the 2025 ACM SIGSAC Conference on Computer and Communications Security , pages 4154– 4168, 2025. [67] Yimeng Zhang, Xin Chen, Jinghan Jia, Yihua Zhang, Chongyu Fan, Jiancheng Liu, Mingyi Hong, Ke Ding, and Sijia Liu. Defensive unlearning with adversarial training for robust concept erasure in diffusion models, 2024. URL https://arxiv.org/ab s/2405.15234 .[68] Boyang Zheng, Chumeng Liang, Xiaoyu Wu, and Yan Liu. Understanding and im-proving adversarial attacks on latent diffusion model. 2023. 22 A Consistency of Gaussian Probing 
+
+The population object underlying Gaussian probing is given by (1), and the empirical representation (2) is its Monte Carlo approximation. The following result shows that this approximation is statistically well behaved and clarifies the condition under which it can support correct classification. 
+
+Proposition 1 (Consistency of Gaussian probing) . Suppose that ¯H(∆; ν) has finite second moment for every fixed adaptor ∆. Then 
+
+bΨm(∆) a.s.
+
+−−−−→ 
+
+> m→∞
+
+Ψ(∆) .
+
+If, in addition, the specialization classes are separated by a positive margin in Ψ-space, then any margin-respecting plug-in classifier built on bΨm(∆) is asymptotically correct. Proof Sketch. The convergence bΨm(∆) → Ψ(∆) follows from the strong law of large numbers, since the probes are sampled independently from the Gaussian reference distri-bution. If the classes are separated in the population representation, then for sufficiently large m the empirical representation lies in the same decision region as the population representation, yielding asymptotically correct classification. 
+
+## B Probe Classifier Implementation 
+
+Extraction For extracting the probes from the models we fix the internal randomness using a specific random seed across all LoRAs. This is important so that all of the representations we extracted start from the same initial Gaussian noise. Throughout our experiments in Section 4 we sample 1024 probes unless stated otherwise. In our experiments in Section 5 we sample 512 probes for SD 1.5 and SDXL 1.0. Due to the significantly larger size of FLUX.1-dev and computational restrictions when interacting with CSAM-specialized LoRAs for operational security, we only sample 4 probes. We do so over 30 timesteps. So each LoRA is mapped to a tensor in the shape of (N, T, D) where N is the number of probes, T is the number of timesteps, and D is the dimension of the representation we extract. We do so by simply implementing hooks in that capture the representations during forward passes up to the layers of interest. To prevent randomness due to the solver introducing noise, we use a deterministic solver for each architecture when extracting the probes. Specifically, for SD1.5 and SDXL 1.0, which are denoising diffusion implicit models (DDIM) that use a deterministic ODE instead of an SDE. For FLUX.1-dev, the default flow-matching scheduler with dynamic shift is deterministic. We note that probe tensors are not guaranteed to be numerically identical across hardware / micro-batch configurations due to bf16 non-determinism. However, this is a non-issue given our theoretical intuition for the method because the noise from non-determinism is class-agnostic and the classifier is trained to distinguish distributional mo-ments rather than exact values. We empirically validate this on all three architectures across classes by training linear classifiers to distinguish between our averaged probes on different subsets of the entire probe set. We find that across all three architectures, classes, and all layer choices, classifiers are unable to distinguish between averaged probes from different initializations (Figures 8, 9, 10). 
+
+Classifier For the classifier we split the dataset of probes based on the LoRAs into a 70%, 10%, 20% train, validation, and test train split. We train a linear classifier for 200 epochs, with batch size 32, and learning rate 1 −3. We take an argmax over the softmax probabilities to assign the class between SFW, NSFW, and CSAM. 23 0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> mid_block
+> accuracy
+
+accuracy 
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+ROC AUC 
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> mid_block_post_attn
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> cross_attn
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> down_cross_attn
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+21 23 25 27 29
+
+N (subset size) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> early_up_cross_attn
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+21 23 25 27 29
+
+N (subset size) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=18) 
+
+SD15 subset 1 vs subset 2 (within-class binary classifier) 
+
+LoRA-grouped 5-fold CV · 3 trials · n_loras=40/class · chance = 0.5 Figure 8: Linear classifier trained on random subsets of varying sizes from the total pool of probes for a sample of LoRAs from each class for SD1.5. Across all layers we extract the classifier is unable to distinguish the averaged probe across any subset size. Thus indicating that the same initialization does not need to be used across all LoRAs or classes. 24 0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> mid_block
+> accuracy
+
+accuracy 
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+ROC AUC 
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> mid_block_post_attn
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> cross_attn
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> down_cross_attn
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+21 23 25 27 29
+
+N (subset size) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> early_up_cross_attn
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+21 23 25 27 29
+
+N (subset size) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=33) 
+
+SDXL subset 1 vs subset 2 (within-class binary classifier) 
+
+LoRA-grouped 5-fold CV · 3 trials · n_loras=40/class · chance = 0.5 Figure 9: Linear classifier trained on random subsets of varying sizes from the total pool of probes for a sample of LoRAs from each class for SDXL 1.0. Across all layers we extract the classifier is unable to distinguish the averaged probe across any subset size. Thus indicating that the same initialization does not need to be used across all LoRAs or classes. 25 0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> double_last_image
+> accuracy
+
+accuracy 
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+ROC AUC 
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> double_last_text
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> single_first_image
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> single_first_text
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> single_mid_image
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+21 23 25 27 29
+
+N (subset size) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> single_mid_text
+> accuracy
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+21 23 25 27 29
+
+N (subset size) 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> ROC AUC
+
+SFW (n=40) 
+
+NSFW (n=40) 
+
+CSAM (n=40) 
+
+FLUX1dev subset 1 vs subset 2 (within-class binary classifier) 
+
+LoRA-grouped 5-fold CV · 3 trials · n_loras=40/class · chance = 0.5 Figure 10: Linear classifier trained on random subsets of varying sizes from the total pool of probes for a sample of LoRAs from each class for FLUX.1-dev. Across all layers we extract the classifier is unable to distinguish the averaged probe across any subset size. Thus indicating that the same initialization does not need to be used across all LoRAs or classes. 26 C Structured Study 
+
+We present additional results from our structured study of Gaussian probing. Primarily, the standard cross validation results, additional metrics for the leave dataset out results, and ablations on both the impact of using probes from different modules of the model, and ablations on the ensembling strategy for these different modules. 
+
+C.1 LoRA Training Details 
+
+For Section 4 when creating the controlled study we trained our own LoRAs as de-scribed in the experimental section. For LoRA training we randomly picked the hy-perparameters from the following lists: rank = {4, 8, 16 , 32 , 64 , 128 , 256 }, learning rate = 
+
+{1E − 3, 1E − 4, 1E − 5}, module = {text encoder , latent diffusion model , both }, and al-pha = {4, 8, 16 , 32 , 64 , 128 , 256 }, number of finetuning steps = {1, 10 , 100 , 1000 }, number of examples in finetuning dataset = {1, 5, 10 , 25 , 100 , 250 , 500 , 1000 }. We randomly assign a configuration of hyperparameters to each LoRA for training to prevent any confounds being exploited during prediction. We use both the diffusers library [59] and the kohya library [2] to capture the common training setups in the wild. 
+
+C.2 Standard Cross Validation Results 
+
+In this section we present the standard cross validation results for the controlled study. As mentioned in Section 4 we view these results as the ceiling of the possible performance since we eliminate many of the confounds that temper performance in the wild. These include differences in training hyperparameters between concepts, LoRAs being produced from different base checkpoints, different training libraries being used, a long tail of different ranks and layer configurations that are updated. 
+
+C.2.1 Stable Diffusion 1.5 
+
+We present the standard CV results across all metrics over 5 folds in Figures 11 and 12 for SD 1.5. 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> False Positive Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> True Positive Rate
+> SD15 ROC Curve
+> Gaussian Probes (AUC=0.988±0.003)
+> Raw Weights (AUC=0.989±0.003)
+
+(a) ROC curve of both weight projection and gaussian probing methods in identify-ing SFW vs NSFW LoRAs for SD 1.5. Both methods perform well showing almost per-fect classification. We attribute this to con-trolling many confounds that appear in the wild, making the task much easier. 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> Recall
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Precision
+> SD15 Precision-Recall Curve
+> Gaussian Probes (AP=0.989±0.002)
+> Raw Weights (AP=0.991±0.003)
+
+(b) PR curve of both weight projection and gaussian probing methods in identify-ing SFW vs NSFW LoRAs for SD 1.5. Both methods perform well showing almost per-fect classification. We attribute this to con-trolling many confounds that appear in the wild, making the task much easier. 
+
+Figure 11: Standard cross-validation results for SD 1.5 on controlled adult sexual content prediction task. 27 Accuracy AUROC AUPRC Precision Recall F1 FPR FNR 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0         
+
+> Score
+> 0.966 0.988 0.989 0.963 0.972 0.967
+> 0.039 0.028
+> 0.944
+> 0.989 0.990
+> 0.925
+> 0.972 0.948
+> 0.087
+> 0.028
+
+SD15 Classification Metrics 
+
+> Gaussian Probes
+> Raw Weights
+
+Figure 12: Additional metrics for standard cross-validation results for SD 1.5 on controlled adult sexual content prediction task. 
+
+C.2.2 Stable Diffusion XL 1.0 
+
+We present the standard CV results across all metrics over 5 folds in Figures 13 and 14 for SDXL 1.0. 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> False Positive Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> True Positive Rate
+> SDXL ROC Curve
+> Gaussian Probes (AUC=0.992±0.003)
+> Raw Weights (AUC=0.978±0.007)
+
+(a) ROC curve of both weight projection and gaussian probing methods in identify-ing SFW vs NSFW LoRAs for SDXL 1.0. Both methods perform well showing almost perfect classification. We attribute this to controlling many confounds that appear in the wild, making the task much easier. 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> Recall
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Precision
+> SDXL Precision-Recall Curve
+> Gaussian Probes (AP=0.992±0.003)
+> Raw Weights (AP=0.980±0.006)
+
+(b) PR curve of both weight projection and gaussian probing methods in identify-ing SFW vs NSFW LoRAs for SDXL 1.0. Both methods perform well showing almost perfect classification. We attribute this to controlling many confounds that appear in the wild, making the task much easier. 
+
+Figure 13: Standard cross-validation results for SDXL 1.0 on controlled adult sexual content prediction task. 
+
+C.2.3 FLUX.1-dev 
+
+We present the standard CV results across all metrics over 5 folds in Figures 15 and 16 for FLUX.1-dev. 28 Accuracy AUROC AUPRC Precision Recall F1 FPR FNR      
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Score
+> 0.944
+> 0.992 0.991
+> 0.909
+> 0.987
+> 0.946
+> 0.100
+> 0.013
+> 0.944
+> 0.978 0.974
+> 0.939 0.949 0.944
+> 0.062 0.051
+
+SDXL Classification Metrics 
+
+> Gaussian Probes
+> Raw Weights
+
+Figure 14: Additonal metrics for standard cross-validation results for SDXL 1.0 on con-trolled adult sexual content prediction task. 
+
+C.3 Ensemble and Module Probe Ablation 
+
+In this section, we present the impact of ensembling the representations across the dif-ferent modules in the model (i.e. the text encoder, the latent diffusion model, or both) in Figure 17. We show that the ensemble is most important for SD 1.5 and there are diminishing returns as the size of the model increases (i.e. as we go from SDXL 1.0 to FLUX.1-dev). 29 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> False Positive Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> True Positive Rate
+> FLUX1dev ROC Curve
+> Gaussian Probes (AUC=0.998±0.004)
+> Raw Weights (AUC=0.999±0.001)
+
+(a) ROC curve of both weight projection and gaussian probing methods in identify-ing SFW vs NSFW LoRAs for FLUX.1-dev. Both methods perform well showing almost perfect classification. We attribute this to controlling many confounds that appear in the wild, making the task much easier. 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> Recall
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Precision
+> FLUX1dev Precision-Recall Curve
+> Gaussian Probes (AP=0.999±0.003)
+> Raw Weights (AP=0.999±0.001)
+
+(b) PR curve of both weight projection and gaussian probing methods in identify-ing SFW vs NSFW LoRAs for FLUX.1-dev. Both methods perform well showing almost perfect classification. We attribute this to controlling many confounds that appear in the wild, making the task much easier. 
+
+Figure 15: Standard cross-validation results for SDXL FLUX.1-dev on controlled adult sexual content prediction task. Accuracy AUROC AUPRC Precision Recall F1 FPR FNR 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0             
+
+> Score
+> 0.996 0.998 0.999 1.000 0.989 0.994
+> 0.000 0.011
+> 0.993 0.999 0.999 0.996 0.987 0.991
+> 0.003 0.013
+
+FLUX1dev Classification Metrics 
+
+> Gaussian Probes
+> Raw Weights
+
+Figure 16: Additional metrics for standard cross-validation results for SDXL FLUX.1-dev on controlled adult sexual content prediction task. 30 SD15 SDXL FLUX1dev   
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Score
+> =+0.067 =+0.015 =+0.001
+
+AUROC     
+
+> SD15 SDXL FLUX1dev
+> =+0.079 =+0.027 =+0.002
+
+AUPRC    
+
+> SD15 SDXL FLUX1dev
+> =+0.154 =-0.003
+> =+0.002
+
+Accuracy    
+
+> SD15 SDXL FLUX1dev
+> =+0.179 =-0.002
+> =+0.002
+
+F1   
+
+> SD15 SDXL FLUX1dev
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Score
+> =+0.038
+> =-0.011
+> =+0.004
+
+Precision     
+
+> SD15 SDXL FLUX1dev
+> =+0.282 =+0.009 =+0.000
+
+Recall   
+
+> SD15 SDXL FLUX1dev
+> =-0.023
+> =+0.015
+> =-0.003
+
+FPR    
+
+> SD15 SDXL FLUX1dev
+> =-0.282
+> =-0.009 =+0.000
+
+FNR   
+
+> Text Encoder UNet Mid-Block Both
+
+Figure 17: Module ablation for Gaussian probing across architectures. We compare probes extracted from the text encoder alone, the UNet mid-block alone, and both modules combined, across eight metrics. ∆ values show the improvement from ensembling both modules over the best single module. Combining text-encoder and UNet probes is essential for SD 1.5 (AUROC ∆ = +0.067, recall ∆ = +0.282) and yields smaller but consistent gains on SDXL and FLUX.1-dev. The large SD 1.5 recall gain reflects finetunes that modify only the text encoder, UNet probes alone miss these entirely. 31 D Detecting CSAM Specialization in the Wild Study 
+
+We present additional details from our in the wild study. First, we discuss how we curated our dataset of LoRAs and performed filtering to capture SFW LoRAs from NSFW LoRAs. Second we present additional results in terms of the standard cross validation results and ablations on both the impact of layer choice for SDXL 1.0 and FLUX.1-dev, and ablations on the ensembling strategy for these different layer choices. 
+
+D.1 Dataset Curation 
+
+We focused our in the wild analysis on CivitAI as our platform of choice given the ease with which we can download LoRAs programatically through the API. There exist two endpoints the civitai.green and civitai.com endpoints. We use these two endpoints to help us curate the SFW LoRAs vs. the NSFW LoRAs. The civitai.green endpoint is a SFW version of civitai.com. Thus, we randomly download 1000 LoRAs from this endpoint and then we use an NSFW classifier on the gallery images to determine if it is still NSFW specialized. We also look for keywords in the model name or description that might indicate it was specialized for NSFW content. For curating the NSFW LoRAs we develop a set of keywords related to adult sexual content and use these to find LoRAs which match these search terms through the civitai.com endpoint. We then run an NSFW classifier over the gallery images to ensure at least one image is NSFW since this acts as a good proxy for the intent of the LoRA training. 
+
+D.2 Additional Metrics 
+
+In this section, we present the per-class values across all of our metrics for CSAM detection across all of our architectures in 18 averaged over 5-fold CV. Acc       
+
+> AUROC
+> AUPRC
+> Prec
+> Recall
+> F1
+> FPR
+> FNR
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> SD15
+> 0.78
+> 0.87 0.84
+> 0.74 0.78 0.75
+> 0.21 0.22
+> 0.77
+> 0.86
+> 0.76 0.77 0.69
+> 0.71
+> 0.17
+> 0.31
+
+SFW       
+
+> Acc
+> AUROC
+> AUPRC
+> Prec
+> Recall
+> F1
+> FPR
+> FNR
+> 0.77
+> 0.86 0.89
+> 0.82 0.75 0.78
+> 0.20
+> 0.25
+> 0.77
+> 0.83 0.85 0.79 0.82
+> 0.79
+> 0.30
+> 0.18
+
+NSFW    
+
+> Acc
+> AUROC
+> AUPRC
+> Prec
+> Recall
+> F1
+> FPR
+> FNR
+> 0.98 1.00
+> 0.86
+> 0.53
+> 1.00
+> 0.66
+> 0.02 0.00
+> 0.97
+> 0.78
+> 0.21
+> 0.13
+> 0.17 0.15
+> 0.02
+> 0.83
+
+CSAM                                            
+
+> Acc
+> AUROC
+> AUPRC
+> Prec
+> Recall
+> F1
+> FPR
+> FNR
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> SDXL
+> 0.82
+> 0.91 0.91 0.82 0.79 0.80
+> 0.16 0.21
+> 0.84
+> 0.91 0.86
+> 0.78
+> 0.94
+> 0.85
+> 0.24
+> 0.06
+> Acc
+> AUROC
+> AUPRC
+> Prec
+> Recall
+> F1
+> FPR
+> FNR
+> 0.82
+> 0.92 0.92
+> 0.81 0.83
+> 0.82
+> 0.20 0.17
+> 0.85
+> 0.92 0.92 0.94
+> 0.76 0.84
+> 0.05
+> 0.24
+> Acc
+> AUROC
+> AUPRC
+> Prec
+> Recall
+> F1
+> FPR
+> FNR
+> 1.00 1.00 1.00 1.00 1.00 1.00
+> 0.00 0.00
+> 0.96
+> 0.89
+> 0.40
+> 0.51
+> 0.33 0.37
+> 0.02
+> 0.67
+> Acc
+> AUROC
+> AUPRC
+> Prec
+> Recall
+> F1
+> FPR
+> FNR
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> FLUX1dev  0.81
+> 0.88 0.87 0.82 0.78 0.80
+> 0.15
+> 0.22
+> 0.57 0.61
+> 0.53 0.54
+> 0.54
+> 0.52
+> 0.40
+> 0.46
+> Acc
+> AUROC
+> AUPRC
+> Prec
+> Recall
+> F1
+> FPR
+> FNR
+> 0.82
+> 0.88 0.85 0.79 0.83
+> 0.81
+> 0.20 0.17
+> 0.58 0.62 0.57 0.56
+> 0.57
+> 0.55 0.41 0.43
+> Acc
+> AUROC
+> AUPRC
+> Prec
+> Recall
+> F1
+> FPR
+> FNR
+> 1.00 1.00 1.00 0.96 1.00 0.98
+> 0.00 0.00
+> 0.96
+> 0.82
+> 0.65
+> 0.77
+> 0.60 0.65
+> 0.02
+> 0.40
+> Per-class metrics Gaussian Probes vs Raw Weights
+> Gaussian Probes Raw Weights
+
+Figure 18: Per-class metrics across architectures (rows: SD 1.5, SDXL, FLUX.1-dev; columns: SFW, NSFW, CSAM). For each (architecture, class) pair we report all eight metrics for Gaussian probes and raw weights. Gaussian probing matches or exceeds raw weights on SFW and NSFW across all metrics, and decisively outperforms on CSAM. Raw weights collapse on the CSAM column due to the small CSAM sample size and high dimensionality. 32 D.3 Layer Choice Ablation 
+
+In this section we present our ablations over the individual classifiers trained on the probes from the different layers we picked for SD 1.5, SDXL 1.0 and FLUX.1-dev: Figures 19, 20, and 21. AUROC F1 Accuracy Precision 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Score
+
+Wild Civitai SD15: per-layer probe ablation   
+
+> UNet Mid Mid Post-Attn Down Cross-Attn
+
+Figure 19: Per-layer probe performance on wild CivitAI SD 1.5 LoRAs. We compare Gaus-sian probes extracted from three candidate layers: UNet mid-block, mid post-attention, and down cross-attention. No single layer dominates across all metrics, motivating the ensemble approach. AUROC F1 Accuracy Precision 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Score
+
+Wild Civitai SDXL: per-layer probe ablation   
+
+> UNet Mid Mid Post-Attn Down Cross-Attn
+
+Figure 20: Per-layer probe performance on wild CivitAI SDXL 1.0 LoRAs. We com-pare Gaussian probes extracted from three candidate layers: UNet mid-block, mid post-attention, and down cross-attention. No single layer dominates across all metrics, moti-vating the ensemble approach. 33 AUROC F1 Accuracy Precision 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Score
+
+Wild Civitai FLUX1dev: per-layer probe ablation    
+
+> Single-First (img)
+> Single-First (txt)
+> Single-Mid (img) Single-Mid (txt) Double-Last (img) Double-Last (txt)
+
+Figure 21: Per-layer probe performance on wild CivitAI FLUX.1-dev LoRAs. We compare Gaussian probes extracted from six candidate layers spanning the first, middle, and last thirds of the transformer, for both image and text streams. Performance is similar across layer choices, with no single layer clearly outperforming. 34 D.4 Error Analysis 
+
+In this section we provide the raw counts for the error analysis we present in Section 5 to complement the error rates and give a sense of the scale of the errors. sfw                   
+
+> nsfw
+> csam
+> Predicted
+> sfw
+> nsfw
+> csam
+> True
+> 314 86 5
+> 114 388 17
+> 0018
+> SD15
+> (ens_weighted)
+> sfw
+> nsfw
+> csam
+> Predicted
+> sfw
+> nsfw
+> csam
+> 390 103 0
+> 91 434 0
+> 0033
+> SDXL
+> (ens_stacking)
+> sfw
+> nsfw
+> csam
+> Predicted
+> sfw
+> nsfw
+> csam
+> 406 115 2
+> 90 434 1
+> 0066
+> FLUX1dev
+> (ens_stacking)
+> 0
+> 100
+> 200
+> 300
+> 400
+> Count
+> CSAM Detection Confusion Counts
+
+Figure 22: CSAM detection error counts by true class, across architectures. Gaussian probing achieves 100% recall on CSAM across SD 1.5, SDXL, and FLUX.1-dev (bottom row). 
+
+D.5 Ensembling Ablation 
+
+In this section we compare the best individual layer classifier to the ensembled classifier for SD 1.5, SDXL 1.0 and FLUX.1-dev (Figures 23, 24, and 25). We also explore the best ensembling strategy for each architecture ((Figures 26, 27, and 28). AUROC F1 Accuracy Precision 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0  
+
+> Score
+> 0.906
+> 0.684
+> 0.748
+> 0.639
+> 0.909
+> 0.733 0.764
+> 0.694
+
+Wild Civitai SD15: best sub-layer vs best ensemble 
+
+> Best sub-layer: Down Cross-Attn
+> Best ensemble: Weighted
+
+Figure 23: Best single-layer probe vs. best ensemble on wild CivitAI SD15. Ensembling probes across layers (soft vote) improves over the best single layer (down cross-attn) on all metrics. 35 AUROC F1 Accuracy Precision 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0  
+
+> Score
+> 0.923
+> 0.764 0.787
+> 0.726
+> 0.943
+> 0.872
+> 0.815
+> 0.877
+
+Wild Civitai SDXL: best sub-layer vs best ensemble 
+
+> Best sub-layer: Down Cross-Attn
+> Best ensemble: Stacking
+
+Figure 24: Best single-layer probe vs. best ensemble on wild CivitAI SDXL 1.0. Ensem-bling probes across layers (stacking) improves over the best single layer (down cross-attn) on all metrics. AUROC F1 Accuracy Precision 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0     
+
+> Score
+> 0.920
+> 0.799 0.794 0.772
+> 0.926
+> 0.841 0.810 0.825
+
+Wild Civitai FLUX1dev: best sub-layer vs best ensemble 
+
+> Best sub-layer: Single-First (img)
+> Best ensemble: Soft Vote
+
+Figure 25: Best single-layer probe vs. best ensemble on wild CivitAI FLUX.1-dev. En-sembling probes across layers (soft vote) improves over the best single layer (single first image) on all metrics. 36 AUROC F1 Accuracy Precision 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Score
+
+Wild Civitai SD15: ensemble strategy ablation    
+
+> Soft Vote Stacking Weighted All-Concat
+
+Figure 26: Comparing performance of different ensembling strategies on wild CivitAI SD 1.5. Weighted soft vote seems to provide the best performance across the metrics. AUROC F1 Accuracy Precision 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Score
+
+Wild Civitai SDXL: ensemble strategy ablation    
+
+> Soft Vote Stacking Weighted All-Concat
+
+Figure 27: Comparing performance of different ensembling strategies on wild CivitAI SDXL 1.0. Stacking seems to provide the best performance across the metrics. 37 AUROC F1 Accuracy Precision 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Score
+
+Wild Civitai FLUX1dev: ensemble strategy ablation    
+
+> Soft Vote Stacking Weighted All-Concat
+
+Figure 28: Comparing performance of different ensembling strategies on wild CivitAI FLUX.1-dev. Standard soft vote seems to provide the best performance across the metrics. 38
