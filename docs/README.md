@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-02
-- 运行时间：2026-05-02 19:41:06 UTC
+- 最新运行日期：2026-05-03
+- 运行时间：2026-05-03 19:53:32 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦影像生成与超分辨率，共阅 17 篇论文，其中 6 篇精读。  
-值得关注的亮点包括高效多帧超分辨率模型 LatentBurst 及真实商业场景图像生成基准 ServImage。  
-建议明日重点跟进生成模型在真实拍摄条件下的应用与评测趋势。
-- 详情：[/202605/02/README](/202605/02/README)
+精读 6 篇、速读 11 篇，聚焦多任务图像修饰与生成模型创新。  
+重点推荐轻量可微的照片调色框架 VeraRetouch 与自适应去噪生成法 Golden RPG，兼顾效率与稳定性。  
+建议关注生成一致性与风格可控性的新进展，尝试在应用中跨域测试其表现。
+- 详情：[/202605/03/README](/202605/03/README)
 
 ### 精读区论文标签
-1. [LatentBurst: A Fast and Efficient Multi Frame Super-Resolution for Hexadeca-Bayer Pattern CIS images](/202605/02/2604.23268v1-latentburst-a-fast-and-efficient-multi-frame-super-resolution-for-hexadeca-bayer-pattern-cis-images)  
+1. [VeraRetouch: A Lightweight Fully Differentiable Framework for Multi-Task Reasoning Photo Retouching](/202605/03/2604.27375v1-veraretouch-a-lightweight-fully-differentiable-framework-for-multi-task-reasoning-photo-retouching)  
+   标签：评分：9.5/10、query:real-ir
+   evidence：用于多任务照片修饰与增强的可微框架
+2. [Golden RPG: Confidence-Adaptive Region-Aware Noise for Compositional Text-to-Image Generation](/202605/03/2604.25314v1-golden-rpg-confidence-adaptive-region-aware-noise-for-compositional-text-to-image-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：CIS图像的多帧超分辨率
-2. [ServImage: An Image Generation and Editing Benchmark from Real-world Commercial Imaging Services](/202605/02/2604.24023v1-servimage-an-image-generation-and-editing-benchmark-from-real-world-commercial-imaging-services)  
+   evidence：用于组合式文生图扩散模型的区域感知噪声
+3. [ACPO: Anchor-Constrained Perceptual Optimization for Diffusion Models with No-Reference Quality Guidance](/202605/03/2604.26348v1-acpo-anchor-constrained-perceptual-optimization-for-diffusion-models-with-no-reference-quality-guidance)  
    标签：评分：9.0/10、query:real-ir
-   evidence：图像生成与编辑模型的评测基准
-3. [ACPO: Anchor-Constrained Perceptual Optimization for Diffusion Models with No-Reference Quality Guidance](/202605/02/2604.26348v1-acpo-anchor-constrained-perceptual-optimization-for-diffusion-models-with-no-reference-quality-guidance)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：利用无参考质量引导优化扩散模型
-4. [SEAL: Semantic-aware Single-image Sticker Personalization with a Large-scale Sticker-tag Dataset](/202605/02/2604.26883v1-seal-semantic-aware-single-image-sticker-personalization-with-a-large-scale-sticker-tag-dataset)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散模型的个性化文本生成图像
-5. [Statistical Analysis of Markovian Generative Modeling](/202605/02/2604.22712v1-statistical-analysis-of-markovian-generative-modeling)  
+   evidence：使用无参考质量引导的扩散模型感知优化
+4. [Delta Score Matters! Spatial Adaptive Multi Guidance in Diffusion Models](/202605/03/2604.26503v1-delta-score-matters-spatial-adaptive-multi-guidance-in-diffusion-models)  
    标签：评分：8.5/10、query:real-ir
-   evidence：基于得分的扩散与生成模型的统计分析
-6. [Visual Generation in the New Era: An Evolution from Atomic Mapping to Agentic World Modeling](/202605/02/2604.28185v1-visual-generation-in-the-new-era-an-evolution-from-atomic-mapping-to-agentic-world-modeling)  
+   evidence：扩散模型中的空间自适应多重引导
+5. [YOSE: You Only Select Essential Tokens for Efficient DiT-based Video Object Removal](/202605/03/2604.27322v1-yose-you-only-select-essential-tokens-for-efficient-dit-based-video-object-removal)  
    标签：评分：8.5/10、query:real-ir
-   evidence：视觉生成模型的分类与演进，包括交互式编辑
+   evidence：基于扩散Transformer的高效视频物体移除
+6. [ServImage: An Image Generation and Editing Benchmark from Real-world Commercial Imaging Services](/202605/03/2604.24023v1-servimage-an-image-generation-and-editing-benchmark-from-real-world-commercial-imaging-services)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：来自真实世界服务的图像生成与编辑基准
 
 ### 速读区论文标签
-1. [On the Memorization of Consistency Distillation for Diffusion Models](/202605/02/2604.23552v1-on-the-memorization-of-consistency-distillation-for-diffusion-models)  
+1. [CA-IDD: Cross-Attention Guided Identity-Conditional Diffusion for Identity-Consistent Face Swapping](/202605/03/2604.24493v1-ca-idd-cross-attention-guided-identity-conditional-diffusion-for-identity-consistent-face-swapping)  
    标签：评分：8.0/10、query:real-ir
-   evidence：扩散模型一致性蒸馏中的记忆化行为分析
-2. [Talker-T2AV: Joint Talking Audio-Video Generation with Autoregressive Diffusion Modeling](/202605/02/2604.23586v1-talker-t2av-joint-talking-audio-video-generation-with-autoregressive-diffusion-modeling)  
+   evidence：基于扩散模型的换脸图像编辑
+2. [Simple Self-Conditioning Adaptation for Masked Diffusion Models](/202605/03/2604.26985v1-simple-self-conditioning-adaptation-for-masked-diffusion-models)  
    标签：评分：8.0/10、query:real-ir
-   evidence：用于视频生成的自回归扩散建模
-3. [ViPO: Visual Preference Optimization at Scale](/202605/02/2604.24953v1-vipo-visual-preference-optimization-at-scale)  
+   evidence：掩码扩散模型的训练后适配
+3. [How to Guide Your Flow: Few-Step Alignment via Flow Map Reward Guidance](/202605/03/2604.27147v1-how-to-guide-your-flow-few-step-alignment-via-flow-map-reward-guidance)  
    标签：评分：8.0/10、query:real-ir
-   evidence：视觉生成模型的偏好优化
-4. [SpatialFusion: Endowing Unified Image Generation with Intrinsic 3D Geometric Awareness](/202605/02/2604.26341v1-spatialfusion-endowing-unified-image-generation-with-intrinsic-3d-geometric-awareness)  
+   evidence：用于生成模型对齐的流映射奖励引导
+4. [AdvDMD: Adversarial Reward Meets DMD For High-Quality Few-Step Generation](/202605/03/2604.28126v1-advdmd-adversarial-reward-meets-dmd-for-high-quality-few-step-generation)  
    标签：评分：8.0/10、query:real-ir
-   evidence：带有扩散主干的统一图像生成
-5. [Spatiotemporal Degradation-Aware 3D Gaussian Splatting for Realistic Underwater Scene Reconstruction](/202605/02/2604.23551v1-spatiotemporal-degradation-aware-3d-gaussian-splatting-for-realistic-underwater-scene-reconstruction)  
-   标签：评分：7.5/10、query:real-ir
-   evidence：通过建模时空退化来重建真实的视觉水下场景
-6. [Benchmarking Layout-Guided Diffusion Models through Unified Semantic-Spatial Evaluation in Closed and Open Settings](/202605/02/2604.25358v1-benchmarking-layout-guided-diffusion-models-through-unified-semantic-spatial-evaluation-in-closed-and-open-settings)  
+   evidence：用于高质量少步扩散生成的对抗奖励方法
+5. [Benchmarking Layout-Guided Diffusion Models through Unified Semantic-Spatial Evaluation in Closed and Open Settings](/202605/03/2604.25358v1-benchmarking-layout-guided-diffusion-models-through-unified-semantic-spatial-evaluation-in-closed-and-open-settings)  
    标签：评分：7.5/10、query:real-ir
    evidence：布局引导扩散模型的基准测试
-7. [Language Diffusion Models are Associative Memories Capable of Retrieving Unseen Data](/202605/02/2604.26841v1-language-diffusion-models-are-associative-memories-capable-of-retrieving-unseen-data)  
-   标签：评分：7.5/10、query:real-ir
-   evidence：离散扩散模型作为关联记忆进行数据检索
-8. [Latent Inter-Frame Pruning: A Training-Free Method Bridging Traditional Video Compression and Modern Diffusion Transformers for Efficient Generation](/202605/02/2604.23858v1-latent-inter-frame-pruning-a-training-free-method-bridging-traditional-video-compression-and-modern-diffusion-transformers-for-efficient-generation)  
+6. [CheXmix: Unified Generative Pretraining for Vision Language Models in Medical Imaging](/202605/03/2604.22989v1-chexmix-unified-generative-pretraining-for-vision-language-models-in-medical-imaging)  
    标签：评分：7.0/10、query:real-ir
-   evidence：使用扩散Transformer的高效视频生成
-9. [Neural Enhancement of Analytical Appearance Models](/202605/02/2604.24081v1-neural-enhancement-of-analytical-appearance-models)  
+   evidence：医学影像的统一生成式预训练
+7. [Comparative Study of Weighted and Coupled Second- and Fourth-Order PDEs for Image Despeckling in Grayscale, Color, SAR, and Ultrasound](/202605/03/2604.23612v1-comparative-study-of-weighted-and-coupled-second--and-fourth-order-pdes-for-image-despeckling-in-grayscale-color-sar-and-ultrasound)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：基于偏微分方程的图像去噪以抑制噪声
+8. [DiffuSAM: Diffusion-Based Prompt-Free SAM2 for Few-Shot and Source-Free Medical Image Segmentation](/202605/03/2604.24719v1-diffusam-diffusion-based-prompt-free-sam2-for-few-shot-and-source-free-medical-image-segmentation)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：基于扩散模型的医学图像分割适配
+9. [Diffusion Reconstruction towards Generalizable Audio Deepfake Detection](/202605/03/2604.26465v1-diffusion-reconstruction-towards-generalizable-audio-deepfake-detection)  
    标签：评分：6.5/10、query:real-ir
-   evidence：对解析外观模型进行神经增强以准确表示物理测量
-10. [When the Forger Is the Judge: GPT-Image-2 Cannot Recognize Its Own Faked Documents](/202605/02/2604.25213v1-when-the-forger-is-the-judge-gpt-image-2-cannot-recognize-its-own-faked-documents)  
+   evidence：基于扩散的重建用于检测
+10. [Softmax-GS: Generalized Gaussians Learning When to Blend or Bound](/202605/03/2604.27437v1-softmax-gs-generalized-gaussians-learning-when-to-blend-or-bound)  
    标签：评分：6.5/10、query:real-ir
-   evidence：AI编辑文档图像的检测
-11. [Noise2Map: End-to-End Diffusion Model for Semantic Segmentation and Change Detection](/202605/02/2604.27889v1-noise2map-end-to-end-diffusion-model-for-semantic-segmentation-and-change-detection)  
+   evidence：解决3D重建中的视图不一致和边界模糊问题
+11. [RayFormer: Modeling Inter- and Intra-Ray Similarity for NeRF-Based Video Snapshot Compressive Imaging](/202605/03/2604.27702v1-rayformer-modeling-inter--and-intra-ray-similarity-for-nerf-based-video-snapshot-compressive-imaging)  
    标签：评分：6.5/10、query:real-ir
-   evidence：用于语义分割和变化检测的扩散模型
+   evidence：从快照测量中重建动态场景
 
 
 <div class="dpr-home-promo-card">
