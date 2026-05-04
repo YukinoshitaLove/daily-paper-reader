@@ -1,0 +1,787 @@
+Title: Flow matching for Sentinel-2 super-resolution: implementation, application, and implications
+
+URL Source: https://arxiv.org/pdf/2605.00367v1
+
+Published Time: Mon, 04 May 2026 00:32:33 GMT
+
+Number of Pages: 41
+
+Markdown Content:
+# Flow matching for Sentinel-2 super-resolution: implementation, application, and implications 
+
+Dakota Hester a,* , Vitor S. Martins a,* , Lucas B. Ferreira b,a , Thainara M. A. Lima a, and Juliana A. Araújo aaDepartment of Agricultural and Biological Engineering, Mississippi State University 
+
+> b
+
+North Mississippi Research and Extension Center, Mississippi State University 
+
+> *
+
+Corresponding authors: dh2306@msstate.edu , vmartins@abe.msstate.edu 
+
+Abstract 
+
+Developing robust techniques for super-resolution of satellite imagery involves navigating commonly observed trade-offs between spectral fidelity and perceptual quality. In this work, we introduce a flow matching model for 4 × super-resolution of 10-m Sentinel-2 visible and near-infrared bands over the conterminous United States (CONUS) using a dataset of 120,851 10-m Sentinel-2 and 2.5-m resampled NAIP imagery pairs acquired on the same day. Our results showed that the flow matching model outperformed diffusion and Real-ESRGAN models in pixel-wise accuracy in a single sampling step using the Euler method. When evaluated with a second-order Midpoint solver, our model generated perceptually realistic super-resolved imagery in only 20 sampling steps, effectively navigating the perception-distortion trade-off at inference time without retraining. We used this model to produce a super-resolved 2.5-m 4-band CONUS imagery product derived from 2025 10-m Sentinel-2 annual composites, consisting of over 1.58 trillion pixels. We further evaluated the use of super-resolved data on a land cover classification task using semantic segmentation models. Finally, we generated a yearly 2.5-m land cover product for the Chesapeake Bay watershed for 2020–2025. An accuracy assessment against 25,000 ground truth points revealed an overall accuracy of 89.11% for the annual land cover product. We conclude that flow matching is an effective generative modeling approach for super-resolution of Sentinel-2 imagery compared to diffusion and Generative Adversarial Network-based methods, and has strong implications for expanding access to high-resolution imagery for geospatial applications that demand fine spatial detail. 
+
+Keywords: super-resolution, flow matching, Sentinel-2, land cover 
+
+# 1 Introduction 
+
+The use of deep learning super-resolution models for producing synthetic high spatial resolution imagery from medium resolution imagery has expanded rapidly in recent years (Wang et al., 2024, 2022, 2025). Many of these approaches utilize generative adversarial networks (GANs), where a generator network is trained to map coarse-resolution inputs to high-resolution outputs using both pixel-wise loss functions (e.g., L1 or L2 loss) and feedback from a discriminator network, which is simultaneously trained to distinguish real high-resolution images from those produced by the generator network (Gong et al., 2021; Goodfellow et al., 2014; Ledig et al., 2017). For instance, Jia et al. (2022) used a GAN framework for 4 × super-resolution of aerial imagery, outperforming non-adversarial CNN-based super-resolution models. Zhu et al. (2023) incorporated neural implicit 1
+
+> arXiv:2605.00367v1 [cs.CV] 1 May 2026
+
+representations into a GAN-based adversarial training framework for hyperspectral image super-resolution. Pham and Bui (2021) used an Enhanced Super-Resolution GAN (ESRGAN) architec-ture (Wang et al., 2018) to super-resolve 30-m Landsat-8 visible and near-infrared (NIR) bands to 10-m resolution using temporally aligned Sentinel-2 images as target outputs during training. Criv-ellari et al. (2023) applied an SRGAN architecture (Ledig et al., 2017) to super-resolve the 10-m Sentinel-2 bands to 1-m using GaoFen-2 imagery as ground truth, demonstrating improved land cover classification performance when using the super-resolved imagery compared to simple bicubic upsampling. However, GAN-based super-resolution approaches suffer from several fundamental drawbacks, the most commonly cited of which is the instability of the adversarial training process (Arjovsky et al., 2017). This adversarial process makes robust training inherently difficult, frequently leading to mode collapse, where the generator model only learns to capture a small portion of the target dis-tribution accurately, resulting in generative models that fail to produce photorealistic samples (Sal-imans et al., 2016). Further, the convolutional nature of discriminator networks leads to instances where the discriminator is blind to certain types of artifacts in generated images, incentivizing the generator network to produce images laden with these artifacts (Liang et al., 2022; Odena et al., 2016). To address this, many super-resolution GANs incorporate a perceptual loss function during training, where a pre-trained feature extraction network is used to provide additional feedback to the generator network regarding the perceptual similarity between super-resolved imagery and their ground truth counterparts (Ledig et al., 2017; Wang et al., 2018). Nevertheless, these perceptual losses introduce a different class of distortions into generated imagery, as they prioritize similarity between extracted features over pixel-wise accuracy, leading to images with photorealistic textures but poor spectral fidelity. Blau and Michaeli (2018) first formalized this inherent trade-off between perceptual quality and distortion (i.e., pixel-wise accuracy) in generative image modeling tasks, showing that GAN-based techniques can model this behavior by adjusting the weighting between the pixel-wise and adversarial or perceptual loss terms during training, but cannot simultaneously optimize for both perceptual quality and low distortion. Aybar et al. (2026) emphasized that this trade-off is particularly relevant for Sentinel-2 super-resolution and argued that GAN-based super-resolution models disproportionately prioritize perceptual quality over spectral reliability. This bias towards perceptual quality yields super-resolved imagery that is visually pleasing but often poorly suited for downstream analytical tasks. Conversely, for analyses where spatial features are more critical than spectral fidelity (e.g., road network extraction), perceptual quality may be more im-portant. However, developing models that can flexibly adapt to different points along this trade-off at inference time remains a challenge. Motivated by the drawbacks of GAN frameworks for generative image modeling tasks, research efforts have recently shifted towards iterative denoising models based on diffusion processes (Croitoru et al., 2023). Unlike GANs, these architectures resemble semantic segmentation and image-to-image translation models, as they are a single network that transforms an input image to an output image, trained using a single pixel-wise loss function without any additional adversarial feedback or percep-tual loss terms. The training process for diffusion models relies on a multi-step iterative denoising process, where small amounts of noise are added to images over a series of steps, and the model is trained to reverse this noising process. At inference time, the model can be used to generate new images by starting from pure noise and iteratively denoising the image over a series of steps to produce a final output image (Ho et al., 2020; Sohl-Dickstein et al., 2015; Song et al., 2022). This process can easily be extended to super-resolution tasks by reframing the task as a conditional image generation problem, where the diffusion model follows a similar training routine but incorporates some form of conditioning mechanism to guide the denoising process toward a high-resolution out-put that corresponds to a given low-resolution conditioning input (Gao et al., 2023; Li et al., 2022; 2Saharia et al., 2021). This trend away from GANs towards diffusion-based approaches has recently emerged in generative remote sensing applications as well (Liu et al., 2024). Xiao et al. (2024) developed a custom U-Net-like denoising model that utilized enhanced conditioning mechanisms for aerial imagery super-resolution, showing that diffusion-based super-resolution models can outper-form GAN-based approaches in image quality and spectral fidelity. Wang and Sun (2025) used a diffusion-based framework for 16 × super-resolution of Sentinel-2 imagery using vector map data as additional conditioning information, demonstrating that the diffusion-based approach outperformed GAN-based super-resolution models and reduced hallucinations (i.e., features that appear realistic but are absent in the true high-resolution imagery). Chen et al. (2024) used diffusion for spectral super-resolution, enabling the generation of synthetic hyperspectral imagery with dozens of bands from 3-band RGB inputs. Meng et al. (2024) used an aggressive noise schedule for faster sampling (i.e., inference) for super-resolution of aerial imagery in 20 denoising steps (compared to the typical 100+ steps used in most diffusion models) while maintaining high image quality. Yet, despite the relative stability of training (due to the simple pixel-wise loss function) and high-quality outputs produced by diffusion models, they require many denoising steps at inference time to produce high-quality images. This leads to long inference times compared to GANs, which only require a single forward pass through the generator network to produce an output image (Miao et al., 2025; Song et al., 2021). One promising approach that has recently emerged as a means of reducing the computational burden of generative models is the use of continuous normalizing flows as an alternative to diffusion processes for training generative image models. Instead of modeling the denoising process as a stochastic Markov process, flow matching simplifies the process to a straightforward ordinary differential equation (ODE) that uses a linear flow field, defined using the optimal transport between the data distribution and a simple Gaussian noise distribution. Thus, the model is trained to predict this ODE flow field, and at inference time, the model can produce high-quality images from noise using a simple numerical ODE solver (e.g., Euler’s method) to integrate the learned flow field over a series of steps. The use of flow matching-based generative models has been shown to facilitate the generation of high-quality synthetic images using substantially fewer forward passes through the denoising network (e.g., 10 forward passes instead of 100) (Lipman et al., 2023; Pooladian et al., 2023). Yet, no prior work has rigorously explored the use of flow matching for super-resolution of Sentinel-2 imagery, nor its utility for downstream remote sensing data analysis tasks. This study presents the first national-scale implementation of a flow matching framework for Sentinel-2 super-resolution and provides a rigorous evaluation of the resulting imagery’s utility for downstream land cover classification. Following the super-resolution via repeated refinement (SR3) framework for super-resolution with diffusion models (Saharia et al., 2021), we trained a flow matching model to generate 2.5-m resolution synthetic visible and NIR imagery from 10-m Sentinel-2 inputs using a large dataset of Sentinel-2 and cross-calibrated aerial imagery from the USDA NAIP archive. Using this approach, we produced a synthetic 2.5-m visible/NIR imagery product over the entirety of the conterminous United States (CONUS) for the year 2025, providing a new high-resolution imagery data product for the remote sensing community. Further, we evaluated the utility of our synthetic 2.5-m imagery for downstream land cover classification tasks using semantic segmentation models. This application revealed that the perception-distortion trade-off is highly relevant for downstream analysis, as the perceptually superior synthetic imagery led to worse land cover classification accuracy compared to more spectrally accurate super-resolved imagery. These findings are crucial, as the super-resolved imagery produced by our flow matching framework demonstrated suitability for reliable land cover classification performance in a single inference step, while also being able to produce perceptually superior imagery by simply increasing the number of ODE solver steps at inference time. Using the best-performing segmentation model evaluated, we 3produced and validated an annual 2.5-m land cover data product for the Chesapeake Bay watershed for 2020–2025, providing a temporally dense, high-resolution land cover dataset for the region. In summary, this study introduces a novel application of flow matching models for Sentinel-2 super-resolution using cross-sensor training data and provides a rigorous evaluation of the implications of such a product for downstream remote sensing data tasks, such as land cover mapping. 
+
+# 2 Data sources 
+
+2.1 Sentinel-2 Level-2A data 
+
+The European Space Agency’s (ESA) Sentinel-2 satellite constellation provides publicly available multispectral imagery with a 10-day revisit period across three satellites, giving the constellation an effective temporal resolution of 5 days for most terrestrial sites across the globe (Drusch et al., 2012). The first satellite, Sentinel-2A, was launched on June 23, 2015, followed by Sentinel-2B on March 7, 2017, and Sentinel-2C on September 4, 2024. The Multispectral Instrument aboard each satellite records visible and NIR optical reflectance data across 13 spectral bands with 12-bit radiometric resolution, with bands 2 (blue, 490 nm), 3 (green, 560 nm), 4 (red, 665 nm), and 8 (NIR, 842 nm) acquired at a spatial resolution of 10 m. Because the Sentinel-2 constellation provides temporally dense imagery at high spatial resolution, it has seen broad use across a wide variety of applications where high resolution, temporally dense imagery at regional-to-global scale is needed (Blickensdörfer et al., 2022; Brown et al., 2022; Jia et al., 2023). For the super-resolution model input imagery, we used the visible and NIR bands of Sentinel-2 Level-2A surface reflectance products at 10-m resolution. Sen2Cor is ESA’s official Level-2A processor for Sentinel-2 data, providing atmospherically corrected surface reflectance values as well as a Scene Classification Layer (SCL) that provides quality information for each pixel at a 20-m resolution (Main-Knorn et al., 2017). We used SCL to filter out images in which the surface is obscured by cloud cover, cloud shadows, or terrestrial shadows, or which are otherwise of low quality due to oversaturation or data gaps. The 10-m Sentinel-2 surface reflectance data serve as the primary input to the super-resolution models developed in this study. We used Microsoft Planetary Computer’s sentinel-2-l2a collection to access Sen2Cor-processed Sentinel-2 surface reflectance data (Microsoft Open Source et al., 2022). 
+
+2.2 NAIP aerial imagery 
+
+The target high-resolution imagery for this study is sourced from the USDA’s National Agriculture Imagery Program (NAIP) (Earth Resources Observation and Science (EROS) Center, 2017). NAIP provides an archive of high spatial resolution (0.3-m to 0.6-m) multispectral aerial imagery across CONUS during the peak agricultural growing season (June to September). Each state is typically imaged every 2–3 years, with imagery collection starting in 2003 and continuing to the present. Imagery is collected using crewed aircraft and is orthorectified to account for terrain and geometric distortions. NAIP imagery is mostly cloud-free due to strict quality control measures during acqui-sition, making it a high-quality data source for numerous downstream applications. Consequently, NAIP imagery has a long history of use as source imagery for a variety of terrestrial remote sensing applications over CONUS requiring high spatial resolution imagery (Aires et al., 2026; Bhatt and Maclean, 2023; Martins et al., 2021, 2020; Maxwell et al., 2017). More recently, NAIP imagery has also seen use as a target high-resolution dataset for training and evaluating Sentinel-2 super-resolution models (Aybar et al., 2026, 2024a,b; Wolters et al., 2023). For this study, we used 4-band NAIP imagery (Red, Green, Blue, NIR) acquired between 2015 and 2023 to match the temporal 4coverage of Sentinel-2 data. As with the Sentinel-2 data, we used Microsoft Planetary Computer’s 
+
+naip collection to query and download NAIP imagery. 
+
+2.3 Chesapeake Bay Land Use/Land Cover Dataset 
+
+To demonstrate the utility of the super-resolved imagery generated by the super-resolution models, we implemented a land cover mapping task. We utilized the Chesapeake Bay Land Use/Land Cover Dataset (CBLC), a land use and land cover dataset covering the Chesapeake Bay watershed at 1-m spatial resolution, as a reference dataset. The 2024 edition dataset provides a 56-class land use product derived from NAIP imagery across three temporal periods: 2013/2014, 2017/2018, and 2021/2022, the specific year within each period being a function of the NAIP imagery acquisition schedule for a given state within the watershed (Claggett et al., 2025; McDonald et al., 2025). As the dataset is derived from NAIP imagery, it is an excellent choice of ground truth land cover labels, as it is already temporally aligned with the NAIP imagery used in this study. For this study, we only used the 2021/2022 land cover labels, as this data has undergone a formal accuracy assessment and is the most recent available. 
+
+# 3 Methodology 
+
+Our methodology utilized Sentinel-2 and cross-calibrated NAIP imagery pairs to train several super-resolution models (Section 3.1.1) and a separate Sentinel-2/NAIP/land cover triplet dataset to train land cover classification models over the Chesapeake Bay watershed (Section 3.1.2). We trained and evaluated several super-resolution image modeling frameworks, including our proposed flow matching model (Section 3.2). Both pixel-wise and perceptual similarity metrics were used to evaluate the super-resolution models (Section 3.3), and the best-performing model and configuration were used to produce a super-resolved 2.5-m imagery product over CONUS for 2025 (Section 3.4). We then evaluated the utility of the super-resolution models as part of a land cover classification pipeline, ultimately resulting in the creation of annual 2.5-m land cover maps for the Chesapeake Bay watershed between 2020 and 2025 (Section 3.5), followed by a formal accuracy assessment using the 25k validation points selected in Section 3.1.2. We provide a flowchart summarizing the overall methodology in Figure 1. 53) CONUS-Scale Inference 
+
+4) Land Cover Application 2) Synthetic Imagery Validation 
+
+1) Super-resolution Model Training 
+
+Diffusion 
+
+Flow Matching 
+
+Sentinel-2 NAIP Pairs 
+
+Sentinel-2 NAIP Pairs 
+
+Gaussian Noise 
+
+NAIP (2.5-m) 
+
+Sentinel-2 (10-m) 
+
+Actual Velocity 
+
+Predicted Velocity 
+
+Concat 
+
+Flow Matching Model 
+
+NAIP (2.5-m) 
+
+Sentinel-2 (10-m) 
+
+Actual Noise 
+
+Predicted Noise 
+
+Concat 
+
+Diffusion Model 
+
+Lanczos 
+
+Lanczos 
+
+Real-ESRGAN 
+
+Sentinel-2 (10-m) 
+
+Predicted High-Res (2.5-m) 
+
+NAIP (2.5-m) 
+
+RRDBNet 
+
+VGG19 
+
+Sentinel-2 NAIP Pairs 
+
+Sentinel-2 NAIP Pairs 
+
+U-Net Discriminator 
+
+Land Cover (2.5-m) 
+
+Noisy Image 
+
+Sentinel-2 NAIP/LC Triplets 
+
+Similarity 
+
+PSNR, SSIM, LPIPS 
+
+NAIP (2.5-m) 
+
+Sentinel-2 NAIP Pairs 
+
+Sentinel-2 (10-m) 
+
+Diffusion Samplers 
+
+DDIM, DDPM 
+
+ODE Solvers 
+
+Euler, Midpoint, Heun, RK4 
+
+Flow Matching Model 
+
+Predicted High-Res (2.5-m) 
+
+Real-ESRGAN 
+
+Accuracy Metrics 
+
+NAIP (2.5-m) 
+
+Sentinel-2 (10-m) 
+
+Lanczos Upsampling 
+
+Diffusion Model 
+
+Flow Matching Model 
+
+2025 2.5-m CONUS Synthetic Imagery Product 
+
+U-Net, DeepLabV3+. SegFormer 
+
+Land Cover Classi fi er 
+
+2020 2021 2022 2023 2024 2025 
+
+Annual 2.5-m Chesapeake Bay Land Cover 
+
+Sentinel-2 Annual Comp. Figure 1: A high-level overview of the methodology used in this study. 63.1 Preprocessing and sampling procedures 
+
+3.1.1 Sentinel-2/NAIP pair dataset creation for super-resolution model training and evaluation 
+
+To train and evaluate the super-resolution models, we curated a dataset of Sentinel-2 and NAIP imagery pairs across CONUS. First, we identified regions where both Sentinel-2 and NAIP images were collected on the same date to minimize discrepancies arising from temporal changes. Using Microsoft Planetary Computer’s STAC API, we queried the footprints of Sentinel-2 Level-2A sur-face reflectance products and NAIP orthophotos collected between 2015 and 2023, and intersected temporally aligned footprints to produce a broad set of candidate regions. From this set of candidate regions, we randomly sampled 250,000 locations to serve as centroids for 640 ×640-m square poly-gons from which chips of imagery would be extracted. A minimum distance of 2 km was enforced between sampled locations to avoid data leakage or interdependence between samples arising from spatial autocorrelation. We randomly withheld 5% of the sampled locations for validation, while the remaining 95% were used for training. At each sample location, we again queried Microsoft Planetary Computer’s STAC API to retrieve the Sentinel-2 SCL for a random valid year (i.e., a year where both Sentinel-2 and NAIP imagery were available on the same date). If any pixel in a potential sample was classified as saturated/defective (SCL class 1), topographic shadow (SCL class 2), cloud shadows (SCL class 3), unclassified (SCL class 7), or cloud (SCL class 8, 9, 10), we searched for a new Sentinel-2 and NAIP image pair at that location in a different year. If no other years contained a valid image pair or if no other years were available, we discarded that sample location. Once a sample had passed this quality check, we downloaded the corresponding Sentinel-2 and NAIP imagery. The final dataset consisted of 114,835 training samples and 6,016 validation samples for a total of 120,851 Sentinel-2/NAIP image pairs. The spatial distribution of the sampled locations is shown in Figure 2. 46°N 42°N 38°N 34°N 30°N 26°N 22°N 64°W 68°W 72°W 76°W 80°W 84°W 88°W 92°W 96°W 100°W 104°W 108°W 112°W 116°W 120°W 124°W 128°W        
+
+> Sample Density 012-5 6-10 11-18 0250 500 750 1,000 125 Kilometers
+> 47°57'5"N 97°11'31"W
+> 41°0'10"N 81°23'50"W
+> 41°18'17"N 110°38'4"W
+> 47°57'5"N 97°11'31"W
+> 40°9'40"N 115°45'43"W
+> Sentinel-2 NAIP
+> 200m
+
+Figure 2: Spatial distribution of Sentinel-2 and NAIP image pairs used for training and evaluating super-resolution models (left) and examples of Sentinel-2 surface reflectance and calibrated NAIP imagery (right). 7We extracted 640 ×640-m chips from both Sentinel-2 and NAIP imagery samples. Both im-ages were reprojected to EPSG:5070 (NAD83/CONUS Albers) to ensure consistency across the dataset, with the NAIP imagery being resampled to the desired 2.5-m resolution using Lanczos re-sampling (Duchon, 1979). As the NAIP imagery is not a surface reflectance product, we performed a cross-calibration of the raw digital numbers using the Sentinel-2 surface reflectance values as a reference. First, we downsampled and reprojected the NAIP imagery to match the 10-m resolution and affine transform of the Sentinel-2 imagery chip to align the two images spatially. Next, we fitted a per-band ordinary least squares linear regression model between the NAIP pixel values and the corresponding Sentinel-2 surface reflectance values on a per-image basis. We then applied the learned linear transformation to the original 2.5-m NAIP imagery chip to produce estimates of sur-face reflectance at 2.5-m resolution. These Sentinel-2 and cross-calibrated NAIP imagery pairs were stored as 16-bit unsigned integer GeoTIFF files for later use during model training and evaluation. Figure 2 shows a selection of Sentinel-2 and cross-calibrated NAIP image pairs from the dataset. 
+
+3.1.2 Sentinel-2/NAIP/land cover label triplet dataset creation for super-resolution land cover classification 
+
+To train the segmentation models for land cover classification, we curated a dataset of Sentinel-2/NAIP/land cover label triplets. This process followed a similar procedure to the Sentinel-2/NAIP pair dataset creation process described in Section 3.1.1, but with a few key differences. First, we did not utilize prior years of CBLC data to identify valid sample locations, instead relying solely on the most recent 2021/2022 data for sampling. This constrained the number of potential Sentinel-2/NAIP concomitant acquisitions since we could not sample from across multiple years. To account for this, we allowed for a greater degree of temporal mismatch between Sentinel-2 and NAIP acquisitions, allowing for up to a 3-day match difference between imagery collection dates when querying for candidate regions. We followed the same procedure as in Section 3.1.1 to identify potential sample locations prior to sampling 70,000 locations across the valid regions. Instead of a 2 km minimum distance between samples, we relaxed this constraint to 1.5 km to allow for a greater density of samples given the smaller spatial extent of the Chesapeake Bay watershed. We placed 20% of the sampled locations into a withheld test split, while the remaining 80% were randomly distributed among 5 folds for cross-validation during model training. We again enforced the same quality checks as before to ensure that no clouds, cloud shadows, or defective pixels were present, and that all data points in the Sentinel-2 imagery, NAIP imagery, and land cover labels were valid. In total, we obtained 28,446 valid samples of Sentinel-2/NAIP/land cover label triplets to be used for training and evaluating land cover classification models using super-resolved Sentinel-2 imagery, with 5,689 samples reserved for testing and 22,757 samples used for 5-fold cross-validation. As with the Sentinel-2/NAIP pair dataset, all imagery/data chips were reprojected to EPSG:5070 (NAD83/CONUS Albers) for consistency; the NAIP imagery was resampled to 2.5-m resolution us-ing Lanczos resampling, while the land cover labels were resampled to 2.5-m resolution using mode resampling. We chose to reclassify the land use labels from the original CBLC dataset into a sim-plified set of 5 general land cover classes. While a 5-class legend is somewhat coarse, many ancillary datasets (e.g., wetland maps, building footprints, road networks, cropland maps, etc.) were used in the original classification process of the data. As we were primarily concerned with evaluating the utility of super-resolved Sentinel-2 imagery for land cover classification tasks, we opted to simplify the legend as to remove the dependence on these ancillary datasets and focus solely on spectral and spatial information present in the imagery. The reclassification scheme is provided in Table S1. To validate the resulting 2.5-m land cover product, we curated a second dataset of 25,000 points across the Chesapeake Bay watershed for an accuracy assessment of the land cover product. 8Points were randomly sampled across the region with a minimum distance of 2 km between points and tiles sampled for the Sentinel-2/NAIP/land cover triplet dataset to minimize the effect of spatial autocorrelation between the two datasets and ensure spatial independence of the accuracy assessment points. At each point, we collected the corresponding ground-truth land cover label from the original CBLC dataset, then reclassified the label according to the scheme in Table S1 to match the legend of the land cover product. The spatial extent of the CBLC dataset, the density of sampled triplets for land cover classifier training/evaluation, and the density of sampled points for the accuracy assessment dataset are shown in Figure 3. 44°N 43°N 42°N 41°N 40°N 39°N 38°N 37°N 74°W 75°W 76°W 77°W 78°W 79°W 80°W 81°W 82°W 83°W 84°W      
+
+> 44°N 43°N 42°N 41°N 40°N 39°N 38°N 37°N 74°W 75°W 76°W 77°W 78°W 79°W 80°W 81°W
+> 44°N 43°N 42°N 41°N 40°N 39°N 38°N 37°N 74°W 75°W 76°W 77°W 78°W 79°W 80°W 81°W
+> Open Water Herbaceous Forest Canopy Impervious Barren Land
+> Triplet Tile Density 012 - 5 6 - 10 11 - 14
+> Assess Point Density 01234-12
+> 0100 200 300 400 50 Km
+
+Figure 3: Reclassified CBLC data (left), locations of triplets used for training land cover classifi-cation models (middle), and locations of points used for accuracy assessment of annual 2.5-m land cover product (right). 
+
+3.1.3 Sentinel-2 annual mean composites 
+
+To create both the super-resolved CONUS 2.5-m imagery product and the annual 2.5-m land cover maps for the Chesapeake Bay watershed, we opted to use annual mean composites of Sentinel-2 imagery as the input to the super-resolution models instead of single-date imagery. This decision was motivated by the fact that annual composites are more likely to be cloud-free, and while choosing cloud-free tiles is possible for single-date imagery, this would lead to products that are temporally inconsistent across space and time. Annual mean composites, on the other hand, provide a consistent snapshot of the average landscape of a region within a given year. Google Earth Engine was used to generate annual mean composites of Sentinel-2 Level-2A imagery for the year 2025 across CONUS and for 2020–2025 across the Chesapeake Bay watershed (Gorelick et al., 2017). We used the SCL layer of the Sentinel-2 Level-2A product to remove snow/ice pixels and the Cloud Score+ quality assessment product provided by Google Earth Engine to mask out pixels that were predicted as being less than 65% clear (Pasquarella et al., 2023) during the compositing process. 93.2 Training generative super-resolution models 
+
+3.2.1 Flow matching-based super-resolution 
+
+Flow matching is a generative modeling technique that treats the process of sampling from a target data distribution as a continuous flow of samples from an initial distribution (e.g., Gaussian noise) to the target distribution over time. A continuous normalizing flow field fθ(x, t ) is defined as the instantaneous velocity of samples as they move from an initial distribution x0 ∼ N (0 , I) to the target data distribution x1 ∼ pdata (x) over time t ∈ [0 , 1] , as shown in Equation 1. 
+
+dx t
+
+dt = fθ(xt, t ) (1) The flow field fθ(xt, t ) is approximated by training a neural network to minimize |fθ(xt, t ) − dx t 
+
+> dt
+
+|
+
+over samples xt, where xt is defined as a linear interpolation between x0 and x1 at time t, as shown in Equation 2. 
+
+xt = (1 − t)x0 + tx 1 (2) Lipman et al. (2023) demonstrated that this linear interpolation between x0 and x1 is sufficient for image-based generative modeling tasks through the use of an image-to-image deep learning architecture for fθ. During training, x0 is sampled from a Gaussian distribution and x1 is sampled from the training data, and fθ is trained to predict the flow velocity (i.e., x1 − x0) at a randomly sampled time step t ∈ [0 , 1) given the interpolated sample xt and time step t as input. At inference time, new samples can be generated by integrating Equation 1 from t = 0 to t = 1 starting from an initial sample x0 ∼ N (0 , I) and ending with a generated sample x1. As the flow field is deterministic, any ODE solving algorithm can be used to perform this integration, and the choice of ODE solver and number of inference steps T can be chosen post hoc . Further, we tested several common ODE solvers for flow matching model inference, including Euler’s method, the midpoint method, Heun’s method, and the classical 4th-order Runge-Kutta (RK4) method. Higher order methods use multiple neural function evaluations (i.e., forward passes) of the flow field fθ(xt, t ) at each time step to better approximate the integral of Equation 1 at each step, resulting in more accurate sample trajectories at the cost of increased computation compared to lower-order methods. A summary of the ODE solvers used in this study is provided in Table 1, where ∆t = 1 
+
+> T
+
+.Table 1: Summary of ODE solvers used for flow matching model inference. 
+
+Method Update Equation Order 
+
+Euler xt+∆ t = xt + fθ(xt, t )∆ t 1Midpoint xt+∆ t = xt + fθ
+
+ xt + 12 fθ(xt, t )∆ t, t + 12 ∆t ∆t 2Heun xt+∆ t = xt + 12 (fθ(xt, t ) + fθ (xt + fθ(xt, t )∆ t, t + ∆ t)) ∆ t 2RK4 
+
+k1 = fθ(xt, t )
+
+k2 = fθ
+
+ xt + 12 k1∆t, t + 12 ∆t
+
+k3 = fθ
+
+ xt + 12 k2∆t, t + 12 ∆t
+
+k4 = fθ (xt + k3∆t, t + ∆ t)
+
+xt+∆ t = xt + 16 (k1 + 2 k2 + 2 k3 + k4)∆ t
+
+4For generative image modeling, fθ(xt, t ) can be any image-to-image architecture that accepts an input image xt and time step t and outputs an image of the same size as xt representing the flow 10 velocity at that time step. Transitioning from a pure generative modeling framework to a super-resolution model involves incorporating some form of conditioning mechanism into the architecture of fθ such that the model uses the low-resolution image as a guide for producing the super-resolved output. Following the SR3 framework for image super-resolution with iterative refinement models proposed by Saharia et al. (2021), we used a U-Net architecture for fθ and simply concatenate the low-resolution image to xt along the band dimension at each time step as input to fθ for conditioning (Ronneberger et al., 2015). The low-resolution conditioning signal must match the spatial dimensions of the high-resolution sample in order to be concatenated with xt; to accomplish this, we used Lanczos resampling to upsample the Sentinel-2 input to 2.5-m. To provide the model with context on the current time step, we used sinusoidal positional embeddings to encode the time step t (see Vaswani et al., 2017), which is then projected and added to the feature maps at various points in the U-Net architecture (both in the encoder and decoder sub-networks). Avisualization of this flow matching super-resolution process using Sentinel-2 as a conditioning signal in the super-resolution framework is provided in Figure 4. 
+
+Figure 4: Visualization of the sampling procedure for flow matching super-resolution using the Euler solver. Starting from pure Gaussian noise ( x0), the model progressively refines the sample over T
+
+steps until reaching the final super-resolved output ( x1). To train the U-Net, we used the AdamW optimizer with an initial learning rate of 1 × 10 −5
+
+that was linearly increased to 1 × 10 −4 over the first 10 epochs before a cosine annealing schedule was used to gradually decrease the learning rate to 0 over the 90 subsequent epochs. Images were loaded into VRAM using a batch size of 16, but gradients were accumulated across 2 batches prior to weight updates to achieve an effective batch size of 32. Automatic mixed precision training was employed with bfloat16 half-precision to reduce VRAM usage and speed up training and inference. Following Saharia et al. (2021), we opted for L1 loss instead of the more commonly used L2 loss for training fθ, as this was found to produce super-resolved images with improved perceptual quality (see Zhao et al., 2017), as shown in Equation 3. 
+
+Lflow matching = ∥fθ(xt, t ) − (x1 − x0)∥1 (3) 11 3.2.2 Diffusion models Denoising Diffusion Probabilistic Models Like flow matching, diffusion is a technique for building generative models that iteratively transforms samples drawn from a simple initial distri-bution (e.g., Gaussian noise) to samples from a target data distribution over a series of time steps. Unlike flow matching models, diffusion models do not model this transformation as a deterministic flow directly from the initial distribution to the target distribution, but rather as a learned denois-ing process. Denoising Diffusion Probabilistic Models (DDPM), introduced by Ho et al. (2020), serve as the basis for modern diffusion-based generative models. Specifically, DDPM uses a forward diffusion (noising) process that gradually adds Gaussian noise to an image x0 over T time steps to produce a sequence of increasingly noisy images x1, x 2, . . . , x T , where xT is essentially pure Gaus-sian noise, then uses a learned reverse diffusion (i.e., denoising) process to iteratively remove noise from xT back to x0.1 Numerically, the forward diffusion (i.e., noising) process q(xt|xt−1) is defined as a Markov process consisting of a sequence of Gaussian transitions parameterized by a variance schedule β1, β 2, . . . , β T , as formulated in Equation 4. 
+
+q(xt|xt−1) = N (xt; p1 − βtxt−1, β tI) (4) As the variance schedule is defined a priori , xt can be sampled at any time step t given an initial image x0 without having to iteratively apply the forward transitions, as shown in Equation 5, where 
+
+¯αt = Qts=1 (1 − βs).
+
+q(xt|x0) = N (xt; √¯αtx0, (1 − ¯αt)I) (5) Reversing the diffusion process to generate images from noise involves learning a parameterized model pθ(xt−1|xt) that approximates the true reverse transitions of the forward diffusion process, as shown in Equation 6. 
+
+pθ(xt−1|xt) = N (xt−1; μθ(xt, t ), β tI) (6) During training, a random time step t can be sampled uniformly from {1, . . . , T }, and a noisy image xt can be generated directly from a clean image x0 using Equation 5. A neural network ϵθ
+
+can be trained to predict the noise ϵ added to x0 to produce xt by minimizing ∥ϵ − ϵθ(xt, t )∥1. These estimates of ϵ can then be used to estimate the mean of the reverse transition μθ(xt, t ) as shown in Equation 7. 
+
+μθ(xt, t ) = 1
+
+√1 − βt
+
+
+
+xt − βt
+
+√1 − ¯αt
+
+ϵθ(xt, t )
+
+
+
+(7) At inference time, starting from a sample of Gaussian noise xT ∼ N (0 , I ), μθ(xt, t ) is used to iteratively progress backwards from xT to x0 over T time steps by sampling from the learned reverse transitions pθ(xt−1|xt) (Equation 6) until t = 0 , where x0 is the generated sample. That is to say, at each time step t, the model ϵθ predicts the noise present in the current image xt given the time step t. This noise is then scaled by a factor determined by the variance schedule and subtracted from xt to produce a slightly less noisy image xt−1. After repeating this process T times, we arrive at a clean generated image x0. While T is often fixed at 1,000 during both training and inference, 
+
+T can be changed by using a strided sampling strategy during inference. A smaller number of time steps Tnew can be used by simply skipping time steps to speed up sampling at the cost of sample           
+
+> 1When discussing diffusion, we follow the notation of Ho et al. (2020), where x0is a “clean” sample and xT∼ N ,as opposed to the flow matching notation in Section 3.2.1 where x0∼ N and x1is a “clean” sample (following Lipman et al., 2023).
+
+12 quality by deriving pθ(xt−k|xt) where k = Ttrain /T new instead of pθ(xt−1|xt), where Ttrain is the number of time steps used during training. Following the original SR3 implementation, we used 
+
+T = 1000 during training but varied T at inference time to examine the effects of varying T on super-resolution quality and inference speed. We used the same U-Net architecture for ϵθ as we do for fθ in the flow matching model, along with the SR3-style conditioning mechanism where the low-resolution Sentinel-2 is upsampled and concatenated with xt at each time step as input to ϵθ. During training, we set T = 1000 and used a variance schedule that linearly increases from β1 = 1 × 10 −4 to βT = 0 .02 . The same hyperparameters and procedures were used to train the diffusion model as the flow matching model (including the use of L1 loss instead of L2 loss). 
+
+Denoising Diffusion Implicit Models While DDPMs provide a powerful framework for gener-ative modeling of images, they often require many inference steps to produce high-quality samples, which has hindered their adoption in practical applications. One technique to address this limitation involves a slight modification to the reverse diffusion process, where we replace the stochastic sam-pling step with a deterministic mapping. Denoising Diffusion Implicit Models (DDIM), introduced by Song et al. (2022), essentially reframes the reverse diffusion process by removing the stochastic sampling step in the reverse transitions: instead of predicting the mean of the reverse transition to determine xt−1 given xt (Equations 6 and 7), the model’s estimate of ϵθ(xt, t ) is used to derive xt−1
+
+deterministically, as shown in Equation 8. 
+
+xt−1 = √¯αt−1
+
+ xt − √1 − ¯αtϵθ(xt, t )
+
+√¯αt
+
+
+
++ p1 − ¯αt−1ϵθ(xt, t ) (8) Rather than sampling xt−1 from a Gaussian distribution parameterized by μθ(xt, t ) and σθ(xt, t ),we directly compute xt−1 using the model’s estimate of the noise present in xt. Since no noise is added between each transition, the reverse diffusion process can be modeled as a deterministic mapping from xT to x0. While we can choose an arbitrary number of time steps T for inference in DDPMs, DDIMs are designed to allow for better performance when using a reduced number of time steps during inference as the deterministic mapping allows for more consistent trajectories between 
+
+xT and x0 compared to the stochastic sampling process used in DDPMs. As this change concerns the sampling procedure only, we can use the same trained model ϵθ from the DDPM framework without any modifications, using DDIM as a drop-in replacement for the DDPM sampling procedure during inference. 
+
+3.2.3 Real-ESRGAN 
+
+As a baseline super-resolution model, we used the Real-ESRGAN architecture proposed by Wang et al. (2021). Real-ESRGAN is an evolution of the ESRGAN framework, which itself is a straightfor-ward adaptation of the original SRGAN architecture for deep image super-resolution tasks (Ledig et al., 2017; Wang et al., 2018). The Real-ESRGAN framework utilizes three separate networks during training with the aim of maximizing both the visual quality and accuracy of generated high-resolution images: a generator network f Gθ that maps low-resolution inputs to high-resolution outputs, a discriminator network f Dθ that is trained to distinguish between real high-resolution im-ages and those produced by the generator network, and a fixed VGG19 network ϕ pre-trained on ImageNet (Deng et al., 2009) that provides feedback to the generator network on the perceptual similarity between generated images and their ground truth counterparts. f Gθ is trained to minimize the joint loss function formulated in Equation 9, where x is a low-resolution input, y is a ground truth high-resolution pair, and ϕj is the j-th layer feature map of the pre-trained VGG19 network, 13 and λpercep and λadv are hyperparameters that control the relative importance of the perceptual and adversarial loss terms, respectively. 
+
+LReal-ESRGAN = E[|| y − f Gθ (x)|| 1] + λpercep (X
+
+> j
+
+∥ϕj (y) − ϕj (f Gθ (x)) ∥) + λadv E[log f Dθ (f Gθ (x))] (9) Simultaneously, f Dθ minimizes a binary cross-entropy loss that aims to maximize the probability of correctly classifying real and generated images, as shown in Equation 10. 
+
+LD = E[log f Dθ (y)] + E[log(1 − f Dθ (f Gθ (x)))] (10) 
+
+f Gθ is a residual-in-residual dense block (RRDB) network architecture which uses convolutional layers only (i.e., no batch normalization or max-pooling layers) with many skip connections to preserve high-frequency details in the input image as it flows through the network. Upsampling does not occur until the final layers of the network, followed by two convolutional layers to produce the final synthetic high-resolution output. f Dθ , on the other hand, uses a U-Net architecture with spectral normalization to provide pixel-level feedback on the realism of generated imagery as opposed to a single scalar output, a concept originally proposed by (Schonfeld et al., 2020). This is a critical design choice, particularly for remote sensing imagery, as it provides the generator network with localized feedback as opposed to global feedback; given that analysis of remote sensing imagery typically concerns pixel-level information (e.g., land cover classification), this localized feedback is potentially conducive to producing higher-quality synthetic imagery. One issue with the use of a perceptual loss term using an ImageNet pre-trained VGG19 network is that the input convolutional layer only accepts 3-band imagery, not the 4-band multispectral imagery used in this study. To address this, we performed PCA on the 4-band cross-calibrated NAIP imagery in the training split of the dataset to learn a linear transformation from 4-band to 3-band imagery while preserving as much variance as possible. Given the large size of the dataset, we used the Incremental PCA algorithm (Ross et al., 2008) to approximate this transformation in a memory-efficient manner by loading 1024 images at a time and updating the PCA model iteratively until all images in the training split were processed. The first three principal components accounted for 78.55%, 19.69%, and 1.61% of the variance in the 4-band NAIP imagery, respectively. In total, the PCA transformation preserved 99.84% of the spectral variance when mapping from 4-band to 3-band imagery. Per the original Real-ESRGAN implementation, we fixed λpercep = 1 and λadv = 0 .1 dur-ing training. Both f Gθ and f Dθ were trained simultaneously according to the same learning rate schedule. For consistency, we followed the same procedure and hyperparameters for training the Real-ESRGAN model as we did for the flow matching and diffusion models (AdamW optimizer, cosine annealing learning rate schedule with linear warmup, gradient accumulation, mixed precision training, etc.) with the same batch size, initial learning rate, and number of epochs. After training, only f Gθ was used as part of the evaluation and inference pipelines. 
+
+3.3 Evaluation of super-resolution models 
+
+Once trained, we evaluated the performance of each super-resolution model on the validation split of the Sentinel-2/NAIP pair dataset. For the diffusion and flow matching models, we specifically tested various step sizes to assess the trade-off between inference speed and super-resolution quality. We tested T ∈ { 1, 5, 10 , 15 , . . . , 100 } time steps for both diffusion (DDPM and DDIM) and flow matching models (with all ODE solvers) to evaluate this trade-off. For broad assessment of pixel-wise accuracy, we used the Peak Signal-to-Noise Ratio (PSNR) metric, defined in Equation 11, 14 where L is the range of possible pixel values ( L = 2 for our case since our images are normalized to 
+
+[−1, 1] ), y is the ground truth image, ˆy is the super-resolved image, and N is the total number of pixels in the image. PSNR = 10 log 10 
+
+ L2
+
+|| y − ˆy|| 2/N 
+
+
+
+(11) PSNR is useful for measuring overall pixel-wise accuracy in a way that is easy to interpret due to its logarithmic scale; for example, a 1 dB increase in PSNR corresponds to a 10% decrease in MSE. Yet, PSNR correlates poorly with human perception when used as a measure of image similarity for super-resolution tasks (Ledig et al., 2017). Producing visually realistic super-resolved imagery at 4 × the original resolution forces the model to hallucinate fine details absent in the low-resolution input. While these details are “correct” from a visual standpoint and are often a desired outcome of super-resolution, they tend to increase pixel-wise error compared to the ground truth high-resolution image, thus lowering PSNR (Blau and Michaeli, 2018). In this context, the structural similarity index measure (SSIM) and learned perceptual image patch similarity (LPIPS) are designed to quantify similarity in image structure and visual perception as opposed to pixel-wise accuracy. SSIM, as formulated in Equation 12, uses a local Gaussian kernel (typically 11 ×11 pixels with σ = 1 .5) to compute local statistics (mean μ, variance σ2, and covariance σxy ) between two images x and y, with constants k1 = 0 .01 and k2 = 0 .03 used for numerical stability (Wang et al., 2004). SSIM (x, y ) = (2 μxμy + ( k1L)2)(2 σxy + ( k2L)2)(μ2 
+
+> x
+
++ μ2 
+
+> y
+
++ ( k1L)2)( σ2 
+
+> x
+
++ σ2 
+
+> y
+
++ ( k2L)2) (12) The Gaussian kernel is slid across the entire image (with 1 pixel stride) to compute a mean SSIM value for the entire image. Values for SSIM range from -1 to 1, with values closer to 1 indicating greater structural similarity between the two images. LPIPS uses an ImageNet pre-trained network to extract deep feature maps from multiple layers of the network for both images x and y. As the feature maps pass through the network, the L2 distance between corresponding feature maps is computed after selected layers l. Equation 13 formulates the LPIPS metric, where Hl and Wl are the height and width of the feature maps at layer l, respectively, and wl is a learned weight for layer 
+
+l that adjusts the importance of each layer’s contribution to the final LPIPS score. LPIPS (x, y ) = X
+
+> l
+
+wl
+
+HlWlHlX
+
+> h=1
+> Wl
+
+X
+
+> w=1
+
+|| ϕl(x)h,w − ϕl(y)h,w || 22 (13) We used an AlexNet-based implementation of LPIPS where weights wl are trained using a human-annotated dataset of image similarity judgments to better align the feature relevance of each layer with human perception (Krizhevsky et al., 2012). As the AlexNet architecture only accepts 3-band imagery, we used the same PCA transformation described previously to reduce the 4-band calibrated NAIP imagery to 3-band imagery prior to LPIPS calculation. LPIPS was used to determine the optimal value of T for diffusion and flow matching models using the Kneedle algorithm (Satopaa et al., 2011) to identify the elbow point where increasing T yielded diminishing returns in LPIPS improvement, providing an objective method for selecting T that balances inference speed and perceptual quality. Additionally, once we identified the best performing super-resolution model according to PSNR (separate from the LPIPS-based selection of T ), we performed a spectral evaluation of the super-resolved imagery using the metrics in Table 2 to quantify the agreement between the super-resolved imagery and the cross-calibrated NAIP imagery on a per-band basis to assess the spectral reliability of the super-resolved imagery. 15 Table 2: Spectral similarity metrics used to assess the reliability of super-resolved imagery. 
+
+Metric Formula 
+
+R2 1 −
+
+> PNi=1 (yi−ˆyi)2
+> PNi=1 (yi−¯y)2
+
+Root Mean Squared Error (RMSE) 
+
+q 1
+
+> N
+
+PNi=1 (yi − ˆyi)2
+
+Mean Absolute Error (MAE) 1
+
+> N
+
+PNi=1 |yi − ˆyi|
+
+Mean Absolute Percentage Error (MAPE) 100 
+
+> N
+
+PNi=1 
+
+> yi−ˆyi
+> yi
+
+3.4 CONUS Sentinel-2 super-resolution product 
+
+Upon identifying the best performing super-resolution model and inference configuration based on the pixel-wise metrics (as opposed to the perceptual metrics), we used this model to generate super-resolved Sentinel-2 imagery for the entire CONUS region. We disregarded the perceptual metrics for this process: ultimately, a synthetic image product should be spectrally reliable in order to be suitable for additional analysis, and while high perceptual quality is desirable, we prioritized spectral reliability for the creation of our super-resolved Sentinel-2 product. We used the Sentinel-2 Level-2A annual composites generated in Section 3.1.3 as inputs to the super-resolution model. As each Sentinel-2 tile is approximately 10,980 ×10,980 pixels at 10-m resolution (or 43,920 ×43,920 pixels at 2.5-m resolution), we utilized a sliding window approach for inference as opposed to super-resolving the entire tile in a single forward pass. We used a window size of 64 ×64 pixels at 10-m resolution (or 256 ×256 pixels at 2.5-m resolution) with a stride of half the window size to ensure that each pixel is covered by multiple windows and to mitigate edge artifacts in the super-resolved output. The super-resolved outputs were weighted according to a 2D Gaussian kernel centered at the middle of the window that decreases the influence of edge pixels when combining the super-resolved outputs from overlapping windows. We performed this procedure for each of the 988 Sentinel-2 tiles across CONUS to produce a complete super-resolved Sentinel-2 product for the year 2025, ultimately comprising 1.58 trillion pixels of synthetic imagery. 
+
+3.5 Demonstrating utility for land cover classification 
+
+To demonstrate the practical utility of our super-resolution model for downstream applications, we used the model outputs to train classifiers for land cover mapping at 2.5-m resolution. Us-ing the Sentinel-2/NAIP/CBLC triplet dataset curated in Section 3.1.2, we compared the per-formance of various semantic segmentation models trained to predict land cover labels with the super-resolved Sentinel-2 imagery as inputs. To determine the best performing super-resolution framework (e.g., sampling process, T value, ODE solver, etc.) for land cover classification, we gen-erated super-resolved Sentinel-2 imagery using all super-resolution models and configurations with 
+
+T ∈ { 1, 10 , 20 , 30 , 40 , 50 } for all samples in the training and test splits of the Sentinel-2/NAIP/CBLC dataset (except for Real-ESRGAN, which does not have a T parameter). We used 3 different se-mantic segmentation architectures to ensure that our findings were not architecture-specific: U-Net, DeepLabV3+ (Chen et al., 2018), and SegFormer (Xie et al., 2021). The U-Net and DeepLabV3+ models utilized a ResNet-101 encoder (He et al., 2015), while the SegFormer model used an MiT-B5 encoder (Xie et al., 2021). The encoder of each architecture was initialized with ImageNet pre-trained weights, while the decoder was randomly initialized. Focal loss was used to address the class imbalance present in the CBLC dataset, as shown in Equation 14, where yi is the ground 16 truth one-hot encoded label for pixel i, ˆyi is the predicted probability for the true class, and γ is a hyperparameter that determines the strength of the modulating factor (we used γ = 2 in this study, per the original Focal loss implementation) (Lin et al., 2020). 
+
+Lfocal = −
+
+> N
+
+X
+
+> i=1
+
+(1 − ˆyi)γ yi log(ˆ yi) (14) We used the same training procedure, optimizer, and hyperparameters for training as described in Section 3.2.3: we used the AdamW optimizer with a cosine annealing learning rate using an initial learning rate of 1 × 10 −5 that was linearly increased to 1 × 10 −4 during the first 10 epochs before decaying to 0 over the remaining 90 epochs of training for 100 total training epochs, a batch size of 16 with gradient accumulation across 2 batches for an effective batch size of 32, and automatic mixed precision training with bfloat16 half-precision. 5-fold cross-validation was used on the training split; loss was calculated on the validation fold after each epoch, and the model obtained in the epoch with the lowest validation loss was used to evaluate performance on the test split. We used the classification metrics summarized in Table 3 to evaluate land cover classification performance on the test split, where TP, FP, and FN are the number of true positive, false positive, and false negative predictions, respectively. Table 3: Classification metrics used to evaluate land cover classification performance. 
+
+Metric Formula 
+
+User’s Accuracy (UA) UA = TP TP +FP 
+
+Producer’s Accuracy (PA) PA = TP TP +FN 
+
+F1 Score (F1) F1 = 2×TP 
+
+> 2×TP +FP +FN
+
+Overall Accuracy (OA) OA = TP +TN TP +TN +FP +FN 
+
+When reporting metrics on the test split, we averaged the metrics across all 5 cross-validation runs to obtain a robust estimate of the true performance of each test case. Aggregated metrics were calculated by averaging the per-class metrics, with each class contributing equally to the overall score regardless of the number of samples belonging to each class. Once the best performing super-resolution model and configuration was identified according to the overall F1 score, we compared it against land cover classification models trained using the original low-resolution Sentinel-2 imagery (upsampled to 2.5-m using Lanczos resampling) and the original high-resolution NAIP imagery. We used the best-performing super-resolution model, inference parameters, and semantic seg-mentation model to generate annual land cover maps at 2.5-m resolution for the entire Chesapeake Bay watershed for 2020–2025, using 6 years of annual mean Sentinel-2 temporal composites as input to the super-resolution model (Section 3.1.3), which then directly feeds into the trained land cover classification model. This process was similar to the CONUS-scale synthetic imagery generation process described in Section 3.4, where we used a sliding window approach with a window size of 64 ×64 pixels at 10-m resolution and a stride of 32 pixels to ensure that each pixel was covered by multiple windows. The 10-m data within each window was super-resolved to 2.5-m resolution us-ing the chosen super-resolution technique, then passed through the trained land cover classification model to produce a land cover probability map for each window. Like the super-resolution process, the land cover probability maps for each window were weighted according to a 2D Gaussian kernel centered at the middle of the window to smooth the predictions across window edges. Finally, each 17 pixel’s land cover label is determined by the class with the highest predicted probability for that pixel (post-weighting). We process and store these land cover maps in raster format according to the original Sentinel-2 tiling scheme, but clip the output rasters to the boundary of the Chesapeake Bay watershed: ultimately, each year of land cover product consists of 50 Sentinel-2 tiles covering the entire Chesapeake Bay watershed at 2.5-m resolution, which amounts to over 357 billion pixels across 6 years of data. Once the land cover maps were generated, we performed a point-based accuracy assessment using the locations and labels derived from the CBLC dataset as reference data (Section 3.1.2). As our product is multi-temporal while the assessment points only provide labels for 2021 and 2022, we used the appropriate year’s land cover map for each assessment point when determining the predicted land cover label for that location. In addition to the standard classification metrics described in Table 3, we also calculated the confusion matrix for each class to provide a more detailed breakdown of the types of errors made by the model. 
+
+# 4 Results 
+
+4.1 Evaluation of super-resolution performance 
+
+First, we evaluated the performance of the diffusion and flow matching super-resolution models across different sampling algorithms and numbers of sampling steps T on the validation set. Figure 5 shows the results of the flow matching ODE solvers (Table 1) and DDIM/DDPM samplers across different values of T in terms of both pixel-wise accuracy (PSNR) and perceptual quality (LPIPS) metrics, as well as their inference time. When examining the outputs of the diffusion-based samplers, the DDIM sampler was consistently outperformed by the DDPM sampler at all values of T when considering PSNR. In terms of LPIPS, DDIM slightly outperformed the DDPM sampler where 
+
+T ≥ 10 , with the DDPM sampler ultimately achieving LPIPS and PSNR values of 0.3358 and 33.31 dB, respectively, at T = 100 , compared to 0.3184 and 31.56 dB for the DDIM sampler. However, the diffusion-based samplers were unable to match the performance of the flow matching-based models across any of the ODE solvers tested, regardless of the number of sampling steps used. Additionally, both diffusion-based samplers failed to produce any meaningful results at T = 1 , both yielding PSNR values of 6.07 dB and LPIPS of 1.1637 (DDPM and DDIM are equivalent at T = 1 ). 18 0.2         
+
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> LPIPS
+> Sampler
+> Euler
+> Midpoint
+> Heun
+> RK4
+> DDPM
+> DDIM
+> 1510 25 50 100
+> Sampling Steps ( T)
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> PSNR (dB)
+> 0.01 0.10 1.00 10.00
+> GPU Time per Sample (seconds)
+
+Figure 5: Pixel-wise accuracy (PSNR) and perceptual similarity (LPIPS) performance of the diffu-sion and flow matching-based super-resolution models across different ODE solvers/diffusion sam-plers and numbers of sampling steps T .Overall, the Euler and Midpoint ODE solvers substantially outperformed all other ODE solvers and both diffusion samplers at T ≤ 5, with the Midpoint producing slightly better perceptual performance at the cost of pixel-wise accuracy, with average PSNR and LPIPS decreases of 1.067 dB and 0.0603, respectively, compared to the Euler method. The RK4 solver outperformed the Euler solver in terms of LPIPS at T = 10 and outperformed all other solvers at T = 20 , but never surpassed the Euler or Midpoint solver in terms of PSNR except for T = 85 , where it surpassed the Midpoint solver before underperforming at higher values of T . Indeed, the RK4 achieved the best LPIPS at T = 40 with a value of 0.2330, but at the cost of inference time, requiring an average of 3.69 seconds per sample. The benefits of using the more basic Euler and Midpoint solvers were clear when comparing the GPU time per sample during inference, as the Heun and RK4 solvers did not approach comparable performance with these simpler methods until the time needed to sample a single image exceeded 1 second. In fact, the Euler and Midpoint solvers achieved relatively high performance at T = 1 , with the Midpoint solver achieving an LPIPS of 0.3200 and PSNR of 33.90 dB, whereas the Euler solver produced a PSNR of 34.95 dB but a relatively poor LPIPS of 0.3738. The ability to generate high-quality, pixel-accurate super-resolved imagery in a single step was a key advantage of the flow matching framework over diffusion-based models, as high spectral reliability and low inference time are conducive to real-world remote sensing applications. To examine the differences between the Euler and Midpoint solvers more closely, we provide a more detailed comparison of their performance across different values of T in Figure 6. We see that the first-order Euler method yielded much higher PSNR values than the second-order Midpoint method while the Midpoint solver was superior in terms of LPIPS when comparing the two solvers at equal T . At the optimal value of T for both solvers (found using the Kneedle algorithm), the 19 Midpoint method achieved a mean LPIPS of 0.2469 compared to 0.2784 for the Euler method, while the Euler method yielded a mean PSNR of 33.37 dB compared to 32.64 dB for the Midpoint method. Perhaps most notable was the inverse relationship between PSNR and LPIPS: as the number of sampling steps increased, the pixel-wise accuracy of the outputs decreased while the perceptual quality increased. We used the Euler sampling method to illustrate this trade-off in Figure 7: at 
+
+T = 1 , the output image exhibits sharper edges between different objects and land cover types, yet lacks finer details (e.g., the texture of trees in a forest canopy). As T increased, more fine details were synthesized to produce a visually pleasing image, but this came at the cost of spectral accuracy as the model must synthesize these details according to patterns learned during training as opposed to directly reconstructing them from the low-resolution input image. Being able to directly model the perception-distortion trade-off and have fine control over the quality of the synthesized images at inference time is an advantage of the flow matching framework compared to the diffusion models or the GAN-based Real-ESRGAN model. 1 10 20 30 40 50 60 70 80 90 100 
+
+> 32.5
+> 33.0
+> 33.5
+> 34.0
+> 34.5
+> 35.0
+> PSNR (dB)
+> PSNR: 33.37 dB
+
+Euler Solver            
+
+> Optimal Steps ( T= 25 )
+> 110 20 30 40 50 60 70 80 90 100
+> PSNR: 32.64 dB
+
+Midpoint Solver  
+
+> Optimal Steps ( T= 20 )
+> LPIPS: 0.2784
+> 0.22
+> 0.24
+> 0.26
+> 0.28
+> 0.30
+> 0.32
+> 0.34
+> 0.36
+> 0.38
+> 0.40
+> LPIPS
+> LPIPS: 0.2469
+> Sampling Steps ( T)
+
+Figure 6: Comparison of Euler and Midpoint solvers for flow matching-based super-resolution in terms of pixel-wise accuracy (PSNR) and perceptual quality (LPIPS) across varying numbers of sampling steps T . Note that the y-axis for LPIPS is inverted for easier visualization. 20 Sentinel-2 Input T = 1 T = 5 T = 10 T = 25 T = 50 T = 100 NAIP Reference Figure 7: Visual comparison of super-resolved outputs from the flow matching model using the Euler solver with varying numbers of sampling steps T . As T increases, more fine details are synthesized in the super-resolved output images at the cost of pixel-wise accuracy. Table 4 provides the mean PSNR, SSIM, and LPIPS values across the validation set for all super-resolution models, samplers, and steps T = 1 , T = 100 , and the optimal T as determined by the Kneedle algorithm. When considering PSNR and SSIM, the Euler solver at T = 1 outperformed all other models and configurations, achieving a mean PSNR of 34.95 dB and an SSIM of 0.8316, compared to 33.29 dB and 0.7861 for Real-ESRGAN and 32.99 dB and 0.8134 for basic Lanczos upsampling. The Midpoint solver at its optimal T = 20 appeared to have the best balance between LPIPS and inference time among the iterative refinement methods, achieving a mean LPIPS of 0.2469 and an SSIM of 0.7714 at an average inference time of 0.563 GPU seconds per sample; we provide some examples of the outputs from this model in Figure 8. Among all methods, the Real-ESRGAN model was the fastest in terms of inference time, even compared to single-step diffusion/flow matching models, taking only 0.00274 GPU seconds per sample. 21 Table 4: Spectral and visual quality metrics for super-resolution results across various models, samplers, and numbers of sampling steps T .Method/Sampler Steps ( T ) PSNR (dB) ↑ SSIM ↑ LPIPS ↓ GPU Time/Sample (s) ↓
+
+Lanczos – 32.99 0.8134 0.9065 –Real-ESRGAN – 33.29 0.7861 0.1937 2.74 ×10 −3
+
+DDPM 1 6.07 0.0000 1.1637 6.39 ×10 −3
+
+5 33.85 0.8232 0.4004 9.96 ×10 −2
+
+100 33.31 0.8027 0.3358 2.32 ×10 +0 
+
+DDIM 1 6.07 0.0000 1.1637 6.42 ×10 −3
+
+10 31.70 0.7338 0.3713 2.16 ×10 −1
+
+100 31.56 0.7366 0.3184 2.31 ×10 +0 
+
+Euler 1 34.95 0.8316 0.3738 6.75 ×10 −3
+
+25 33.37 0.7958 0.2784 5.45 ×10 −1
+
+100 32.80 0.7744 0.2474 2.29 ×10 +0 
+
+Midpoint 1 33.90 0.8178 0.3200 8.40 ×10 −3
+
+20 32.64 0.7714 0.2469 8.94 ×10 −1
+
+100 32.42 0.7603 0.2356 4.62 ×10 +0 
+
+Heun 1 13.84 0.0281 1.0672 8.60 ×10 −3
+
+25 31.35 0.7046 0.3362 1.13 ×10 +0 
+
+100 32.26 0.7557 0.2336 4.62 ×10 +0 
+
+RK4 1 21.91 0.1519 0.9030 5.53 ×10 −2
+
+15 31.98 0.7438 0.2577 1.36 ×10 +0 
+
+100 32.40 0.7588 0.2342 9.29 ×10 +0 
+
+22 Color Infrared  Visible RGB         
+
+> Sentinel-2 Input Super-Resolved NAIP Reference Sentinel-2 Input Super-Resolved NAIP Reference Sentinel-2 Input Super-Resolved NAIP Reference
+> Color Infrared  Visible RGB Color Infrared  Visible RGB
+
+Figure 8: 10-m Sentinel-2 imagery, synthetic 2.5-m super-resolved imagery produced by the flow matching model using the Midpoint solver with T = 20 , and true 2.5-m NAIP imagery for compar-ison. According to the LPIPS metric, Real-ESRGAN produced the most perceptually accurate syn-thetic imagery with a mean LPIPS of 0.1937, outperforming all other methods, including the best-performing flow matching configurations. However, examining the super-resolved outputs visually in Figure 9 reveals that the nature of Real-ESRGAN’s enhancements is different from those of the flow matching and diffusion-based models. Notably, the Real-ESRGAN outputs contained noticeable artifacts, including noise and unnatural textures in more complex urban regions with many smaller objects (see samples b and d in Figure 9). Conversely, the flow matching and diffusion models produced much clearer outputs that better preserve the structures of buildings and small objects in these regions. We attribute this behavior to differences in how the models generate outputs. Real-ESRGAN learns a simple deterministic mapping from a low-resolution to high-resolution space, outputting images that tend to aggregate multiple possible high-resolution solutions. In contrast, the probabilistic nature of the flow matching and diffusion models enables them to output a single plausible high-resolution sample that better preserves structure without necessarily averaging over multiple possibilities. The Real-ESRGAN model performed well at reconstructing textures (e.g., samples a and c in Figure 9), but the diffusion and flow matching models also produced realistic textures without the artifacts observed in the Real-ESRGAN outputs. Further, in sample e, the Real-ESRGAN output appears to shift the output color of the forest from a dark brown to a lighter green, whereas the flow matching and diffusion models better preserve the original color from the low-resolution input. Given that the visual analysis contradicts the findings from the LPIPS metrics, we posit that the LPIPS metric is poorly aligned with human perception of high-resolution remote 23 sensing imagery. Additionally, as the Real-ESRGAN training includes a perceptual loss based on an ImageNet pre-trained CNN, it should not be surprising that it yields high similarity scores according to LPIPS, which is also based on features extracted from a pre-trained CNN. As these networks are trained on natural images, they may be blind to remote sensing-specific spectral/spatial features, weakening the utility of the perceptual loss and LPIPS metric for this domain. (a)            
+
+> Sentinel-2 Input Lanczos Euler ( T= 1 )DDIM ( T= 100 )DDPM ( T= 100 )Real-ESRGAN Midpoint ( T= 20 )NAIP Reference
+> (b)
+> (c)
+> (d)
+> (e)
+
+Figure 9: Visual comparison of super-resolution outputs from a selection of the models evaluated in this study. To evaluate the spectral reliability of the super-resolved outputs, we randomly sampled 1 pixel from each validation image chip and performed a regression analysis where we compared the pre-dicted high-resolution pixel values with the true high-resolution calibrated NAIP pixel values. Fig-ure 10 shows the per-band regression plots from this analysis, where we compare the outputs of the flow matching model using the Euler solver at T = 1 , the Real-ESRGAN model, and Lanczos upsam-pling. The flow matching model produced the best fit in terms of predicting the true high-resolution pixel values across all bands, with an overall R2 of 0.939 compared to 0.915 for Real-ESRGAN and 0.904 for Lanczos upsampling. The flow matching model excelled in the high-variance NIR band, achieving an R2 of 0.909 compared to Real-ESRGAN’s 0.879 and Lanczos’ 0.862. These results further corroborate the PSNR findings in Table 4, where the flow matching model at T = 1 showed the best pixel-wise accuracy among all methods tested (despite lower visual fidelity, as shown in Figures 7 and 9). 24 0.0 
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> R2: 0.967
+> RMSE: 0.0125
+> MAE: 0.0079
+> MAPE: 12.72%
+
+Blue Band 
+
+> R2: 0.957
+> RMSE: 0.0155
+> MAE: 0.0101
+> MAPE: 20.14%
+
+Green Band 
+
+> R2: 0.955
+> RMSE: 0.0198
+> MAE: 0.0126
+> MAPE: 17.46%
+
+Red Band 
+
+> R2: 0.909
+> RMSE: 0.0335
+> MAE: 0.0212
+> MAPE: 8.64%
+
+NIR Band                     
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> R2: 0.950
+> RMSE: 0.0155
+> MAE: 0.0100
+> MAPE: 15.96%
+> R2: 0.936
+> RMSE: 0.0189
+> MAE: 0.0128
+> MAPE: 21.39%
+> R2: 0.935
+> RMSE: 0.0239
+> MAE: 0.0158
+> MAPE: 21.19%
+> R2: 0.879
+> RMSE: 0.0388
+> MAE: 0.0259
+> MAPE: 10.20%
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> R2: 0.951
+> RMSE: 0.0153
+> MAE: 0.0089
+> MAPE: 13.66%
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> R2: 0.936
+> RMSE: 0.0188
+> MAE: 0.0118
+> MAPE: 14.78%
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> R2: 0.934
+> RMSE: 0.0240
+> MAE: 0.0150
+> MAPE: 18.78%
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> R2: 0.862
+> RMSE: 0.0425
+> MAE: 0.0288
+> MAPE: 9.98%
+
+True Reflectance 
+
+> Predicted Reflectance
+
+Flow Matching (Euler; T = 1 )
+
+Real-ESRGAN 
+
+Lanczos Figure 10: Comparison of per-band regression plots for flow matching using the Euler solver with 
+
+T = 1 steps (top), Real-ESRGAN (middle), and Lanczos upsampling (bottom) compared with true high-resolution calibrated NAIP imagery. From a visual analysis standpoint, even though the Euler solver with T = 1 has relatively poor perceptual quality compared to the other solvers with higher values of T , the super-resolved outputs provide substantially more detail in small-scale scenes than their low-resolution Sentinel-2 counterparts. This can be particularly useful for applications where high-frequency, small-scale features are important, such as urban change analysis. Figure 11 provides several examples of super-resolved time series showing urban expansion and housing developments in various cities across CONUS, demonstrating the utility of the super-resolved imagery for monitoring fine-scale changes in the landscape over time. For example, individual structures that are difficult to distinguish in the original Sentinel-2 imagery are easily identifiable in the super-resolved imagery. 25 2016        
+
+> S2 (10-m) S2SR (2.5-m) S2 (10-m) S2SR (2.5-m) S2 (10-m) S2SR (2.5-m) S2 (10-m) S2SR (2.5-m)
+> 2018 2020 2022
+
+Boise, ID 
+
+> 2024
+
+Phoenix, AZ Austin, TX Nashville, TN Figure 11: Examples of small-scale urban development visible in the synthetic 2.5-m imagery time series. We used the flow matching model with the Euler solver at T = 1 as the core approach for generating the synthetic 2.5-m imagery product for the entire CONUS region for the year 2025 (Section 3.4). A visualization of this product is shown in Figure 12. In addition to finer delineation of small-scale features in urban environments, the synthetic imagery also improves the delineation of agricultural fields in rural areas (see the examples in Ute Mountain, CO and Moorehead, MS), improving the spatial fidelity of the landscape features across all of CONUS. We again point out that the model does not hallucinate fine details at T = 1 , and that the improvement in spatial fidelity is a function of the model refining edges and boundaries between objects and land cover types instead of attempting to recover sub-pixel textures and details. 26 46°N 42°N 38°N 34°N 30°N 26°N 22°N 64°W 68°W 72°W 76°W 80°W 84°W 88°W 92°W 96°W 100°W 104°W 108°W 112°W 116°W 120°W 124°W 128°W      
+
+> 0250 500 750 1,000 125 Km
+
+San Francisco, CA 
+
+San Jose, CA 
+
+Oxnard, CA 
+
+Los Angeles, CA  Ute Mountain, CO  Moorehead, MS  New Orleans, LA 
+
+Brooklyn, NY 
+
+Providence, RI 
+
+Boston, MA Chicago, IL Aspen, CO 
+
+> 150m
+
+Figure 12: CONUS-wide synthetic 2.5-m imagery for 2025 generated using the flow matching super-resolution method (middle) and selected examples of 10-m Sentinel-2 surface reflectance and syn-thetic 2.5-m imagery from selected locations across the CONUS (surrounding panels). 
+
+4.2 Super-resolution impacts on land cover classification 
+
+Figure 13 shows the performance of the downstream land cover classification models as a function of the number of sampling steps T across the Euler, DDPM, and DDIM samplers. Overall, as 
+
+T increased, the land cover classification performance tended to decrease across all samplers and segmentation models, similar to the trend in PSNR observed in Figures 5 and 6. This indicates that the increased perceptual quality of the synthetic images at higher values of T hindered the models’ ability to classify land cover types accurately, likely due to the hallucination of fine details that do not necessarily correspond to the true high-resolution imagery, a problematic behavior for remote sensing applications that demand reliable imagery. However, using the Euler solver and setting 
+
+T = 1 yielded high performance, and we selected this model configuration for further comparison with Lanczos upsampling, Real-ESRGAN, and the true high-resolution NAIP imagery. 27 1 10 20 30 40 50         
+
+> 74.0%
+> 75.0%
+> 76.0%
+> 77.0%
+> 78.0%
+> F1 Score
+> Euler Sampler
+> 10 20 30 40 50
+> DDPM Sampler
+> 10 20 30 40 50
+> DDIM Sampler
+> Model
+> SegFormer
+> DeepLabV3+
+> U-Net
+> Sampling Steps ( T)
+
+Figure 13: Impact of increasing the number of sampling steps using iterative super-resolution meth-ods on downstream land cover classification F1 Score. The DDIM/DDPM samplers with T = 1 
+
+have been omitted for clarity due to poor performance. The error bars correspond to the standard deviation. The use of deep super-resolution models provided marginal benefits for downstream land cover classification compared to simple Lanczos upsampling, as shown in Table 5. When considering over-all accuracy, the Lanczos upsampling method outperformed both deep super-resolution methods. However, as overall accuracy can be misleading in the presence of class imbalance, we emphasize the class-averaged F1 Score metric for evaluating model performance. Using the super-resolved imagery from the Euler solver for classification resulted in a 0.16% average increase in F1 Score over Lanczos upsampling when averaged across all segmentation architectures, compared to a 0.01% in-crease when using the Real-ESRGAN model. The SegFormer model achieved the highest F1 score across all super-resolution models, with an average of 78.23% when using the Euler solver super-resolved imagery, compared to 77.44% for the DeepLabV3+ model and 76.89% for the U-Net model when evaluated on the same imagery. As expected, the high-resolution NAIP imagery provided the best classification performance, achieving an average F1 Score of 80.74% across all segmentation architectures compared to Euler’s 77.56%, Real-ESRGAN’s 77.41%, and Lanczos’ 77.40%. 28 Table 5: Comparison of land cover classification metrics across different semantic segmentation architectures and input data sources. Model Method/Data UA (%) PA (%) F1 (%) OA (%) U-Net Lanczos 81.33 ±0.68 74.19 ±0.41 76.81 ±0.50 92.53 ±0.23 
+
+Real-ESRGAN 81.36 ±0.66 74.15 ±0.20 76.75 ±0.21 92.43 ±0.30 Euler ( T = 1 ) 81.16 ±1.23 74.49 ±0.36 76.89 ±0.56 92.46 ±0.18 NAIP 83.85 ±0.64 78.88 ±0.29 80.92 ±0.21 93.81 ±0.05 DeepLabV3+ Lanczos 81.77 ±0.37 74.80 ±0.31 77.45 ±0.21 92.79 ±0.01 
+
+Real-ESRGAN 82.14 ±0.30 74.58 ±0.35 77.35 ±0.33 92.69 ±0.02 Euler ( T = 1 ) 82.40 ±0.55 74.79 ±0.41 77.55 ±0.40 92.71 ±0.02 NAIP 83.65 ±0.13 78.09 ±0.18 80.38 ±0.15 93.70 ±0.02 SegFormer Lanczos 81.15 ±0.38 75.82 ±0.30 77.94 ±0.27 92.93 ±0.02 
+
+Real-ESRGAN 81.74 ±0.44 75.80 ±0.21 78.12 ±0.24 92.82 ±0.01 Euler ( T = 1 ) 81.90 ±0.14 75.90 ±0.26 78.23 ±0.23 92.88 ±0.01 NAIP 83.43 ±0.31 79.09 ±0.16 80.92 ±0.05 93.84 ±0.01 While the overall differences between the deep super-resolution methods were small compared to Lanczos upsampling, examining the class-wise change in metrics provides further insight into the benefits and drawbacks of the deep super-resolution methods. Figure 14 shows the per-class changes in classification metrics when moving from Lanczos upsampling to either the Real-ESRGAN or flow matching (Euler solver at T = 1 ) super-resolution methods, averaged across all segmentation architectures. The deep super-resolution methods tended to improve classification of the impervious class, with the flow matching method yielding a 2.00% increase in F1 Score and Real-ESRGAN providing a 1.34% increase. This behavior is visualized in Figure 15, where the models trained using the super-resolved imagery tend to delineate roads and buildings slightly better compared to the model trained on Lanczos-upsampled imagery. This is offset by a decrease in performance for the barren land class, where using the super-resolved data resulted in 0.75% decreases in F1 Score for both deep super-resolution methods compared to Lanczos upsampling. Both the impervious and barren classes showed the largest discrepancy in F1 Score between the models trained using some form of Sentinel-2 data and the models trained using true high-resolution NAIP imagery, with the NAIP-trained models achieving 7.80% and 5.86% higher F1 Scores for the impervious and barren classes, respectively, compared to the average of all Sentinel-2 based methods (including Lanczos upsampling). 29 Open Water  
+
+> Herbaceous
+> Forest Canopy
+> Impervious
+> Barren Land
+> Data Source
+> Real-ESRGAN
+> Euler ( T= 1 )
+> NAIP
+
+SegFormer 
+
+> Open Water
+> Herbaceous
+> Forest Canopy
+> Impervious
+> Barren Land
+
+DeepLabv3+     
+
+> -10% -5% 0% 5% 10%
+
+User's Accuracy     
+
+> Open Water
+> Herbaceous
+> Forest Canopy
+> Impervious
+> Barren Land
+> -10% -5% 0% 5% 10%
+
+Producer's Accuracy     
+
+> -10% -5% 0% 5% 10%
+
+F1 Score 
+
+U-Net Figure 14: Per-class changes in accuracy metrics compared to Lanczos-upsampled Sentinel-2 imagery for super-resolution land cover classification when using imagery from Real-ESRGAN, our flow matching (Euler solver with T = 1 ) model, and NAIP imagery. Error bars correspond to the standard deviation. 30 Sentinel-2 Input NAIP Input Lanczos Prediction Real-ESRGAN Prediction Euler Prediction NAIP Prediction Ground Truth Figure 15: Comparison of urban land cover classification outputs from SegFormer at 2.5-m using different super-resolution methods for upsampling Sentinel-2 imagery. We applied the SegFormer model trained using the flow matching super-resolved imagery from the best-performing run of the cross-validation procedure (in terms of F1 Score) to the Chesapeake Bay region to generate a 2.5-m land cover map for the region following the procedure described in Section 3.5. The results of the accuracy assessment of this land cover map against the ground truth assessment points from the CBLC dataset are presented in Table 6. Overall, our product achieved an overall accuracy of 89.11% and a class-averaged F1 score of 74.40% over the 25,000 assessment points, with particularly strong performance for the open water and forest canopy classes with F1 scores of 97.18% and 92.51%, respectively. The impervious class was classified fairly well, with an F1 score of 70.52%, with a slightly higher producer’s accuracy (72.38%) than user’s accuracy (68.74%), indicating that the impervious class is slightly more prone to errors of commission than omission. Barren lands were poorly classified, with an F1 score of 27.85%, and a producer’s accuracy of 18.64% compared to a user’s accuracy of 55.00%, indicating a high tendency for errors of omission. However, this had little impact on the overall accuracy, as only 118 of the 25,000 assessment points were labeled as barren land in the ground truth dataset (0.47%). The confusion matrix reveals misclassifications between the herbaceous and barren classes, with 59 of the 118 barren land points being misclassified as herbaceous. Therefore, despite a high overall accuracy and moderate to high F1 scores for the other classes, the performance of the model for classifying barren land is poor and should be interpreted with caution when using this product for applications where barren land is of interest. We note that the original CBLC dataset estimates that the producer’s and user’s accuracy for the barren land class is 40% and 63%, respectively; we therefore partially attribute the poor performance of our model for classifying barren land to the general difficulty of classifying this class in the ground truth dataset (McDonald et al., 2025). A full visualization of the land cover product for 2025 is shown in Figure 16, along with several examples of rapid land cover change captured by the product to demonstrate the utility of this dataset for monitoring fine-scale changes in the 31 landscape over time. Table 6: Confusion matrix for annual 2.5-m Chesapeake Bay land cover product. 
+
+Predicted Class True Class Open Water Herbaceous Forest Canopy Impervious Barren Land Total PA (%) 
+
+Open Water 3,324 41 23 5 1 3,394 97.94 Herbaceous 84 6,245 644 288 10 7,271 85.89 Forest Canopy 25 941 11,648 166 3 12,783 91.12 Impervious 4 319 69 1,038 4 1,434 72.38 Barren Land 10 59 14 13 22 118 18.64 
+
+Total 3,447 7,605 12,398 1,510 40 25,000 73.20 
+
+UA (%) 96.43 82.12 93.95 68.74 55.00 79.25 OA: 89.11 44°N 43°N 42°N 41°N 40°N 39°N 38°N 37°N 36°N 71°W 72°W 73°W 74°W 75°W 76°W 77°W 78°W 79°W 80°W 81°W      
+
+> Open Water Herbaceous Forest Canopy Impervious Barren Land
+> 0100 200 300 400 50 Km
+
+## 2020  2021  2022  2023  2024  2025 
+
+> 250m
+
+Figure 16: Examples of high-frequency land cover changes captured by our annual Chesapeake Bay 2.5-m land cover product. 
+
+# 5 Discussion and conclusion 
+
+Modeling techniques for deep super-resolution of remote sensing imagery are rapidly evolving, and diffusion-based methods have begun to address several limitations of traditional GAN-based ap-proaches (Liu et al., 2024). However, diffusion models often require large numbers of sampling steps to produce high-quality outputs that are comparable to their GAN-based counterparts, leading to slow inference times that limit their use in large-scale applications (Wolters et al., 2023). In this work, we showed that flow matching-based super-resolution models are both more performant and more computationally efficient than diffusion-based approaches for the task of 4 × Sentinel-2 super-resolution. Our flow matching model outperformed both the Real-ESRGAN and diffusion models in terms of both pixel-wise similarity (Table 4, Figure 10) and qualitative visual fidelity (Figure 9). Beyond image similarity, we demonstrated that our flow matching model is reliable 32 for downstream land cover classification tasks, outperforming simple Lanczos upsampling, Real-ESRGAN, and diffusion-based super-resolution methods when applied to a land cover mapping task using various semantic segmentation models (Figure 13, Table 5). While the overall improve-ments in classification performance were relatively small in magnitude, they were more pronounced when examining per-class metrics (Figure 14), which showed modest increases in impervious/built-up classification accuracy when using the flow matching super-resolution imagery as input to the land cover classification models compared to Lanczos upsampling. One key advantage of the flow matching model was its ability to produce outputs that minimize distortion while also being able to provide high perceptual quality depending on the choice of solver used and the number of sampling steps employed during inference. Figures 6 and 7 illustrate how the flow matching model produced images with high accuracy in only a single step with the Euler solver, while also achieving high perceptual quality when using the Midpoint solver with more sampling steps. While GAN-based models can be trained to emphasize perceptual quality over distortion (or vice versa) by adjusting the relative importance of the pixel-wise loss, adversarial loss, and perceptual loss during training, the model’s behavior is fixed once trained, and the user has no control over this trade-off at inference time (Blau and Michaeli, 2018). For remote sensing applications, this property is particularly useful, as imagery with high perceptual quality may be preferred for human interpretation tasks, while imagery with high pixel-wise accuracy is more suitable for analytical workflows (Aybar et al., 2026). As a means of evaluating the utility of the super-resolved imagery, we trained several land cover classification models using super-resolved imagery from various different methods as input. We showed that our flow matching super-resolution model using the Euler solver with a single sam-pling step provided reliable results that yielded slight improvements over existing methods when used as part of a super-resolution land cover classification workflow, particularly for segmenting impervious/built-up features at high resolution where the increases in accuracy were more pro-nounced. We do note that our land cover classification training dataset suffered from an obvious spatial bias away from the dense urban areas of the Delaware and Baltimore-Washington D.C. corridors present in the Chesapeake Bay region. Figure 3 shows that the sampled locations are con-centrated in more rural and natural areas, instead of being uniformly distributed across the entire region. We attribute this to our strict quality control measures and narrow temporal window for acquiring cloud-free Sentinel-2 and NAIP imagery, restricting the number of regions that met the criteria for inclusion in our dataset. The point-based assessment dataset was not constrained by the need for temporal alignment between the Sentinel-2 and NAIP imagery, enabling the assessment of a larger number of points across the region where training data was absent when evaluating the final land cover product. As part of our analysis of flow matching super-resolution, we investigated the impact of different fixed-step ODE solvers on sampling performance. We found that at low numbers of sampling steps (e.g., T ≤ 10 ), the first-order Euler solver and second-order Midpoint solver outperformed the second-order Heun and fourth-order RK4 solvers in terms of both pixel-wise accuracy and perceptual quality (Figure 6). While the Heun and RK4 solvers eventually exceeded the performance of the Euler and Midpoint solvers at higher numbers of sampling steps, the computational cost of these solvers was substantially higher than the simpler Euler and Midpoint methods, making them less attractive for practical use cases (Figure 5). We limited our methodology to fixed-step solvers in this work, but adaptive-step solvers (such as the Dormand-Prince method; Dormand and Prince, 1980) may provide better performance by allocating more steps towards regions of high complexity in the flow field while using fewer steps in regions of low complexity, potentially improving sampling efficiency and output quality. During evaluation, we observed that the LPIPS metric sometimes did not fully align with the 33 perceived visual quality of the super-resolved images. For example, while the Real-ESRGAN outputs had lower LPIPS values by a wide margin compared to the flow matching results (Table 4), their super-resolutions were of lower visual quality (Figure 9). As LPIPS uses a convolutional feature extractor pre-trained on general-purpose images from ImageNet, we hypothesize that these features are less relevant for remote sensing imagery, leading to a disconnect between the LPIPS scores and actual visual quality. Since the Real-ESRGAN model is trained to minimize a perceptual loss based on similar convolutional features, we believe that this led to the Real-ESRGAN outputs being optimized for low LPIPS scores, producing images that were similar to ground truth in terms of the extracted features, but not necessarily visually realistic. This highlights the need for better perceptual similarity metrics and loss functions that are specific to remote sensing imagery. As flow matching is very similar to diffusion modeling in that both frameworks use a neural network to transform a simple distribution into a more complex data distribution via a series of steps, many of the extensions and improvements that have been proposed for diffusion models may also be applicable to flow matching. While we utilized SR3-style conditioning with a U-Net architec-ture in this work for simplicity and easier comparison to existing diffusion-based methods, adapting SRDiff (and its remote sensing derivatives, EDiffSR (Xiao et al., 2024) and FastDiffSR (Meng et al., 2024)) to the flow matching framework is straightforward and may yield further performance im-provements. One advantage of SR3-style conditioning is that adding additional spatial conditioning inputs (e.g., land cover maps, road/building footprints, canopy height models, etc.) is straightfor-ward, as these inputs can simply be concatenated to the low-resolution image along the channel dimension. This could enable even higher-quality super-resolution outputs that are more faithful to the underlying land surface features, as demonstrated by Wang and Sun (2025). Further, this approach is sensor-agnostic, and could be applied to cross-sensor super-resolution tasks (e.g., using Sentinel-2 to super-resolve Landsat 8 imagery) and multi-sensor fusion super-resolution tasks (e.g., using Sentinel-2 and Sentinel-1 to super-resolve NAIP imagery). Ultimately, we posit that flow matching is a promising new framework for generative remote sensing super-resolution thanks to its strong generative capability, computational efficiency, ease of training, and flexibility for future extensions, addressing many of the shortcomings of existing GAN- and diffusion-based methods while opening new avenues for research and development. 
+
+# Acknowledgments 
+
+This work was supported by the Mississippi Space Grant Consortium (MSSGC) Graduate Fellowship Program through NASA funding, as well as by the Mississippi Agricultural and Forestry Experi-ment Station (MAFES) Special Research Initiative. We also wish to acknowledge Mississippi State University’s High Performance Computing Collaboratory for providing the computational resources necessary to complete this work. 
+
+# References 
+
+Aires, U.R., Martins, V.S., Hester, D.J., Lima, T.M., Ferreira, L.B., 2026. National-scale open cattle feedlot detection using deep learning and high-resolution aerial images: Spatial distribution and animal welfare analysis. Science of The Total Environment 1015, 181451. doi:10.1016/j.scitotenv.2026.181451. Arjovsky, M., Chintala, S., Bottou, L., 2017. Wasserstein Generative Adversarial Networks, in: Proc. 34th Int. Conf. Mach. Learn., PMLR. pp. 214–223. 34 Aybar, C., Contreras, J., Donike, S., Portalés-Julià, E., Mateo-García, G., Gómez-Chova, L., 2026. A radiometrically and spatially consistent super-resolution framework for Sentinel-2. Remote Sensing of Environment 334, 115222. doi:10.1016/j.rse.2025.115222. Aybar, C., Montero, D., Contreras, J., Donike, S., Kalaitzis, F., Gómez-Chova, L., 2024a. SEN2NAIP: A large-scale dataset for Sentinel-2 Image Super-Resolution. Sci. Data 11. doi:10.1038/s41597-024-04214-y. Aybar, C., Montero, D., Donike, S., Kalaitzis, F., Gómez-Chova, L., 2024b. A Comprehensive Benchmark for Optical Remote Sensing Image Super-Resolution. IEEE Geosci. Remote Sens. Lett. 21, 1–5. doi:10.1109/LGRS.2024.3401394. Bhatt, P., Maclean, A.L., 2023. Comparison of high-resolution NAIP and unmanned aerial ve-hicle (UAV) imagery for natural vegetation communities classification using machine learning approaches. GIScience Remote Sens. 60, 2177448. doi:10.1080/15481603.2023.2177448. Blau, Y., Michaeli, T., 2018. The Perception-Distortion Tradeoff, in: 2018 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), IEEE Computer Society. pp. 6228–6237. doi:10.1109/CVPR.2018.00652. Blickensdörfer, L., Schwieder, M., Pflugmacher, D., Nendel, C., Erasmi, S., Hostert, P., 2022. Mapping of crop types and crop sequences with combined time series of Sentinel-1, Sentinel-2 and Landsat 8 data for Germany. Remote Sens. Environ. 269. doi:10.1016/j.rse.2021.112831. Brown, C.F., Brumby, S.P., Guzder-Williams, B., Birch, T., Hyde, S.B., Mazzariello, J., Czerwinski, W., Pasquarella, V.J., Haertel, R., Ilyushchenko, S., Schwehr, K., Weisse, M., Stolle, F., Hanson, C., Guinan, O., Moore, R., Tait, A.M., 2022. Dynamic World, Near real-time global 10 m land use land cover mapping. Sci Data 9, 251. doi:10.1038/s41597-022-01307-4. Chen, B., Liu, L., Liu, C., Zou, Z., Shi, Z., 2024. Spectral-Cascaded Diffusion Model for Re-mote Sensing Image Spectral Super-Resolution. IEEE Trans. Geosci. Remote Sens. 62, 1–14. doi:10.1109/TGRS.2024.3450874. Chen, L.C., Zhu, Y., Papandreou, G., Schroff, F., Adam, H., 2018. Encoder-Decoder with Atrous Separable Convolution for Semantic Image Segmentation. arXiv:1802.02611 .Claggett, P.R., McDonald, S.M., O’Neil-Dunne, J., MacFaden, S., Walker, K., Guinn, S., Ahmed, L., Buford, E., Kurtz, E., McCabe, P., Pickford, J.A., Royar, A., Schulze, K., 2025. Chesapeake Bay Land Use/Land Cover (LULC) Database 2024 Edition. U.S. Geological Survey data release. doi:10.5066/P14BEBRC. Crivellari, A., Wei, H., Wei, C., Shi, Y., 2023. Super-resolution GANs for upscaling unplanned urban settlements from remote sensing satellite imagery – the case of Chinese urban village detection. Int. J. Digit. Earth 16, 2623–2643. doi:10.1080/17538947.2023.2230956. Croitoru, F.A., Hondru, V., Ionescu, R.T., Shah, M., 2023. Diffusion Models in Vision: A Survey. IEEE Trans. Pattern Anal. Mach. Intell. 45, 10850–10869. doi:10.1109/TPAMI.2023.3261988. Deng, J., Dong, W., Socher, R., Li, L.J., Li, K., Fei-Fei, L., 2009. ImageNet: A large-scale hierar-chical image database, in: CVPR09. Dormand, J., Prince, P., 1980. A family of embedded Runge-Kutta formulae. Journal of Computa-tional and Applied Mathematics 6, 19–26. doi:10.1016/0771-050X(80)90013-3. 35 Drusch, M., Del Bello, U., Carlier, S., Colin, O., Fernandez, V., Gascon, F., Hoersch, B., Isola, C., Laberinti, P., Martimort, P., Meygret, A., Spoto, F., Sy, O., Marchese, F., Bargellini, P., 2012. Sentinel-2: ESA’s Optical High-Resolution Mission for GMES Operational Services. Remote Sensing of Environment 120, 25–36. doi:10.1016/j.rse.2011.11.026. Duchon, C.E., 1979. Lanczos Filtering in One and Two Dimensions. J. Appl. Meteorol. Climatol. 18, 1016–1022. doi:10.1175/1520-0450(1979)018<1016:LFIOAT>2.0.CO;2. Earth Resources Observation and Science (EROS) Center, 2017. National Agriculture Imagery Program (NAIP). doi:10.5066/F7QN651G. Gao, S., Liu, X., Zeng, B., Xu, S., Li, Y., Luo, X., Liu, J., Zhen, X., Zhang, B., 2023. Implicit Diffusion Models for Continuous Super-Resolution, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 10021–10030. Gong, Y., Liao, P., Zhang, X., Zhang, L., Chen, G., Zhu, K., Tan, X., Lv, Z., 2021. Enlighten-GAN for Super Resolution Reconstruction in Mid-Resolution Remote Sensing Images. Remote Sens. 13, 1104. doi:10.3390/rs13061104. Goodfellow, I., Pouget-Abadie, J., Mirza, M., Xu, B., Warde-Farley, D., Ozair, S., Courville, A., Bengio, Y., 2014. Generative Adversarial Nets, in: Adv. Neural Inf. Process. Syst., Curran Associates, Inc. Gorelick, N., Hancher, M., Dixon, M., Ilyushchenko, S., Thau, D., Moore, R., 2017. Google Earth Engine: Planetary-scale geospatial analysis for everyone. Remote Sensing of Environment 202, 18–27. doi:10.1016/j.rse.2017.06.031. He, K., Zhang, X., Ren, S., Sun, J., 2015. Deep Residual Learning for Image Recognition. 
+
+arXiv:1512.03385 .Ho, J., Jain, A., Abbeel, P., 2020. Denoising Diffusion Probabilistic Models. arXiv:2006.11239 .Jia, M., Wang, Z., Mao, D., Ren, C., Song, K., Zhao, C., Wang, C., Xiao, X., Wang, Y., 2023. Mapping global distribution of mangrove forests at 10-m resolution. Sci. Bull. 68, 1306–1316. doi:10.1016/j.scib.2023.05.004. Jia, S., Wang, Z., Li, Q., Jia, X., Xu, M., 2022. Multiattention Generative Adversarial Net-work for Remote Sensing Image Super-Resolution. IEEE Trans. Geosci. Remote Sens. 60, 1–15. doi:10.1109/TGRS.2022.3180068. Krizhevsky, A., Sutskever, I., Hinton, G., 2012. ImageNet classification with deep convolutional neural networks, in: Adv. Neural Inf. Process. Syst., pp. 1097–1105. Ledig, C., Theis, L., Huszár, F., Caballero, J., Cunningham, A., Acosta, A., Aitken, A., Tejani, A., Totz, J., Wang, Z., Shi, W., 2017. Photo-Realistic Single Image Super-Resolution Using a Generative Adversarial Network, in: 2017 IEEE Conf. Comput. Vis. Pattern Recognit. CVPR, pp. 105–114. doi:10.1109/CVPR.2017.19. Li, H., Yang, Y., Chang, M., Chen, S., Feng, H., Xu, Z., Li, Q., Chen, Y., 2022. SRDiff: Sin-gle image super-resolution with diffusion probabilistic models. Neurocomputing 479, 47–59. doi:10.1016/j.neucom.2022.01.029. 36 Liang, J., Zeng, H., Zhang, L., 2022. Details or Artifacts: A Locally Discriminative Learning Approach to Realistic Image Super-Resolution, in: 2022 IEEECVF Conf. Comput. Vis. Pattern Recognit. CVPR, pp. 5647–5656. doi:10.1109/CVPR52688.2022.00557. Lin, T.Y., Goyal, P., Girshick, R., He, K., Dollar, P., 2020. Focal Loss for Dense Object Detection. IEEE Trans. Pattern Anal. Mach. Intell. 42, 318–327. doi:10.1109/TPAMI.2018.2858826. Lipman, Y., Chen, R.T.Q., Ben-Hamu, H., Nickel, M., Le, M., 2023. Flow Matching for Generative Modeling. doi:10.48550/arXiv.2210.02747, arXiv:2210.02747 .Liu, Y., Yue, J., Xia, S., Ghamisi, P., Xie, W., Fang, L., 2024. Diffusion Models Meet Remote Sensing: Principles, Methods, and Perspectives. IEEE Trans. Geosci. Remote Sens. 62, 1–22. doi:10.1109/TGRS.2024.3464685. Main-Knorn, M., Pflug, B., Louis, J., Debaecker, V., Müller-Wilm, U., Gascon, F., 2017. Sen2Cor for Sentinel-2, in: Image Signal Process. Remote Sens. XXIII, SPIE. pp. 37–48. doi:10.1117/12.2278218. Martins, V.S., Kaleita, A.L., Gelder, B.K., 2021. Digital mapping of structural conservation prac-tices in the Midwest U.S. croplands: Implementation and preliminary analysis. Science of The Total Environment 772, 145191. doi:10.1016/j.scitotenv.2021.145191. Martins, V.S., Kaleita, A.L., Gelder, B.K., Da Silveira, H.L., Abe, C.A., 2020. Exploring multiscale object-based convolutional neural network (multi-OCNN) for remote sensing image classification at high spatial resolution. ISPRS Journal of Photogrammetry and Remote Sensing 168, 56–73. doi:10.1016/j.isprsjprs.2020.08.004. Maxwell, A.E., Warner, T.A., Vanderbilt, B.C., Ramezan, C.A., 2017. Land Cover Clas-sification and Feature Extraction from National Agriculture Imagery Program (NAIP) Or-thoimagery: A Review. Photogrammetric Engineering & Remote Sensing 83, 737–747. doi:10.14358/PERS.83.10.737. McDonald, S.M., Pickford, J.A., Claggett, P.R., Ahmed, L., 2025. Chesapeake Bay Land Use/Land Cover (LULC) Database 2024 Edition User Guide. U.S. Geological Survey data release. doi:10.5066/P14BEBRC. Meng, F., Chen, Y., Jing, H., Zhang, L., Yan, Y., Ren, Y., Wu, S., Feng, T., Liu, R., Du, Z., 2024. A Conditional Diffusion Model With Fast Sampling Strategy for Remote Sensing Image Super-Resolution. IEEE Trans. Geosci. Remote Sens. 62, 1–16. doi:10.1109/TGRS.2024.3458009. Miao, R., Yang, K., Zhou, K., Song, J., Fu, S., Liu, C., Wang, Y., 2025. Research on Cross-Sensor Remote Sensing Image Super-Resolution Method Based on Diffusion Models. IEEE J. Sel. Top. Appl. Earth Obs. Remote Sens. 18, 18528–18542. doi:10.1109/JSTARS.2025.3590687. Microsoft Open Source, McFarland, M., Emanuele, R., Morris, D., Augspurger, T., 2022. Mi-crosoft/PlanetaryComputer: October 2022. Zenodo. doi:10.5281/zenodo.7261897. Odena, A., Dumoulin, V., Olah, C., 2016. Deconvolution and Checkerboard Artifacts. Distill 1, e3. doi:10.23915/distill.00003. Pasquarella, V.J., Brown, C.F., Czerwinski, W., Rucklidge, W.J., 2023. Comprehensive quality assessment of optical satellite imagery using weakly supervised video learning, in: 37 2023 IEEECVF Conf. Comput. Vis. Pattern Recognit. Workshop CVPRW, pp. 2125–2135. doi:10.1109/CVPRW59228.2023.00206. Pham, V.D., Bui, Q.T., 2021. Spatial resolution enhancement method for Landsat imagery using a Generative Adversarial Network. Remote Sens. Lett. 12, 654–665. doi:10.1080/2150704X.2021.1918789. Pooladian, A.A., Ben-Hamu, H., Domingo-Enrich, C., Amos, B., Lipman, Y., Chen, R.T.Q., 2023. Multisample flow matching: Straightening flows with minibatch couplings, in: Proc. 40th Int. Conf. Mach. Learn., JMLR.org, Honolulu, Hawaii, USA. pp. 28100–28127. Ronneberger, O., Fischer, P., Brox, T., 2015. U-Net: Convolutional Networks for Biomedical Image Segmentation. doi:10.48550/ARXIV.1505.04597. Ross, D.A., Lim, J., Lin, R.S., Yang, M.H., 2008. Incremental Learning for Robust Visual Tracking. Int J Comput Vis 77, 125–141. doi:10.1007/s11263-007-0075-7. Saharia, C., Ho, J., Chan, W., Salimans, T., Fleet, D.J., Norouzi, M., 2021. Image Super-Resolution via Iterative Refinement. doi:10.48550/arXiv.2104.07636, arXiv:2104.07636 .Salimans, T., Goodfellow, I., Zaremba, W., Cheung, V., Radford, A., Chen, X., 2016. Improved techniques for training GANs, in: Proc. 30th Int. Conf. Neural Inf. Process. Syst., Curran Asso-ciates Inc., Red Hook, NY, USA. pp. 2234–2242. Satopaa, V., Albrecht, J., Irwin, D., Raghavan, B., 2011. Finding a "Kneedle" in a Haystack: Detecting Knee Points in System Behavior, in: 2011 31st Int. Conf. Distrib. Comput. Syst. Workshop, pp. 166–171. doi:10.1109/ICDCSW.2011.20. Schonfeld, E., Schiele, B., Khoreva, A., 2020. A U-Net Based Discriminator for Generative Adver-sarial Networks, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 8207–8216. Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., Ganguli, S., 2015. Deep Unsupervised Learning using Nonequilibrium Thermodynamics, in: Proc. 32nd Int. Conf. Mach. Learn., PMLR. pp. 2256–2265. Song, J., Meng, C., Ermon, S., 2022. Denoising Diffusion Implicit Models. arXiv:2010.02502 .Song, Y., Sohl-Dickstein, J., Kingma, D.P., Kumar, A., Ermon, S., Poole, B., 2021. Score-Based Generative Modeling through Stochastic Differential Equations., in: 9th Int. Conf. Learn. Repre-sent. ICLR 2021 Virtual Event Austria May 3-7 2021. Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.N., Kaiser, Ł., Polosukhin, I., 2017. Attention is All you Need, in: Adv. Neural Inf. Process. Syst., Curran Associates, Inc. Wang, C., Sun, W., 2025. Semantic guided large scale factor remote sensing image super-resolution with generative diffusion prior. ISPRS Journal of Photogrammetry and Remote Sensing 220, 125–138. doi:10.1016/j.isprsjprs.2024.12.001. Wang, S., Han, B., Yang, L., Zhao, C., Liang, A., Hu, C., Yang, F., Xu, F., 2024. Robust Remote Sensing Super-Resolution With Frequency Domain Decoupling for Multiscenarios. IEEE Trans. Geosci. Remote Sens. 62, 1–13. doi:10.1109/TGRS.2024.3406516. 38 Wang, X., Xie, L., Dong, C., Shan, Y., 2021. Real-ESRGAN: Training Real-World Blind Super-Resolution with Pure Synthetic Data. doi:10.48550/arXiv.2107.10833, arXiv:2107.10833 .Wang, X., Yu, K., Wu, S., Gu, J., Liu, Y., Dong, C., Loy, C.C., Qiao, Y., Tang, X., 2018. ESRGAN: Enhanced Super-Resolution Generative Adversarial Networks. doi:10.48550/arXiv.1809.00219, 
+
+arXiv:1809.00219 .Wang, Y., Bashir, S.M.A., Khan, M., Ullah, Q., Wang, R., Song, Y., Guo, Z., Niu, Y., 2022. Remote sensing image super-resolution and object detection: Benchmark and state of the art. Expert Systems with Applications 197, 116793. doi:10.1016/j.eswa.2022.116793. Wang, Y., Shao, Z., Lu, T., Huang, X., Wang, J., Zhang, Z., Zuo, X., 2025. Lightweight remote sensing super-resolution with multi-scale graph attention network. Pattern Recognition 160, 111178. doi:10.1016/j.patcog.2024.111178. Wang, Z., Bovik, A., Sheikh, H., Simoncelli, E., 2004. Image quality assessment: From error visibility to structural similarity. IEEE Trans. Image Process. 13, 600–612. doi:10.1109/TIP.2003.819861. Wolters, P., Bastani, F., Kembhavi, A., 2023. Zooming Out on Zooming In: Advancing Super-Resolution for Remote Sensing. arXiv:2311.18082 .Xiao, Y., Yuan, Q., Jiang, K., He, J., Jin, X., Zhang, L., 2024. EDiffSR: An Efficient Diffusion Probabilistic Model for Remote Sensing Image Super-Resolution. IEEE Trans. Geosci. Remote Sens. 62, 1–14. doi:10.1109/TGRS.2023.3341437. Xie, E., Wang, W., Yu, Z., Anandkumar, A., Alvarez, J.M., Luo, P., 2021. SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers, in: Adv. Neural Inf. Process. Syst., Curran Associates, Inc.. pp. 12077–12090. Zhao, H., Gallo, O., Frosio, I., Kautz, J., 2017. Loss Functions for Image Restoration With Neural Networks. IEEE Trans. Comput. Imaging 3, 47–57. doi:10.1109/TCI.2016.2644865. Zhu, C., Deng, S., Zhou, Y., Deng, L.J., Wu, Q., 2023. QIS-GAN: A Lightweight Adversarial Network With Quadtree Implicit Sampling for Multispectral and Hyperspectral Image Fusion. IEEE Trans. Geosci. Remote Sens. 61, 1–15. doi:10.1109/TGRS.2023.3332176. 39 Supplementary material 
+
+Table S1: Reclassification scheme mapping original CBLC classes to generalized land cover classes. 
+
+Original CBLC 2024 Class Generalized Class Index Name Index Name 
+
+10 Tidal Waters 1 Open Water 11 Lakes and Reservoirs 12 Riverine Ponds 13 Terrene Ponds 14 Streams and Rivers 27 Turf Grass 2 Herbaceous 34 Solar Field Herbaceous 37 Suspended Succession Herbaceous 43 Natural Succession Herbaceous 46 Harvested Forest Herbaceous 51 Riverine Wetlands Non-forested Herbaceous 55 Riverine Wetlands Harvested Forest 61 Terrene Wetlands Non-forested Herbaceous 65 Terrene Wetlands Harvested Forest 71 Tidal Wetlands Non-forested Herbaceous 75 Tidal Wetlands Harvested Forest 81 Cropland Herbaceous 83 Orchards and Vineyards Herbaceous 86 Pasture and Hay Herbaceous 23 Tree Canopy over Roads 3 Forest Canopy 24 Tree Canopy over Structures 25 Tree Canopy over Impervious 26 Tree Canopy over Turf Grass 35 Solar Field Shrubland 38 Suspended Succession Shrubland 40 Forest 41 Forested Other 44 Natural Succession Shrubland 52 Riverine Wetlands Non-forested Shrubland 53 Riverine Wetlands Forested Other 54 Riverine Wetlands Forest 62 Terrene Wetlands Non-forested Shrubland 63 Terrene Wetlands Forested Other 64 Terrene Wetlands Forest 72 Tidal Wetlands Non-forested Shrubland 73 Tidal Wetlands Forested Other 74 Tidal Wetlands Forest Continued on next page 40 Original CBP 2024 Class Generalized Class Index Name Index Name 
+
+84 Orchards and Vineyards Shrubland 20 Roads 4 Impervious 21 Structures 22 Other Impervious 31 Extractive Impervious 32 Solar Field Panel Arrays 15 Bare Shore 5 Barren Land 28 Bare Developed 30 Extractive Barren 33 Solar Field Barren 36 Suspended Succession Barren 42 Natural Succession Barren 45 Harvested Forest Barren 50 Riverine Wetlands Non-forested Barren 60 Terrene Wetlands Non-forested Barren 70 Tidal Wetlands Non-forested Barren 80 Cropland Barren 82 Orchards and Vineyards Barren 85 Pasture and Hay Barren 41
