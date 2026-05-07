@@ -1,0 +1,408 @@
+Title: Large Language Models are Universal Reasoners for Visual Generation
+
+URL Source: https://arxiv.org/pdf/2605.04040v1
+
+Published Time: Wed, 06 May 2026 01:25:34 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Large Language Models are Universal Reasoners for Visual Generation 
+
+Sucheng Ren 1,2, Chen Chen 2, Zhenbang Wang 2, Liangchen Song 2, Xiangxin Zhu 2⋆, Alan Yuille 1⋆, Liang-Chieh Chen 2⋆, Jiasen Lu 2⋆
+
+> 1
+
+Johns Hopkins University, 2Apple 
+
+> ⋆
+
+Senior authors 
+
+Text-to-image generation has advanced rapidly with diffusion models, progressing from CLIP and T5 conditioning to unified systems where a single LLM backbone handles both visual understanding and generation. Despite the architectural unification, these systems frequently fail to faithfully align complex prompts during synthesis, even though they remain highly accurate at verifying whether an image satisfies those same prompts. We formalize this as the understanding-generation gap and propose UniReasoner, a framework that leverages the LLM as a universal reasoner to convert its understanding strength into direct generation guidance. Given a prompt, the LLM first produces a coarse visual draft composed of discrete vision tokens. It then performs a self-critique by evaluating the draft for prompt consistency, producing a grounded textual evaluation that pinpoints what needs to be corrected. Finally, a diffusion model is conditioned jointly on the prompt, the visual draft, and the evaluation, ensuring that generation is guided by explicit corrective signals. Each signal addresses a limitation of the other: the draft provides a concrete, scene-level anchor that reduces under-specification in text-only conditioning, while the evaluation turns verification into grounded, actionable constraints that correct omissions, hallucinations, and relational errors. Experiments show that UniReasoner improves compositional alignment and semantic faithfulness under the same diffusion backbone while maintaining image quality, demonstrating a practical way to exploit LLM reasoning to close the understanding–generation gap. 
+
+Date: May 6, 2026 
+
+# 1 Introduction 
+
+Text-to-image generation (Rombach et al., 2022; Esser et al., 2024; Labs, 2024; Betker et al., 2023; Xie et al., 2025; Wang et al., 2024) has rapidly advanced with diffusion models, enabling photorealistic image generation at scale. Early large-scale systems ( e.g ., Stable Diffusion (Rombach et al., 2022)) typically condition a latent diffusion backbone on a frozen text encoder, most prominently CLIP (Radford et al., 2021) text embeddings, effectively treating language as a static conditioning signal. Subsequent diffusion Transformers (Peebles and Xie, 2023), like SD3 (Esser et al., 2024) and FLUX (Labs, 2024), strengthen the text conditioning by incorporating higher-capacity language encoders such as T5 (Raffel et al., 2020). Yet, the fundamental paradigm remains largely unchanged: the prompt is compressed into a single dense embedding, and the diffusion model is tasked with satisfying all semantic and compositional constraints derived solely from that representation. Recently, the field is increasingly shifting toward LLM-conditioned image generation (Hurst et al., 2024; Betker et al., 2023). OpenAI’s GPT-4o (Hurst et al., 2024) enables image generation “by chatting” with GPT-4o itself, reflecting a broader move toward multimodal LLMs as the primary interface for visual creation. Driven by the rapid progress of large language models, a new unification of understanding and generation systems (Bai et al., 2023; Wu et al., 2025; Deng et al., 2025; Chen et al., 2025a,c; Wang et al., 2024; Tian et al., 2025b,a; Lu et al., 2023) has emerged, where a single LLM backbone supports both visual understanding and visual generation. Representative frameworks, such as BAGEL (Deng et al., 2025), bridge understanding and generation with the same underlying LLM ( e.g ., Qwen (Bai et al., 2023)). While this architectural unification is a significant step forward that injects deep semantic reasoning into the generative process, it does not fully 1
+
+> arXiv:2605.04040v1 [cs.CV] 5 May 2026
+
+## Prompt : There 
+
+## are four apples in 
+
+## the tree. 
+
+## Question : Position? 
+
+## Understanding : The cup is 
+
+## positioned to the right of the 
+
+## umbrella. 
+
+## Question : Position? 
+
+## Understanding : The corn is 
+
+## located at the center of the 
+
+## paper .
+
+## Question : Physics/Chemistry 
+
+## Plausibility? 
+
+## Understanding : No. Sodium is 
+
+## a highly reactive , and ignites 
+
+## violently in water, producing 
+
+## hydrogen gas. 
+
+## Question : How many apples in 
+
+## the tree? 
+
+## Understanding : 5
+
+## Prompt : A cup left 
+
+## of an umbrella. 
+
+## Prompt : a single 
+
+## coin placed in the 
+
+## top -left corner 
+
+## of a blank white 
+
+## paper .
+
+## Prompt : Put 
+
+## sodium into water. Figure 1 The Understanding-Generation Gap. BAGEL (Deng et al., 2025), employing the same LLM (Qwen (Bai et al., 2023)) for image generation and understanding, exposes a striking asymmetry. During generation, the model violates explicit prompt constraints, resulting in incorrect object counts, swapped spatial relations, or physically/chem-ically implausible outcomes. However, when tasked with evaluating its own output, the exact same model accurately diagnoses these failures, demonstrating that its understanding strength exceeds its direct generative capabilities. 
+
+resolve prompt-image inconsistencies. Even when the resulting images exhibit high perceptual quality, they frequently fail to faithfully satisfy complex, multi-constraint specifications. A key observation motivating our work is that unified models (Deng et al., 2025; Chen et al., 2025a) with the same LLM for both understanding and generation exhibit a understanding–generation gap . When asked to generate images that satisfy complex prompts, these models often produce plausible-looking outputs that nevertheless deviate from the specification. However, when tasked with verifying whether a given image matches that same prompt, they are substantially more dependable. As shown in Figure 1, using BAGEL (Deng et al., 2025) for both generation and understanding exposes a striking asymmetry: the model generates five apples when prompted for four, yet correctly counts the resulting apples when tasked to evaluate the image. Similar failures appear consistently across spatial relations and physical plausibility. These failure modes are often easy for the same model to diagnose after the fact – suggesting that evaluation is a stronger primitive than direct generation, and that we should explicitly convert this verification strength into actionable guidance for diffusion synthesis. Motivated by this insight, we propose UniReasoner, a framework that leverages the LLM as a universal reasoner, converting its evaluation ability and internal knowledge into explicit generation control via a 
+
+Draft-Evaluate-Diffuse pipeline. Given a prompt, the LLM first produces a visual draft composed of discrete vision tokens, serving as a coarse but scene-level plan of the intended output. Crucially, we do not treat this draft as the final image. Instead, the same LLM evaluates the draft against the original prompt to produce a grounded evaluation , a concise textual description of what needs to be corrected. We then condition a diffusion model jointly on the original prompt, the visual draft, and the textual evaluation. Consequently, the 2generation is guided by explicit corrective signals rather than relying on a single pass to implicitly capture all constraints. Importantly, compared to the standard text-encoding and diffusion pipeline (Rombach et al., 2022; Esser et al., 2024), our approach provides a more informative conditioning and each signal addresses the limitations of the other: blindly following the draft would preserve its mistakes, while evaluating without a visual reference reduces the reasoning process to transitional prompt rewriting. By pairing them, the visual draft provides the evaluator with a concrete spatial anchor to critique, and the evaluation supplies the generator with localized, actionable instructions on “what-to-fix.” Together, this synergy turns the LLM’s stronger understanding ability into direct generation guidance, improving compositional alignment without requiring structural changes to the underlying diffusion backbone. Extensive experiments on Text-to-Image (T2I) synthesis validate our approach: utilizing the same frozen SANA (Xie et al., 2025) diffusion model, UniReasoner improves overall performance from 0.79 to 0.88 on GenEval (Xie et al., 2025), and from 84.50 to 86.30 on DPG-Bench (Hu et al., 2024). 
+
+# 2 Related Work 
+
+2.1 Text-to-Image Generation 
+
+Diffusion models (Ho et al., 2020; Song et al., 2020a; Karras et al., 2022; Song et al., 2020b; Nichol et al., 2021; Saharia et al., 2022; Yu et al., 2022; Rombach et al., 2022; Esser et al., 2024; Labs, 2024; Betker et al., 2023; Hurst et al., 2024; Peebles and Xie, 2023; Ma et al., 2024) have become the dominant paradigm for text-to-image generation. Stable Diffusion (Rombach et al., 2022) popularized latent diffusion with CLIP (Radford et al., 2021) conditioning, and subsequent systems like FLUX (Labs, 2024) and SD3 (Esser et al., 2024) adopt Transformer-based denoisers (Peebles and Xie, 2023) with higher-capacity encoders such as T5 (Raffel et al., 2020). A more recent trend involves augmenting or replacing classic text encoders entirely with Large Language Model (LLM) backbones. Qwen-Image (Wu et al., 2025), for example, integrates the Qwen (Bai et al., 2023) LLM as a highly capable conditioning backbone for diffusion generation. Concurrently, the field is shifting toward unified multimodal foundation models – such as BAGEL (Deng et al., 2025), BLIP3-o (Chen et al., 2025a), and Janus-Pro (Chen et al., 2025c) – that aim to support both visual understanding and generation within a single system, often by blending autoregressive token modeling with diffusion or flow-matching components. Despite this progress, prompt-image inconsistencies remain prevalent for fine-grained constraints like counting, spatial relations, and attribute binding, suggesting that stronger backbones alone do not close the gap between understanding a specification and reliably generating an image that satisfies it. In contrast, our UniReasoner reform the LLM as a universal reasoner instead of only architecture-level unification. We convert its inherent evaluation strength into an explicit generation-time signal, using a prompt, a visual draft and a grounded evaluation to guide diffusion toward targeted corrections rather than relying on a single text embedding. 
+
+2.2 Reasoning and Refinement for Visual Generation 
+
+LLM reasoning has been applied to generation primarily as a front-end that reformulates prompts into generator-friendly conditions. Common approaches include prompt rewriting (Betker et al., 2023; OpenAI), recaptioning with chain-of-thought planning (Yang et al., 2024), and spatial layout generation via bounding boxes or scene blueprints (Feng et al., 2023; Gani et al., 2024; Lian et al., 2023; He et al., 2025). These methods reason entirely in text or coordinate space – none produce a visual representation of the scene or verify the plan before generation. A parallel line of work improves generation through post-hoc verification or refinement at inference time. UniGen (Tian et al., 2025b) uses the same model as both generator and verifier, applying text-based Chain-of-Thought Verification for Best-of-N selection. SLD (Wu et al., 2024) uses an LLM and a detector to diagnose mismatches, then performs latent-space edits. Reflect-DiT (Li et al., 2025) has a VLM critique for each image and conditions subsequent generations on past feedback. All these methods reason exclusively in text or pixel space. None produces intermediate visual tokens as a draft representation that can be both evaluated and fed as conditioning to the generator in a single pass. 3LM 
+
+(Text Encoder) 
+
+## Previous T2I: LM as Text Encoder 
+
+Prompt : A photorealistic image of a        
+
+> vintage red convertible car parked
+> next to a blue bicycle on a cobblestone
+> street at sunset .
+
+Diffusion Model 
+
+## UniReasoner: LLM as Universal Reasoner      
+
+> P r o m p t : A photorealistic image of a
+> vintage red convertible car parked
+> next to a blue bicycle on a cobblestone
+> street at sunset.
+
+LLM 
+
+(Universal Reasoner) 
+
+> Inconsistent &
+> Incomplete
+> Single text embedding
+> condition
+
+Diffusion 
+
+Model  
+
+> Draft
+> (Vision Tokens)
+> Prompt
+> Draft
+> Evaluation
+> Evaluation
+> (Missing Bicycle)
+> Struggling with complex
+> multi -faceted constraint
+> Missing
+> objects/attributes
+> No explicit
+> understanding
+> Encode text
+> prompt
+
+Figure 2 Overview of UniReasoner. Left: Prior text-to-image pipelines utilize a Language Model (LM) ( e.g ., T5) solely as a text encoder, conditioning the diffusion model on a single embedding of the text prompt p. This often fails to satisfy complex prompts, leading to omissions or relational errors. Right: The proposed UniReasoner treats an LLM as a universal reasoner via a Draft–Evaluate–Diffuse pipeline. It first generates a discrete visual draft d to establish a spatial plan, then performs a self-critique to produce a grounded evaluation e identifying prompt-draft discrepancies. Finally, the diffusion model is conditioned on the joint triplet (p, d, e ), transforming LLM’s verification strength into explicit corrective signals during synthesis. 
+
+Our UniReasoner differs along three axes: (i) we reason in a multimodal token space – the LLM produces a visual draft as discrete tokens rather than text or coordinates; (ii) we provide corrective guidance before 
+
+generation via single-pass conditioning, avoiding iterative regeneration; and (iii) the same LLM serves as both drafter and evaluator, keeping the pipeline self-contained. 
+
+# 3 Method 
+
+Overview. We study the task of text-to-image synthesis: given a text prompt p, the goal is to generate an image I that is both perceptually high-quality and semantically faithful to p. Following the recent trend of utilizing a single LLM for both understanding and generation, we propose UniReasoner to alleviate the observed understanding-generation gap via a three-stage Draft-Evaluate-Diffuse reasoning pipeline: 
+
+d ∼ Draft ϕ(p), e = Eval ϕ(p, d ), I ∼ Diffuse θ (p, d, e ), (3.1) where d is a visual draft represented as discrete vision tokens (serving as a coarse visual plan), e is a grounded evaluation describing discrepancies between the prompt p and the draft d, and Diffuse θ is a diffusion model (parameterized by θ) conditioned on the joint tuple (p, d, e ), enabling targeted corrections during denoising by leveraging the explicit feedback provided in the draft and evaluation. Notably, both the drafting and evaluation stages are executed by the same underlying LLM (parameterized by ϕ), framing it as a universal reasoner for visual synthesis. We detail each stage of this pipeline below. 43.1 Visual Drafting via LLM Token Generation 
+
+The first stage of our pipeline constructs a visual draft d that serves as a coarse spatial and semantic plan. We derive our draft space from SigLIP 2 (Tschannen et al., 2025) features, which are optimized for semantic understanding and prompt-image alignment. Let F (Id) ∈ RH×W ×C denote the feature map extracted from a reference draft image Id (data preparation is detailed in Section 4.1.1). While continuous features provide rich information, they are difficult to sample and incompatible with the autoregressive generation typical of LLMs. To resolve this, we discretize the SigLIP 2 features using Vector Quantization (VQ) (Van Den Oord et al., 2017; Han et al., 2025). By mapping continuous features to a codebook of K discrete indices, we obtain a representation that is both sampling-friendly and natively compatible with the LLM’s vocabulary. 
+
+Why SigLIP-based Discretization? Unlike traditional pixel-reconstruction codebooks ( e.g ., VQGAN (Esser et al., 2021)), SigLIP-quantized tokens encode high-level semantic primitives. This ensures the draft space is inherently aligned with the LLM’s internal world knowledge, making the tokens more “readable” for the subsequent self-critique stage. 
+
+Drafting via Token Generation. Given a prompt p, the LLM (parameterized by ϕ) generates the visual draft d as a sequence of discrete tokens: 
+
+d ∼ pϕ(d | p). (3.2) Concretely, we represent each VQ index k ∈ { 1, . . . , K } as a unique special token ⟨vk⟩ within the LLM’s expanded vocabulary. The draft is generated as a contiguous block within a task-specific wrapper: 
+
+⟨DRAFT ⟩ ⟨ vq1 ⟩ · · · ⟨ vqN ⟩ ⟨ /DRAFT ⟩, (3.3) where N is the number of tokens in the spatial grid. This allows the LLM to “visualize” the scene within its native generative interface. Intuitively, this process converts an underspecified linguistic description into a concrete visual anchor, reducing the ambiguity that often plagues single-pass prompt embeddings. The LLM is trained to generate these tokens using a standard cross-entropy objective: 
+
+Ldraft = −
+
+> N
+
+X
+
+> i=1
+
+log pϕ(qi | p, q <i ). (3.4) 
+
+3.2 Grounded Evaluation via LLM Self-Critique 
+
+While visual drafting provides a concrete spatial anchor, it does not inherently guarantee prompt faithfulness. The pivotal step in our pipeline is the conversion of the LLM’s internal verification strength into explicit, actionable guidance. We task the same LLM (parameterized by ϕ) with evaluating the draft d against the original prompt p:
+
+e = Eval ϕ(p, d ). (3.5) 
+
+Grounding via Self-Critique. To perform this self-critique, the LLM is provided with (i) the original prompt p, (ii) the discrete visual draft d, and (iii) instructions to identify semantic inconsistencies or violations of visual commonsense. The resulting output e is a grounded evaluation that explicitly pinpoints specific mismatches rather than providing a generic caption or a simple prompt rewrite. This grounding is critical: conditioning a generator solely on the pair (p, d ) would inadvertently encourage the model to preserve errors present in the draft. By contrast, the grounded evaluation e instructs the generator on exactly where and how the draft deviates from the prompt. This allows the downstream diffusion model to treat the draft 
+
+d as a proposed spatial layout and the evaluation e as a set of corrective constraints, transforming the LLM’s understanding strength into a diagnostic text stream that enables targeted semantic correction during synthesis. 53.3 Image Synthesis via Joint Diffusion Conditioning 
+
+The final stage of our pipeline generates the image I by conditioning a diffusion model on the triplet (p, d, e ).Let zt denote the noisy latent at timestep t, and let ϵθ be the noise predictor. While standard text-to-image models condition only on a prompt embedding c(p):
+
+ϵθ (zt, t ; c(p)) , (3.6) we instead construct a multi-source conditioning signal by concatenating the prompt, visual draft, and grounded evaluation: 
+
+c(p, d, e ) = c Concat( p, d, e ). (3.7) The denoising process then proceeds as: 
+
+ϵθ (zt, t ; c(p, d, e )) . (3.8) Here, c(·) represents the LLM used to encode the joint sequence into a unified feature space. These features are injected into the diffusion backbone via MM-DiT (Esser et al., 2024) or cross-attention layers (Xie et al., 2025), depending on the specific architecture. 
+
+Joint Diffusion Conditioning. Compared to standard text-only pipelines, our multi-source conditioning provides two complementary signals: (i) the visual draft d supplies a semantically grounded spatial plan, reducing linguistic ambiguity and preserving complex interacting constraints; and (ii) the grounded evaluation 
+
+e provides explicit corrective guidance on what must be resolved. By combining these, the diffusion model can allocate its generative capacity toward specific, localized mismatches rather than implicitly attempting to resolve all constraints from a single, potentially diluted prompt embedding. Together, drafting and evaluation transform LLM’s verification strength into structured, generation-time control, yielding significantly more faithful results without requiring architectural changes to the diffusion backbone. 
+
+Visualization of the Reasoning Process. In Figure 3, we illustrate the whole reasoning process of UniReasoner, including draft, evaluation and the final generated image. The visual draft and the grounded evaluation together transform the LLM’s understanding strength into an explicit diagnostic stream, pinpointing the precise semantic corrections required during diffusion refinement. 
+
+# 4 Experimental Results 
+
+4.1 Experimental Setup  
+
+> 4.1.1 Dataset Construction.
+
+To train our UniReasoner framework, we construct a three-tuple training signal (p, d, e ) paired with a target image It. Here, p is the original text prompt, d represents the visual draft (a sequence of imperfect but semantically informative tokens capturing an initial plan), and e is a grounded evaluation produced by a Vision-Language Model (VLM) 1 that explicitly diagnoses the prompt-draft alignment. Our training protocol consists of two distinct stages: (i) large-scale pretraining using reconstructed images to establish baseline reasoning, and (ii) targeted finetuning using model-generated hard negatives to refine corrective capabilities. We detail each stage below. 
+
+Stage I: Pretraining via Image Reconstruction. We utilize the same text-image dataset as prior works (Chen et al., 2025a; Lin et al., 2025) containing only (p, I ) pairs. Because it lacks intermediate visual drafts, we synthesize them via token reconstruction: 
+
+• Draft Supervision. For each image I, we obtain a degraded reconstruction ˜I using a pretrained image tokenizer (Wang et al., 2024). We treat ˜I as the reference draft image Id and discretize it into draft tokens d via our SigLIP-based tokenizer. 
+
+• Target Supervision. The original, high-fidelity image I serves as the final target It for the diffusion model. 
+
+> 1The VLM is used exclusively for offline dataset construction; our framework UniReasoner relies solely on the base LLM as the universal reasoner.
+
+6Alignment 
+
+between caption 
+
+and image 
+
+two cups on a table: the 
+
+taller glass cup is on the 
+
+right and the shorter 
+
+ceramic cup is on the 
+
+left; a coaster is under 
+
+the left cup only. 
+
+one tall bottle in the 
+
+center, two shorter 
+
+bottles symmetrically 
+
+placed left and right; the 
+
+left bottle contains blue 
+
+liquid and the right 
+
+bottle contains red 
+
+liquid. 
+
+A photoreal mountain 
+
+road in late fall with 
+
+scattered leaves, a 
+
+winding curve ahead, 
+
+mist in the distance, cool 
+
+air feel, crisp textures. 
+
+The image does not align 
+
+with the caption. The 
+
+image shows only a single 
+
+glass with a handle, 
+
+sitting alone on a wooden 
+
+surface. There is no 
+
+second cup, no coaster. 
+
+The image is partially 
+
+aligned with the caption. 
+
+The image shows one on 
+
+the left with a dark 
+
+liquid, and one on the 
+
+right with a red liquid. 
+
+The center bottle is as 
+
+tall as the rest bottles. 
+
+The image aligns very well 
+
+with the prompt. winding 
+
+mountain road through 
+
+late -fall forest, golden 
+
+leaves, crisp textures, 
+
+and misty distant 
+
+mountains. Cool mood. 
+
+Minor issue: slightly lacks 
+
+fine texture /detail. 
+
+Prompt Draft Evaluation Final Image Figure 3 Qualitative Results of UniReasoner. Given a text prompt, it first generates a coarse visual draft that provides a semantically grounded plan. It then evaluates prompt–draft alignment and explicitly describes unsatisfied constraints ( e.g ., missing objects, incorrect counts/attributes, or erroneous spatial relations). Finally, a diffusion model synthesizes the image conditioned jointly on {prompt, draft, evaluation}, using the evaluation as an explicit “what-to-fix” signal to correct draft errors and ensure compositional faithfulness. Note that while the draft exists only as discrete tokens during synthesis, we decode them here for visualization. 
+
+• Grounded Evaluation. We process the pair (p, ˜I) through a VLM (Qwen-VL (Bai et al., 2025)) to generate the evaluation e. This evaluation checks for semantic consistency and verbalizes concrete mismatches ( e.g ., missing objects, swapped attributes, or incorrect spatial relations), yielding an explicit “what-to-fix” diagnostic text for the diffusion model. 
+
+Stage II: Finetuning via Hard-Negative Candidates. To strengthen the model’s ability to correct structural errors, we construct a curated finetuning set (Chen et al., 2025b,a) containing challenging prompt-draft mismatches: 
+
+• Candidate Generation. For a given prompt p, we generate a candidate image If using a state-of-the-art diffusion model FLUX (Labs, 2024). 
+
+• Alignment Scoring. We use Qwen-VL to score semantic alignment between the prompt p and both the generated candidate If and the real image I.
+
+• Hard-Negative Mining. We select the poorly aligned candidate as the draft image Id (converted to 7Table 1 Evaluation of Text-to-Image Generation on Geneval. Note that our UniReasoner and the SANA baseline share the exact same diffusion generator.                                                                       
+
+> Method Overall Single Obj. Two Obj. Counting Colors Position Attr. Binding Emu3 (Wang et al., 2024) 0.54 0.98 0.71 0.34 0.81 0.17 0.21 DALL ·E 3 (Betker et al., 2023) 0.67 0.96 0.87 0.47 0.83 0.43 0.45 FLUX.1-Dev (Labs, 2024) 0.66 0.98 0.81 0.74 0.79 0.22 0.45 SD3 (Rombach et al., 2022) 0.71 0.98 0.89 0.73 0.83 0.34 0.47 Janus-Pro (Chen et al., 2025c) 0.80 0.99 0.92 0.85 0.91 0.75 0.66 BLIP-3o(Chen et al., 2025a) 0.83 0.99 0.92 0.74 0.86 0.77 0.67 GPT-4o (Hurst et al., 2024) 0.84 0.99 0.92 0.85 0.92 0.75 0.61 SANA (Xie et al., 2025) 0.79 0.98 0.93 0.78 0.88 0.62 0.57 UniReasoner 0.88 0.99 0.94 0.90 0.92 0.83 0.72
+
+tokens d) and the strictly better-aligned image as the final target It.
+
+• Evaluations for Correction. Similar to Stage I, we generate the grounded evaluation e by prompting the VLM to diagnose the discrepancies between p and Id. 
+
+> 4.1.2 Implementation Details.
+
+We instantiate our LLM backbone with Qwen (Bai et al., 2023) 2 and utilize SANA (Xie et al., 2025) as the diffusion generator. To isolate the contribution of the LLM as a universal reasoner, we freeze the diffusion backbone entirely, optimizing only the LLM and the cross-modal connector linking the language model to the generator. We train the network using the AdamW optimizer (Loshchilov and Hutter, 2017) with an initial learning rate of 5 × 10 −5, applying a 1,000-step linear warmup followed by a decay schedule down to 1 × 10 −5.The model is pretrained for 60,000 iterations on the reconstructed dataset (Stage I) and subsequently finetuned for 20,000 iterations on the hard-negative candidate set (Stage II). We evaluate UniReasoner’s compositional faithfulness on GenEval (Ghosh et al., 2023) and DPG-Bench (Hu et al., 2024). 
+
+4.2 Main Results 
+
+GenEval. As shown in Table 1, UniReasoner achieves the best overall GenEval (Ghosh et al., 2023) score of 0.88, surpassing all evaluated baselines. Notably, this gain is obtained without altering the underlying diffusion generator: UniReasoner shares the exact same backbone as the SANA baseline (Xie et al., 2025), yet increases the overall score from 0.79 to 0.88 (+0.09). In particular, UniReasoner raises Counting from 0.78 to 0.90, Position from 0.62 to 0.83, and Attribute Binding from 0.57 to 0.72, while maintaining near-ceiling performance on Single-Object and Two-Object prompts (0.99 and 0.94, respectively). These trends indicate that employing the LLM as a universal reasoner provides highly effective visual drafts and corrective cues for complex entity interactions—areas often underspecified by text-only conditioning—thereby significantly improving prompt adherence. Furthermore, the results reveal a consistent progression tied to increasingly capable language conditioning. LM-conditioned diffusion backbones, such as SD3 (Esser et al., 2024) and FLUX.1-Dev (Labs, 2024), trail behind LLM-based generators like BLIP-3o (Chen et al., 2025a). While the latter primarily benefit from stronger linguistic grounding, they do not explicitly perform text-side reasoning. GPT-4o (Hurst et al., 2024) improves upon these models by pairing advanced language understanding with explicit text reasoning. Building on this progression, UniReasoner advances the state-of-the-art by fully utilizing the LLM as a universal reasoner that actively drafts and evaluates, rather than treating language conditioning as a static, one-shot prompt. Overall, these results suggest that integrating a universal reasoning framework is a complementary and practical enhancement for high-fidelity diffusion generators, yielding strictly better semantic alignment and constraint satisfaction while preserving visual quality. 
+
+DPG-Bench. We further evaluate UniReasoner on the DPG-Bench (Hu et al., 2024). As reported in Table 2, UniReasoner achieves an overall score of 86.30, outperforming previous methods including DALL ·E 3 (Betker 
+
+> 2We strictly use LLM backbone (Qwen (Bai et al., 2023)) during UniReasoner training and inference to ensure a fair comparison with text-to-image baselines that rely solely on language models.
+
+8Table 2 Evaluation of Text-to-Image Generation on DPG-Bench. Note that our UniReasoner and the SANA baseline share the exact same diffusion generator. 
+
+Method Overall Global Entity Attribute Relation Other Emu3 (Wang et al., 2024) 80.60 85.21 86.68 86.84 90.22 83.15 BLIP-3o(Chen et al., 2025a) 82.27 88.63 89.11 87.84 87.03 89.46 DALL ·E 3 (Betker et al., 2023) 83.50 90.97 89.61 88.39 90.58 89.83 FLUX.1-Dev (Labs, 2024) 83.84 74.35 90.00 88.96 90.87 88.33 SD3 (Rombach et al., 2022) 84.08 87.90 91.01 88.83 80.70 88.68 Janus-Pro (Chen et al., 2025c) 84.19 86.90 88.90 89.40 89.32 89.48 SANA (Xie et al., 2025) 84.50 77.55 89.85 89.96 89.19 91.74 UniReasoner 86.30 92.46 90.56 91.11 90.65 89.84                                                   
+
+> Table 3 Ablation of Language Models and Reasoning on GenEval. “Text” reasoning refers to prompt rewriting, while “Universal” is our reasoning framework.
+> Text Encoder Reasoning Overall Single Obj. Two Obj. Counting Colors Position Attr. Binding T5 N/A 0.70 0.98 0.86 0.50 0.85 0.45 0.46 T5 Text 0.76 0.98 0.88 0.58 0.86 0.52 0.50 Qwen3 N/A 0.79 0.98 0.90 0.65 0.88 0.69 0.61 Qwen3 Text 0.82 0.99 0.91 0.72 0.90 0.72 0.64 Qwen3 Universal 0.88 0.99 0.94 0.90 0.92 0.83 0.72
+
+et al., 2023), SD3 (Esser et al., 2024), FLUX.1-Dev (Labs, 2024), Janus-Pro (Chen et al., 2025c), Emu3 (Wang et al., 2024), and BLIP-3o (Chen et al., 2025a). Crucially, UniReasoner improves upon SANA (Xie et al., 2025) by +1.80 overall ( 84 .50 → 86 .30 ) using the identical diffusion generator, demonstrating that the performance gain stems directly from our reasoning framework rather than a more powerful diffusion backbone. Breaking this down by category, UniReasoner shows the most significant gains on Global instructions (77 .55 → 92 .46 ), indicating that grounded evaluation provides effective, high-level corrective cues for holistic prompt intent and scene consistency. We also observe consistent improvements across fine-grained compositional aspects, including Entity ( 89 .85 → 90 .56 ) and Attribute ( 89 .96 → 91 .11 ), alongside highly competitive performance on Relation (90.65) and Other (89.84). Together, these results validate that UniReasoner generalizes well beyond GenEval benchmark, robustly enhancing text-to-image alignment across diverse instruction families. 
+
+Visualization. We provide qualitative results of UniReasoner in Figure 4. 
+
+4.3 Ablation Study 
+
+Effectiveness of the LLM as a Universal Reasoner. Table 3 studies how the language backbone and the reasoning interface affect prompt faithfulness on GenEval (Ghosh et al., 2023). Replacing the standard T5 text encoder (Raffel et al., 2020) with a stronger LLM backbone (Qwen3 (Bai et al., 2023)) already improves overall alignment from 0.70 to 0.79 , suggesting that better language understanding translates to better constraint adherence. Adding text-only reasoning via prompt rewriting further brings consistent but modest gains for both backbones (T5: 0.70 → 0.76 , Qwen3: 0.79 → 0.82 ), indicating that rewriting reduces ambiguity yet remains limited when multiple constraints interact. Transitioning to our full universal reasoning framework yields the largest improvement, boosting the Qwen3 text-only reasoning baseline from 0.82 to 0.88 overall, again without modifying the diffusion generator. The gains concentrate on compositional categories that require explicit multi-constraint satisfaction: Counting increases from 0.72 to 0.90 (+ 0.18 ), Position from 0.72 to 0.83 (+ 0.11 ), and Attribute Binding from 0.64 to 
+
+0.72 (+ 0.08 ), while maintaining near-ceiling performance on Single-Object/ Two-Object prompts ( 0.99 /0.94 ). These results support our hypothesis that moving beyond text-only reasoning to a universal reasoning by the draft and evaluation provides more actionable, localized correction cues, enabling the diffusion model to resolve specific mismatches rather than relying on a single (rewritten) prompt embedding. 9Figure 4 Qualitative Results of UniReasoner. We show images generated by UniReasoner across a diverse set of photorealistic and artistic prompts. 
+
+Effectiveness of the UniReasoner Conditioning. Table 4 ablates the conditioning signals used by 10 Table 4 Ablation of Conditioning Signals on GenEval. Text , Draft , and Eval denote the text prompt, visual draft, and grounded evaluation, respectively. 
+
+Condition Overall Single Obj. Two Obj. Counting Colors Position Attr. Binding 
+
+Text Draft Eval 
+
+✓ 0.79 0.98 0.90 0.65 0.88 0.69 0.61 
+
+✓ 0.82 0.99 0.92 0.71 0.84 0.76 0.67 
+
+✓ ✓ 0.82 0.99 0.92 0.72 0.82 0.77 0.68 
+
+✓ ✓ ✓ 0.88 0.99 0.94 0.90 0.92 0.83 0.72                                      
+
+> Table 5 Comparison of Visual Draft Variants. We compare our SigLIP-based discretization against continuous VAE latents and reconstruction-optimized VQ tokens.
+> Draft Variants Overall Single Obj. Two Obj. Counting Colors Position Attr. Binding None (text-only) 0.79 0.98 0.90 0.65 0.88 0.69 0.61 VAE (Labs, 2024) 0.72 0.98 0.86 0.60 0.82 0.54 0.52 VQ (Wang et al., 2024) 0.84 0.99 0.93 0.74 0.82 0.78 0.69 SigLIP-based Discretization 0.88 0.99 0.94 0.90 0.92 0.83 0.72
+
+UniReasoner, where Text , Draft , and Eval denote the text prompt, visual draft, and grounded evaluation, respectively. Using only the text prompt ( Text , Row 1) yields an overall GenEval score of 0.79 . Replacing the text entirely with the visual draft ( Draft , Row 2) improves performance to 0.82 , with clear gains on compositional constraints such as Counting ( 0.65 → 0.71 ), Position ( 0.69 → 0.76 ), and Attribute Binding (0.61 → 0.67 ), suggesting that the draft provides a more explicit, spatially grounded plan than a single text embedding. Combining text and draft ( Text + Draft , Row 3) offers limited additional benefit over the draft alone, with the overall score remaining at 0.82 . This implies that the visual draft largely subsumes the constraint-relevant information in the prompt, while naive fusion can introduce minor interference ( e.g ., Colors 0.84 → 0.82 ). In contrast, augmenting the conditions with the grounded evaluation ( Text + Draft + Eval , Row 4) produces a substantial jump to 0.88 overall. The improvement is dominated by categories that require multi-constraint correction: Counting increases from 0.72 to 0.90 (+ 0.18 ), Position from 0.77 to 0.83 (+ 0.06 ), and Attribute Binding from 0.68 to 0.72 (+ 0.04 ), while Single-Object and Two-Object performance stays near ceiling ( 0.99 /0.94 ). These results validate the role of evaluation as an explicit “what-to-fix” signal: given a draft that may violate constraints, the grounded evaluation enables the diffusion generator to correct localized errors rather than relying on implicit text-only conditioning. 
+
+Comparison of Visual Draft Variants. Table 5 compares different visual draft representations under the same Draft-Evaluate-Diffuse pipeline. The “None” baseline corresponds to standard text-only conditioning (no visual draft), achieving an overall GenEval score of 0.79 . Introducing a draft based on continuous VAE latents (Labs, 2024) significantly degrades performance ( 0.72 overall), causing pronounced drops in compositional categories ( e.g ., Position 0.69 → 0.54 and Attribute Binding 0.61 → 0.52 ). We attribute this to the fact that continuous VAE latents are ill-suited for the discrete autoregressive sampling required during the drafting phase. Utilizing VQ tokens (Wang et al., 2024) yields better results ( 0.84 overall) compared to text-only conditioning (“None” baseline), since discrete codes provide a more structured intermediate representation for autoregressive draft generation. However, VQ still underperforms our final design. Our SigLIP-based Discretization draft achieves the best performance ( 0.88 overall) and consistently dominates across all categories, especially on hard compositional constraints (Counting 0.90 , Position 0.83 , Attribute Binding 0.72 ). This validates our motivation for designing the tokenization around SigLIP (Tschannen et al., 2025): by quantizing dense, semantically rich features, the resulting discrete draft preserves high-level contextual meaning while remaining fully compatible with autoregressive generation. Consequently, both the grounded evaluator and the diffusion generator can better leverage the draft as a high-level plan, enabling more accurate diagnosis and targeted correction than VAE- or VQ-based drafts. 11 5 Conclusion 
+
+We presented UniReasoner, leveraging the LLM as a universal reasoner for text-to-image generation that narrows the understanding–generation gap in modern unified models. Our key insight is that with the same LLM generation may fail to avoid prompt-image inconsistencies but understanding is substantially more reliable at evaluating them. To turn this evaluation strength into actionable control, UniReasoner follows a Draft-Evaluate-Diffuse pipeline: an LLM first produces the visual draft as a coarse visual plan, then performs self-critique to generate a grounded evaluation that explicitly highlights mismatches between the prompt and the drafts, and finally a diffusion model generates the final image conditioned on the joint signals (prompt, draft, evaluation) to enable targeted correction during denoising. Extensive experiments show that UniReasoner consistently improves semantic faithfulness and compositional constraint satisfaction under the same diffusion backbone while maintaining image quality. We hope this work encourages a broader view of generative modeling, where the LLM serves not just as a text encoder, but as a universal reasoner that steers visual synthesis through explicit, grounded corrective signals. 
+
+# References 
+
+Jinze Bai, Shuai Bai, Yunfei Chu, Zeyu Cui, Kai Dang, Xiaodong Deng, Yang Fan, Wenbin Ge, Yu Han, Fei Huang, et al. Qwen technical report. arXiv preprint arXiv:2309.16609 , 2023. Shuai Bai, Yuxuan Cai, Ruizhe Chen, Keqin Chen, Xionghui Chen, Zesen Cheng, Lianghao Deng, Wei Ding, Chang Gao, Chunjiang Ge, et al. Qwen3-vl technical report. arXiv preprint arXiv:2511.21631 , 2025. James Betker, Gabriel Goh, Li Jing, Tim Brooks, Jianfeng Wang, Linjie Li, Long Ouyang, Juntang Zhuang, Joyce Lee, Yufei Guo, et al. Improving image generation with better captions. Computer Science. https://cdn. openai. com/papers/dall-e-3. pdf , 2(3):8, 2023. Jiuhai Chen, Zhiyang Xu, Xichen Pan, Yushi Hu, Can Qin, Tom Goldstein, Lifu Huang, Tianyi Zhou, Saining Xie, Silvio Savarese, et al. Blip3-o: A family of fully open unified multimodal models-architecture, training and dataset. 
+
+arXiv preprint arXiv:2505.09568 , 2025a. Junying Chen, Zhenyang Cai, Pengcheng Chen, Shunian Chen, Ke Ji, Xidong Wang, Yunjin Yang, and Benyou Wang. Sharegpt-4o-image: Aligning multimodal models with gpt-4o-level image generation. arXiv preprint arXiv:2506.18095 ,2025b. Xiaokang Chen, Zhiyu Wu, Xingchao Liu, Zizheng Pan, Wen Liu, Zhenda Xie, Xingkai Yu, and Chong Ruan. Janus-pro: Unified multimodal understanding and generation with data and model scaling. arXiv preprint arXiv:2501.17811 ,2025c. Chaorui Deng, Deyao Zhu, Kunchang Li, Chenhui Gou, Feng Li, Zeyu Wang, Shu Zhong, Weihao Yu, Xiaonan Nie, Ziang Song, et al. Emerging properties in unified multimodal pretraining. arXiv preprint arXiv:2505.14683 , 2025. Patrick Esser, Robin Rombach, and Björn Ommer. Taming transformers for high-resolution image synthesis. In CVPR ,2021. Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. Scaling rectified flow transformers for high-resolution image synthesis. In 
+
+ICML , 2024. Weixi Feng, Wanrong Zhu, Tsu-jui Fu, Varun Jampani, Arjun Akula, Xuehai He, Sugato Basu, Xin Eric Wang, and William Yang Wang. Layoutgpt: Compositional visual planning and generation with large language models. 
+
+NeurIPS , 2023. Hanan Gani, Shariq Farooq Bhat, Muzammal Naseer, Salman Khan, and Peter Wonka. Llm blueprint: Enabling text-to-image generation with complex and detailed prompts. In ICLR , 2024. Dhruba Ghosh, Hannaneh Hajishirzi, and Ludwig Schmidt. Geneval: An object-focused framework for evaluating text-to-image alignment. NeurIPS , 2023. 
+
+> Apple and the Apple logo are trademarks of Apple Inc., registered in the U.S. and other countries and regions.
+
+12 Jiaming Han, Hao Chen, Yang Zhao, Hanyu Wang, Qi Zhao, Ziyan Yang, Hao He, Xiangyu Yue, and Lu Jiang. Vision as a dialect: Unifying visual understanding and generation via text-aligned representations. arXiv preprint arXiv:2506.18898 , 2025. Runze He, Bo Cheng, Yuhang Ma, Qingxiang Jia, Shanyuan Liu, Ao Ma, Xiaoyu Wu, Liebucha Wu, Dawei Leng, and Yuhui Yin. Plangen: Towards unified layout planning and image generation in auto-regressive vision language models. In ICCV , 2025. Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. NeurIPS , 2020. Xiwei Hu, Rui Wang, Yixiao Fang, Bin Fu, Pei Cheng, and Gang Yu. Ella: Equip diffusion models with llm for enhanced semantic alignment. arXiv preprint arXiv:2403.05135 , 2024. Aaron Hurst, Adam Lerer, Adam P Goucher, Adam Perelman, Aditya Ramesh, Aidan Clark, AJ Ostrow, Akila Welihinda, Alan Hayes, Alec Radford, et al. Gpt-4o system card. arXiv preprint arXiv:2410.21276 , 2024. Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-based generative models. NeurIPS , 2022. Black Forest Labs. Flux. https://github.com/black-forest-labs/flux , 2024. Shufan Li, Konstantinos Kallidromitis, Akash Gokul, Arsh Koneru, Yusuke Kato, Kazuki Kozuka, and Aditya Grover. Reflect-dit: Inference-time scaling for text-to-image diffusion transformers via in-context reflection. In ICCV , 2025. Long Lian, Boyi Li, Adam Yala, and Trevor Darrell. Llm-grounded diffusion: Enhancing prompt understanding of text-to-image diffusion models with large language models. arXiv preprint arXiv:2305.13655 , 2023. Bin Lin, Zongjian Li, Xinhua Cheng, Yuwei Niu, Yang Ye, Xianyi He, Shenghai Yuan, Wangbo Yu, Shaodong Wang, Yunyang Ge, et al. Uniworld-v1: High-resolution semantic encoders for unified visual understanding and generation. 
+
+arXiv preprint arXiv:2506.03147 , 2025. Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. arXiv preprint arXiv:1711.05101 , 2017. Jiasen Lu, Christopher Clark, Sangho Lee, Zichen Zhang, Savya Khosla, Ryan Marten, Derek Hoiem, and Aniruddha Kembhavi. Unified-io 2: Scaling autoregressive multimodal models with vision, language, audio, and action. arXiv preprint arXiv:2312.17172 , 2023. Nanye Ma, Mark Goldstein, Michael S Albergo, Nicholas M Boffi, Eric Vanden-Eijnden, and Saining Xie. Sit: Exploring flow and diffusion-based generative models with scalable interpolant transformers. In ECCV , 2024. Alex Nichol, Prafulla Dhariwal, Aditya Ramesh, Pranav Shyam, Pamela Mishkin, Bob McGrew, Ilya Sutskever, and Mark Chen. Glide: Towards photorealistic image generation and editing with text-guided diffusion models. arXiv preprint arXiv:2112.10741 , 2021. OpenAI. Chatgpt. https://chatgpt.com .William Peebles and Saining Xie. Scalable diffusion models with transformers. In ICCV , 2023. Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervision. In ICML , 2021. Colin Raffel, Noam Shazeer, Adam Roberts, Katherine Lee, Sharan Narang, Michael Matena, Yanqi Zhou, Wei Li, and Peter J Liu. Exploring the limits of transfer learning with a unified text-to-text transformer. JMLR , 21(140):1–67, 2020. Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In CVPR , 2022. Chitwan Saharia, William Chan, Saurabh Saxena, Lala Li, Jay Whang, Emily L Denton, Kamyar Ghasemipour, Raphael Gontijo Lopes, Burcu Karagol Ayan, Tim Salimans, et al. Photorealistic text-to-image diffusion models with deep language understanding. NeurIPS , 2022. Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 ,2020a. Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 , 2020b. 
+
+13 Rui Tian, Mingfei Gao, Haiming Gang, Jiasen Lu, Zhe Gan, Yinfei Yang, Zuxuan Wu, and Afshin Dehghan. Unigen-1.5: Enhancing image generation and editing through reward unification in reinforcement learning. arXiv preprint arXiv:2511.14760 , 2025a. Rui Tian, Mingfei Gao, Mingze Xu, Jiaming Hu, Jiasen Lu, Zuxuan Wu, Yinfei Yang, and Afshin Dehghan. Unigen: Enhanced training & test-time strategies for unified multimodal understanding and generation. arXiv preprint arXiv:2505.14682 , 2025b. Michael Tschannen, Alexey Gritsenko, Xiao Wang, Muhammad Ferjad Naeem, Ibrahim Alabdulmohsin, Nikhil Parthasarathy, Talfan Evans, Lucas Beyer, Ye Xia, Basil Mustafa, et al. Siglip 2: Multilingual vision-language encoders with improved semantic understanding, localization, and dense features. arXiv preprint arXiv:2502.14786 ,2025. Aaron Van Den Oord, Oriol Vinyals, et al. Neural discrete representation learning. NeurIPS , 2017. Xinlong Wang, Xiaosong Zhang, Zhengxiong Luo, Quan Sun, Yufeng Cui, Jinsheng Wang, Fan Zhang, Yueze Wang, Zhen Li, Qiying Yu, et al. Emu3: Next-token prediction is all you need. arXiv preprint arXiv:2409.18869 , 2024. Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Sheng-ming Yin, Shuai Bai, Xiao Xu, Yilei Chen, et al. Qwen-image technical report. arXiv preprint arXiv:2508.02324 , 2025. Tsung-Han Wu, Long Lian, Joseph E Gonzalez, Boyi Li, and Trevor Darrell. Self-correcting llm-controlled diffusion models. In CVPR , 2024. Enze Xie, Junsong Chen, Junyu Chen, Han Cai, Haotian Tang, Yujun Lin, Zhekai Zhang, Muyang Li, Ligeng Zhu, Yao Lu, et al. Sana: Efficient high-resolution text-to-image synthesis with linear diffusion transformers. In ICLR , 2025. Ling Yang, Zhaochen Yu, Chenlin Meng, Minkai Xu, Stefano Ermon, and Bin Cui. Mastering text-to-image diffusion: Recaptioning, planning, and generating with multimodal llms. In ICML , 2024. Jiahui Yu, Yuanzhong Xu, Jing Yu Koh, Thang Luong, Gunjan Baid, Zirui Wang, Vijay Vasudevan, Alexander Ku, Yinfei Yang, Burcu Karagol Ayan, et al. Scaling autoregressive models for content-rich text-to-image generation. 
+
+arXiv preprint arXiv:2206.10789 , 2022. 
+
+14

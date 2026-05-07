@@ -6,73 +6,76 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-06
-- 运行时间：2026-05-06 20:28:24 UTC
+- 最新运行日期：2026-05-07
+- 运行时间：2026-05-07 21:04:58 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：18
+- 精读区：7
 - 速读区：11
 
 ### 今日简报（AI）
-聚焦 17 篇论文，深入精读 6 篇，快速浏览 11 篇，高效完成图像生成与医学影像方向综述。  
-最值得关注的是图像编辑合成数据与多域医学影像超分提升，两者均展现出 10 分满分的突破潜力。  
-建议普通读者重点了解 AI 在图像可控生成与医疗影像增强中的应用趋势，以把握未来视觉技术走向。
-- 详情：[/202605/06/README](/202605/06/README)
+图像与信号智能复原主题高热，今日深读与速读共 18 篇成果。  
+重点关注移动端图像去噪与自监督扩散 MRI 超分辨，兼具性能与通用性突破。  
+建议持续关注低功耗影像处理与跨模态重建的新算法趋势。
+- 详情：[/202605/07/README](/202605/07/README)
 
 ### 精读区论文标签
-1. [ScribbleEdit: Synthetic Data for Image Editing with Scribbles and Text](/202605/06/2605.01135v2-scribbleedit-synthetic-data-for-image-editing-with-scribbles-and-text)  
+1. [Real Image Denoising with Knowledge Distillation for High-Performance Mobile NPUs](/202605/07/2605.03680v1-real-image-denoising-with-knowledge-distillation-for-high-performance-mobile-npus)  
    标签：评分：10.0/10、query:real-ir
-   evidence：结合涂鸦和文本的图像编辑
-2. [MedSR-Vision: Deep Learning Framework for Multi-Domain Medical Image Super-Resolution](/202605/06/2605.03343v1-medsr-vision-deep-learning-framework-for-multi-domain-medical-image-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：医学图像超分辨率与修复
-3. [Mamoda2.5: Enhancing Unified Multimodal Model with DiT-MoE](/202605/06/2605.02641v1-mamoda25-enhancing-unified-multimodal-model-with-dit-moe)  
+   evidence：针对移动NPU的真实图像去噪
+2. [Self-Supervised Spatial And Zero-Shot Angular Super-Resolution by Spatial-Angular Implicit Representation For Rotating-View SNR-Efficient Diffusion MRI](/202605/07/2605.02575v1-self-supervised-spatial-and-zero-shot-angular-super-resolution-by-spatial-angular-implicit-representation-for-rotating-view-snr-efficient-diffusion-mri)  
+   标签：评分：9.5/10、query:real-ir
+   evidence：自监督空间与零样本角度超分辨率
+3. [Awaking Spatial Intelligence in Unified Multimodal Understanding and Generation](/202605/07/2605.04128v1-awaking-spatial-intelligence-in-unified-multimodal-understanding-and-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：用于多模态生成与编辑的统一自回归扩散框架
-4. [PODiff: Latent Diffusion in Proper Orthogonal Decomposition Space for Scientific Super-Resolution](/202605/06/2605.03399v1-podiff-latent-diffusion-in-proper-orthogonal-decomposition-space-for-scientific-super-resolution)  
+   evidence：多模态理解、生成和指令引导图像编辑的统一模型
+4. [StableI2I: Spotting Unintended Changes in Image-to-Image Transition](/202605/07/2605.04453v1-stablei2i-spotting-unintended-changes-in-image-to-image-transition)  
    标签：评分：9.0/10、query:real-ir
-   evidence：在潜POD空间中用于科学超分辨率的扩散模型。
-5. [BFORE: Butterfly-Firefly Optimized Retinex Enhancement for Low-Light Image Quality Improvement](/202605/06/2605.03509v1-bfore-butterfly-firefly-optimized-retinex-enhancement-for-low-light-image-quality-improvement)  
+   evidence：图像编辑与修复中内容忠实度的评估框架
+5. [Open-Source Image Editing Models Are Zero-Shot Vision Learners](/202605/07/2605.04566v1-open-source-image-editing-models-are-zero-shot-vision-learners)  
    标签：评分：9.0/10、query:real-ir
-   evidence：低光照图像质量提升与增强
-6. [DataEvolver: Let Your Data Build and Improve Itself via Goal-Driven Loop Agents](/202605/06/2605.01789v1-dataevolver-let-your-data-build-and-improve-itself-via-goal-driven-loop-agents)  
-   标签：评分：8.5/10、query:real-ir
-   evidence：用于图像编辑和多模态理解的闭环视觉数据引擎。
+   evidence：开源图像编辑模型在视觉任务上的评估
+6. [Advancing Aesthetic Image Generation via Composition Transfer](/202605/07/2605.04609v1-advancing-aesthetic-image-generation-via-composition-transfer)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：利用预训练扩散模型进行构图迁移
+7. [D-OPSD: On-Policy Self-Distillation for Continuously Tuning Step-Distilled Diffusion Models](/202605/07/2605.05204v1-d-opsd-on-policy-self-distillation-for-continuously-tuning-step-distilled-diffusion-models)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：步进蒸馏扩散模型的训练范式
 
 ### 速读区论文标签
-1. [A Few-Step Generative Model on Cumulative Flow Maps](/202605/06/2605.03623v1-a-few-step-generative-model-on-cumulative-flow-maps)  
+1. [Learning-based Statistical Refinement for Denoising](/202605/07/2605.04332v1-learning-based-statistical-refinement-for-denoising)  
    标签：评分：8.5/10、query:real-ir
-   evidence：扩散和流模型的高效少步生成框架
-2. [Disciplined Diffusion: Text-to-Image Diffusion Model against NSFW Generation](/202605/06/2605.01113v1-disciplined-diffusion-text-to-image-diffusion-model-against-nsfw-generation)  
+   evidence：用于图像去噪的统计细化方法
+2. [CGFformer: Cluster-Guidance Frequency Transformer for Pansharpening](/202605/07/2605.01490v1-cgfformer-cluster-guidance-frequency-transformer-for-pansharpening)  
    标签：评分：8.0/10、query:real-ir
-   evidence：针对不安全内容生成的鲁棒文本到图像扩散模型。
-3. [Skipping the Zeros in Diffusion Models for Sparse Data Generation](/202605/06/2605.01817v1-skipping-the-zeros-in-diffusion-models-for-sparse-data-generation)  
+   evidence：通过全色锐化生成高分辨率多光谱图像
+3. [GRIFDIR: Graph Resolution-Invariant FEM Diffusion Models in Function Spaces over Irregular Domains](/202605/07/2605.03497v1-grifdir-graph-resolution-invariant-fem-diffusion-models-in-function-spaces-over-irregular-domains)  
    标签：评分：8.0/10、query:real-ir
-   evidence：用于稀疏数据生成的扩散模型
-4. [Video Generation with Predictive Latents](/202605/06/2605.02134v1-video-generation-with-predictive-latents)  
+   evidence：函数空间中的分辨率不变有限元扩散模型
+4. [RPBA-Net: An Interpretable Residual Pyramid Bilateral Affine Network for RAW-Domain ISP Enhancement](/202605/07/2605.03626v1-rpba-net-an-interpretable-residual-pyramid-bilateral-affine-network-for-raw-domain-isp-enhancement)  
    标签：评分：8.0/10、query:real-ir
-   evidence：用于视频生成模型的预测学习
-5. [TAP into the Patch Tokens: Leveraging Vision Foundation Model Features for AI-Generated Image Detection](/202605/06/2604.26772v1-tap-into-the-patch-tokens-leveraging-vision-foundation-model-features-for-ai-generated-image-detection)  
+   evidence：RAW域细节增强与修复
+5. [Large Language Models are Universal Reasoners for Visual Generation](/202605/07/2605.04040v1-large-language-models-are-universal-reasoners-for-visual-generation)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：用于视觉生成的扩散模型
+6. [GOR-IS: 3D Gaussian Object Removal in the Intrinsic Space](/202605/07/2605.00498v1-gor-is-3d-gaussian-object-removal-in-the-intrinsic-space)  
    标签：评分：7.0/10、query:real-ir
-   evidence：检测来自未知生成模型的AI生成图像
-6. [3D-ReGen: A Unified 3D Geometry Regeneration Framework](/202605/06/2604.28134v1-3d-regen-a-unified-3d-geometry-regeneration-framework)  
+   evidence：3D高斯对象移除编辑任务
+7. [Threshold-Guided Optimization for Visual Generative Models](/202605/07/2605.04653v1-threshold-guided-optimization-for-visual-generative-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：用于增强、重建和编辑的3D几何再生
-7. [Let ViT Speak: Generative Language-Image Pre-training](/202605/06/2605.00809v1-let-vit-speak-generative-language-image-pre-training)  
+   evidence：大型视觉生成模型的对齐与优化框架
+8. [FlowDIS: Language-Guided Dichotomous Image Segmentation with Flow Matching](/202605/07/2605.05077v1-flowdis-language-guided-dichotomous-image-segmentation-with-flow-matching)  
    标签：评分：7.0/10、query:real-ir
-   evidence：视觉Transformer的生成式预训练框架。
-8. [Active Sampling for Ultra-Low-Bit-Rate Video Compression via Conditional Controlled Diffusion](/202605/06/2605.02849v1-active-sampling-for-ultra-low-bit-rate-video-compression-via-conditional-controlled-diffusion)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：基于扩散模型的视频压缩感知重建
-9. [Escaping Mode Collapse in LLM Generation via Geometric Regulation](/202605/06/2605.00435v1-escaping-mode-collapse-in-llm-generation-via-geometric-regulation)  
+   evidence：用于图像分割与编辑的流匹配框架
+9. [SandSim: Curve-Guided Gaussian Splatting for Reconstructing Sand Painting Processes](/202605/07/2604.27572v1-sandsim-curve-guided-gaussian-splatting-for-reconstructing-sand-painting-processes)  
    标签：评分：6.5/10、query:real-ir
-   evidence：解决生成建模中的模式崩塌问题
-10. [Denoising data using convex relaxations](/202605/06/2605.02327v1-denoising-data-using-convex-relaxations)  
+   evidence：基于扩散的视频合成用于沙画重建
+10. [DiffCap-Bench: A Comprehensive, Challenging, Robust Benchmark for Image Difference Captioning](/202605/07/2605.04503v1-diffcap-bench-a-comprehensive-challenging-robust-benchmark-for-image-difference-captioning)  
    标签：评分：6.5/10、query:real-ir
-   evidence：使用凸松弛进行观测去噪
-11. [Fusing Urban Structure and Semantics: A Conditional Diffusion Model for Cross-City OD Matrix Generation](/202605/06/2605.00938v1-fusing-urban-structure-and-semantics-a-conditional-diffusion-model-for-cross-city-od-matrix-generation)  
+   evidence：图像差异描述与图像编辑数据构建基准
+11. [Generalizable Sparse-View 3D Reconstruction from Unconstrained Images](/202605/07/2604.28193v1-generalizable-sparse-view-3d-reconstruction-from-unconstrained-images)  
    标签：评分：6.0/10、query:real-ir
-   evidence：用于矩阵生成的条件扩散模型
+   evidence：使用学习的几何先验和外观适配器进行稀疏视图3D重建
 
 
 <div class="dpr-home-promo-card">
