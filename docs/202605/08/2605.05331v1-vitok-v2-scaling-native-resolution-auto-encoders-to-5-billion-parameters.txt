@@ -1,0 +1,610 @@
+Title: ViTok-v2: Scaling Native Resolution Auto-Encoders to 5 Billion Parameters
+
+URL Source: https://arxiv.org/pdf/2605.05331v1
+
+Published Time: Fri, 08 May 2026 00:08:34 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# ViTok-v2: Scaling Native Resolution Autoencoders to 5 Billion Parameters 
+
+Philippe Hansen-Estruch 1 Jiahui Chen 1 Vivek Ramanujan 2 Orr Zohar 3 Yan Ping 4 Animesh Sinha 5
+
+Markos Georgopoulos 5 Edgar Schoenfeld 5 Ji Hou 5 Felix Juefei-Xu 5 Sriram Vishwanath 6 Ali Thabet 5
+
+## Abstract 
+
+Vision Transformer (ViT) autoencoders have emerged as compelling tokenizers for images, offering improved reconstruction over convolu-tional tokenizers. However, existing ViT tokeniz-ers cannot explore this landscape as performance degrades outside training resolutions, and reliance on adversarial losses prevents stable scaling. Vi-Tok (Hansen-Estruch et al., 2025) found that the compression ratio r mediates a reconstruction– generation trade-off where lower r means bet-ter reconstructions but harder generations, so im-proving tokenizer reconstruction is key to more Pareto-optimal tokenizers. We introduce ViTok-v2, which addresses these limitations with native resolution support via NaFlex for generalization across resolutions and aspect ratios, and a novel DINOv3 perceptual loss that replaces both LPIPS and GAN objectives for stable training at any scale. ViTok-v2 is trained on ∼2B images and scaled to 5B parameters, the largest image au-toencoder to date. ViTok-v2 matches or exceeds state-of-the-art reconstruction at 256p and outper-forms all baselines at 512p and above. In joint scaling experiments with flow matching genera-tors, we show that scaling both the autoencoder and the generator advances the Pareto frontier of this trade-off. 
+
+## 1. Introduction 
+
+Autoencoders (AEs) (Kingma and Welling, 2013; Oord et al., 2017) compress images into continuous latent representations and serve as a critical component in visual generation (Rombach et al., 2022; Esser et al., 2024). Most production-grade AEs are Convolutional Neural Network (CNN) (LeCun et al., 1989)-based autoencoders, 
+
+> 1
+
+University of Texas, Austin 2University of Washington 
+
+> 3
+
+Stanford University 4Spellbrush 5Meta Superintelligence Labs 
+
+> 6
+
+Georgia Institute of Technology. Correspondence to: Philippe Hansen-Estruch <philippehansen@utexas.edu >.
+
+which leverage CNNs’ translation invariance to generalize robustly across resolutions and aspect ratios. Recently, ViT (Dosovitskiy et al., 2021) autoencoders have emerged as a compelling alternative, offering more aggressive compression ratios (Yu et al., 2024; Chen et al., 2024), improved reconstruction fidelity (Hansen-Estruch et al., 2025; Sargent et al., 2025; Chen et al., 2025b), and scaling properties (Xiong et al., 2025). ViTok (Hansen-Estruch et al., 2025) established the compression ratio r as the central axis of the ViT au-toencoder design space. This ratio determines the latent dimensionality exposed to downstream generators and mediates a reconstruction–generation trade-off (Ye et al., 2024): lower r improves reconstruction, but produces higher-dimensional latent spaces that are more difficult for diffusion models to learn. Crucially, this trade-off is not fixed. It can be improved along two orthogonal axes: at any fixed r, a stronger autoencoder can improve reconstruction without changing the latent space that generators must model, while a larger generator can better exploit the richer latent distributions made available by lower r. Therefore, fully exploring this design space requires scaling both autoencoder and generator capacity. ViTok, however, could only partially explore this landscape. On the autoencoder side, its reliance on adversarial losses introduced training instabilities that made scaling decoders beyond 350M parameters impractical, preventing the study of billion-scale autoencoders. Its fixed 256 ×256 training regime with absolute positional embeddings led to degra-dation at other resolutions and aspect ratios, limiting real-world deployment. On the generator side, the reconstruction– generation trade-off was studied with only a single 450M flow model; so it remains unclear how larger generators interact with different compression ratios. We introduce ViTok-v2, addressing each of these limitations. 
+
+(1) We present, to our knowledge, the first native aspect-ratio ViT-AE , integrating NaFlex-style training (Dehghani et al., 2023) with 2D RoPE positional encoding. Unlike prior ViT-AEs that fail outside of their training resolution, ViTok-v2 trained at 256p generalizes to 512p, 1024p. (2) 
+
+We train the largest continuous ViT image compression autoencoder to date at 5B parameters (4.5B decoder, 463M 1       
+
+> arXiv:2605.05331v1 [cs.CV] 6 May 2026 ViTok-v2: Scaling Native Resolution AEs to 5B Parameters
+> Figure 1. ViTok-v2 method overview. Input images at native aspect ratios are processed through an asymmetric encoder-decoder architecture: a shallow ViT encoder compresses tokens through a bottleneck into compact latents, which are then upsampled and decoded by a large (5–10 ×encoder size) ViT decoder. Training combines Charbonnier, SSIM, and DINOv3 perceptual losses on ∼2B images, requiring no GAN or LPIPS losses. Key advances: (1) NaFlex training enables generalization to arbitrary resolutions and aspect ratios; (2) models trained with full attention are robust to sliding window attention at inference, enabling efficiency at high resolutions; (3) models scale to 5B parameters, over 14 ×larger than prior ViT tokenizers.
+
+encoder), over 14 × larger than ViTok’s 350M. Our training recipe at this scale enables state-of-the-art reconstruction without adversarial training (Section 3.2). (3) We introduce a novel DINOv3-based perceptual loss that replaces both LPIPS and GAN objectives. To our knowledge, we are the first to use DINOv3 directly as a perceptual reconstruction loss, enabling stable billion-scale training (Section 3.4). (4) 
+
+We conduct a joint AE–flow model scaling study , pairing AEs at 350M and 5B parameters with flow models (Lipman et al., 2023; Esser et al., 2024) at 450M and 1.2B parame-ters across multiple compression settings, finding that larger generators benefit from lower r while smaller ones perform best at higher r; concurrently, Scale-RAE (Tong et al., 2026) demonstrates similar benefits of scaling both components for text-to-image generation (Section 3.6). (5) We systemat-ically compare KL, tanh, and LayerNorm regularization, finding minimal impact on generation quality at scale, 
+
+which enables simpler deterministic encoders (Section 3.5). 
+
+## 2. Background & Setup 
+
+Autoencoders for latent generation. An autoencoder consists of an encoder E that compresses an image x ∈
+
+RH×W ×3 into a latent representation z = E(x) ∈ Rh×w×c,and a decoder D that reconstructs ˆx = D(z). The bottleneck 
+
+z has spatial dimensions reduced by factor f with c latent channels per position. The compression ratio r = 3 f 2/c 
+
+measures pixels per latent dimension; lower r means less aggressive compression but makes downstream diffusion modeling harder. Modern latent diffusion pipelines (Rom-bach et al., 2022; Esser et al., 2024; Black Forest Labs, 2024) train autoencoders with:           
+
+> LVAE =∥x−ˆx∥1
+> |{z }
+> recon.
+> +β D KL (q(z|x)∥p(z))
+> |{z }
+> regularization
+> +λpLLPIPS
+> | {z }
+> perceptual
+> +λadv LGAN
+> | {z }
+> adversarial
+
+(1) The β-VAE formulation (Kingma and Welling, 2013; Hig-gins et al., 2017) controls regularization strength, though in practice most models use small β ≈ 10 −6.
+
+Trade-offs in autoencoder training. Two fundamental trade-offs govern autoencoder design. First, the choice of losses creates tension: L1/L2 reconstruction optimizes pixel-level fidelity (PSNR, SSIM), while perceptual losses (Zhang et al., 2018) and adversarial training (Esser et al., 2021) im-prove distributional metrics (FID, FDD) at the cost of pixel accuracy, effectively making the decoder partially genera-tive. ViTok (Hansen-Estruch et al., 2025) demonstrated this explicitly: increasing perceptual and adversarial weights im-proves FID but degrades PSNR/SSIM. Second, a trade-off exists between reconstruction quality (rFID) and generation quality (gFID), mediated by r. Decreasing r improves re-construction but creates a higher-dimensional latent space harder for diffusion models to learn, inducing a parabolic relationship with an optimal r balancing both. Given these two bottlenecks, our goal is to achieve the best possible reconstruction quality for any fixed compression ratio r. We hypothesize that further decoder scaling is the key lever: a larger decoder can better invert the information bottleneck imposed by r, improving reconstruction without changing the latent space that downstream models learn. To probe this, we train models across compression ratios 2ViTok-v2: Scaling Native Resolution AEs to 5B Parameters 12 24 48               
+
+> Compression Ratio r
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> PSNR (dB)
+> 1.7dB
+> 1.5dB
+> 1.8dB
+> 12 24 48
+> Compression Ratio r
+> 0.775
+> 0.800
+> 0.825
+> 0.850
+> 0.875
+> 0.900
+> 0.925
+> SSIM
+> 0.03
+> 0.03
+> 0.05
+> 12 24 48
+> Compression Ratio r
+> 5
+> 10
+> 15
+> 20
+> rFID
+> 2.30
+> 4.00
+> 12.20
+> 12 24 48
+> Compression Ratio r
+> 6
+> 8
+> 10
+> 12
+> 14
+> rFDD
+> 2.00
+> 2.50
+> 5.20
+> 29M/86M 51M/306M 145M/1.2B 456M/4.5B enc d=8
+
+Figure 2. Decoder scaling across compression ratios. Decoder sizes from B (88M) to T (4.5B) evaluated on ImageNet-1k 256 ×256 at 
+
+r ∈ { 12 , 24 , 48 }. Solid: 4-layer encoder; dotted: 8-layer (minimal difference). ∆: B-to-T gap. Scaling past 350M improves all metrics; the B-to-T rFID gap grows from 2.3 at r=12 to 12.2 at r=48 , motivating the joint scaling study in Section 3.6. 
+
+r ∈ { 12 , 24 , 48 } (corresponding to f16 ×64, f16 ×32, and f16 ×16) and scale decoders from 88M to 4.5B parameters. 
+
+2.1. Architecture 
+
+We adopt the ViTok (Hansen-Estruch et al., 2025) archi-tecture with NaFlex-style training (Dehghani et al., 2023; Tschannen et al., 2025) to overcome fixed-resolution lim-itations. Images are resized preserving aspect ratio, gray-padded to dimensions divisible by patch size p ∈ { 16 , 32 },and patchified into non-overlapping p × p patches. We use 2D RoPE (Su et al., 2024). We scale decoders across four sizes while keeping encoders shallow (4 layers): B (768 width, 12 depth, 88M params), L (1024 width, 24 depth, 302M), G (1408 width, 40 depth, 1.1B), and T (3072 width, 40 depth, 4.5B). Models are denoted as 
+
+{enc }-{dec }/{patch }×{ ch }, e.g., Td4-T/16 ×64 
+
+indicates a 4-layer encoder with T-scale decoder, patch size 16, and 64 latent channels. Full architecture details are in Appendix A.1. 
+
+2.2. Training & Data 
+
+We train on ∼2B images from DataComp (Gadre et al., 2023), YFCC-100M (Thomee et al., 2016), Shutter-stock, ImageNet-22K (Russakovsky et al., 2015), and LAION (Schuhmann et al., 2022). Following the SigLIP-2 training protocol (Tschannen et al., 2025), training proceeds in two stages: 90% uses 256-token NaFlex, followed by 10% with 1024-token NaFlex for high-resolution generaliza-tion (see Appendix B for data processing details). We train with full attention but apply 2D sliding window attention (SWA) only at inference; each query attends to a (2 r+1) 2
+
+neighborhood in patch space (we use radius r=8 ), reducing complexity from O(L2) to O(L · r2).We use AdamW (Loshchilov and Hutter, 2019) with 
+
+β = (0 .9, 0.95) , weight decay 0.05, peak learning rate 
+
+5 × 10 −4 with cosine decay, batch size 8192, and gra-dient clipping at 1.0. Training uses FSDP in bfloat16 with float8 GEMMs (Micikevicius et al., 2022) and 
+
+torch.compile , achieving ∼90% MFU on 128 H200 GPUs. Full training details are in Appendix B. 
+
+2.3. Evaluation Metrics 
+
+We report reconstruction quality using PSNR and SSIM for pixel fidelity, plus rFID and rFDD for perceptual quality. Both are Fr ´echet distances (Heusel et al., 2017) computed using Inception-v3 and DINOv3 features, respectively. The “r” prefix distinguishes reconstruction metrics from gener-ation metrics (gFID, gFDD) in Section 3.5. Reconstruction metrics are computed on 50k ImageNet-1k validation images at 256 ×256 unless otherwise noted. For generation metrics, we generate 100k samples and compare against a 100k reference set from ImageNet-22k training data, constructed to include each class at least once with the remainder sampled randomly. 
+
+2.4. Losses 
+
+We avoid adversarial losses for training stability at scale. Our objective is L = Lchar + 0 .1 LSSIM + λp LDINO , where 
+
+Lchar is Charbonnier loss (Charbonnier et al., 1994) for pixel fidelity, LSSIM (Wang et al., 2004) preserves structural similarity, and LDINO is our DINOv3 perceptual tile loss, building on the DINO self-supervised learning lin-eage (Caron et al., 2021; Oquab et al., 2023; Sim ´eoni et al., 2025). The weight λp controls the perception-distortion trade-off: λp=500 balances reconstruction (rFID ≈ 0.7), while λp=1000 prioritizes perceptual metrics (rFID ≈ 0.3) at modest PSNR cost. Loss ablations are in Section 3.4; detailed formulations in Appendix E. 
+
+DINOv3 Perceptual Tile Loss. Since DINOv3 uses fixed positional embeddings, we sample random 224 ×224 tiles from corresponding locations in both input and recon-structed images (see Figure 1). Each tile pair is passed through a frozen DINOv3-S encoder (Sim ´eoni et al., 2025); we extract intermediate features from multiple transformer blocks, L2-normalize per token, and compute MSE between feature maps. Gradients flow through DINOv3 to the tok-enizer, but DINOv3 weights remain frozen. 3ViTok-v2: Scaling Native Resolution AEs to 5B Parameters (a) (b)                                    
+
+> (c) (d)
+> Figure 3. Patch boundary artifacts under different training regimes. 1024p DIV8K reconstruction with our 5B f16 ×64 model. (a) Ground truth. (b) Fixed 256 ×256 crops produce visible grid artifacts. (c) 256-token NaFlex reduces artifacts significantly. (d) 1024-token NaFlex (final 10% of training) removes them entirely. Insets: 2 ×zoom. The two-stage NaFlex schedule is necessary and sufficient for artifact-free high-resolution reconstruction.
+> Table 1. Encoder ablations. Left (f16): Reducing encoder depth from 4 to 1 block has minimal impact, but linear projection fails.
+> Right (f32): At 32 ×compression, width must match patch dimen-sionality (3072). See Appendix A.1 for full model configurations.
+> Depth (f16) Width (f32)
+> Config Enc/Dec SSIM Config Enc/Dec SSIM Bd4 29M/86M .768 Bd4-B 31M/87M .432 Bd2 15M/86M .766 Ld4-L 54M/306M .688 Bd1 8M/86M .753 Gd4-G 149M/1.2B .793 Linear 49K/86M .462 Td4-T 463M/4.5B .872
+
+## 3. Experiments 
+
+We organize our experiments into two parts. First, we ablate the reconstruction autoencoder: encoder depth and width (Section 3.1), decoder scaling across compression ratios 
+
+r ∈ { 12 , 24 , 48 } (Section 3.2), NaFlex training for reso-lution generalization (Section 3.3), and our DINOv3 loss (Section 3.4). Second, we study downstream generation: latent regularization (Section 3.5), joint AE–flow model scaling (Section 3.6), and the effect of decoder capacity on generation quality (Section 3.7). 
+
+3.1. Encoder Depth 
+
+ViTok demonstrated that decoder capacity matters more than encoder capacity. We push this further by testing extremely shallow encoders. Table 1 shows that reducing from 4 to 1 encoder block has minimal SSIM impact, but a pure linear projection degrades catastrophically (0.462 vs. 0.768 SSIM), demonstrating that non-linear capacity is necessary even for encoding. For f32 compression, Table 1 shows that both encoder and decoder width must match or exceed the number of pixels per patch token, consistent with width-matching requirements observed in RAE (Zheng et al., 2025) and analogous to DiT findings that transformer width should match latent dimensionality (Peebles and Xie, 2023). 
+
+Finding 1: Both encoder and decoder width should match or exceed pixels per token, but a 1-block deep encoder is sufficient. 
+
+3.2. Decoder Scaling 
+
+We compare decoders from sizes B (88M) to T (4.5B) at compression ratios r ∈ { 12 , 24 , 48 }, with results in Fig-ure 2. Larger decoders consistently improve all metrics, with benefits increasing at higher compression: at r=12 
+
+the B-to-T rFID gap is 2.3, growing to 12.2 at r=48 . This shows that decoder capacity is especially critical for highly compressed representations where the reconstruction task is more challenging. Scaling past 350M continues to yield improvements, a finding concurrently validated by Giga-Tok (Xiong et al., 2025). Encoder depth (d=4 vs d=8) has minimal impact, consistent with Finding 1 and ViTok-v1. 4ViTok-v2: Scaling Native Resolution AEs to 5B Parameters                          
+
+> Table 2. Loss ablation on ImageNet-1k 256 ×256. Each “+” row adds one loss component to the pixel-only baseline. Model: 5B Td4-T/16 ×64, r=12 . Evaluated on 50k val images. rFID/rFDD use Inception-v3/DINOv3 features. Green: improvement; red: degradation vs. pixel-only. Training Style rFID ↓rFDD ↓SSIM ↑
+> Pixel-only 5.13 10.96 .929
+> +SSIM 4.87 ↓5% 10.42 ↓5% .931 ↑0.2%
+> +LPIPS 0.72 ↓86% 2.93 ↓73% .923 ↓0.6%
+> +DINO ( λ=250 )0.51 ↓90% 1.45 ↓87% .919 ↓1.1%
+> +DINO ( λ=1000 )0.30 ↓94% 1.12 ↓90% .914 ↓1.6%
+> +LPIPS+DINO 0.38 ↓93% 1.35 ↓88% .918 ↓1.2%
+
+Finding 2: Decoder scaling past 350M benefits all compression rates, with gains increasing at higher r.
+
+3.3. NaFlex Training 
+
+We ablate three training regimes (see Section 2.1 for setup): (1) Fixed 256p : standard 256 ×256 square crops; (2) 256-token NaFlex : variable aspect ratios fitting 256 token bud-get; (3) 1024-token NaFlex : 1024 token budget for the final 10% of training (Tschannen et al., 2025). We train with full attention but apply SWA only at inference with negligible quality degradation, implying that attention heads gather useful information primarily from local tokens even when trained with global access. Figure 3 illustrates the progression: fixed 256p training produces visible grid artifacts at non-square resolutions, 256-token NaFlex sig-nificantly reduces these artifacts by exposing the model to varied aspect ratios, and the 1024-token NaFlex stage (final 10% of training) eliminates them entirely. This two-stage schedule is critical for clean high-resolution reconstruction while keeping most of training at the cheaper 256-token budget. 
+
+Finding 3: NaFlex enables resolution generalization; SWA can be added at inference to tokenizers trained with full attention without performance degradation. 
+
+3.4. Loss Ablation 
+
+We ablate our loss components: Charbonnier for pixel fi-delity, SSIM for structural similarity, LPIPS (Zhang et al., 2018) for VGG-based perceptual quality, and our DINOv3 perceptual tile loss (Caron et al., 2021; Oquab et al., 2023; Sim ´eoni et al., 2025) for self-supervised patch-level fea-tures. Table 2 shows results on ImageNet 256 ×256 with all experiments run with our 5B decoder model. Pixel-level losses achieve highest PSNR (34.81 dB) but worst perceptual metrics (rFID 5.13). LPIPS reduces rFID by 86% to 0.72. Our DINOv3 loss achieves strictly better perceptual improvements: λdino =1000 yields rFID 0.30, a 58% improvement over LPIPS, with comparable SSIM cost.   
+
+> Table 3. Latent regularization comparison. KL ( β=0 .01 ), tanh+noise ( σ=0 .01 ), and LayerNorm evaluated with a 450M flow transformer on ImageNet-1k 256p (100 epochs, 5B f16 ×64 AE). All achieve similar gFID (4.7–5.0); we adopt LayerNorm for simplicity.
+
+Method rFID ↓ gFID ↓ gFDD ↓ IS ↑ Std KL ( β=0 .01 ) 0.43 4.71 5.32 181 0.39 Tanh+Noise 0.42 5.02 5.42 178 1.04 LayerNorm 0.43 4.73 5.24 185 1.00 
+
+We attribute this to DINOv3’s self-supervised patch-level training, which preserves fine-grained spatial information while capturing semantic structure. In contrast, LPIPS’s VGG features are trained for classification and are invariant to reconstruction-relevant details. Combining LPIPS with DINO provides no additional benefit (rFID 0.38 vs. 0.30 DINO-only), suggesting that DINO subsumes the perceptual signal provided by LPIPS. 
+
+Finding 4: Our DINOv3 loss is a stronger perceptual loss than LPIPS, notably improving rFID and rFDD with comparable SSIM. 
+
+3.5. Latent Regularization 
+
+Having established our reconstruction recipe, we now turn to downstream generation. Recent work suggests that scal-ing to higher latent channels requires sophisticated latent space structuring, such as high-frequency emphasis (Sko-rokhodov et al., 2025) or DINO alignment (Yao and Wang, 2025; Zheng et al., 2025). We investigate whether simpler approaches suffice, starting with the choice of latent regu-larization. We use the flow model training setup described in Appendices C and A.2. We compare three approaches: KL divergence with β=0 .01 
+
+(proper VAE), tanh bounding with scaled Gaussian noise (σ=0 .01 ), and LayerNorm (fully deterministic). As shown in Table 3, all methods achieve similar gFID (4.7–5.0) and rFID, indicating that for high-channel latents the choice of stochasticity has minimal impact. This is consistent with DiTo (Chen et al., 2025c), which also adopts LayerNorm. We choose LayerNorm for simplicity: it requires no hyper-parameter tuning and is fully deterministic. 
+
+Finding 5: High-channel latent generation is largely insensitive to the choice of latent regularization. 
+
+3.6. Joint AE–Flow Model Scaling 
+
+To control for compute, we plot generation metrics against cumulative flow model training FLOPs in Figure 4. We train DiT-style flow transformers (Peebles and Xie, 2023) at two scales (450M and 1.2B) for 300 epochs on ImageNet-22k, using latents from our 5B AE at compression ratios 
+
+r ∈ { 12 , 24 , 48 }.5ViTok-v2: Scaling Native Resolution AEs to 5B Parameters 0 5 10 15 20 25                          
+
+> Training FLOPs (ZFLOPs)
+> 2
+> 4
+> 6
+> 8
+> 10
+> gFID
+> 0510 15 20 25
+> Training FLOPs (ZFLOPs)
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> gFDD
+> r= 48 r= 24 r= 12 1.2B (solid) 450M (dashed)
+> Figure 4. Joint AE–flow model scaling on ImageNet-22k. DiT-style flow transformers (450M dashed, 1.2B solid) trained for 300 epochs at r∈ { 12 ,24 ,48 }. X-axis: cumulative FLOPs. (a) gFID: the 450M flow model performs best at r=48 (highest compression); the 1.2B model makes lower-rlatents competitive, exploiting the richer representations that Figure 2 shows scale most from decoder capacity.
+> (b) gFDD: larger models consistently outperform across all r.
+
+For gFID (Inception-v3 features), the 450M flow trans-former at r=48 (highest compression) outperforms the lower-r variants at matched FLOPs, consistent with a more compact latent space being easier for smaller generators to learn. However, this ranking flips with the 1.2B flow transformer: r=12 and r=24 become competitive or supe-rior, indicating that larger flow models can better exploit the richer representations available at lower compression. For gFDD (DINOv3 features), larger flow models consistently outperform smaller ones across all compression ratios at matched FLOPs. Interestingly, gFID and gFDD rankings di-verge: r=12 achieves competitive gFID with the 1.2B flow transformer but lags in gFDD, suggesting that Inception-v3 and DINOv3 capture different aspects of generation quality and that low-compression latents may still pose challenges for semantic fidelity as measured by DINOv3. 
+
+3.7. Decoder Capacity 
+
+To isolate the effect of decoder capacity on downstream gen-eration, we train 1.2B flow transformers on ImageNet-22k using latents from two AE sizes: our 5B (Td4-T) and 350M (Ld4-L) decoders. Figure 5 plots reconstruction metrics (rFID, rFDD on 50k ImageNet-1k val) against generation metrics (gFID, gFDD on 50k samples) for both AE sizes across compression ratios r ∈ { 12 , 24 , 48 } at 256p (f16). We also include a 512p ablation using the f32 configuration. Across all compression ratios and resolutions, the 5B AE (red) achieves 1–2 gFID points better generation quality than the 350M AE (blue). This holds even when the 5B AE shows similar or worse rFID, indicating that decoder capacity benefits generation through mechanisms beyond reconstruction fidelity alone. Combined with the flow model scaling results in Section 3.6, both decoder capacity and flow model capacity independently contribute to unlocking the benefits of lower compression ratios. 
+
+Finding 6: Larger generators can effectively utilize autoencoders with low compression ratio r.
+
+## 4. Comparison 
+
+We compare ViTok-v2 against prior visual tokenizers, both CNN-based (SD-VAE (Rombach et al., 2022), SDXL-VAE (Podell et al., 2023), FLUX (Black Forest Labs, 2024), DC-AE (Chen et al., 2024), Qwen, Hunyuan (Kong et al., 2024)) and ViT-based (VA-VAE, RAE (Zheng et al., 2025), AToken (Lu et al., 2025)), on reconstruction benchmarks spanning 256p to 8192p. Evaluation metrics (rFID, rFDD, PSNR, SSIM) and methodology follow Sections 2.3 and 2.1 respectively. 
+
+4.1. 256p and 512p Reconstruction 
+
+Table 4 summarizes reconstruction quality across resolu-tions and compression ratios. ViTok-v2 5B consistently achieves the best PSNR and SSIM at each compression ratio, demonstrating superior pixel-level fidelity. For perceptual metrics (rFID/rFDD), ViTok-v2 is competitive, generally matching or beating baselines at 512p, while FLUX.2 leads at 256p due to its adversarial training. This rFID gap can be closed: increasing our DINO loss weight ( λ=1000 ) yields rFID 0.30 on ImageNet 256p, approaching FLUX.2’s 0.15, with only modest PSNR reduction (see ‡ rows). At r=12 , ViTok-v2 5B achieves +3.1 dB PSNR over FLUX.2 on ImageNet 256p; this gap widens to 2–3 dB at r=24 and r=48 . The high-DINO variant ( ‡) demon-strates the perception-distortion trade-off: rFID drops from 0.74 to 0.30 (approaching FLUX.2’s 0.15) at the cost of 0.6 dB PSNR. At 512p, ViTok-v2 achieves best or near-best 6ViTok-v2: Scaling Native Resolution AEs to 5B Parameters 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00 
+
+rFID (reconstruction)             
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> gFID (generation)
+> r= 12
+> r= 24
+> r= 48
+> 512p
+> r= 6 512p r= 12
+> 123456
+
+rFDD (reconstruction)           
+
+> 10
+> 20
+> 30
+> 40
+> 50
+> gFDD (generation)
+> r= 12
+> r= 24
+> r= 48
+> 512p
+> r= 6
+> 512p r= 12
+> 5B VAE 302M VAE 5B VAE (512p f32) 1.2B DiT 450M DiT
+
+Figure 5. Reconstruction vs. generation quality. Reconstruction metrics (rFID, rFDD) vs. generation metrics (gFID, gFDD) for 5B AE (red) and 350M AE (blue) at r ∈ { 12 , 24 , 48 }, 256p. Points are annotated with r values. (a) rFID vs. gFID. (b) rFDD vs. gFDD. The 5B AE achieves 1–2 gFID improvement over 350M even at comparable reconstruction quality, confirming decoder capacity benefits generation beyond reconstruction fidelity. 
+
+Table 4. Reconstruction quality on ImageNet 256p, COCO 256p, and COCO 512p. ViTok-v2 5B vs. CNN- and ViT-based methods at 
+
+r ∈ { 12 , 24 , 48 }. † from original papers; ‡ high DINO loss weight ( λ=1000 ) trading PSNR for better rFID.                                                                                                                                                                                                                                   
+
+> ImageNet 256p COCO 256p COCO 512p Model Comp. rFID ↓FDD ↓PSNR ↑SSIM ↑FID ↓FDD ↓PSNR ↑SSIM ↑FID ↓FDD ↓PSNR ↑SSIM ↑
+> FLUX.2 f8 ×16 12 .15 –31.1 .887 1.12 1.46 31.5 .900 .45 .45 33.2 .914 FLUX.1 f8 ×16 12 .24 1.26 31.1 .887 ––––––––Hunyuan f8 ×16 12 .67 –33.3 .916 ––––––––VA-VAE f16 ×64 12 .14 –30.7 .870 ––––––––Qwen f8 ×16 12 1.32 7.36 30.3 .860 1.71 3.79 29.1 .849 .79 2.24 30.8 .863 ViTok-v2 5B f16 ×64 12 .74 2.49 34.2 .924 2.98 4.28 34.1 .930 .41 1.02 35.9 .938
+> ViTok-v2 5B ‡f16 ×64 12 .30 1.12 33.6 .914 1.85 2.15 33.5 .921 .38 .72 32.1 .925 SDXL-VAE †f8 ×824 .68 –26.0 .834 4.16 9.59 25.8 .740 2.20 4.77 27.5 .762 AToken †f16 ×32 24 .26 –28.8 .814 ––––––––VA-VAE f16 ×32 24 .28 –28.0 .790 ––––––––ViTok-v2 5B f16 ×32 24 1.26 2.94 31.2 .867 4.72 5.37 31.1 .878 1.02 1.44 32.9 .888
+> SD-VAE f8 ×448 .73 6.14 25.7 .702 4.38 12.1 25.4 .715 2.28 4.78 27.1 .742 VA-VAE f16 ×16 48 .55 –25.3 .690 ––––––––RAE f16 ×16 48 .61 –18.8 .496 ––––––––ViTok-v2 5B f16 ×16 48 1.52 3.66 28.5 .793 6.66 7.15 28.3 .807 2.27 2.24 30.1 .820
+
+results across all metrics; sliding window attention enables fast, high-quality reconstruction where CNN-based methods exhibit significant latency. 
+
+4.2. High-Resolution Reconstruction 
+
+Table 5 shows high-resolution results on DIV8K. ViTok-v2 substantially outperforms all baselines: at 2048p, we achieve rFID 0.06 (87% better than FLUX.2) with +2.3 dB PSNR. The efficiency gap is even more striking at higher res-olutions. CNN-based methods either time out ( >60s/image) or run out of memory at 4K+, while the transformer ar-chitecture with sliding window attention scales gracefully: ViTok-v2 5B processes 4K in 1.2s ( 50 ×+ faster ) and f32 in 0.4s. At 8192p, only ViTok-v2 succeeds; all baselines OOM. The f16 and f32 configurations offer a practical quality– speed trade-off: f32 ×128 processes 4K images in 0.4s (3 ×
+
+faster than f16 ×64) at r=24 , trading ∼2 dB PSNR for sub-stantially lower latency. This makes the f32 variants attrac-tive for latency-sensitive pipelines, while f16 remains prefer-able when reconstruction fidelity is paramount. Critically, the ability to process 8K images at all, where every CNN baseline we tested runs out of memory, opens new applica-tions for high-resolution generation and editing workflows that were previously intractable with learned tokenizers. 
+
+## 5. Related Work 
+
+Visual tokenization. Deep autoencoders compress images into continuous latent representations for efficient generative modeling (Kingma and Welling, 2013; Oord et al., 2017). SD-VAE (Rombach et al., 2022) established the standard 7ViTok-v2: Scaling Native Resolution AEs to 5B Parameters                                                                                                                                                               
+
+> Table 5. High-resolution reconstruction on DIV8K (1024p–8192p). CNN methods timeout or OOM at 4K+. ViTok-v2 with SWA scales linearly: 4K in 0.4–1.2s, 8K in 1.3–5.7s.
+> DIV8K 1024p DIV8K 2048p Latency Model Comp. rFID ↓FDD ↓PSNR ↑SSIM ↑ms FID ↓FDD ↓PSNR ↑SSIM ↑ms 4K 8K FLUX.2 f8 ×16 12 .90 .44 31.4 .908 108 .48 .16 32.6 .918 284 >60s OOM Qwen f8 ×16 12 1.50 1.28 28.8 .845 237 .69 .31 30.0 .864 790 OOM OOM ViTok-v2 5B f16 ×64 12 .35 .89 34.0 .932 207 .06 .11 34.9 .938 294 1.2s 5.4s ViTok-v2 5B f16 ×32 24 1.21 2.16 31.0 .874 71 .19 .47 32.0 .886 292 1.2s 5.2s ViTok-v2 5B f32 ×128 24 1.68 3.13 29.1 .834 15 .73 .70 30.0 .853 70 .4s 1.3s
+> SD-VAE f8 ×448 5.59 4.38 25.6 .707 110 1.92 1.91 26.6 .738 290 >60s OOM ViTok-v2 5B f16 ×16 48 3.05 3.17 28.5 .802 71 .69 1.11 29.4 .818 290 1.2s 5.7s ViTok-v2 5B f32 ×64 48 4.69 6.14 27.0 .754 15 .67 1.87 28.1 .782 71 .5s 1.3s
+> DC-AE-f32 f32 ×32 96 7.08 4.88 23.7 .636 335 ––––OOM OOM OOM DC-AE-f64 f64 ×128 96 6.52 4.33 24.1 .648 422 ––––OOM OOM OOM
+
+architecture for latent diffusion: a convolutional encoder-decoder with 8 × spatial compression and 4 channels, pro-ducing 1024 latent tokens per 256px image. SDXL-VAE im-proved reconstruction quality via larger training batches and longer schedules (Podell et al., 2023), while FLUX (Black Forest Labs, 2024) extends to 16 channels with adversarial training for sharper reconstructions. These CNN-based AEs benefit from translation invariance, enabling robust cross-resolution generalization even when trained only at 256px. 
+
+ViT-based autoencoders. Vision Transformer autoencoders offer an alternative to CNNs with more aggressive compres-sion and cleaner scaling properties. ViTok (Hansen-Estruch et al., 2025) demonstrated that decoder capacity determines reconstruction quality more than encoder capacity, matching CNN-AE fidelity while using only 256 tokens (vs. 1024), enabling 4 × faster diffusion training. GigaTok (Xiong et al., 2025) scaled discrete tokenizers to 3B parameters using DINOv2 regularization. TiTok (Yu et al., 2024) achieves extreme compression to just 32 tokens using learned queries. AToken (Lu et al., 2025) unifies image, video, and 3D tokenization with 4D RoPE and adversarial-free training. FlowMo (Sargent et al., 2025) replaces adversarial losses with a diffusion decoder, achieving state-of-the-art recon-struction without convolutions or 2D latent codes. MAE-Tok (Chen et al., 2025b) shows that masked autoencoder pretraining produces better latent structure than variational constraints. However, vanilla ViTs struggle at resolutions beyond their training distribution: models trained at 256px exhibit severe grid artifacts at 512px due to positional em-bedding extrapolation failures. 
+
+High-compression & flexible-resolution. DC-AE (Chen et al., 2024) achieves extreme 32–128 × compression ra-tios for efficient 4K generation (Xie et al., 2024); DC-AE 1.5 (Chen et al., 2025a) extends this with channel mask-ing for improved downstream generation. Scale-RAE (Tong et al., 2026) scales regularized autoencoders to large-scale text-to-image generation, showing that VAE-based models overfit while RAE models remain stable. NaViT (Dehghani et al., 2023) introduced native aspect ratio training for ViTs, later extended by SigLIP-2 (Tschannen et al., 2025) and FiT (Lu et al., 2024) for flexible-resolution diffusion. We adopt NaFlex-style training combined with 2D RoPE to enable resolution generalization in ViT-AEs. 
+
+Perceptual losses & trade-offs. LPIPS (Zhang et al., 2018) uses pretrained VGG features to measure perceptual similarity, while adversarial training with GANs (Esser et al., 2021) produces sharper outputs at the cost of training instability. DINOv3 (Sim ´eoni et al., 2025) provides modern self-supervised features with strong spatial correspondence; SVG (Shi et al., 2025) goes further by replacing the VAE entirely with frozen DINO features for 62 × faster training. We demonstrate DINOv3 can replace both LPIPS and GAN objectives while enabling stable billion-parameter training. The perception-distortion trade-off (Blau and Michaeli, 2018) is well-documented: optimizing perceptual metrics (FID) often degrades pixel fidelity (PSNR). Additionally, a reconstruction-generation trade-off exists where larger bottlenecks improve reconstruction but can hurt down-stream generation quality (Hansen-Estruch et al., 2025); we systematically study both trade-offs in Sections 3.4 and 3.5. 
+
+## 6. Conclusion 
+
+We presented ViTok-v2, a family of ViT-based visual tokenizers scaled to 5B parameters. Key findings: (1) Encoder depth matters less than width; (2) NaFlex training in two stages, with the first 90% of training using a 256-token budget then the last 10% using a 1024-token budget, enables high-resolution reconstruction that generalizes to natural image resolutions and aspect ratios; (3) Our novel DINOv3 loss matches LPIPS’s performance, while enabling stable GAN-free training; (4) Decoder scaling benefits increase with higher compression, but the encoder size has minimal impact on performance; (5) Larger generation models better leverage high-channel latents and larger autoencoders enable better generation quality even if reconstruction performance is worse. ViTok-v2 achieves 8ViTok-v2: Scaling Native Resolution AEs to 5B Parameters 
+
+state-of-the-art PSNR/SSIM on COCO and DIV8K with +3 dB over FLUX.2. Additionally, our ViT-based approach leveraging sliding window attention enables the processing of 8k images, where all CNN-based tokenizers are unusable due to running out of memory. 
+
+## References 
+
+Black Forest Labs. Flux.1. https://github.com/ black-forest-labs/flux , 2024. Yochai Blau and Tomer Michaeli. The perception-distortion tradeoff. In CVPR , pages 6228–6237, 2018. Mathilde Caron, Hugo Touvron, Ishan Misra, Herv ´e J ´egou, Julien Mairal, Piotr Bojanowski, and Armand Joulin. Emerging properties in self-supervised vision transform-ers. In ICCV , 2021. P. Charbonnier, L. Blanc-Feraud, G. Aubert, and M. Bar-laud. Two deterministic half-quadratic regularization algorithms for computed imaging . In Proceedings of 1st International Conference on Image Processing ,volume 2, pages 168,169,170,171,172, Los Alami-tos, CA, USA, November 1994. IEEE Computer Society. doi: 10.1109/ICIP.1994.413553. URL 
+
+https://doi.ieeecomputersociety.org/ 10.1109/ICIP.1994.413553 .Junyu Chen, Han Cai, Junsong Chen, Enze Xie, Shang Yang, Haotian Tang, Muyang Li, Yao Lu, and Song Han. Deep compression autoencoder for efficient high-resolution dif-fusion models. arXiv preprint arXiv:2410.10733 , 2024. Junyu Chen, Chongjian Ge, Enze Xie, Yue Wu, Xiangyu Guo, Jingyi Liu, Han Cai, Xiaoxin Ren, Hongsheng Li, and Song Han. Dc-ae 1.5: Efficient image tok-enizer for autoregressive visual generation. arXiv preprint arXiv:2501.09012 , 2025a. Tianhong Chen, Haoqi Fan, Saurabh Gupta, and Kaiming He. MAETok: Masked autoencoders as image tokeniz-ers, 2025b. URL https://arxiv.org/abs/2502. 03444 .Yinbo Chen, Rohit Girdhar, Xiaolong Wang, Sai Saketh Rambhatla, and Ishan Misra. Diffusion autoen-coders are scalable image tokenizers. arXiv preprint arXiv:2501.18593 , 2025c. Mostafa Dehghani, Basil Mustafa, Josip Djolonga, Jonathan Heek, Matthias Minderer, Mathilde Caron, Andreas Steiner, Joan Puigcerver, Robert Geirhos, Ibrahim Al-abdulmohsin, Avital Oliver, Piotr Padlewski, Alexey Grit-senko, Mario Lu ˇci ´c, and Neil Houlsby. Patch n’ pack: Navit, a vision transformer for any aspect ratio and resolu-tion, 2023. URL https://arxiv.org/abs/2307. 06304 .Prafulla Dhariwal and Alexander Nichol. Diffusion models beat GANs on image synthesis. In NeurIPS , 2021. Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszkoreit, and Neil Houlsby. An image is worth 16x16 words: Transformers for image recognition at scale. In ICLR , 2021. Patrick Esser, Robin Rombach, and Bj ¨orn Ommer. Tam-ing transformers for high-resolution image synthesis. In 
+
+CVPR , 2021. Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas M ¨uller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. Scaling recti-fied flow transformers for high-resolution image synthesis. In ICML , 2024. Samir Yitzhak Gadre, Gabriel Ilharco, Alex Fang, Jonathan Hayase, Georgios Smber, Thao Nguyen, Grigory Kaplun, et al. Datacomp: In search of the next generation of multimodal datasets. NeurIPS , 2023. Philippe Hansen-Estruch, David Yan, Ching-Yao Chung, Orr Zohar, Jialiang Wang, Tingbo Hou, Tao Xu, Sri-ram Vishwanath, Peter Vajda, and Xinlei Chen. Learn-ings from scaling visual tokenizers for reconstruction and generation, 2025. URL https://arxiv.org/abs/ 2501.09755 .Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. GANs trained by a two time-scale update rule converge to a local Nash equilibrium. In NIPS , 2017. Irina Higgins, Loic Matthey, Arka Pal, Christopher Burgess, Xavier Glorot, Matthew Botvinick, Shakir Mohamed, and Alexander Lerchner. β-VAE: Learning basic visual concepts with a constrained variational framework. In 
+
+ICLR , 2017. Diederik P Kingma and Max Welling. Auto-encoding varia-tional bayes. In ICLR , 2013. Weijie Kong, Qi Tian, Zijian Zhang, Rox Min, Zuozhuo Dai, Jin Zhou, Jiangfeng Xiong, Xin Li, Bo Wu, Jian-wei Zhang, et al. Hunyuanvideo: A systematic frame-work for large video generative models. arXiv preprint arXiv:2412.03603 , 2024. Y. LeCun, B. Boser, J. S. Denker, D. Henderson, R. E. Howard, W. Hubbard, and L. D. Jackel. Backpropagation applied to handwritten zip code recognition. Neural Com-putation , 1(4):541–551, 1989. doi: 10.1162/neco.1989.1. 4.541. 9ViTok-v2: Scaling Native Resolution AEs to 5B Parameters 
+
+Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Max-imilian Nickel, and Matthew Le. Flow matching for generative modeling. In ICLR , 2023. Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In ICLR , 2019. Jiasen Lu, Liangchen Song, Mingze Xu, Byeongjoo Ahn, Yanjun Wang, Chen Chen, Afshin Dehghan, and Yinfei Yang. Atoken: A unified tokenizer for vision. arXiv preprint arXiv:2509.14476 , 2025. Zeyu Lu, Zidong Wang, Di Huang, Chengyue Wu, Xi-hui Liu, Wanli Ouyang, and Lei Bai. Fit: Flexible vi-sion transformer for diffusion model. arXiv preprint arXiv:2402.12376 , 2024. Paulius Micikevicius, Dusan Stosic, Neil Burgess, Marius Cornea, Pradeep Dubey, Richard Grisenthwaite, Sangwon Ha, Alexander Heinecke, Patrick Judd, John Kamalu, et al. Fp8 formats for deep learning. arXiv preprint arXiv:2209.05433 , 2022. Aaron van den Oord, Oriol Vinyals, and Koray Kavukcuoglu. Neural discrete representation learning. In NIPS , 2017. Maxime Oquab, Timoth ´ee Darcet, Th ´eo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fernandez, Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, Mahmoud Assran, Nicolas Ballas, Wojciech Galuba, Rus-sell Howes, Po-Yao Huang, Shang-Wen Li, Ishan Misra, Michael Rabbat, Vasu Sharma, Gabriel Synnaeve, Hu Xu, Herv ´e Jegou, Julien Mairal, Patrick Labatut, Armand Joulin, and Piotr Bojanowski. Dinov2: Learning robust visual features without supervision. TMLR , 2023. William Peebles and Saining Xie. Scalable diffusion models with transformers. In ICCV , 2023. Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas M ¨uller, Joe Penna, and Robin Rombach. Sdxl: Improving latent diffusion mod-els for high-resolution image synthesis. arXiv preprint arXiv:2307.01952 , 2023. Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj ¨orn Ommer. High-resolution im-age synthesis with latent diffusion models. In CVPR ,2022. Olga Russakovsky, Jia Deng, Hao Su, Jonathan Krause, Sanjeev Satheesh, Sean Ma, Zhiheng Huang, Andrej Karpathy, Aditya Khosla, Michael Bernstein, Alexan-der C. Berg, and Li Fei-Fei. ImageNet Large Scale Vi-sual Recognition Challenge. International Journal of Computer Vision (IJCV) , 115(3):211–252, 2015. doi: 10.1007/s11263-015-0816-y. Kyle Sargent, Shengbang Tong, Xi Yin, Bj ¨orn Ommer, and Yi Ma. FlowMo: Flow-based autoregressive modeling of continuous visual tokens, 2025. URL https:// arxiv.org/abs/2503.11056 .Axel Sauer, Dominik Lorenz, Andreas Blattmann, and Robin Rombach. Adversarial diffusion distillation. In 
+
+ECCV , 2024. Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon, Ross Wightman, Mehdi Cherti, Theo Coombes, Aarush Katta, Clayton Mullis, Mitchell Worts-man, et al. Laion-5b: An open large-scale dataset for training next generation image-text models. NeurIPS ,2022. Yongming Shi, Xinyao Chen, Weidi Liang, Yu Zeng, and Shengbang Tong. SVG: Scalable visual generation with frozen DINO features, 2025. URL https://arxiv. org/abs/2510.15301 .Oriane Sim ´eoni, Huy V. Vo, Maximilian Seitzer, Federico Baldassarre, Maxime Oquab, Cijo Jose, Vasil Khali-dov, Marc Szafraniec, Seungeun Yi, Micha ¨el Ramamon-jisoa, Francisco Massa, Daniel Haziza, Luca Wehrst-edt, Jianyuan Wang, Timoth ´ee Darcet, Th ´eo Moutakanni, Leonel Sentana, Claire Roberts, Andrea Vedaldi, Jamie Tolan, John Brandt, Camille Couprie, Julien Mairal, Herv ´e J ´egou, Patrick Labatut, and Piotr Bojanowski. Di-nov3. arXiv preprint arXiv:2508.10104 , 2025. Ivan Skorokhodov, Shahar Katz, Aliaksandr Siarohin, Willi Menapace, Yanir Kleiman, and Sergey Tulyakov. Improv-ing the diffusability of autoencoders. In ICML , 2025. Jianlin Su, Murtadha Ahmed, Yu Lu, Shengfeng Pan, Wen Bo, and Yunfeng Liu. Roformer: Enhanced transformer with rotary position embedding. Neurocomputing , 568: 127063, 2024. Bart Thomee, David A Shamma, Gerald Friedland, Ben-jamin Elizalde, Karl Ni, Douglas Poland, Damian Borth, and Li-Jia Li. YFCC100M: The new data in multimedia research. Communications of the ACM , 2016. Shengbang Tong, Bobby He, Kyle Sargent, Bj ¨orn Ommer, and Yi Ma. Scale-RAE: Scaling regularized autoencoders for large-scale text-to-image generation, 2026. URL 
+
+https://arxiv.org/abs/2601.16208 .Michael Tschannen, Alexey Gritsenko, Xiao Wang, Muham-mad Ferjad Naeem, Ibrahim Alabdulmohsin, Nikhil Parthasarathy, Talfan Evans, Lucas Beyer, Ye Xia, Basil Mustafa, Olivier H ´enaff, Jeremiah Harmsen, Andreas Steiner, and Xiaohua Zhai. Siglip 2: Multilingual vision-language encoders with improved semantic un-derstanding, localization, and dense features, 2025. URL 
+
+https://arxiv.org/abs/2502.14786 .10 ViTok-v2: Scaling Native Resolution AEs to 5B Parameters 
+
+Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Simoncelli. Image quality assessment: from error visibil-ity to structural similarity. IEEE Transactions on Image Processing , 13(4):600–612, 2004. Enze Xie, Junsong Chen, Junyu Chen, Han Cai, Haotian Tang, Yujun Lin, Zhekai Zhang, Muyang Li, Ligeng Zhu, Yao Lu, and Song Han. Sana: Efficient high-resolution image synthesis with linear diffusion transformer. arXiv preprint arXiv:2410.10629 , 2024. Tianwei Xiong, Jun Hao Liew, Zilong Huang, Jiashi Feng, and Xihui Liu. Gigatok: Scaling visual tokenizers to 3 billion parameters for autoregressive image genera-tion, 2025. URL https://arxiv.org/abs/2504. 08736 .Jingfeng Yao and Xinggang Wang. Reconstruction vs. generation: Taming optimization dilemma in latent dif-fusion models, 2025. URL https://arxiv.org/ abs/2501.01423 .Tian Ye, Zixin Li, Xin Chen, Zhihui Deng, Lin Chen, Peng Gao, Yong Zhao, and Ying Shan. When worse is better: Navigating the compression-generation trade-off in vi-sual tokenization, 2024. URL https://arxiv.org/ abs/2412.16326 .Qihang Yu, Mark Weber, Xueqing Deng, Xiaohui Shen, Daniel Cremers, and Liang-Chieh Chen. An image is worth 32 tokens for reconstruction and generation, 2024. URL https://arxiv.org/abs/2406.07550 .Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In CVPR , 2018. Boyang Zheng, Nanye Ma, Shengbang Tong, and Saining Xie. Diffusion transformers with representation autoen-coders. arXiv preprint arXiv:2510.11690 , 2025. 11 ViTok-v2: Scaling Native Resolution AEs to 5B Parameters 
+
+## A. Architecture Details 
+
+A.1. ViTok-v2 Autoencoder Model Variants. We scale decoders from 88M to 4.5B parameters by increasing width (Table 6). Encoders use 4 layers with matched width across all variants.                      
+
+> Table 6. Model variants.
+> Scale Width Depth Heads Params B768 12 12 88M L1024 24 16 302M G1408 40 16 1.1B T3072 40 24 4.5B
+
+Encoder Design. A shallow stack (depth 4, width matching decoder) maps input patches to latents via a linear head. We use a non-variational design with tanh-bounded output and small i.i.d. Gaussian noise during training. The encoder comprises only ∼10% of total parameters, validating our asymmetric architecture where decoder capacity dominates. 
+
+Decoder Design. Latents are projected to hidden dimension and processed by a deep transformer stack. A final linear layer predicts per-token RGB patches, which are unpatchified to reconstruct the image. 
+
+Attention and Positional Encoding. We use pre-norm transformer blocks with multi-head self-attention (per-head Q/K RMSNorm) and 2D rotary positional embeddings (RoPE). The MLP uses SwiGLU with expansion ≈2.67. LayerScale stabilizes residual branches. For high-resolution inference, sliding window attention (SWA) with 2D block radius 8 enables linear memory scaling. 
+
+A.2. Transformer-Based Flow Model 
+
+Our flow model operates directly on ViTok-v2 latents z ∈ RB×L×c, following the DiT architecture (Peebles and Xie, 2023) with modern improvements. 
+
+Architecture. Latents are projected to hidden dimension D with learned absolute position embeddings. Each block applies: (1) self-attention on affinely modulated pre-norm, (2) cross-attention to text/class conditioning, and (3) SwiGLU MLP, with LayerScale on all residuals. We use AdaLN (Peebles and Xie, 2023) for timestep modulation and 2D RoPE (Su et al., 2024) for positional encoding. 
+
+Output Head. The final head maps hidden states back to latent dimension to predict flow matching targets in the ViTok-v2 latent space. 
+
+## B. Pretraining Setup 
+
+Training Data. We train on ∼2B images from DataComp, YFCC-100M, Shutterstock, ImageNet-22K, and LAION, streamed via WebDataset shards. 
+
+NaFlex Variable-Resolution Training. Unlike fixed-resolution training that resizes all images to a canonical size (e.g., 256 ×256), we use NaFlex (Dehghani et al., 2023) to process images at their native aspect ratios within a token budget . Each image is randomly cropped and resized to fit the sampled budget while preserving aspect ratio, exposing the model to diverse resolutions during training. Training proceeds in two stages: 90% of training uses a 256-token budget ( ∼256p at patch size 16), followed by 10% with a 1024-token budget ( ∼512p) to enable high-resolution generalization. Variable-length sequences are packed with boolean attention masks for efficient batching. 
+
+Hyperparameters. AdamW ( β = (0 .9, 0.95) , weight decay 0.05, lr 5 × 10 −4) with cosine schedule and gradient clip 1.0 for ∼300k steps. Batch size 8192 with gradient accumulation. Training uses FSDP in bfloat16. Through bfloat16, float8 GEMMs (Micikevicius et al., 2022), and torch.compile , we achieve 90% MFU on 128 H200s. 12 ViTok-v2: Scaling Native Resolution AEs to 5B Parameters 
+
+Loss Weights. We use λchar = 1 .0, λSSIM = 0 .1, and λdino = 500 (default) or λdino = 1000 (high-perceptual variant). We do not use adversarial losses, which simplifies training and avoids mode collapse while still achieving strong perceptual quality through the DINOv3 loss. 
+
+## C. Flow Model Training 
+
+To evaluate generation quality (Section 3.5), we train transformer-based flow models on ViTok-v2 latents using flow matching. 
+
+Model Configurations. We train two scales: DiT-450M (depth 24, width 1152, 16 heads) and DiT-1.2B (depth 32, width 1536, 24 heads). Both use SwiGLU MLPs, 2D RoPE, and AdaLN for conditioning. 
+
+Training Setup. Models are trained on ImageNet-22k (10 × larger than ImageNet-1k for rigorous generalization testing) for 300 epochs with batch size 4096, EMA decay 0.999, and cosine LR schedule with peak 1 × 10 −3. We use Euler sampling with 50 steps and classifier-free guidance scale 4.0 at inference. 
+
+## D. Evaluation Protocol 
+
+Metrics. We evaluate reconstruction quality using four complementary metrics: • rFID (reconstruction FID): Fr ´echet Inception Distance between ground truth and reconstructed images using Inception-v3 features. Lower is better. • rFDD (reconstruction FDD): Fr ´echet DINOv3 Distance using DINOv3 features, capturing semantic similarity. Lower is better. • PSNR : Peak Signal-to-Noise Ratio measuring pixel-level fidelity. Higher is better. • SSIM : Structural Similarity Index measuring perceptual similarity via luminance, contrast, and structure. Higher is better. 
+
+Datasets and Sampling. For COCO evaluation, we use 5,000 randomly sampled validation images with ADM-style center cropping (Dhariwal and Nichol, 2021) to the target resolution. For DIV8K, we evaluate on the full validation set at native resolution. ImageNet evaluations use the standard 50K validation split. 
+
+Inference Configuration. All evaluations use float8 inference with torch.compile on a single NVIDIA H100 GPU. We use deterministic sampling (no stochastic augmentation at inference) for reproducibility. 
+
+## E. Loss Functions 
+
+We train without adversarial losses to avoid instability. Our objective combines: 
+
+Charbonnier Loss. Lchar = p(x − ˆx)2 + ϵ2 with ϵ = 10 −3. A smooth L1 approximation providing stable gradients near zero while being robust to outliers. 
+
+SSIM Loss. Structural similarity (Wang et al., 2004) computed over local windows, capturing luminance, contrast, and structure. We use LSSIM = 1 − SSIM (x, ˆx).
+
+DINOv3 Perceptual Tile Loss. Following Sauer et al. (2024), we use frozen DINOv3-S (Sim ´eoni et al., 2025) features rather than VGG-based LPIPS. We sample random 224 ×224 tiles from corresponding locations in input and reconstruction, extract intermediate features from multiple transformer blocks, L2-normalize token-wise, and compute MSE. Since DINOv3 uses fixed positional embeddings, this tile-based approach enables perceptual supervision at any resolution. 
+
+## F. Trade-off Visualizations 
+
+13 ViTok-v2: Scaling Native Resolution AEs to 5B Parameters 28 29 30 31 32 33 34 35 
+
+PSNR (dB) 
+
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> 22.5
+> rFID
+> pixel-only
+
+(a)        
+
+> 28 29 30 31 32 33 34 35
+
+PSNR (dB) 
+
+> 6
+> 8
+> 10
+> 12
+> 14
+> rFDD
+> pixel-only
+
+(b)       
+
+> 0.775 0.800 0.825 0.850 0.875 0.900 0.925
+
+SSIM 
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> rFID
+> pixel-only
+> +DINO
+
+(c)       
+
+> 0.775 0.800 0.825 0.850 0.875 0.900 0.925
+
+SSIM 
+
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> 14
+> rFDD
+> pixel-only
+> +DINO
+
+(d)    
+
+> B (88M)
+> L (302M)
+> G (1.1B)
+> T (4.5B)
+> r= 12
+> r= 24
+> r= 48
+> Loss ablation
+> Pareto frontier
+
+Figure 6. Perception-distortion trade-off with Pareto frontier. 2×2 grid: columns show rFID and rFDD; rows show PSNR and SSIM on the x-axis. Colored circles/squares/triangles are decoder scaling variants (B/L/G/T × r ∈ { 12 , 24 , 48 }); orange stars are loss ablation configurations (Table 2, T decoder, r=12 ). The dashed line is the Pareto frontier. (a, b) Decoder scaling at fixed loss improves both pixel fidelity and perceptual quality simultaneously, moving points along the frontier. (c, d) Loss ablation at fixed decoder creates a nearly 
+
+vertical trade-off: rFID spans 0.3–5.1 within a narrow SSIM band (.914–.931), showing that perceptual losses trade minimal distortion for large perceptual gains. Combining both levers (large decoder + DINOv3 loss) reaches a region inaccessible to either alone. 
+
+14 ViTok-v2: Scaling Native Resolution AEs to 5B Parameters r=12 r=24 r=48 
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8      
+
+> gFID
+> 7.8
+> 6.9 7.0
+> 4.2
+> 3.5
+> 4.0
+> 3.5 3.4
+> 4.0
+> 1.7
+> 2.0
+> 2.9
+> AE=3.6 flow=4.3
+> AE=3.4 flow=3.5 AE=3.0 flow=3.0
+
+(a) gFID decomposition 
+
+r=12 r=24 r=48 
+
+0
+
+10 
+
+20 
+
+30 
+
+40      
+
+> gFDD
+> 45
+> 35
+> 37
+> 27
+> 19
+> 16 16
+> 12 12
+> 98
+> 10
+> AE=18 flow=29
+> AE=16 flow=23
+> AE=21 flow=25
+
+(b) gFDD decomposition 
+
+2 × 10 22 3 × 10 22 
+
+Flow training FLOPs 
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+> gFID
+> 1.7
+> 2.0
+> 2.9
+> 3.5 3.4
+> 4.0
+
+(c) gFID vs. flow FLOPs 
+
+> r=12
+> r=24
+> r=48
+> 5B AE
+> 350M AE
+> 350M AE
+> 450M flow
+> 5B AE
+> 450M flow
+> 350M AE
+> 1.2B flow
+> 5B AE
+> 1.2B flow
+
+Figure 7. Scaling decomposition of generation quality. (a, b) Grouped bars decompose gFID and gFDD improvements into AE scaling (350M →5B) and flow scaling (450M →1.2B) contributions. At r=12 , flow scaling dominates ( ∆gFID = 4.3 vs. 3.6 for AE); at higher r
+
+the contributions converge. (c) gFID vs. flow training FLOPs. The 5B AE (solid) provides a consistent downward shift relative to the 350M AE (dashed) at all FLOPs budgets—an effectively free quality gain since the AE is trained once and amortized across flow model scales and sampling budgets. 
+
+15
