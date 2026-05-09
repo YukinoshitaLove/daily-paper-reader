@@ -6,82 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-08
-- 运行时间：2026-05-08 20:42:42 UTC
+- 最新运行日期：2026-05-09
+- 运行时间：2026-05-09 20:20:59 UTC
 - 运行状态：成功
-- 本次总论文数：20
-- 精读区：9
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-深入阅读了 20 篇前沿论文，聚焦图像重建与扩散模型的新突破。  
-最值得关注的是多光谱恢复的 R2H-Diff 模型与全能型图像修复的连续专家组装方法。  
-下步可重点了解扩散模型在多模态视觉与主动学习方向的应用潜力。
-- 详情：[/202605/08/README](/202605/08/README)
+探索影像生成与编辑前沿，今日成功总结 17 篇论文。  
+重点推荐时尚编辑试穿模型与图像转换稳定性检测两项突破。  
+下步可聚焦扩散与流匹配模型原理，理解多模态生成的核心趋势。
+- 详情：[/202605/09/README](/202605/09/README)
 
 ### 精读区论文标签
-1. [R2H-Diff: Guided Spectral Diffusion Model for RGB-to-Hyperspectral Reconstruction](/202605/08/2605.05688v1-r2h-diff-guided-spectral-diffusion-model-for-rgb-to-hyperspectral-reconstruction)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：用于RGB到高光谱图像重建的扩散模型
-2. [Continuous Expert Assembly: Instance-Conditioned Low-Rank Residuals for All-in-One Image Restoration](/202605/08/2605.06127v1-continuous-expert-assembly-instance-conditioned-low-rank-residuals-for-all-in-one-image-restoration)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：针对多样化局部损坏模式的全能图像修复
-3. [Awaking Spatial Intelligence in Unified Multimodal Understanding and Generation](/202605/08/2605.04128v1-awaking-spatial-intelligence-in-unified-multimodal-understanding-and-generation)  
-   标签：评分：9.5/10、query:real-ir
-   evidence：用于文本到图像生成和指令引导图像编辑的统一多模态基础模型
-4. [StableI2I: Spotting Unintended Changes in Image-to-Image Transition](/202605/08/2605.04453v1-stablei2i-spotting-unintended-changes-in-image-to-image-transition)  
-   标签：评分：9.5/10、query:real-ir
-   evidence：图像编辑与图像修复的评测框架
-5. [Conditional Diffusion Under Linear Constraints: Langevin Mixing and Information-Theoretic Guarantees](/202605/08/2605.05387v1-conditional-diffusion-under-linear-constraints-langevin-mixing-and-information-theoretic-guarantees)  
+1. [FEAT: Fashion Editing and Try-On from Any Design](/202605/09/2605.02393v1-feat-fashion-editing-and-try-on-from-any-design)  
    标签：评分：9.0/10、query:real-ir
-   evidence：用于超分辨率和修复的扩散模型
-6. [Sparse-to-Complete: From Sparse Image Captures to Complete 3D Scenes](/202605/08/2605.05664v1-sparse-to-complete-from-sparse-image-captures-to-complete-3d-scenes)  
+   evidence：使用多模态输入的时尚编辑与试穿
+2. [StableI2I: Spotting Unintended Changes in Image-to-Image Transition](/202605/09/2605.04453v1-stablei2i-spotting-unintended-changes-in-image-to-image-transition)  
    标签：评分：9.0/10、query:real-ir
-   evidence：用于3D重建中场景特定图像修复的专用扩散模型
-7. [DBMSolver: A Training-free Diffusion Bridge Sampler for High-Quality Image-to-Image Translation](/202605/08/2605.05889v1-dbmsolver-a-training-free-diffusion-bridge-sampler-for-high-quality-image-to-image-translation)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：用于图像到图像转换任务的免训练扩散桥采样器
-8. [FREPix: Frequency-Heterogeneous Flow Matching for Pixel-Space Image Generation](/202605/08/2605.06421v1-frepix-frequency-heterogeneous-flow-matching-for-pixel-space-image-generation)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：像素空间图像生成的频率异构流匹配
-9. [Diverse Sampling in Diffusion Models with Marginal Preserving Particle Guidance](/202605/08/2605.06553v1-diverse-sampling-in-diffusion-models-with-marginal-preserving-particle-guidance)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：提升扩散模型样本多样性的引导机制
+   evidence：图像编辑与修复的评估框架
+3. [Taming Outlier Tokens in Diffusion Transformers](/202605/09/2605.05206v1-taming-outlier-tokens-in-diffusion-transformers)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：用于图像生成的扩散Transformer中的离群标记
+4. [Energy Generative Modeling: A Lyapunov-based Energy Matching Perspective](/202605/09/2605.05530v1-energy-generative-modeling-a-lyapunov-based-energy-matching-perspective)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于能量的生成模型框架
+5. [Physical Fidelity Reconstruction via Improved Consistency-Distilled Flow Matching for Dynamical Systems](/202605/09/2605.05975v1-physical-fidelity-reconstruction-via-improved-consistency-distilled-flow-matching-for-dynamical-systems)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：通过流匹配进行高保真重建
+6. [Fusion in Your Way: Aligning Image Fusion with Heterogeneous Demands via Direct Preference Optimization](/202605/09/2605.06049v1-fusion-in-your-way-aligning-image-fusion-with-heterogeneous-demands-via-direct-preference-optimization)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：用于红外与可见光图像融合的潜在扩散模型
 
 ### 速读区论文标签
-1. [Structured 3D Latents Are Surprisingly Powerful: Unleashing Generalizable Style with 2D Diffusion](/202605/08/2605.04412v1-structured-3d-latents-are-surprisingly-powerful-unleashing-generalizable-style-with-2d-diffusion)  
+1. [Understanding diffusion models requires rethinking (again) generalization](/202605/09/2605.06077v1-understanding-diffusion-models-requires-rethinking-again-generalization)  
    标签：评分：8.0/10、query:real-ir
-   evidence：基于2D扩散模型的3D风格迁移潜空间唤醒
-2. [Concurrence of Symmetry Breaking and Nonlocality Phase Transitions in Diffusion Models](/202605/08/2605.04830v1-concurrence-of-symmetry-breaking-and-nonlocality-phase-transitions-in-diffusion-models)  
+   evidence：理解扩散模型泛化能力的理论框架
+2. [Flow Matching with Arbitrary Auxiliary Paths](/202605/09/2605.06364v1-flow-matching-with-arbitrary-auxiliary-paths)  
    标签：评分：8.0/10、query:real-ir
-   evidence：扩散模型中的相变与生成动力学
-3. [Active Learning for Conditional Generative Compressed Sensing](/202605/08/2605.05435v1-active-learning-for-conditional-generative-compressed-sensing)  
+   evidence：推广条件流匹配的新型生成建模框架
+3. [Relit-LiVE: Relight Video by Jointly Learning Environment Video](/202605/09/2605.06658v1-relit-live-relight-video-by-jointly-learning-environment-video)  
    标签：评分：8.0/10、query:real-ir
-   evidence：使用提示词条件模型的生成式压缩感知图像恢复
-4. [Steering Visual Generation in Unified Multimodal Models with Understanding Supervision](/202605/08/2605.05781v1-steering-visual-generation-in-unified-multimodal-models-with-understanding-supervision)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：在统一多模态模型中引导视觉生成
-5. [ViTok-v2: Scaling Native Resolution Auto-Encoders to 5 Billion Parameters](/202605/08/2605.05331v1-vitok-v2-scaling-native-resolution-auto-encoders-to-5-billion-parameters)  
+   evidence：使用视频扩散模型进行视频重光照
+4. [DiCLIP: Diffusion Model Enhances CLIP's Dense Knowledge for Weakly Supervised Semantic Segmentation](/202605/09/2605.04593v1-diclip-diffusion-model-enhances-clips-dense-knowledge-for-weakly-supervised-semantic-segmentation)  
    标签：评分：7.5/10、query:real-ir
-   evidence：扩展原生分辨率自编码器用于图像重建与生成
-6. [A Flow Matching Algorithm for Many-Shot Adaptation to Unseen Distributions](/202605/08/2605.06272v1-a-flow-matching-algorithm-for-many-shot-adaptation-to-unseen-distributions)  
-   标签：评分：7.5/10、query:real-ir
-   evidence：用于生成模型自适应的流匹配算法
-7. [Order-Agnostic Autoregressive Modelling with Missing Data](/202605/08/2605.06355v1-order-agnostic-autoregressive-modelling-with-missing-data)  
-   标签：评分：7.5/10、query:real-ir
-   evidence：用于深度生成建模的顺序无关自回归建模
-8. [DCR: Counterfactual Attractor Guidance for Rare Compositional Generation](/202605/08/2605.06512v1-dcr-counterfactual-attractor-guidance-for-rare-compositional-generation)  
-   标签：评分：7.5/10、query:real-ir
-   evidence：扩散模型中稀有组合生成的引导机制
-9. [GCCM: Enhancing Generative Graph Prediction via Contrastive Consistency Model](/202605/08/2605.05689v1-gccm-enhancing-generative-graph-prediction-via-contrastive-consistency-model)  
+   evidence：扩散模型增强CLIP用于语义分割
+5. [Pixel Perfect: Relational Image Quality Assessment with Spatially-Aware Distortions](/202605/09/2605.02863v1-pixel-perfect-relational-image-quality-assessment-with-spatially-aware-distortions)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：用于图像修复评估的图像质量评价
+6. [Conditions for well-posed color recovery in scattering media](/202605/09/2605.03837v1-conditions-for-well-posed-color-recovery-in-scattering-media)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：散射介质中的颜色恢复作为图像修复中的逆问题
+7. [SAMIC: A Lightweight Semantic-Aware Mamba for Efficient Perceptual Image Compression](/202605/09/2605.04560v1-samic-a-lightweight-semantic-aware-mamba-for-efficient-perceptual-image-compression)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：利用生成能力的感知图像压缩
+8. [SymDrift: One-Shot Generative Modeling under Symmetries](/202605/09/2605.06140v1-symdrift-one-shot-generative-modeling-under-symmetries)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：使用等变扩散和流匹配的单步生成建模
+9. [Breaking the Quality-Privacy Tradeoff in Tabular Data Generation via In-Context Learning](/202605/09/2605.04911v1-breaking-the-quality-privacy-tradeoff-in-tabular-data-generation-via-in-context-learning)  
    标签：评分：6.5/10、query:real-ir
-   evidence：基于扩散模型的图预测与一致性训练
-10. [Nonlinear RMM-GKS for Large-Scale Dynamic and Streaming Inverse Problems with Uncertain Forward Operators](/202605/08/2605.06336v1-nonlinear-rmm-gks-for-large-scale-dynamic-and-streaming-inverse-problems-with-uncertain-forward-operators)  
-   标签：评分：6.5/10、query:real-ir
-   evidence：大规模图像逆问题框架
-11. [Missingness-aware Data Imputation via AI-powered Bayesian Generative Modeling](/202605/08/2605.01676v1-missingness-aware-data-imputation-via-ai-powered-bayesian-generative-modeling)  
+   evidence：使用上下文学习的表格生成模型
+10. [Scalable generative modeling of non-Gaussian spatio-temporal fields via autoregressive Gaussian processes](/202605/09/2605.03152v1-scalable-generative-modeling-of-non-gaussian-spatio-temporal-fields-via-autoregressive-gaussian-processes)  
    标签：评分：6.0/10、query:real-ir
-   evidence：用于数据插补的 AI 驱动贝叶斯生成模型
+   evidence：时空场的生成式建模
+11. [Leveraging Pretrained Language Models as Energy Functions for Glauber Dynamics Text Diffusion](/202605/09/2605.04291v1-leveraging-pretrained-language-models-as-energy-functions-for-glauber-dynamics-text-diffusion)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：基于Glauber动力学的离散扩散语言模型
 
 
 <div class="dpr-home-promo-card">
