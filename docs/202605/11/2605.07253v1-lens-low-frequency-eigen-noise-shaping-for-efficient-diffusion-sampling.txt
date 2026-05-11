@@ -1,0 +1,939 @@
+Title: LENS: Low-Frequency Eigen Noise Shaping for Efficient Diffusion Sampling
+
+URL Source: https://arxiv.org/pdf/2605.07253v1
+
+Published Time: Mon, 11 May 2026 01:01:35 GMT
+
+Number of Pages: 27
+
+Markdown Content:
+# LENS: Low-Frequency Eigen Noise Shaping for Efficient Diffusion Sampling 
+
+Haewon Jeon Si-Hyeon Lee 
+
+School of Electrical Engineering Korea Advanced Institute of Science and Technology (KAIST) Daejeon, South Korea 
+
+{haewon, sihyeon}@kaist.ac.kr 
+
+# Abstract 
+
+Distilled diffusion models accelerate image generation by reducing the number of denoising steps, but often suffer from degraded image quality. To mitigate this trade-off, test-time optimization methods improve quality, yet their iterative nature incurs substantial computational overhead and leads to slow inference, limiting practical usability. Recent hypernetwork-based approaches amortize this process during training, but still require costly noise modulation in high-dimensional latent spaces. In this work, we propose LENS (Low-frequency Eigen Noise Shaping), an efficient noise modulation framework that operates in a low-dimensional subspace. Our approach is motivated by the observation that low-frequency components of the noise largely determine the global structure and visual fidelity of generated images. Based on this observation, we provide a theoretical justification for restricting modulation to the low-frequency subspace and derive a principled training objective. Building on this, LENS employs a lightweight, standalone network to selectively modulate these components, enabling efficient and targeted noise modulation. Extensive experiments demonstrate that LENS achieves competitive image quality while reducing FLOPs by 400–700 ×, model parameters by 25–75 ×, and inference-time overhead by 10–20 × compared to prior methods. 
+
+# 1 Introduction 
+
+Diffusion models have achieved remarkable success in high-quality text-to-image generation [ 28 , 47 ]. These models generate images by iteratively denoising an initial noise sample, but achieving high fidelity typically requires a large number of sampling steps, resulting in high computational cost and slow inference [ 5, 32 ]. To improve efficiency, distilled diffusion models have been developed to enable generation in a single or a few steps [ 34 , 43 , 46 ]. However, this efficiency often comes at the expense of generation quality, leading to an inherent trade-off between speed and fidelity [ 42 ]. This motivates methods that enhance generation quality in distilled models without sacrificing their efficiency. Recent work has explored inference-time techniques that improve generation quality by performing additional computations during inference while keeping model parameters fixed [ 36 , 37 ]. Among these, a prominent direction is to optimize the initial noise, motivated by the observation that it governs the global structure of the generated image [ 2 , 19 , 21 , 22 , 45 ]. Conventional approaches perform test-time optimization, iteratively refining the noise for each sample [ 3, 6, 9 , 16 , 23 , 24 , 35 , 39 ], which incurs substantial computational overhead. To mitigate this, recent methods amortize the optimization by learning a prompt-conditioned mapping from noise to improved noise [ 1 , 7 , 20 , 49 ]. HyperNoise [ 7] is a representative approach that predicts noise perturbations by reusing the diffusion backbone augmented with lightweight adaptation 
+
+> Preprint.
+> arXiv:2605.07253v1 [cs.CV] 8 May 2026
+
+Figure 1: Performance vs. inference time relative to unmodified noise input. The x-axis shows inference time normalized by the case where the input noise is sampled directly from a standard Gaussian distribution without any modification, plotted in log scale. The y-axis shows the increase in GenEval2 [ 15 ] mean over this reference. Hence, the point (1 , 0) corresponds to this unmodified noise setting. We compare three approaches: ReNo [ 6], which performs iterative test-time optimization of the input noise; HyperNoise [ 7], which learns a noise modulation network using the diffusion backbone; and the proposed LENS. Results are shown across three distilled diffusion backbones: SD-Turbo [ 31 ], Hyper-SDXL [ 27 ], and SANA-Sprint [ 4]. LENS achieves comparable or improved quality relative to HyperNoise with reduced inference time, while ReNo attains higher quality at a substantially higher computational cost. modules. Specifically, the initial noise is first passed through the Low-Rank Adaptation (LoRA) [ 12 ]-augmented diffusion model to generate a modified noise representation, which is then fed into the original diffusion model for image synthesis. As a result, noise modulation requires executing the diffusion backbone itself, both during training (for learning the perturbation mapping) and at inference time (for each sample), leading to non-negligible computational overhead despite improvements over iterative optimization methods. Moreover, this process operates in the full high-dimensional latent space, introducing unnecessary degrees of freedom and further limiting efficiency. Meanwhile, prior studies suggest that low-frequency components of the noise primarily determine global structure, whereas high-frequency components mainly affect fine details [ 40 ]. This insight indicates that effective noise modulation can be achieved in a low-dimensional subspace. Motivated by these observations, we propose Low-frequency Eigen Noise Shaping (LENS) , a framework that performs efficient noise modulation by operating on low-frequency coefficients of the latent noise. By restricting modulation to this low-dimensional subspace, LENS enables the use of a lightweight network that is decoupled from the diffusion backbone, significantly reducing computational cost while preserving control over key structural attributes of generated images. As illustrated in Figure 1, LENS achieves a favorable performance–efficiency trade-off, maintaining competitive generation quality with negligible additional inference cost. Our contributions are summarized as follows: • We propose LENS, a novel framework for efficient noise modulation in distilled diffusion models via optimization in a low-frequency subspace. By eliminating the need to reuse the diffusion backbone and reducing the effective degrees of freedom during training, LENS enables more efficient and stable learning. • We provide theoretical justification for focusing on low-frequency components and derive a principled training objective in the corresponding coefficient space. • We demonstrate that LENS achieves comparable or improved generation quality while signifi-cantly reducing computational cost, with 400–700 × fewer FLOPs, 25–75 × fewer parameters, and 10–20 × faster noise modulation. 22 Related Work 
+
+Distilled Diffusion Models. Diffusion-based generative models produce high-quality images by iteratively denoising an initial noise sample z0 ∼ N (0 , I ) [11 , 33 ]. However, this process typically requires many sampling steps, resulting in high computational cost [ 30 ]. To address this limitation, recent advances in diffusion model distillation, including SD-Turbo [ 31 ], Hyper-SDXL [ 27 ], and SANA-Sprint [ 4], have drastically reduced the number of sampling steps. Despite these improvements, such efficiency gains often come at the expense of generation quality, with distilled models typically underperforming their full diffusion counterparts. This trade-off motivates inference-time techniques that improve generation quality while retaining the efficiency of distilled models. 
+
+Noise Hypernetworks. Recently, a novel approach has been proposed to improve generation quality by modulating the initial noise via a noise hypernetwork, enabling faster inference than existing iterative test-time optimization methods [ 3 , 6 , 9 , 16 ]. Given a pretrained generator Gθ that maps an initial noise sample z0 to an output image x, i.e., x = Gθ (z0), let r(x) be a reward function that quantifies the quality of generated images. HyperNoise [ 7 ] considers a reward-tilted noise distribution 
+
+p⋆ that biases sampling toward noise realizations yielding high-reward outputs: 
+
+p⋆(z0) ∝ p(z0) exp  r(Gθ (z0)) , (1) where p denotes the original noise distribution. HyperNoise trains a noise hypernetwork fϕ with parameters ϕ such that the distribution of the modulated noise sample z0 + fϕ(z0), denoted by pϕ,is close to the target distribution p⋆. Accordingly, fϕ is trained to minimize the KL divergence 
+
+DKL (pϕ∥p⋆), which can be approximated (up to a constant) under mild conditions by the following loss [7]: 
+
+L(ϕ) = Ez0∼p
+
+ 12 ∥fϕ(z0)∥2 − r(Gθ (z0 + fϕ(z0))) 
+
+
+
+, (2) which consists of a regularization term that penalizes deviation from the original noise distribution and a reward maximization term that encourages high-quality outputs. This formulation amortizes the search for high-reward noise into a learned mapping. However, noise modulation remains computationally inefficient in both training and inference, since each forward pass requires executing a large-scale diffusion backbone. Furthermore, operating in the full latent noise space introduces unnecessary degrees of freedom, leading to reduced efficiency. 
+
+Patch-wise PCA Analysis of Diffusion Noise. Recently, an intriguing result has demonstrated a strong correlation between the PCA components of initial noise in diffusion models and the structure of the generated outputs [ 40 ]. In this study, the noise is decomposed into p × p patches and projected onto a PCA basis derived from natural image statistics. It is shown that the top principal components (i.e., low-frequency components) largely determine key attributes of the generated images, such as global structure and object layout. In contrast, modifying high-frequency components has minimal impact on these structural properties. This observation motivates a more efficient noise modulation strategy that focuses solely on shaping the low-frequency components. 
+
+# 3 Method 
+
+We propose a novel framework, Low-frequency Eigen Noise Shaping (LENS) , for efficient diffusion sampling via noise modulation. LENS employs a lightweight network operating on low-frequency noise coefficients to predict modulation, without relying on the diffusion backbone. It improves generation quality while maintaining low computational overhead in both training and inference. 
+
+3.1 Theoretical Foundations and Objective 
+
+In the following, we introduce our method and provide theoretical justification based on prior findings that the low-frequency components of the initial noise predominantly determine the structural properties of the generated outputs [ 40 ]. We consider a pretrained diffusion generator Gθ that maps an initial noise sample z0 ∈ RC×H×W to an output image x ∈ RC×H×W , i.e., x = Gθ (z0), where C,
+
+H, and W denote the number of channels, height, and width, respectively. We assume z0 ∼ N (0 , I ).Let r(x) be a reward function that quantifies the quality of generated images. In practice, we also condition on a text prompt, and r(x) reflects the alignment of x with the given prompt. 3Noise Reparameterization in the PCA Coefficient Space. We partition the initial latent noise z0
+
+into N non-overlapping patches {si}Ni=1 , where each patch si ∈ Rd with d = Cs 2, is obtained by extracting a s × s spatial region across all channels and vectorizing it. Hence, N = HW s2 .Each patch is projected onto a PCA basis V ∈ Rd×d computed from natural image statistics, resulting in the coefficient vector wi = V ⊤si ∈ Rd. Since V is an orthonormal matrix, this transformation preserves the Gaussian prior, i.e., wi ∼ N (0 , I ). A detailed proof is provided in Appendix A.2. We further decompose the coefficient vector as wi = ( wi,L , w i,H ), where wi,L ∈ Rk denotes the low-frequency components and wi,H ∈ Rd−k denotes the high-frequency components, with k < d .Let w ∈ RN ×d, wL ∈ RN ×k, and wH ∈ RN ×(d−k) denote the collections {wi}Ni=1 , {wi,L }Ni=1 , and 
+
+{wi,H }Ni=1 , respectively. Then, their corresponding prior distributions, denoted by q(w), qL(wL),and qH (wH ), all follow isotropic Gaussian distributions N (0 , I ) with appropriate dimensions, as shown in Appendix A.3. 
+
+Low-frequency-only Tilted Distribution. Let Recon (w) denote the reconstruction operator that maps patch-wise PCA coefficients to the full latent noise. The generator can be expressed in the coefficient space as g(w) := Gθ (Recon (w)) . We define a reward-tilted target distribution in the coefficient space as 
+
+q⋆(w) ∝ q(w) exp  r(g(w))  (3) Prior empirical results from patch-wise PCA analysis [ 40 ] show that perturbations applied to the low-frequency components of the noise have a dominant effect on the composition of generated images. Based on this observation, we make the following assumption, which is empirically validated in Section 4.2. 
+
+Assupmtion 1. For any (wL, w H ),
+
+r g(wL, w H ) − ¯r(wL) ≤ ϵ, (4) 
+
+where ¯r(wL) := EwH ∼qH [ r(g(wL, w H )) ] denotes the expected reward conditioned on the low-frequency coefficients and ϵ > 0 is a small constant that bounds the contribution of the high-frequency components to the reward. 
+
+We define the low-frequency-only tilted distribution as 
+
+˜q⋆(w) := ˜ q⋆L(wL) qH (wH ), ˜q⋆L(wL) ∝ qL(wL) exp(¯ r(wL)) . (5) The following proposition provides theoretical justification for approximating q⋆(w) by ˜q⋆(w), whose proof is in Appendix A.5. 
+
+Proposition 3.1. The KL divergence between the full tilted distribution q⋆(w) and its low-frequency-only tilted distribution ˜q⋆(w) is bounded as 
+
+DKL (q⋆ ∥ ˜q⋆) ≤ 2ϵ. (6) 
+
+Objective. We train a neural network hϕ with parameters ϕ that takes wL as input and outputs an additive perturbation to wL. In practice, hϕ is also conditioned on a text prompt, but we omit this dependence for notational simplicity. Let qϕL denote the distribution of the modulated low-frequency coefficients wL + hϕ(wL). The network hϕ is trained so that qϕL approximates the target distribution 
+
+˜q⋆L. To this end, we minimize the KL divergence DKL (qϕL∥˜q⋆L). The following proposition shows that this objective admits a tractable reformulation. The proof is provided in Appendix A.6. 
+
+Proposition 3.2 (Objective) . Assume that hϕ is continuously differentiable with ∥Jhϕ (wL)∥2 ≤
+
+M < 1 for any wL, where Jhϕ (wL) := ∂h ϕ(wL) 
+
+> ∂w L
+
+denotes the Jacobian matrix, ∥ · ∥ 2 is the spectral norm, and M is a constant. Then minimizing the KL divergence DKL (qϕL∥˜q⋆L) is equivalent (up to a constant) to minimizing 
+
+DKL (qϕL∥qL) − EwL∼qϕL
+
+[¯ r(wL)] , (7) 
+
+which can be approximated (up to ϵ) by 
+
+L(ϕ) := Ew∼q
+
+ 12 ∥hϕ(wL)∥2 − r g(wL + hϕ(wL), w H )
+
+. (8) 4Figure 2: Overview of the proposed Low-frequency Eigen Noise Shaping (LENS) framework. The model operates on low-frequency noise coefficients that capture structurally meaningful components. These coefficients are processed via self-attention, while the text prompt is incorporated through cross-attention for conditioning, and the network predicts coefficient updates. 
+
+3.2 Implementation 
+
+We present the practical implementation of the proposed framework. The framework comprises two components: a Patch PCA Codec and a LENS Network. The Patch PCA Codec projects noise onto a PCA basis to obtain coefficients and reconstructs them back to the noise space, while the LENS Network models prompt-conditioned modulation in the low-frequency coefficient space. To construct the PCA basis, we precompute it from natural image datasets [ 40 ], such as ImageNetV2 [ 26 ]. Images are encoded into latent representations using a pretrained Variational Autoencoder (VAE) [ 17 ] of the diffusion model, and the resulting latents are partitioned into non-overlapping 
+
+s × s patches. Each patch is reshaped into a vector in Rd, and PCA is performed by computing the covariance matrix over all patches, yielding an orthonormal basis V ∈ Rd×d whose columns correspond to eigenvectors. The overall architecture and training pipeline are illustrated in Figure 2. We next describe the Patch PCA Codec and the LENS Network in detail. 
+
+Patch PCA Codec. This component consists of two modules: a projection module Proj and a reconstruction module Recon . The projection module partitions the input latent noise z into non-overlapping patches and projects them onto the precomputed PCA basis to obtain coefficient vectors 
+
+w, i.e., w = Proj (z). After coefficient modulation, the reconstruction module maps the coefficients 
+
+w back to the latent noise z via the inverse PCA transformation, i.e., z = Recon (w).
+
+Low-frequency Eigen Noise Shaping (LENS) Network. The LENS network hϕ takes low-frequency coefficients wL and a text prompt c as inputs, and predicts an additive perturbation to 
+
+wL that aligns the generated output with the semantics of the prompt. Operating on low-frequency coefficients reduces the dimensionality of the prediction space, enabling a lightweight network decoupled from the diffusion backbone. We implement this network using a transformer architec-ture [ 38 ] to model global dependencies and incorporate text conditioning. The network consists of an input projection layer, sinusoidal positional embeddings, multiple transformer blocks (including self-attention, text cross-attention, and feed-forward networks), and a final linear layer. Self-attention captures global correlations among coefficient tokens across patches, while text cross-attention aligns the modulation with the semantic content of the prompt. Further architectural details are provided in Appendix B.1. 5Algorithm 1 Training of LENS Network  
+
+> 1:
+
+Initialize: LENS network parameters ϕ 
+
+> 2:
+
+while learning do  
+
+> 3:
+
+Sample latent noise z0 ∼ N (0 , I ) 
+
+> 4:
+
+(wL, w H ) = Proj (z0) 
+
+> 5:
+
+ˆw ← (wL + hϕ(wL, c ), w H ) 
+
+> 6:
+
+x ← Gθ (Recon ( ˆ w))  
+
+> 7:
+
+Compute reward r(x, c ) and loss L(ϕ) 
+
+> 8:
+
+Update ϕ using gradient descent  
+
+> 9:
+
+end while  
+
+> 10:
+
+return trained parameters ϕ
+
+The network is pretrained and used once at infer-ence time to modulate the low-frequency noise. The training procedure is summarized in Algo-rithm 1. We use Eq. (8) as the training loss L(ϕ),which consists of a regularization term and a re-ward term. The former acts as an L2 penalty on the coefficient residual, encouraging prox-imity to the original Gaussian prior. The latter is a weighted combination of multiple reward models, including CLIP [ 10 ], HPSv2.1 [ 41 ], Im-ageReward [ 44 ], and PickScore [ 18 ]. Additional details on the reward formulation are provided in Appendix B.2. 
+
+3.3 Complexity Analysis 
+
+We analyze the computational complexity of our transformer-based noise modulation framework, LENS. The computational complexity of a standard transformer is O(n2r + nr 2), where n is the number of tokens and r is the representation dimension [ 38 ]. The first term corresponds to self-attention, while the second term accounts for the feed-forward network. In LENS, the number of tokens is N (the number of patches), and each token has dimension k (the number of low-frequency PCA coefficients). As a result, the computational complexity becomes O(N 2k + N k 2). We omit the cost of cross-attention, which scales with the prompt length, as it is negligible compared to the self-attention term given that the prompt is significantly shorter than the number of tokens. Compared to operating in the full latent dimension d, this reduces the self-attention and feed-forward complexities by factors of d/k and (d/k )2, respectively, yielding substantial computational savings. The efficiency of our method is experimentally validated in Section 4.2. 
+
+# 4 Experiment 
+
+4.1 Experimental Settings Implementation. We conduct experiments using three distilled text-to-image diffusion models: SD-Turbo [ 31 ], Hyper-SDXL [ 27 ], and SANA-Sprint [ 4 ]. For each model, we precompute a corresponding PCA basis using its pretrained VAE encoder. We set the patch size to s = 4 . For SD-Turbo and Hyper-SDXL, the latent channel dimension is C = 4 , resulting in d = 64 , and we use 
+
+k = 32 low-frequency coefficients for modulation. For SANA-Sprint, the latent channel dimension is C = 32 , resulting in d = 512 , and we set k = 256 . The effects of k and s on performance are analyzed in Appendices D.1 and D.2, respectively. All experiments are conducted on NVIDIA RTX 3090 GPUs. Further implementation details are provided in Appendix C. 
+
+Dataset. For PCA basis extraction, we use ImageNetV2 [ 26 ]. During training, we use approximately 70k text prompts collected from multiple sources, including Attribute Binding (ABC-6K) [ 8], the T2I-CompBench training set [14], and Pick-a-Pic v2 [18]. 
+
+Baselines. We compare our method against three baselines: random noise initialization (unmodified noise input), ReNo [ 6], and HyperNoise [ 7]. Random noise initialization samples the initial latent from a standard Gaussian distribution without additional processing. ReNo performs reward-guided test-time optimization, iteratively updating the initial noise via gradient-based optimization to maximize a given reward function. HyperNoise trains a noise hypernetwork by attaching LoRA adapters to the diffusion backbone, using it to predict a modulated initial noise that is then fed into the generator. 
+
+4.2 Experimental Results Generation Quality. We evaluate the quality of generated images on the GenEval2 benchmark [ 15 ], with results reported in Table 1. All images are generated using a single diffusion step. Our method, LENS, achieves comparable or better performance than HyperNoise while reducing the additional time cost by a factor of 10–20. More specifically, HyperNoise incurs additional computational cost of 6Model Time(s) ↓ Object ↑ Attribute ↑ Count ↑ Position ↑ Verb ↑ Mean ↑                                                                                    
+
+> SD-Turbo 0.107 72.27 42.65 21.15 28.1 5.60 33.95 + ReNo 11.371 81.02 50.42 31.91 32.58 6.90 40.57 + HyperNoise 0.194 74.94 43.00 23.95 27.67 5.23 34.96
+> + LENS (Ours) 0.112 75.07 43.08 26.08 28.46 5.78 35.69
+> Hyper-SDXL 0.414 71.94 51.97 26.88 21.14 3.28 35.04 + ReNo 45.13 80.06 56.79 32.61 27.53 3.59 40.12 + HyperNoise 0.694 71.97 52.02 27.06 21.58 4.76 35.48
+> + LENS (Ours) 0.424 72.96 53.47 27.84 21.45 4.39 36.02
+> SANA-Sprint 0.336 80.23 54.73 33.01 33.31 15.53 43.36 + ReNo 14.964 83.16 56.57 34.73 38.36 13.44 45.25 + HyperNoise 0.532 83.59 54.18 34.84 36.32 20.66 45.92 + LENS (Ours) 0.352 82.98 55.27 36.12 36.38 18.21 45.79
+
+Table 1: Results on GenEval2. Higher is better ( ↑) for all metrics except Time. LENS achieves performance comparable to or better than HyperNoise while enabling faster generation. ReNo is shown in gray, as it relies on iterative test-time optimization, incurring substantially higher computational cost and making it not directly comparable to feed-forward methods. Standard deviations are reported in Appendix D.6. 
+
+Model Method FLOPs Parameters Inference-time 
+
+SD-Turbo HyperNoise 997.1 G 136.5 M 70.78 ms 
+
+LENS (Ours) 2.4 G 4.8 M 5.68ms Hyper-SDXL HyperNoise 7.8 T 395.3 M 207.91 ms 
+
+LENS (Ours) 12.3 G 5.3 M 9.83 ms SANA-Sprint HyperNoise 1.7 T 314.7 M 173.62 ms 
+
+LENS (Ours) 2.2 G 10.0 M 10.84 ms 
+
+Table 2: Noise modulation efficiency comparison between LENS and HyperNoise across different diffusion models. LENS consistently achieves lower FLOPs, fewer parameters, and faster inference time, resulting in significantly improved computational efficiency. approximately 50%–80% of the image generation cost, as the diffusion backbone must be executed once more during noise modulation. In contrast, our method introduces less than 5% overhead. Although ReNo attains the best performance in many cases, it requires 40–100 × longer generation time than our method, making it impractical for real-world applications. We analyze performance as the number of inference steps increases in Appendix D.4. Additional results on other benchmarks are provided in Appendix D.5. 
+
+Computational Efficiency. In Table 2, we evaluate the computational efficiency of our method and HyperNoise [ 7], a representative approach that learns a noise modulation network. We report FLOPs for the noise-modulation pathway only, excluding full image generation. For HyperNoise, this includes a forward pass through the diffusion backbone (including LoRA branches), whereas for LENS, it includes PCA projection/reconstruction and a forward pass of the LENS network. We also report the number of trainable parameters in the modulation network, counting LoRA parameters for HyperNoise and all parameters of the LENS network for our method. Inference time is measured as the time required for noise modulation, averaged over 100 samples. Our method achieves substantial efficiency gains, reducing FLOPs by 400–700 ×, the number of parameters by 25–75 ×, and inference-time latency by 10–20 × across all evaluated models. 
+
+Low-Frequency Concentration of Reward Gradients. In this experiment, we validate the key hypothesis that reward-increasing directions are concentrated in a low-frequency PCA subspace rather than the full high-dimensional noise space. To this end, given an initial noise z0 and a prompt 
+
+c, we compute the reward gradient ∇z0 r Gθ (z0, c ), which indicates the direction in which the noise should be perturbed to maximally increase the reward. Then, we reshape the reward gradient into 7(a) Reward gradient energy spectrum in the PCA basis (b) Cumulative gradient energy ratio 
+
+Figure 3: Reward gradient energy distribution in the PCA basis. (a) Normalized energy spectrum 
+
+Ej / P 
+
+> j
+
+Ej , showing a rapid decay toward higher-frequency components. (b) Cumulative energy ratio ρk, indicating that most energy is concentrated in low-frequency components. 
+
+Method LPIPS ↑ DINO ↓
+
+SD-Turbo 0.6249 ± 0.0427 0.7531 ± 0.1107 + HyperNoise 0.5406 ±0.0562 0.8120 ± 0.1047 
+
++ LENS (Ours) 0.5887 ± 0.0404 0.7337 ± 0.1221 
+
+Table 3: Generation diversity measured by LPIPS and DINO. LENS achieves intermediate LPIPS between random noise and HyperNoise, while attaining the lowest DINO score among all methods. Values are reported as mean ± standard deviation. patch-wise vectors {uℓ} and project each onto the PCA basis V = [ v1, . . . , v d] ∈ Rd×d, where vj
+
+denotes the j-th eigenvector, yielding coefficients αj,ℓ = v⊤ 
+
+> j
+
+uℓ. The importance of each direction is quantified by the expected gradient energy Ej = Eℓ[α2
+
+> j,ℓ
+
+], where the expectation is taken over spatial patches and 100 sampled images. The cumulative energy ratio captured by the top-k components is then defined as ρk =  
+
+> Pkj=1 Ej
+> Pdj=1 Ej
+
+.Figure 3(a) shows that the normalized Ej values decay rapidly as j increases, indicating that high-frequency components contribute little to the overall gradient energy. Figure 3(b) further shows that 
+
+ρk quickly approaches a high value even for small k. These results confirm that the reward gradient is largely concentrated in a low-dimensional PCA subspace. 
+
+Generation Diversity To evaluate generation diversity, we generate images for 300 prompts from the GenEval2 benchmark using 50 different random noise seeds, and compute LPIPS [ 48 ] and DINOv2 [ 25 ] scores. LPIPS measures perceptual differences between images, where higher values indicate greater visual diversity. DINO, on the other hand, captures feature-level similarity, where lower scores correspond to lower semantic similarity and thus higher semantic diversity. Table 3 reports LPIPS and DINOv2 scores for random noise, HyperNoise, and LENS. The results show that LENS achieves lower LPIPS than random noise, indicating a moderate reduction in pixel-level diversity, while still maintaining higher diversity than HyperNoise. Under the DINO metric, LENS attains lower scores than random noise, suggesting improved semantic diversity. These results demonstrate that LENS preserves a favorable level of diversity while enhancing semantic variation. 
+
+Qualitative Results. Figure 4 illustrates one-step generation results from SD-Turbo and SANA-Sprint. All samples for each prompt are generated from the same initial noise to ensure a fair comparison. Without noise modification, the generated images often exhibit poor alignment with the given prompts. In contrast, both HyperNoise and LENS improve semantic consistency and overall visual quality. However, HyperNoise occasionally exhibits inconsistencies with key prompt attributes, whereas LENS generates images that remain more faithful to the intended semantics. LENS further enhances structural clarity and overall generation quality, demonstrating more reliable high-quality generation in the one-step setting. 8Figure 4: One-step generation results using SD-Turbo and SANA-Sprint. Starting from the same initial noise, we compare outputs generated with unmodified noise, HyperNoise, and LENS. 
+
+More Experiments. We provide additional experiments in Appendix D. Specifically, Appen-dices D.1 and D.2 present ablation studies on the number of low-frequency coefficients k and the patch size s, justifying our design choices. Appendix D.3 examines the effect of the number of Transformer layers in the LENS network, showing that increasing model depth does not necessar-ily improve performance. Appendix D.4 analyzes performance as the number of inference steps increases, complementing the one-step focus of the main paper, and shows that the distilled models are optimized for few-step generation. Appendix D.5 reports results on additional benchmarks, confirming the robustness of our method across different settings. Finally, standard deviations for the results in Table 1 are provided in Appendix D.6. 
+
+# 5 Conclusion 
+
+In this paper, we proposed LENS, a principled and efficient framework for noise modulation in diffusion models. By leveraging the insight that low-frequency components of the noise largely determine the global structure of generated images, we restrict modulation to a low-dimensional subspace and derive a corresponding training objective. This design enables effective improvement in generation quality while significantly reducing computational overhead. Extensive experiments across multiple distilled diffusion backbones demonstrate that LENS consistently achieves competitive or improved image quality with minimal inference-time overhead. These results establish low-dimensional noise shaping as an effective approach for improving diffusion-based generation, offering a practical pathway toward more efficient and scalable generative models. A discussion of the broader impact is provided in Appendix E. 
+
+Limitations and Future Work. Our approach relies on a fixed PCA basis computed from a reference dataset, which may not fully capture data distributions that differ significantly from the training domain. Adapting the basis to new domains or learning it jointly with the modulation network could further improve generalization. In addition, LENS focuses on low-frequency components of the noise, which are primarily responsible for global structure. Although this design enables efficient modulation, it may limit the ability to refine fine-grained details governed by high-frequency components. Extending the framework to selectively incorporate higher-frequency information in a controlled manner is an interesting direction for future work. 9References 
+
+[1] Donghoon Ahn, Jiwon Kang, Sanghyun Lee, Jaewon Min, Minjae Kim, Wooseok Jang, Hy-oungwon Cho, Sayak Paul, SeonHwa Kim, Eunju Cha, Kyong Hwan Jin, and Seungryong Kim. A noise is worth diffusion guidance. In The Fourteenth International Conference on Learning Representations , 2026. URL https://openreview.net/forum?id=xEWooSOgaz .[2] Yuanhao Ban, Ruochen Wang, Tianyi Zhou, Boqing Gong, Cho-Jui Hsieh, and Minhao Cheng. The crystal ball hypothesis in diffusion models: Anticipating object positions from initial noise. 
+
+arXiv preprint arXiv:2406.01970 , 2024. [3] Heli Ben-Hamu, Omri Puny, Itai Gat, Brian Karrer, Uriel Singer, and Yaron Lipman. D-flow: Differentiating through flows for controlled generation. arXiv preprint arXiv:2402.14017 , 2024. [4] Junsong Chen, Shuchen Xue, Yuyang Zhao, Jincheng Yu, Sayak Paul, Junyu Chen, Han Cai, Song Han, and Enze Xie. Sana-sprint: One-step diffusion with continuous-time consistency distillation. In Proceedings of the IEEE/CVF International Conference on Computer Vision ,pages 16185–16195, 2025. [5] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. Scaling rectified flow trans-formers for high-resolution image synthesis. In Forty-first international conference on machine learning , 2024. [6] Luca Eyring, Shyamgopal Karthik, Karsten Roth, Alexey Dosovitskiy, and Zeynep Akata. Reno: Enhancing one-step text-to-image models through reward-based noise optimization. Advances in Neural Information Processing Systems , 37:125487–125519, 2024. [7] Luca Eyring, Shyamgopal Karthik, Alexey Dosovitskiy, Nataniel Ruiz, and Zeynep Akata. Noise hypernetworks: Amortizing test-time compute in diffusion models. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https: //openreview.net/forum?id=DbzREoPwmM .[8] Weixi Feng, Xuehai He, Tsu-Jui Fu, Varun Jampani, Arjun Akula, Pradyumna Narayana, Sugato Basu, Xin Eric Wang, and William Yang Wang. Training-free structured diffusion guidance for compositional text-to-image synthesis. arXiv preprint arXiv:2212.05032 , 2022. [9] Xiefan Guo, Jinlin Liu, Miaomiao Cui, Jiankai Li, Hongyu Yang, and Di Huang. Initno: Boosting text-to-image diffusion models via initial noise optimization. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 9380–9389, 2024. [10] Jack Hessel, Ari Holtzman, Maxwell Forbes, Ronan Le Bras, and Yejin Choi. Clipscore: A reference-free evaluation metric for image captioning. In Proceedings of the 2021 conference on empirical methods in natural language processing , pages 7514–7528, 2021. [11] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. [12] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Liang Wang, Weizhu Chen, et al. Lora: Low-rank adaptation of large language models. Iclr , 1(2):3, 2022. [13] Xiwei Hu, Rui Wang, Yixiao Fang, Bin Fu, Pei Cheng, and Gang Yu. Ella: Equip diffusion models with llm for enhanced semantic alignment. arXiv preprint arXiv:2403.05135 , 2024. [14] Kaiyi Huang, Kaiyue Sun, Enze Xie, Zhenguo Li, and Xihui Liu. T2i-compbench: A compre-hensive benchmark for open-world compositional text-to-image generation. Advances in Neural Information Processing Systems , 36:78723–78747, 2023. [15] Amita Kamath, Kai-Wei Chang, Ranjay Krishna, Luke Zettlemoyer, Yushi Hu, and Marjan Ghazvininejad. Geneval 2: Addressing benchmark drift in text-to-image evaluation. arXiv preprint arXiv:2512.16853 , 2025. 10 [16] Korrawe Karunratanakul, Konpat Preechakul, Emre Aksan, Thabo Beeler, Supasorn Suwa-janakorn, and Siyu Tang. Optimizing diffusion noise can serve as universal motion priors. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 1334–1345, 2024. [17] Diederik P Kingma and Max Welling. Auto-encoding variational bayes. arXiv preprint arXiv:1312.6114 , 2013. [18] Yuval Kirstain, Adam Polyak, Uriel Singer, Shahbuland Matiana, Joe Penna, and Omer Levy. Pick-a-pic: An open dataset of user preferences for text-to-image generation. Advances in neural information processing systems , 36:36652–36663, 2023. [19] Shuangqi Li, Hieu Le, Jingyi Xu, and Mathieu Salzmann. Enhancing compositional text-to-image generation with reliable random seeds. In The Thirteenth International Conference on Learning Representations , 2025. URL https://openreview.net/forum?id=5BSlakturs .[20] Zeming Li, Xiangyue Liu, Xiangyu Zhang, Ping Tan, and Heung-Yeung Shum. Noisear: Autoregressing initial noise prior for diffusion models. arXiv preprint arXiv:2506.01337 , 2025. [21] Yongzhe Lyu, Yu Wu, Yutian Lin, and Bo Du. Is-diff: Improving diffusion-based inpainting with better initial seed. arXiv preprint arXiv:2509.11638 , 2025. [22] Jiafeng Mao, Xueting Wang, and Kiyoharu Aizawa. The lottery ticket hypothesis in denoising: Towards semantic-driven initialization. In European Conference on Computer Vision , pages 93–109. Springer, 2024. [23] Boming Miao, Chunxiao Li, Xiaoxiao Wang, Andi Zhang, Rui Sun, Zizhe Wang, and Yao Zhu. Noise diffusion for enhancing semantic faithfulness in text-to-image synthesis. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 23575–23584, 2025. [24] Zachary Novack, Julian McAuley, Taylor Berg-Kirkpatrick, and Nicholas J Bryan. Ditto: Diffusion inference-time t-optimization for music generation. arXiv preprint arXiv:2401.12179 ,2024. [25] Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fernandez, Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, et al. Dinov2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193 , 2023. [26] Benjamin Recht, Rebecca Roelofs, Ludwig Schmidt, and Vaishaal Shankar. Do imagenet classifiers generalize to imagenet? In International conference on machine learning , pages 5389–5400. PMLR, 2019. [27] Yuxi Ren, Xin Xia, Yanzuo Lu, Jiacheng Zhang, Jie Wu, Pan Xie, Xing Wang, and Xuefeng Xiao. Hyper-sd: Trajectory segmented consistency model for efficient image synthesis. Advances in neural information processing systems , 37:117340–117362, 2024. [28] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. [29] Olga Russakovsky, Jia Deng, Hao Su, Jonathan Krause, Sanjeev Satheesh, Sean Ma, Zhiheng Huang, Andrej Karpathy, Aditya Khosla, Michael Bernstein, et al. Imagenet large scale visual recognition challenge. International journal of computer vision , 115(3):211–252, 2015. [30] Tim Salimans and Jonathan Ho. Progressive distillation for fast sampling of diffusion models. 
+
+arXiv preprint arXiv:2202.00512 , 2022. [31] Axel Sauer, Dominik Lorenz, Andreas Blattmann, and Robin Rombach. Adversarial diffusion distillation. In European Conference on Computer Vision , pages 87–103. Springer, 2024. [32] Vikash Sehwag, Xianghao Kong, Jingtao Li, Michael Spranger, and Lingjuan Lyu. Stretching each dollar: Diffusion training from scratch on a micro-budget. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 28596–28608, 2025. 11 [33] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. [34] Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. 2023. [35] Zhiwei Tang, Jiangweizhi Peng, Jiasheng Tang, Mingyi Hong, Fan Wang, and Tsung-Hui Chang. Tuning-free alignment of diffusion models with direct noise optimization. In ICML 2024 Workshop on Structured Probabilistic Inference & Generative Modeling , 2024. URL 
+
+https://openreview.net/forum?id=Dqpa8rbL39 .[36] Masatoshi Uehara, Xingyu Su, Yulai Zhao, Xiner Li, Aviv Regev, Shuiwang Ji, Sergey Levine, and Tommaso Biancalani. Reward-guided iterative refinement in diffusion models at test-time with applications to protein and dna design. arXiv preprint arXiv:2502.14944 , 2025. [37] Masatoshi Uehara, Yulai Zhao, Chenyu Wang, Xiner Li, Aviv Regev, Sergey Levine, and Tom-maso Biancalani. Inference-time alignment in diffusion models with reward-guided generation: Tutorial and review. arXiv preprint arXiv:2501.09685 , 2025. [38] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. Advances in neural information processing systems , 30, 2017. [39] Bram Wallace, Akash Gokul, Stefano Ermon, and Nikhil Naik. End-to-end diffusion latent optimization improves classifier guidance. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 7280–7290, 2023. [40] Qingsong Wang, Zhengchao Wan, Mikhail Belkin, and Yusu Wang. Seeds of structure: Patch PCA reveals universal compositional cues in diffusion models. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https://openreview. net/forum?id=EgH5WYB6my .[41] Xiaoshi Wu, Yiming Hao, Keqiang Sun, Yixiong Chen, Feng Zhu, Rui Zhao, and Hongsheng Li. Human preference score v2: A solid benchmark for evaluating human preferences of text-to-image synthesis. arXiv preprint arXiv:2306.09341 , 2023. [42] Qingsong Xie, Zhenyi Liao, Zhijie Deng, Haonan Lu, et al. Tlcm: Training-efficient latent consistency model for image generation with 2-8 steps. arXiv preprint arXiv:2406.05768 , 2024. [43] Sirui Xie, Zhisheng Xiao, Diederik P Kingma, Tingbo Hou, Ying N Wu, Kevin Murphy, Tim Salimans, Ben Poole, and Ruiqi Gao. Em distillation for one-step diffusion models. Advances in Neural Information Processing Systems , 37:45073–45104, 2024. [44] Jiazheng Xu, Xiao Liu, Yuchen Wu, Yuxuan Tong, Qinkai Li, Ming Ding, Jie Tang, and Yuxiao Dong. Imagereward: Learning and evaluating human preferences for text-to-image generation. 
+
+Advances in Neural Information Processing Systems , 36:15903–15935, 2023. [45] Katherine Xu, Lingzhi Zhang, and Jianbo Shi. Good seed makes a good crop: Discovering secret seeds in text-to-image diffusion models. In 2025 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pages 3024–3034. IEEE, 2025. [46] Tianwei Yin, Michaël Gharbi, Richard Zhang, Eli Shechtman, Fredo Durand, William T Freeman, and Taesung Park. One-step diffusion with distribution matching distillation. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 6613–6623, 2024. [47] Chenshuang Zhang, Chaoning Zhang, Mengchun Zhang, In So Kweon, and Junmo Kim. Text-to-image diffusion models in generative ai: A survey. arXiv preprint arXiv:2303.07909 , 2023. [48] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unrea-sonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 586–595, 2018. [49] Zikai Zhou, Shitong Shao, Lichen Bai, Shufei Zhang, Zhiqiang Xu, Bo Han, and Zeke Xie. Golden noise for diffusion models: A learning framework. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 17688–17697, 2025. 12 A Theoretical Derivations 
+
+A.1 Preliminaries Gaussian Distribution. We denote N (μ, Σ) as a multivariate Gaussian distribution with mean μ
+
+and covariance matrix Σ. In particular, let ϕd(x) be the probability density function (PDF) of the 
+
+d-dimensional standard Gaussian distribution N (0 , I d), defined as: 
+
+ϕd(x) = 1(2 π)d/ 2 exp 
+
+
+
+− 12 ∥x∥2
+
+
+
+. (9) A fundamental property of Gaussian distributions is their closure under affine transformations. Specifically, if a random vector x follows a Gaussian distribution x ∼ N (μ, Σ) , then for any matrix 
+
+A ∈ Rm×d and vector b ∈ Rm, the transformed variable y = Ax + b is also Gaussian: 
+
+y ∼ N (Aμ + b, A ΣA⊤). (10) Furthermore, the standard Gaussian distribution N (0 , I d) exhibits rotational invariance . If A is an orthogonal matrix (i.e., A⊤A = AA ⊤ = Id), the covariance structure is preserved under the transformation y = Ax , yielding: 
+
+y ∼ N (0 , I d). (11) This property ensures that the statistical characteristics of the Gaussian distribution remain unchanged under orthogonal transformations, such as rotations or changes of basis. 
+
+Exponential Tilting. Given a base distribution q0(x) and a real-valued function f (x), the exponen-tially tilted distribution is defined as 
+
+q(x) = 1
+
+Z q0(x) exp( f (x)) , (12) where Z = R q0(x) exp( f (x)) dx is the normalization constant, assumed to be finite. This construction reweights the base distribution q0 by assigning higher probability mass to regions where f (x) is large. As a result, q(x) is biased toward such regions while preserving the overall structure of the base distribution. In the context of reward-based modeling, f (x) typically corresponds to a reward function r(x), and the tilted distribution takes the form 
+
+q(x) ∝ q0(x) exp( r(x)) . (13) This formulation commonly arises in probabilistic inference and energy-based models, where the exponential term softly biases the distribution toward high-reward regions while maintaining stochas-ticity. Importantly, exponential tilting only reweights the base distribution q0 and does not assign probability mass to regions where q0(x) = 0 . In other words, if a point x is impossible under q0, it remains impossible under q. As a result, the support of q is contained within that of q0. This means that exponential tilting does not introduce new regions in the space, but instead redistributes probability mass within the existing domain. Such a property makes it particularly suitable for guiding generation, as it biases the distribution toward desirable regions while preserving the overall structure of the original distribution. 
+
+Kullback–Leibler Divergence. For two probability densities p and q, the Kullback–Leibler (KL) divergence is defined as 
+
+DKL (p ∥ q) = Ep
+
+
+
+log p(x)
+
+q(x)
+
+
+
+, (14) assuming that p is absolutely continuous with respect to q. It measures the discrepancy between two distributions, although it is not a symmetric distance. The KL divergence is always non-negative and equals zero if and only if p = q almost everywhere. An equivalent expression is 
+
+DKL (p ∥ q) = Ep[log p(x)] − Ep[log q(x)] , (15) which shows that minimizing DKL (p ∥ q) encourages q to assign high probability to samples drawn from p.13 A.2 Gaussian Prior Preservation under PCA Projection 
+
+We show that the orthonormal PCA transformation preserves the Gaussian distribution. Let z0 ∼N (0 , I D ) and partition it into non-overlapping patches {si}Ni=1 , where si ∈ Rd. Define wi = V ⊤si
+
+with an orthonormal matrix V ∈ Rd×d. Then wi ∼ N (0 , I d).
+
+Proof. Let Bi ∈ Rd×D denote the selection matrix that extracts the i-th patch from z0, so that 
+
+si = Biz0. (16) Since z0 ∼ N (0 , I D ) and si is a linear transformation of z0, si is also Gaussian: 
+
+si ∼ N (Bi0, B iID B⊤ 
+
+> i
+
+). (17) Because Bi selects d distinct coordinates, we have BiID B⊤ 
+
+> i
+
+= BiB⊤ 
+
+> i
+
+= Id. Hence, 
+
+si ∼ N (0 , I d). (18) Applying the property of Gaussian distribution to si ∼ N (0 , I d) with A = V ⊤ and define wi =
+
+V ⊤si, we obtain 
+
+wi ∼ N (V ⊤0, V ⊤IdV ).
+
+Using the orthonormality of V , V ⊤IdV = V ⊤V = Id.Therefore, 
+
+wi ∼ N (0 , I d). (19) 
+
+A.3 Gaussian Prior Preservation for the Full Coefficient Collection 
+
+We show that the full stacked coefficient vector, obtained from non-overlapping patches via an orthonormal PCA transform, follows a standard Gaussian distribution. Let 
+
+w := 
+
+
+
+w1
+
+w2
+
+...
+
+wN
+
+ ∈ RN d , (20) where each wi ∈ Rd denotes the PCA coefficient vector of the i-th patch. For notational convenience, 
+
+w may also be viewed as an N × d array, but we treat it as a vector in RN d when defining its distribution. We will show that 
+
+w ∼ N (0 , I N d ), (21) which we denote by q(w) = N (0 , I ).
+
+Proof. From Section A.2, for each patch i we have 
+
+wi = V ⊤si ∼ N (0 , I d), (22) where V is an orthonormal PCA basis matrix satisfying V ⊤V = V V ⊤ = Id. To establish the joint distribution of the full collection w, it remains to analyze the stacked patch vector. Define 
+
+s := 
+
+
+
+s1
+
+s2
+
+...
+
+sN
+
+ ∈ RN d . (23) Each patch is obtained from the initial noise z0 ∼ N (0 , I D ) via a linear selection: 
+
+si = Biz0, (24) 14 where Bi ∈ Rd×D is a selection matrix that extracts the coordinates corresponding to the i-th non-overlapping patch. Stacking all patches, define 
+
+B := 
+
+
+
+B1
+
+B2
+
+...
+
+BN
+
+ ∈ RN d ×D , (25) so that 
+
+s = Bz 0. (26) Since z0 ∼ N (0 , I D ) and p is a linear transformation of z0, it follows that 
+
+s ∼ N (0 , BI D B⊤) = N (0 , BB ⊤). (27) Because the patches are non-overlapping and each Ei selects d distinct coordinates, we have 
+
+BiB⊤ 
+
+> i
+
+= Id, BiB⊤ 
+
+> j
+
+= 0 (i̸ = j). (28) Thus, 
+
+BB ⊤ =
+
+
+
+Id 0 · · · 00 Id · · · 0
+
+... ... . . . ...
+
+0 0 · · · Id
+
+ = IN d , (29) which implies 
+
+s ∼ N (0 , I N d ). (30) Next, define the block-diagonal matrix 
+
+¯V := 
+
+
+
+V ⊤ 0 · · · 00 V ⊤ · · · 0
+
+... ... . . . ...
+
+0 0 · · · V ⊤
+
+ ∈ RN d ×N d . (31) Then the full coefficient vector can be written as 
+
+w = ¯V s. (32) Since s ∼ N (0 , I N d ) and ¯V is orthonormal (as each block V ⊤ is orthonormal), we have 
+
+w ∼ N (0 , ¯V I N d ¯V ⊤) = N (0 , ¯V ¯V ⊤) = N (0 , I N d ). (33) Therefore, the full stacked coefficient vector follows a standard Gaussian distribution: 
+
+w ∼ N (0 , I N d ). (34) This completes the proof. 
+
+A.4 Factorization of the Gaussian Prior over Low- and High-Frequency Components 
+
+We show that the standard Gaussian prior factorizes over the low- and high-frequency components. Let 
+
+w =
+
+
+
+w1
+
+w2
+
+...
+
+wN
+
+ ∈ RN ×d, (35) where each wi ∈ Rd, and decompose 
+
+w = ( wL, w H ), (36) with wL ∈ RN ×k and wH ∈ RN ×(d−k).Then the Gaussian prior factorizes as 
+
+q(w) = qL(wL) qH (wH ). (37) 15 Proof. From Appendix A.3, the full coefficient collection satisfies 
+
+w ∼ N (0 , I ). (38) Under the decomposition w = ( wL, w H ), the covariance matrix can be written in block form as 
+
+Cov( w) = 
+
+ Cov( wL) Cov( wL, w H )Cov( wH , w L) Cov( wH )
+
+
+
+. (39) Since w is standard Gaussian, this covariance equals the identity, implying 
+
+Cov( wL, w H ) = 0 . (40) Because (wL, w H ) is jointly Gaussian with zero cross-covariance, the two variables are independent. Therefore, 
+
+q(wL, w H ) = qL(wL) qH (wH ). (41) 
+
+A.5 (Proof of Proposition 3.1) Low-Frequency Approximation of the Tilted Distribution 
+
+Proof. By definition of the reward-tilted distribution, 
+
+q⋆(w) ∝ q(w) exp  r(g(wL, w H )) . (42) Using the decomposition 
+
+r(g(wL, w H )) = ¯ r(wL) + δ(w), δ(w) := r(g(wL, w H )) − ¯r(wL),
+
+we obtain 
+
+q⋆(w) ∝ q(w) exp  ¯r(wL) + δ(w), (43) where |δ(w)| ≤ ϵ by assumption. The low-frequency-only tilted distribution is defined as 
+
+˜q⋆(w) ∝ q(w) exp  ¯r(wL). (44) Let Z and ˜Z denote the corresponding normalization constants: 
+
+q⋆(w) = 1
+
+Z q(w) exp  ¯r(wL) + δ(w), ˜q⋆(w) = 1˜Z q(w) exp  ¯r(wL).
+
+Therefore, 
+
+log q⋆(w)˜q⋆(w) = δ(w) + log ˜ZZ . (45) Next, using 
+
+˜q⋆(w) = 1˜Z q(w) exp(¯ r(wL)) ,
+
+we can write 
+
+Z =
+
+Z
+
+q(w) exp(¯ r(wL)) exp( δ(w)) dw (46) 
+
+= ˜Z
+
+Z
+
+˜q⋆(w) exp( δ(w)) dw (47) 
+
+= ˜Z E˜q [exp( δ(w))] . (48) Since |δ(w)| ≤ ϵ, we have 
+
+e−ϵ ≤ eδ(w) ≤ eϵ,
+
+and hence 
+
+e−ϵ ≤ Z
+
+˜Z ≤ eϵ.
+
+Equivalently, 
+
+log ˜ZZ ≤ ϵ. (49) 16 Moreover, since |δ(w)| ≤ ϵ, it follows that 
+
+−ϵ ≤ Eq⋆ [δ(w)] ≤ ϵ. (50) Therefore, 
+
+DKL (q⋆∥˜q⋆) = Eq⋆
+
+
+
+log q⋆(w)˜q⋆(w)
+
+
+
+(51) 
+
+= Eq⋆ [δ(w)] + log ˜ZZ (52) 
+
+≤ ϵ + ϵ (53) 
+
+= 2 ϵ. (54) 
+
+A.6 (Proof of Proposition 3.2) Derivation of Tractable Loss Function Derivation of KL Divergence Objective. We aim to solve the following optimization problem: 
+
+DKL (qϕL ∥ ˜q⋆L) = EwL∼qϕL
+
+"
+
+log qϕL(wL)˜q⋆L(wL)
+
+#
+
+. (55) Introducing the normalization constant Z, we can write the low-frequency-only tilted distribution as 
+
+˜q⋆L(wL) = 1
+
+Z qL(wL) exp(¯ r(wL)) . (56) Taking the logarithm, we obtain 
+
+log ˜ q⋆L(wL) = log qL(wL) + ¯ r(wL) − log Z. (57) Substituting this into the KL divergence, we obtain 
+
+DKL (qϕL ∥ ˜q⋆L) = EwL∼qϕL
+
+h
+
+log qϕL(wL) − log qL(wL) − ¯r(wL) + log Z
+
+i
+
+. (58) Separating the terms, we have 
+
+DKL (qϕL ∥ ˜q⋆L) = EwL∼qϕL
+
+h
+
+log qϕL(wL) − log qL(wL)
+
+i
+
+− EwL∼qϕL
+
+[¯ r(wL)] + log Z. (59) Thus, the objective can be written as 
+
+DKL (qϕL ∥ ˜q⋆L) = DKL (qϕL ∥ qL) − EwL∼qϕL
+
+[¯ r(wL)] + C, (60) where C = log Z is constant with respect to ϕ, and can therefore be ignored during optimization. 
+
+Practical Approximation of the Low-Frequency Reward. In practice, the low-frequency reward 
+
+¯r(wL) is intractable to compute, as it requires taking an expectation over the high-frequency compo-nents wH . However, under Assumption (1) , ¯r(wL) can be well approximated by r(g(w)) for any w,as their discrepancy is uniformly bounded by ϵ. Consequently, we replace ¯r(wL) with r(g(w)) in practice, leading to a tractable training objective. Based on this approximation, we derive the practical training objective from the low-frequency KL formulation: 
+
+L(ϕ) = DKL (qϕL ∥ qL) − Ew∼qϕ [r(g(w))] . (61) The true objective in the low-frequency space is given by Eq. (60) . The proposed objective L(ϕ)
+
+serves as a surrogate for this quantity, and their discrepancy is uniformly bounded by ϵ. This leads to the following bound: 
+
+L(ϕ) − ϵ ≲ DKL (qϕL∥qL) − EwL∼qϕL
+
+[¯ r(wL)] ≲ L(ϕ) + ϵ. (62) 17 Exact KL divergence. The proof is based on the approach of [ 7 ]. We define the transformation induced by the network in the low-frequency space as 
+
+Tϕ(wL) = wL + hϕ(wL), (63) where hϕ is a residual predictor. Let qL = N (0 , I ) denote the standard Gaussian prior over wL, and let qϕL = ( Tϕ)#qL denote the pushforward distribution induced by Tϕ.To apply the change-of-variables formula, the transformation Tϕ must be invertible with a continu-ously differentiable inverse. The following lemma provides a sufficient condition for this property. 
+
+Lemma A.1 (Invertibility of the residual map) . Let hϕ : RN k → RN k be a continuously differentiable function. If there exists a constant M such that 
+
+∥Jhϕ (wL)∥2 ≤ M < 1 for all wL ∈ RN k , (64) 
+
+then Tϕ is a bijection from RN k onto RN k , and its inverse is continuously differentiable. Proof. Since hϕ is continuously differentiable and satisfies Eq. (64) . It follows from the mean value theorem that hϕ is M -Lipschitz: 
+
+∥hϕ(x) − hϕ(y)∥ ≤ M ∥x − y∥ ∀x, y ∈ RN k . (65) 
+
+(i) Injectivity. For any x, y ∈ RN k ,
+
+∥Tϕ(x) − Tϕ(y)∥ = ∥(x − y) + ( hϕ(x) − hϕ(y)) ∥≥ ∥ x − y∥ − ∥ hϕ(x) − hϕ(y)∥≥ (1 − M )∥x − y∥.
+
+(66) Since 1 − M > 0, it follows that Tϕ(x) = Tϕ(y) implies x = y. Hence, Tϕ is injective. 
+
+(ii) Surjectivity. Fix any z ∈ RN k and define 
+
+Ψz (x) := z − hϕ(x). (67) Then for any x, y ,
+
+∥Ψz (x) − Ψz (y)∥ = ∥hϕ(x) − hϕ(y)∥ ≤ M ∥x − y∥. (68) Thus, Ψz is a contraction with constant L < 1. By the Banach fixed-point theorem, there exists a unique x⋆ such that 
+
+x⋆ = Ψ z (x⋆) = z − hϕ(x⋆). (69) Rearranging gives 
+
+z = x⋆ + hϕ(x⋆) = Tϕ(x⋆). (70) Since z is arbitrary, Tϕ is surjective. 
+
+(iii) Differentiability of the inverse. The Jacobian of Tϕ is 
+
+JTϕ (wL) = I + Jhϕ (wL). (71) we have Eq. (64), hence, the spectral radius satisfies 
+
+ρ(Jhϕ (wL)) ≤ ∥ Jhϕ (wL)∥2 < 1. (72) Therefore, for every eigenvalue λ of Jhϕ (wL), we have |λ| < 1, so 
+
+1 + λ̸ = 0 .
+
+It follows that I + Jhϕ (wL) is invertible for all wL, i.e., 
+
+det( JTϕ (wL)) ̸ = 0 ∀wL.
+
+By the inverse function theorem, Tϕ admits a locally defined inverse around every point, and this inverse is continuously differentiable. Since Parts (i) and (ii) establish that Tϕ is globally bijective, these local inverses are consistent and define a global inverse T −1 
+
+> ϕ
+
+, which is also continuously differentiable. 18 Under the condition of Lemma A.1 (i.e., ∥Jhϕ (wL)∥2 ≤ M < 1), we can use change of variables formula. The density of qϕL is given by 
+
+qϕL( ˆ wL) = qL(wL) det 
+
+ ∂T ϕ(wL)
+
+∂w L
+
+ −1
+
+, (73) where ˆwL = Tϕ(wL). Since 
+
+∂T ϕ(wL)
+
+∂w L
+
+= I + Jhϕ (wL),
+
+this yields 
+
+qϕL( ˆ wL) = qL(wL) det  I + Jhϕ (wL) −1 . (74) Using the definition of KL divergence, 
+
+DKL (qϕL ∥ qL) = E ˆwL∼qϕL
+
+"
+
+log qϕL( ˆ wL)
+
+qL( ˆ wL)
+
+#
+
+, (75) we substitute the expression of qϕL( ˆ wL) to obtain 
+
+log qϕL( ˆ wL)
+
+qL( ˆ wL) = log qL(wL) − log qL( ˆ wL) − log det  I + Jhϕ (wL) . (76) Since qL is a standard Gaussian distribution, its log-density is quadratic. Thus, 
+
+log qL(wL) − log qL( ˆ wL) = 12 ∥ ˆwL∥2 − 12 ∥wL∥2. (77) Substituting ˆwL = wL + hϕ(wL) and expanding, 
+
+12 ∥ ˆwL∥2 − 12 ∥wL∥2 = 12 ∥wL + hϕ(wL)∥2 − 12 ∥wL∥2
+
+= 12 ∥hϕ(wL)∥2 + ⟨wL, h ϕ(wL)⟩.
+
+(78) The first term corresponds to the magnitude of the residual update, while the second term captures the interaction between the input wL and the update direction. To simplify the second term, we apply Stein’s lemma under the Gaussian base measure wL ∼ N (0 , I ).Assume that hϕ is continuously differentiable and satisfies 
+
+E∥hϕ(wL)∥ < ∞, E∥Jhϕ (wL)∥2
+
+ < ∞, (79) so that integration by parts applies and the boundary terms vanish under the Gaussian measure. In our setting, these conditions are ensured by the Jacobian bound in Eq. (64) , which implies that hϕ is Lipschitz and hence has at most linear growth. Applying Stein’s lemma yields 
+
+E⟨wL, h ϕ(wL)⟩ = ETr( Jhϕ (wL)) . (80) Combining the above results, we obtain the exact expression 
+
+DKL (qϕL ∥ qL) = EwL∼qL
+
+ 12 ∥hϕ(wL)∥2 + Tr  Jhϕ (wL) − log det  I + Jhϕ (wL)
+
+. (81) This expression shows that the KL divergence decomposes into a quadratic penalty on hϕ and a Jacobian-based correction capturing local geometric distortion. 19 Approximation of the Jacobian term. The exact KL expression derived above contains a Jacobian-dependent correction term, 
+
+Tr( Jhϕ (wL)) − log det  I + Jhϕ (wL). (82) While this term is necessary for exact density transformation, it is computationally expensive, as it requires evaluating both the Jacobian trace and the log-determinant. To obtain a tractable objective, we analyze this term under the small-Jacobian assumption in Eq. (64) as in Lemma A.1. Let 
+
+A := Jhϕ (wL). (83) Since ∥A∥2 ≤ M < 1, its spectral radius satisfies ρ(A) < 1, and hence the matrix logarithm admits the convergent expansion 
+
+log( I + A) = 
+
+> ∞
+
+X
+
+> j=1
+
+(−1) j+1 
+
+j Aj . (84) Using the identity log det( I + A) = Tr(log( I + A)) , we obtain 
+
+log det( I + A) = 
+
+> ∞
+
+X
+
+> j=1
+
+(−1) j+1 
+
+j Tr( Aj ). (85) Therefore, 
+
+Tr( A) − log det( I + A) = 
+
+> ∞
+
+X
+
+> j=2
+
+(−1) j
+
+j Tr( Aj ). (86) Taking absolute values and using |Tr( Aj )| ≤ N k ∥A∥j 
+
+> 2
+
+≤ N k M j , we get 
+
+|Tr( A) − log det( I + A)| ≤ N k 
+
+> ∞
+
+X
+
+> j=2
+
+M j
+
+j = N k  − log(1 − M ) − M . (87) Substituting this bound into the KL expression yields 
+
+DKL (qϕL ∥ qL) − 12 EwL∼qL ∥hϕ(wL)∥2 ≤ N k  − log(1 − M ) − M . (88) When M ≪ 1, the bound admits the second-order approximation 
+
+− log(1 − M ) − M = M 2
+
+2 + O(M 3), (89) which becomes negligible as M → 0. Consequently, 
+
+DKL (qϕL ∥ qL) ≈ 12 EwL∼qL ∥hϕ(wL)∥2. (90) This shows that, in the small-Jacobian regime, the KL divergence is well approximated by a simple quadratic penalty on the residual update hϕ.
+
+Final practical objective. Applying this approximation yields the practical training loss 
+
+L(ϕ) = Ew∼q
+
+ 12 ∥hϕ(wL)∥2 − r g(wL + hϕ(wL), w H )
+
+. (91) This objective admits a clear interpretation: the first term acts as a regularizer that penalizes large deviations from the base Gaussian prior in the low-frequency subspace, while the second term encourages updates that improve the reward. 20 B Additional Details on Model Architecture and Loss Function 
+
+B.1 Model Architecture of the LENS Framework Patch PCA Codec. The Patch PCA Codec transforms latent noise into a patch-wise PCA coefficient space and reconstructs it back to the latent space. Let z ∈ RC×H×W denote a latent noise representation, where C, H, and W denote the number of channels, height, and width, respectively. We extract non-overlapping patches using an unfold 
+
+operation with patch size s, producing a sequence of patch vectors: 
+
+s = {si}Ni=1 , si ∈ Rd, (92) where N = Hs · Ws and d = Cs 2.Each patch is centered using a precomputed mean μ ∈ Rd:
+
+˜si = si − μ. (93) We project the centered patches onto a truncated PCA basis V ′ ∈ Rd×k, whose columns are orthonormal (i.e., V ′⊤ V ′ = I): 
+
+wi,L = ˜ siV ′, (94) where wi,L ∈ Rk are the retained low-frequency PCA coefficients and k ≪ d.The high-frequency component is defined as: 
+
+yi = ˜ si − wi,L V ′⊤ , (95) where yi lies in the orthogonal complement of the subspace spanned by V ′.Collecting all patches, we obtain: 
+
+wL = {wi,L }Ni=1 ∈ RN ×k, y = {yi}Ni=1 ∈ RN ×d. (96) Given modified coefficients ˆwi,L , reconstruction is performed as: 
+
+ˆsi = μ + ˆ wi,L V ′⊤ + yi. (97) The reconstructed patches are merged back into the latent space using a fold operation. This formulation is mathematically equivalent to performing a full PCA projection using an orthonor-mal basis V ∈ Rd×d, obtaining full coefficients wi = ˜ siV , modifying only the first k coefficients, and reconstructing via wiV ⊤.Specifically, let V = [ V ′, V ′′ ], where V ′ contains the first k principal components and V ′′ contains the remaining components. Then, since V is orthonormal, we can decompose: 
+
+˜si = wi,L V ′⊤ + wi,H V ′′⊤ , (98) where wi,H denotes the remaining high-frequency coefficients. In our formulation, the orthogonal component yi corresponds exactly to the contribution of the high-frequency components, i.e., the component of ˜si that lies in the subspace orthogonal to the span of the top-k principal components V ′:
+
+yi = wi,H V ′′⊤ . (99) Therefore, modifying only wi,L while keeping yi fixed is equivalent to modulating only the first k
+
+PCA coefficients in the full PCA space. 
+
+LENS Network. The LENS Network is a transformer-based model [ 38 ] that predicts residual updates to the PCA coefficients. The input to the network is a sequence of low-frequency PCA coefficients: 
+
+wL ∈ RN ×k, (100) 21 where N is the number of patches and k is the number of low-frequency coefficients used for modulation. Each token corresponds to a patch and contains its k-dimensional PCA coefficient vector. Each coefficient vector is first projected into a hidden dimension h:
+
+h(0) = Linear( wL) + P, h(0) ∈ RN ×h, (101) where P is a sinusoidal positional embedding. Given a text prompt embedding c, two conditioning paths are used: (1) a pooled text condition that is projected and added to all patch tokens (bias injection), and (2) token-wise text embeddings used in cross-attention. Each transformer block applies self-attention, text cross-attention, and a feed-forward network (FFN), with residual connections and layer normalization. After passing through L transformer blocks, the final hidden representation is projected back to the coefficient space: 
+
+∆wL = Linear(LN( h(L))) , (102) where ∆wL ∈ RN ×k represents the predicted coefficient updates. 
+
+B.2 Composition of the Reward-based Loss Function 
+
+We employ a composite reward function to guide the optimization of the coefficient modulation network. The overall reward is defined as a weighted combination of multiple complementary scoring functions that capture semantic alignment, human preference, and perceptual quality. Given a generated image x conditioned on a text prompt c, the total reward is defined as 
+
+r(x, c ) = X
+
+> i
+
+λi ri(x, c ), (103) where {ri} denotes individual reward components and {λi} are weighting coefficients. The proposed reward combines complementary signals: CLIP [ 10 ] provides a strong signal for semantic alignment, HPSv2.1 (Human Preference Score) [ 41 ] captures absolute perceptual quality, ImageReward [ 44 ]promotes visual fidelity by penalizing generative artifacts, and PickScore [ 18 ] models relative human preference. This combination yields a more stable and well-balanced optimization signal compared to relying on a single reward model. In practice, we combine four reward functions: 
+
+r(x, c ) = λCLIP rCLIP (x, c ) + λHPS rHPS (x, c ) + λIR rIR (x, c ) + λPick rPick (x, c ). (104) We set the weights as λCLIP = 0 .01 , λHPS = 5 .0, λIR = 1 .0, and λPick = 0 .05 .
+
+CLIP Score. The CLIP reward [ 10 ] measures semantic alignment by computing the cosine similar-ity between image and text embeddings in a shared latent space. It encourages the generated image to remain consistent with the input prompt. 
+
+HPSv2.1. HPSv2.1 [ 41 ] is a model fine-tuned on human preference data to predict aesthetic quality. It captures perceptual attributes such as composition, lighting, and detail. 
+
+ImageReward. ImageReward [ 44 ] is trained on large-scale human feedback to evaluate overall image quality conditioned on text prompts. It provides a scalar reward reflecting both visual fidelity and semantic alignment. 
+
+PickScore. PickScore [ 18 ] is trained on pairwise human preference data using a Bradley–Terry objective. It predicts relative preference between images for the same prompt, capturing fine-grained ranking signals. 22 C Experimental Details 
+
+C.1 Implementation Details PCA Basis Extraction. Before training each model, we precompute the PCA basis for latent patches. To this end, we use ImageNetV2 (MIT License) [ 26 ], a dataset designed to evaluate generalization performance. ImageNetV2 preserves the same 1,000-class structure as ImageNet [ 29 ]while consisting of 10 newly collected images per class, resulting in a total of 10,000 images without overlap with the original training data. By covering a wide range of classes and visual variations, it provides a reasonable approximation of natural image statistics while mitigating overfitting to a specific dataset distribution. The PCA basis is computed as follows. First, images are encoded into latent representations using the VAE of the corresponding model. The latent features are then divided into patches according to a predefined patch size and vectorized. Next, the mean vector of the patches is computed, and each patch is centered by subtracting the mean. Based on these centered vectors, a covariance matrix is constructed, from which eigenvectors are obtained. These eigenvectors are used as the PCA basis during both training and inference for each model. 
+
+Models and Baselines. In this work, we employ three distilled diffusion models: SD-Turbo 1
+
+[31 ], Hyper-SDXL 2 [ 27 ], and SANA-Sprint 3 [4]. For Hyper-SDXL, we use the 1-step SDXL UNet checkpoint provided in the official repository. As baselines, we employ ReNo (MIT License) 4 [6] and HyperNoise (MIT License) 5 [7]. ReNo is a test-time optimization method that refines latent representations during inference to better align generated samples with the target distribution. Specifically, it performs iterative optimization at test time without modifying the model parameters. In our experiments, we set the number of optimization iterations to 20 and follow the official implementation for all other hyperparameters. For SANA-Sprint, we reimplement ReNo based on the original codebase to ensure compatibility with these models. HyperNoise is a HyperNetwork-based approach that learns to generate input-conditioned noise modulations to steer the denoising process toward better quality samples. We follow the official implementation for all hyperparameters, including setting the LoRA rank to 128. Since the original implementation does not support Hyper-SDXL, we reimplement HyperNoise for this model based on the provided codebase. 
+
+Settings. In LENS, the base generator is pretrained and kept frozen. In the trainable LENS network, most layers use the default PyTorch initialization, while the final output projection is zero-initialized, and the cross-attention gate logits are initialized to -2.0 (gain ≈ 0.119 ), resulting in near-zero initial perturbations under the default modulation setting. This design is intended to stabilize training by starting from minimal perturbations, with updates initially focusing on the output layer and gradually propagating to the entire network, thereby reducing variance and improving convergence in reward-based learning. Across all experiments, the guidance scale is set to 0 during both training and evaluation. For all three models—SD-Turbo, Hyper-SDXL, and SANA-Sprint—the LENS network is trained at a resolution of 512×512. This choice is primarily motivated by computational efficiency and resource constraints, while maintaining adequate text–image alignment. During evaluation, images are generated at resolutions of 512, 1024, and 1024, respectively. The number of generation steps is fixed at 1 for both training and evaluation, except for the ablation experiments in the Appendix where the number of steps is varied. When evaluating on GenEval2 [ 15 ], we adopt Soft-TIFA AM as the scoring metric and generate images using different seeds for each prompt to mitigate dependence on random seed selection. To 
+
+> 1https://huggingface.co/stabilityai/sd-turbo
+> 2https://huggingface.co/ByteDance/Hyper-SD
+> 3https://huggingface.co/Efficient-Large-Model/Sana_Sprint_0.6B_1024px_diffusers
+> 4https://github.com/ExplainableML/ReNO
+> 5https://github.com/ExplainableML/HyperNoise
+
+23 further reduce statistical variance, we repeat the experiments with three different base seeds and report the averaged results, where each base seed defines a distinct set of per-prompt seeds. All training and experiments were conducted using Python 3.11.0 on NVIDIA RTX 3090 GPUs, with a 64-core Intel Xeon Gold 6226R CPU. The training data type was set to bfloat16 (bf16) by default. To increase the effective batch size without significantly increasing VRAM usage, gradient accumulation was employed. Additionally, gradient checkpointing was applied to both the text encoder and parts of the reward model to improve memory efficiency. When using two RTX 3090 GPUs, training each LENS network typically required approximately 4 to 6 days, although the exact duration varied slightly depending on the model architecture and overall GPU utilization. 
+
+C.2 Hyperparmeters 
+
+The hyperparameters used to train our LENS Network for each model are summarized in Table 4. 
+
+Low-frequency Eigen Noise Shaping (LENS) 
+
+Model SD-Turbo Hyper-SDXL SANA-Sprint Patch size 4 4 4Number of low-rank coefficients ( k) 32 32 256 Number of layers (blocks) 4 4 8Number of attention head 4 4 8GradNorm Clipping 1.0 1.0 1.0 Learning rate 2e−5 1e−4 1e−3
+
+Optimizer adamw adamw adamw Batch size 2 2 4Accumulation steps 15 15 6Training epochs ≈ 15 ≈ 20 ≈ 20 
+
+Number of training prompts ≈ 70 k ≈ 70 k ≈ 70 k
+
+Table 4: Hyperparameters for training the LENS network 
+
+# D Additional Experimental Results 
+
+D.1 Effect of the Number of Low-frequency Coefficients 
+
+We conduct an ablation study on the number of low-frequency coefficients k using the SD-Turbo model. The patch size is fixed at s = 4 , and only k is varied during training. For SD-Turbo, the latent channel dimension is 4, resulting in a full dimension of d = 64 . Images are generated using the LENS framework trained and evaluated on the GenEval2 benchmark. Table 5 summarizes the results for each metric, and Figure 5 compares the GenEval2 mean scores. As shown, the best performance is achieved at k = 32 . Increasing k toward the full dimension 
+
+d degrades performance, as it involves modifying an unnecessarily large number of components. This suggests that effective noise modulation benefits from focusing on a restricted subspace, where limiting the degrees of freedom leads to more stable and efficient optimization. 
+
+k Object ↑ Attribute ↑ Count ↑ Position ↑ Verb ↑
+
+8 73.26 42.06 24.59 26.36 3.24 16 73.50 40.83 23.91 28.17 1.53 32 75.07 43.08 26.08 28.46 5.78 
+
+64 74.02 42.55 25.05 28.21 5.33 Table 5: Effect of the number of PCA coefficients k on GenEval2 results 24 Figure 5: Effect of the number of low-frequency coefficients k on GenEval2 mean 
+
+D.2 Effect of the Patch Size 
+
+We conduct an ablation study on the patch size s using the SD-Turbo model. The number of low-frequency coefficients k is fixed, and only s is varied. Images are generated using the LENS framework trained and evaluated on the GenEval2 benchmark. Table 6 summarizes the results for each metric, and Figure 6 compares the GenEval2 mean scores. The results show that the best performance is achieved at s = 4 . This suggests that a moderate patch size strikes a good balance between preserving local details and capturing global structure, leading to improved performance. 
+
+s Object ↑ Attribute ↑ Count ↑ Position ↑ Verb ↑
+
+2 73.71 42.37 23.16 28.24 4.35 4 75.07 43.08 26.08 28.46 5.78 
+
+8 73.59 41.06 23.44 28.27 3.67 16 72.65 40.41 22.30 28.05 3.68 Table 6: Effect of the patch size s on GenEval2 results 
+
+Figure 6: Effect of the patch size s on GenEval2 mean 25 D.3 Effect of the Number of Transformer Layers 
+
+SD-Turbo + LENS GenEval2 Mean ↑
+
+4 Layers 35.70 
+
+8 Layers 34.80 12 Layers 33.10 
+
+Table 7: Effect of the number of layers Table 7 presents the performance of LENS with varying numbers of Transformer layers for the SD-Turbo model. As the number of layers increases, the GenEval mean score de-creases from 35.70 to 33.10. This indicates that deeper architectures do not necessarily yield bet-ter performance. Since LENS operates on low-dimensional representations, increasing depth may introduce redundant transformations or hinder effective feature utilization across layers. Overall, these results highlight the importance of selecting an appropriate model depth, rather than naively increasing the number of layers, in the design of the LENS architecture. 
+
+D.4 Multi-step Analysis 
+
+SD-Turbo GenEval2 Mean ↑
+
+One-step 33.95 + HyperNoise 34.96 
+
++ LENS (Ours) 35.69 
+
+Two-step 30.92 + HyperNoise 32.95 
+
++ LENS (Ours) 33.29 
+
+Four-step 29.82 + HyperNoise 31.72 + LENS (Ours) 31.00 Eight-step 29.16 + HyperNoise 30.58 
+
++ LENS (Ours) 30.61 
+
+Sixteen-step 29.10 + HyperNoise 30.57 + LENS (Ours) 30.10 
+
+Table 8: Step-wise performance While the main paper focuses on one-step genera-tion, we further analyze performance across varying numbers of inference steps. Table 8 shows the per-formance trends as the number of generation steps increases. LENS consistently outperforms both ran-dom noise initialization and HyperNoise in terms of GenEval2 mean across all settings, except at 4 and 16 steps, where it remains comparable to HyperNoise while still surpassing random noise. Notably, LENS achieves the largest performance gain in the one-step setting, attaining the highest score of 35.69. As the number of inference steps increases, performance slightly degrades. We attribute this trend to the design of the underlying model, SD-Turbo, which is specifically optimized through distillation for one-step generation. Consequently, while LENS remains competitive in multi-step settings, it achieves the best performance and efficiency when used with fewer inference steps. 
+
+D.5 Results on Other Benchmarks T2I-CompBench Table 9 presents quantitative evaluation results on T2I-CompBench [ 14 ]. LENS achieves competitive performance, closely matching HyperNoise with only a marginal gap, while significantly outperforming the Random Noise baseline. Notably, despite its substantially faster generation speed, LENS maintains comparable performance to HyperNoise, resulting in a more favorable performance–efficiency trade-off. These results demonstrate that LENS provides an effective and resource-efficient solution for ensuring semantic alignment in text-to-image generation.                               
+
+> Model Color ↑Shape ↑Texture ↑Spatial ↑Numeracy ↑Mean ↑
+> SD-Turbo 0.56 0.43 0.53 0.14 0.50 0.43 + HyperNoise 0.58 0.46 0.57 0.19 0.53 0.47 + LENS (Ours) 0.57 0.46 0.55 0.18 0.52 0.45
+
+Table 9: Results on T2I-CompBench 26 Method DPG-Bench Score ↑   
+
+> SD-Turbo 70.94 + HyperNoise 72.40 + LENS (Ours) 72.33
+
+Table 10: Results on DPG-Bench 
+
+DPG-Bench Table 10 presents the DPG-Bench [ 13 ] scores for the SD-Turbo model. LENS achieves highly competitive performance, closely matching HyperNoise with only a marginal gap. Notably, despite its substantially faster generation speed, LENS maintains comparable semantic alignment to the strongest baseline, highlighting its superior practical efficiency. 
+
+D.6 Standard Deviations of GenEval2 Scores 
+
+Table 1 reports GenEval2 results obtained by averaging over three runs with different base seeds to mitigate dependence on specific random seeds. Table 11 provides the corresponding standard deviations. 
+
+Model Object Attribute Count Position Verb Mean 
+
+SD-Turbo 0.29 0.30 0.21 0.32 0.21 0.24 + ReNo 0.38 0.42 0.33 0.37 0.27 0.35 + HyperNoise 0.40 0.48 0.39 0.36 0.25 0.33 + LENS (Ours) 0.37 0.40 0.36 0.40 0.23 0.35 Hyper-SDXL 0.40 0.43 0.32 0.29 0.20 0.32 + ReNo 0.45 0.43 0.35 0.37 0.16 0.35 + HyperNoise 0.40 0.44 0.38 0.39 0.25 0.32 + LENS (Ours) 0.42 0.41 0.36 0.33 0.21 0.35 SANA-Sprint 0.47 0.44 0.41 0.46 0.56 0.42 + ReNo 0.44 0.43 0.42 0.52 0.53 0.47 + HyperNoise 0.43 0.44 0.38 0.50 0.74 0.45 + LENS (Ours) 0.41 0.43 0.43 0.49 0.61 0.48 
+
+Table 11: Standard deviations of GenEval2 results in Table 1 
+
+# E Broader Impact 
+
+Generative models have been widely studied and increasingly adopted across various domains, leading to substantial societal impact. This work contributes to improving the quality and computational efficiency of such models, enabling higher-quality generation with reduced computational cost. In this regard, our approach may facilitate broader accessibility to generative modeling, particularly in resource-constrained settings. At the same time, we do not expect our work to introduce fundamentally new societal risks beyond those already associated with existing generative models. However, inherent risks such as the potential misuse for generating misleading or synthetic content, including misinformation, remain relevant. These concerns are not unique to our method but are shared across the broader class of generative modeling techniques. Responsible deployment and appropriate usage guidelines are therefore important to mitigate such risks. 27
