@@ -1,0 +1,787 @@
+Title: Uncovering Entity Identity Confusion in Multimodal Knowledge Editing
+
+URL Source: https://arxiv.org/pdf/2605.06096v1
+
+Published Time: Fri, 08 May 2026 01:05:42 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+# Uncovering Entity Identity Confusion in Multimodal Knowledge Editing 
+
+Shu Wu 1∗
+
+, Xiaotian Ye 2∗, Xinyu Mou 1,3 ∗, Dongsheng Liu 1,4 ∗, Xiaohan Wang 5, Mengqi Zhang 6†
+
+> 1
+
+New Laboratory of Pattern Recognition (NLPR) State Key Laboratory of Multimodal Artificial Intelligence Systems (MAIS) Institute of Automation, Chinese Academy of Sciences 
+
+> 2
+
+Beijing University of Posts and Telecommunications 
+
+> 3
+
+School of Artificial Intelligence, University of Chinese Academy of Sciences 
+
+> 4
+
+School of Advanced Interdisciplinary Sciences, University of Chinese Academy of Sciences 
+
+> 5
+
+Huazhong University of Science and Technology 
+
+> 6
+
+Shandong University 
+
+shu.wu@nlpr.ia.ac.cn, yexiaotian@bupt.edu.cn {mouxinyu2025, liudongsheng2025}@ia.ac.cn shawn_wang@hust.edu.cn, mengqi.zhang@sdu.edu.cn 
+
+## Abstract 
+
+Multimodal knowledge editing (MKE) aims to correct the internal knowledge of large vision-language models after deployment, yet the behavioral patterns of post-edit models remain underexplored. In this paper, we identify a systemic failure mode in edited models, termed Entity Identity Confusion (EIC): edited models exhibit an absurd behavior where text-only queries about the original entity’s identity unexpectedly return information about the new entity. To rigorously investigate EIC, we construct EC-Bench, a diagnostic benchmark that directly probes how image-entity bindings shift before and after editing. Our analysis reveals that EIC stems from existing methods failing to distinguish between Image-Entity (I-E) binding and Entity-Entity (E-E) relational knowledge in the model, causing models to overfit E-E associations as a shortcut: the image is still perceived as the original entity, with the new entity’s name serving only as a spurious identity label. We further explore potential mitigation strategies, showing that constraining edits to the model’s I-E processing stage encourages edits to act more faithfully on I-E binding, thereby substantially reducing EIC. Based on these findings, we discuss principled desiderata for faithful MKE and provide methodological guidance for future research. 
+
+## 1 Introduction 
+
+Today’s knowledge editing (KE) [Zhang et al., 2024b] has established itself as a key research area in the large language model (LLM) [Zhao et al., 2025] field. In real-world deployments, maintaining LLMs often requires revising their encoded knowledge to address outdated facts or to meet safety, policy, and privacy requirements. Knowledge editing focuses on targeted modifications to the internal knowledge of LLMs, thereby enabling more practical and auditable post-deployment maintenance. With the growing adoption of large vision-language models (LVLMs) [Liu et al., 2023, Zhu et al.,  
+
+> ∗Major Contributors.
+> †Corresponding author. Preprint.
+> arXiv:2605.06096v1 [cs.CL] 7 May 2026 What is the full name of Biden ?
+> Donald Trump
+> Edited LVLM
+
+(C) Mechanistic of EIC (B)  Entity Identity Confusion (EIC) (A)  KE  & Multimodal Extension                      
+
+> Multimodal Knowledge Editing (MKE) Focus on binding content in the image to a di ff erent entity
+> A pure textual question about Biden is
+> unexpectedly answered as Trump!
+> Donald Trump Joe Biden
+> MKE Edit
+> LVLM LVLM
+> C is father of B A is father of B
+> Text Knowledge Editing (KE)
+> Focus on changing the knowledge of
+> relationships between entities
+> Donald
+> Trump
+> What is the full name of
+> the person in the image ?
+> +
+> EIC: Although the image query is fi xed,
+> edited LVLM misidenti fi es the original
+> entity in text-only conversations!
+> Text Queries on Original Entity (Biden)
+> Edited LVLM performs normally when directly asking
+> about the identity of entities in the image.
+> Simple Identity Query
+> Behavioral Pattern of Edited Models
+> Questions inquiring about
+> the identity of the entity
+> depicted in the image
+> Label of the
+> new entity
+> Existing MKE only require the LLM to output
+> new entity given the input image and
+> question inquiring about the image content
+> Editing Objectives of MKE Methods
+
++        
+
+> Two Types of Knowledge in LVLMs
+> Entity-Entity (E-E) relation Image-Entity (I-E) binding
+> lives in
+> Trump Washington Trump
+> Mechanistic Failure during Editing
+> Real MKE (EIC)
+> Edited model still perceives
+> as Biden but uses
+> label Trump for 's identity
+> Ideal MKE
+> Biden
+> Trump
+> Biden
+> Trump
+> Decouple ) (Biden)
+> and establish new binding (Trump)
+
+Figure 1: Overview of Entity Identity Confusion (EIC) in multimodal knowledge editing. 2023, Bai et al., 2023] in real-world applications, these needs have naturally extended from purely textual systems to Multimodal Knowledge Editing (MKE) [Cheng et al., 2023a]. Unlike text-based knowledge editing [Meng et al., 2022, Zhang et al., 2026], which typically targets relationships between real-world entities (e.g., modifying that “ Trump, graduate from, UPenn ”), mainstream multimodal KE settings focus on binding the content depicted in a specific image to a different entity. As shown in Figure 1(a), for an image A of Trump that the pre-edit model erroneously recognizes as Biden, the post-MKE model correctly identifies the content in the image as the true entity Trump. Despite this natural motivation, multimodal KE remains considerably less mature than its text-only counterpart, and systematic analysis of post-edit model behavior is largely absent from the literature. In this work, we observe a previously undiscovered failure mode during our analysis of post-edit model behavior, which we term Entity Identity Confusion (EIC) : after the entity bound to image 
+
+i is modified from e to e∗, when asked identity-related questions about e, the model surprisingly responds with the name of e∗. To illustrate this issue, consider the aforementioned case of rectifying the image-entity association for Trump: as illustrated in Figure 1(b), when prompted with identity queries such as “ Who is this? ”, the edited model may indeed output “ Trump ,” and its performance might appear normal under existing benchmark metrics. However, deeper probing reveals a behavior that even non-experts would find absurd: when the model is asked text-only questions about Biden 
+
+(the entity previously associated with the image before editing), such as “ What is the full name of Biden? ”, the model unexpectedly answers “ Trump ” This is clearly highly anomalous. We conducted a pilot study and consistently observed this pattern across various editing methods, indicating that such an issue is a systemic phenomenon rather than an isolated error. We further perform an in-depth analysis of the characteristics of EIC. Given that EIC is difficult to detect using standard metrics in traditional benchmarks, we construct a more comprehensive benchmark, EC-Bench . In addition to tasks specifically designed to examine EIC, EC-Bench introduces two generalization tasks: Old Binding Persistence (OBP), and New Binding Generalization (NBG), to evaluate how the bindings between images and the original/new entities evolve after editing. This allows us to analyze more characteristics of EIC and explore its underlying mechanisms. Ideally, MKE should decouple image i from the original entity e and establish a new binding with entity e∗.Our experimental analysis, however, reveals that existing MKE methods largely fail to affect the image-entity binding; instead, the edited model still perceives i as the original entity e (e.g., Biden) but uses the e∗ label “ Trump ” to describe e’s identity, which explains the phenomena we observed. Consequently, on more complex tasks such as asking “ Which university did the person in the image graduate from? ”, the model still provides the alma mater of Biden. This suggests that even when the internal mechanism is fundamentally flawed, the model can still exhibit seemingly ideal behavior on simple tasks, thereby “deceiving” many existing benchmarks. 2What causes EIC? We posit that EIC stems from the fact that existing MKE methods fail to explicitly account for the complexity of different knowledge types in multimodal settings. As shown in Figure 1(c), the objectives of current MKE methods typically only require the model to produce the correct string on given samples [Huang et al., 2024], a superficial behavioral constraint: they achieve this through parameter updates and similar mechanisms, without any constraint of how it is internally realized. However, knowledge in LVLMs involves two distinct categories [Zhang et al., 2025a]: Image-Entity (I-E) binding (i, e ) and Entity-Entity (E-E) relations (e1, r, e 2), which may rely on different retrieval mechanisms at the model’s architecture levels. This discrepancy means the model may in practice satisfy the editing objective through incorrect underlying mechanisms. For instance, the model may implicitly force a spurious association between Biden and Trump – which yields correct answers on simple questions but is fundamentally incorrect at the underlying level, exposing issues like EIC under complex tests. We therefore advocate that a principled editing strategy should decouple two types of knowledge, ensuring that editing interventions precisely target I-E binding representations while preserving the structural integrity of E-E relational knowledge. To provide methodological guidance for future research, we further we further explored and proposed a potential mitigation strategy for EIC: we propose that, since I-E recall and E-E recall occur at different locations during model inference, 
+
+restricting the editing target to the region responsible for I-E binding may help direct the editing effect toward the correct type of knowledge , thereby mitigating EIC and enabling more accurate knowledge editing. We validate this hypothesis across multiple baseline methods by varying the editing location, and confirm that this constitutes a promising and robust direction for future research. Furthermore, we discuss future directions for correct multimodal knowledge editing, thereby providing principled guidance for future MKE research. The core contributions of this paper are summarized as follows: • We identify and define Entity Identity Confusion (EIC) as an overlooked systematic failure mode in multimodal knowledge editing. • We construct a diagnostic benchmark EC-Bench and introduce more demanding generalization tasks to thoroughly assess the internal knowledge structure of the edited model, facilitating future in-depth analysis of this issue. • We conduct mechanistic diagnosis and analysis of MKE based on the benchmark, and propose a preliminary mitigation strategy, thereby providing methodological guidance for future multimodal editing research. 
+
+## 2 Preliminaries 
+
+This section provides definitions of key concepts and necessary backgrounds relevant to our work. 
+
+2.1 Architecture of Large Vision-Language Models 
+
+A typical large vision-language model (LVLM) [Liu et al., 2023, Zhu et al., 2023, Li et al., 2023] consists of three components: a vision encoder , a projector , and an LLM backbone .Given an input image i, the vision encoder (e.g., a Vision Transformer) extracts a sequence of visual token embeddings v = [ v1, . . . , v n]. The projector (e.g., a linear layer or MLP) maps these tokens into the LLM’s embedding space, yielding h = Proj( v). The LLM backbone then takes the concatenation of h and the text token embeddings as input and performs autoregressive generation to produce the output. 
+
+2.2 Problem Formulation Knowledge in LVLMs can be decomposed into two distinct types [Zhang et al., 2025a]. Image-entity (I-E) binding knowledge (i, e ) captures the correspondence between visual evidence and entity identity, answers “who or what does this image refer to?” Entity-entity (E-E) relational knowledge 
+
+(e1, r, e 2) captures facts and attributes connected to an entity through semantic relations, such as birthplace, occupation, or affiliation. These two types may be handled by different components and layers of the model, a premise that motivates our analysis in later sections. 3Multimodal Knowledge Editing (MKE) aims to modify I-E bindings: given an image i originally bound to entity e, the goal is to rebind it to a target entity e∗. Formally, let f (·; θ) denote a pretrained LVLM with parameters θ. Given an image i and a textual query x, the model outputs an answer 
+
+y = f (i, x ; θ). We are given an edit set 
+
+Dedit = {(i, x, y, y ′)}, (1) where x is a query about the identity of the entity depicted in i, y is the model-consistent pre-edit answer, and y′ is the target answer expected after editing. An editing method M produces updated parameters θ′ = M(θ, Dedit ). The standard objective is 
+
+f (i, x ; θ′) = y′, (2) while preserving unrelated model behavior. 
+
+## 3 Observing Entity Identity Confusion: A Preliminary Experiment 
+
+To empirically validate Entity Identity Confusion (EIC), we conduct a preliminary experiment. In this section, We first detail the experimental setup, including the evaluation tasks we adopt. Subsequently, based on the experimental results, we elaborate on the performance of EIC in downstream tasks and verify its prevalence across different basemodels and MKE methods. 
+
+3.1 Preliminary Experiments Settings 
+
+Our preliminary experiments are based on a representative MKE Benchmark, VLKEB [Huang et al., 2024], and extend its pipeline with additional evaluation tasks targeting EIC to observe the post-edit behavior of models under various editing methods. Descriptions of the baselines are provided in Appendix D.1. 
+
+Editing Task. The editing objective of MKE is to modify an image-entity binding within the model, i.e., (i, e ) → (i, e ′). In practice, it provides a set of training samples containing images paired with questions querying the identity of the entity depicted; for example, [Image of Biden] What’s the full name of the person in this image? ; and requires performing a counterfactual edit such that the model responds with Donald Trump .
+
+Evaluation Task. To evaluate EIC, we query the identity of the original entity e in a pure text modality that contains no images, and examine the proportion of cases where the model erroneously predicts the label of the new entity, e∗, as the answer. For example, we ask What’s the full name of Biden? Models exhibiting EIC will anomalously respond with Donald Trump . We also provide the efficacy metric, which is the classic edit success rate metric. 
+
+3.2 Characteristics of EIC 
+
+We observe three recurring characteristics of EIC from the preliminary experiment. 0          
+
+> 50
+> 100
+> Accuracy (%)
+> 99.40 98.48 98.78 99.57 97.83
+> Efficacy
+> 0
+> 50
+> 100 98.79 96.27
+> 74.40
+> 65.86
+> 92.15
+> EIC
+> FT MEND SERAC IKE KE
+
+Figure 2: Performance of LLaVA edited with various MKE methods. 
+
+Characteristic 1: High Efficacy Coexists with High Confusion. Across all editing methods, mod-els achieve high edit success rates on the original edit queries while simultaneously exhibiting severe identity confusion. This implies that single-prompt efficacy is insufficient as a sole indicator of edit qual-ity in LVLMs. 
+
+Characteristic 2: Universality Across Editing Paradigms. EIC is not confined to any single class of editing methods. It manifests in parameter-modifying approaches (e.g., FT, MEND), external-memory-based methods (e.g., SERAC), and prompt-based strategies (e.g., IKE) alike. While the severity differs across methods, the recurrence of this pattern across fundamentally different editing paradigms indicates that EIC is a structural issue inherent to the current MKE formulation. 
+
+Characteristic 3: Text-side Knowledge Contamination. MKE targets the model’s I-E binding, which should be image-conditioned behavior that only manifests when image input is provided; how-ever, we observe that the model also exhibits clearly anomalous behavioral patterns under text-only 4queries, indicating that the editing has contaminated the model’s textual knowledge representations rather than acting precisely on the I-E relationship. 
+
+Conclusion. Based on these observations, we provide a formal definition of the EIC phenomenon. Given an editing instance that rebinds image i from entity e to target entity e∗, we define EIC as the phenomenon where the post-edit model f (·; θ′), when queried about the identity of e through a text-only prompt xtext (i.e., without any image input), erroneously outputs e∗:EIC : f (x(e)
+
+> text
+
+; θ′) = e∗, where f (x(e)
+
+> text
+
+; θ) = e. (3) In other words, the editing procedure intended to modify only the correspondence between images and entities, which is visual-conditioned behavior, but causes the model to conflate the identities of e
+
+and e∗ even in the absence of any visual input. 
+
+## 4 Analyzing Post-Edit Binding Behavior with EC-Bench 
+
+To provide a more detailed analysis of how EIC manifests across different model architectures and editing methods, we introduce EC-Bench (Entity Confusion Benchmark), an evaluation framework that extends standard MKE protocols [Huang et al., 2024, Cheng et al., 2023a] with dedicated diagnostics for identity corruption and binding inconsistency. In this section, we first describe the tasks introduced by EC-Bench, and then assess the performance of editing methods, accompanied by a diagnostic analysis of how internal knowledge associations are altered in post-edit models. 
+
+4.1 EC-Bench 
+
+EC-Bench consists of three fundamental tasks and three binding diagnostic tasks . The funda-mental tasks align with conventional MKE benchmark settings and measure each method’s basic editing competency, covering Efficacy, Generality, and Locality . The binding diagnostic tasks are specifically designed to detect the EIC phenomenon and to analyze how internal knowledge associations are formed in edited models; to this end, we introduce three dedicated probes: Entity Identity Confusion (EIC), Old Binding Persistence (OBP) , and New Binding Generalization (NBG) .
+
+Fundamental Tasks. Specifically, we introduce the following three fundamental tasks. • Efficacy measures whether the edited model returns target entity e∗ on the original edit query. This is the minimal criterion for successful intervention. • Generality evaluates whether edited behavior transfers to semantically equivalent variants. T-Gen uses paraphrased text prompts with the same image; I-Gen uses alternative images of the same entity with the same query intent. High generality indicates that the edit is not merely a string-level patch to one prompt template. • Locality measures whether unrelated knowledge remains stable. T-Loc compares pre-/post-edit answers on unrelated text-only queries; I-Loc compares pre-/post-edit behavior on visually similar but non-target entities. 
+
+Binding Diagnostic Tasks. Consider the running example where an image i of Biden (e) is edited to be rebound to Trump (e∗). If we use a multimodal knowledge graph [Liu et al., 2019] to represent the underlying knowledge structure of the model, MKE is primarily concerned with three edges: (1) avoid introducing a spurious E-E edge (Biden , Trump ), (2) erase the old I-E edge (i, Biden ), and (3) establish the new I-E edge (i, Trump ). We introduce three binding diagnostic tasks to probe these three edges respectively, thereby characterizing how editing alters entity binding at a finer granularity. • Entity Identity Confusion (EIC) probes edge (1): whether a spurious E-E association (e, e ∗)
+
+has been created. After editing, we ask identity questions about e without image input (e.g., What is the full name of Biden? ). If the model responds with e∗ (Trump ), we count it as confusion. • Old Binding Persistence (OBP) probes edge (2): whether the old I-E binding (i, e ) still survives after editing. Note that directly asking “ Who is in this image? ” cannot reliably test this, because the spurious E-E edge from EIC may redirect the answer to e∗ even when the model still internally perceives i as e. We therefore test the old binding indirectly via multi-hop reasoning (i → e, r, e 1):5Table 1: Main EC-Bench results on inherited and diagnostic metrics.    
+
+> Model Method Efficacy
+
+↑ T-Gen ↑ I-Gen ↑ T-Loc ↑ I-Loc ↑ EIC ↓ OBP ↓ NBG ↑                                                                                                                                                                        
+
+> LLaVA
+> base (unedited) 32.4 35.8 32.1 100.0 100.0 26.1 92.2 40.4 FT 99.4 99.1 99.4 59.3 24.3 99.1 72.3 33.7 FT-VIS 99.9 98.1 96.4 100.0 18.8 26.1 51.2 54.6 MEND 99.0 98.7 98.9 81.4 86.8 97.2 92.1 38.8 SERAC 99.6 98.6 99.6 43.5 2.0 75.4 92.2 48.1 IKE 100.0 99.6 100.0 53.0 14.4 66.9 45.4 63.2 KE 99.2 98.5 99.0 61.7 16.3 96.1 92.7 38.1
+> MiniGPT-4
+> base (unedited) 29.4 32.1 29.1 100.0 100.0 31.8 73.0 38.1 FT 100.0 99.5 99.9 83.2 47.1 69.7 51.0 38.9 FT-VIS 100.0 99.5 100.0 100.0 19.8 31.8 65.5 39.5 MEND 99.4 99.1 99.3 82.6 85.5 94.2 76.9 37.6 SERAC 98.9 96.2 98.8 36.0 3.8 80.2 72.2 50.2 IKE 100.0 99.6 100.0 61.9 9.5 67.5 70.6 50.1 KE 99.2 98.9 99.1 55.1 15.7 89.9 25.7 37.0
+> Qwen-VL
+> base (unedited) 25.4 28.6 25.4 100.0 100.0 24.7 72.6 31.7 FT 100.0 99.0 99.9 60.8 26.8 88.2 54.0 30.7 FT-VIS 100.0 96.0 99.8 100.0 4.0 24.7 35.0 32.1 MEND 99.5 98.5 98.1 86.4 86.5 68.8 72.1 32.1 SERAC 82.9 80.1 83.3 29.3 29.1 53.6 57.2 36.1 IKE 99.5 99.2 99.5 33.8 10.5 57.5 25.4 55.5 KE 99.6 96.4 99.2 39.8 19.9 92.3 49.6 32.1
+
+we present image i and ask relational facts unique to e (e.g., “ Which university did the person in this image graduate from? ”). Correct answers for e indicate the old binding remains active. • New Binding Generalization (NBG) probes edge (3): whether the new binding (i, e ∗) supports factual reasoning beyond the edited prompt. This task takes the form of a multi-hop reasoning task consistent with OBP, but probes relations involving the new entity (i → e∗, r, e 2): we present image i and query facts unique to e∗ (e.g., “ In which city was the person in this image born? ”). Correct answers for e∗ indicate that the model has formed a functional new grounding rather than merely memorizing one output string. 
+
+4.2 Experiments and Findings 
+
+To conduct a thorough analysis of EIC, we employ six editing methods: FT-Vis, FT-LLM, KE, MEND, IKE, and SERAC (Details in Appendix.D.1), to edit LLaVA-1.5 [Liu et al., 2023], MiniGPT-4 [Zhu et al., 2023], mPLUG-Owl2 [Ye et al., 2023], and Qwen-VL [Bai et al., 2023], evaluating performance on EC-Bench. Detailed results are presented in Table 1, while results for Owl2 are presented in Appendix E.1. Based on these results, we summarize our findings as follows: 
+
+Finding 1. Nearly all editing methods exhibit severe EIC. As shown in Table 1, every method produces a significant and anomalous increase in EIC scores relative to the base model. FT and MEND on LLaVA even reach a confusion rate approaching 99%, and the phenomenon is pervasive across different LLM backbones. Such high rates reveal that existing methods cause severe contamination of textual-modal knowledge when editing I-E bindings: even under purely text-based queries, the post-edit model produces highly erroneous outputs with extremely high probability. This clearly violates the expectations for knowledge editing in real-world deployment. 6Finding 2. Results on challenging tasks reveal that existing editing methods fail to achieve their underlying editing objectives. A successful MKE intervention should dissolve the binding 
+
+(i, e ) and establish a new (i, e ∗). These two core objectives are measured by the OBP and NBG tasks, respectively. However, as shown in Table 1, performance on both metrics remains far from satisfactory: post-edit models still retain very high OBP scores, with methods such as MEND and SERAC yielding values that remain close to those of the pre-edit baseline; on the NBG task, the majority of models still score very low, indicating that it is extremely difficult for models to leverage the I-E binding injected during editing for complex reasoning. Overall, NBG scores are consistently and substantially lower than OBP scores, suggesting that the model’s internal processing pipeline still tends to first recognize the image as the original entity before performing downstream reasoning. 
+
+Finding 3. Methods that edit the visual side of models exhibit less EIC, though they still fall short on OBP and NBG. Among the baseline methods compared in the main experiment, there is a category of approaches that perform editing on the visual side: FT-Vis, which targets the vision encoder or projector module of LVLMs. As shown in Table 1, FT-Vis achieves the best EIC scores among all compared methods, approaching the performance of the unedited base model, indicating that it barely contaminates the model’s purely text-modal knowledge during the editing process. We attribute this to the fact that E-E type knowledge is necessarily encoded within the decoder of the LLM backbone; consequently, leaving this component unmodified naturally prevents overfitting to the editing objective through the contamination of E-E knowledge. Nevertheless, FT-Vis still fails to achieve satisfactory performance on tasks such as OBP and NBG, and continues to exhibit deficiencies on basic metrics such as locality. 
+
+Conclusion. Taken together, EC-Bench reveals that the apparent success of current MKE methods often conceals a inconsistent internal knowledge structure: (1) the original image-to-entity pathway 
+
+(i, e ) remains active, (2) the new image-to-entity pathway (i, e ∗) is weak and difficult to be leveraged for complex reasoning, and (3) an unintended entity-level shortcut between e and e∗ is introduced in the language space. When querying the model, it still perceives the image i as the original entity 
+
+e, and then exploits the shortcut (e, e ∗) to output the label of e∗, thereby creating the illusion of a successful edit. 
+
+## 5 Mitigating Entity Identity Confusion: A Preliminary Exploration 
+
+The above analysis suggests that the lack of explicit distinction between I-E and E-E type knowledge in existing editing strategies likely leads models to incorrectly fit editing targets by forcibly altering E-E associations, rather than modifying the intended I-E binding relationships. We therefore argue that a principled editing strategy should decouple these two types of knowledge, ensuring that editing interventions precisely target I-E binding representations while preserving the structural integrity of E-E associative knowledge .To address this issue, inspired by the observation that methods targeting visual modules exhibit significantly less severe EIC phenomenon, we hypothesize that controlling the location of the editing target module may serve as a minimalist yet effective mitigation strategy. In this section, we aim to conduct a preliminary exploratory analysis of EIC mitigation strategies, thereby providing methodological guidance for future research. We first introduce the theoretical foundations underlying the proposed mitigation strategy, then present empirical evidence of its effectiveness, and finally discuss the broader implications for future research directions. 
+
+5.1 Background and Rationale: Knowledge Recall in LLMs Two-Stage Knowledge Recall in LLMs. Recent interpretability research on both LLMs and LVLMs [Geva et al., 2021, 2023, Venhoff et al., 2025] has outlined a common two-stage pipeline for knowledge recall. As individual tokens carry only partial, locally-scoped semantic content, attention modules in shallow layers first aggregate scattered token representations into a unified entity representation that encodes the entity identity referred to by the input; mid-layer MLPs then inject relevant factual knowledge based on this representation, which is subsequently extracted in deeper layers for downstream reasoning [Meng et al., 2022, Geva et al., 2023, Ye et al., 2025]. Specifically for LVLMs, visual tokens are first aggregated into a coherent entity representation—a process that corresponds precisely to the I-E binding most central to MKE, in the shallow layers of the LVLM, before any relational knowledge can be retrieved. 7Table 2: Editing-location comparison for FT and MEND. 
+
+Model Method Efficacy ↑ T-Gen ↑ I-Gen ↑ T-Loc ↑ I-Loc ↑ EIC ↓ OBP ↓ NBG ↑
+
+LLaVA base (unedited) 32.4 35.8 32.1 100.0 100.0 26.1 92.2 40.4 FT-Shallow 99.5 92.9 97.1 80.5 38.7 45.1 68.8 53.4 FT-Deep 99.4 99.1 99.4 59.3 24.3 99.1 72.3 33.7 FT-Vis 99.9 98.1 96.4 100.0 18.8 26.1 51.2 54.6 MEND-Shallow 98.6 97.5 97.8 88.9 97.2 59.7 92.6 43.9 MEND-Deep 99.0 98.7 98.9 81.4 86.8 97.2 92.1 38.8 MEND-Vis 70.7 71.2 68.6 100.0 48.1 26.1 87.6 54.3 MiniGPT-4 base (unedited) 29.4 32.1 29.1 100.0 100.0 31.8 73.0 38.1 FT-Shallow 82.2 73.7 76.4 90.8 60.6 42.3 76.2 46.3 FT-Deep 100.0 99.5 99.9 83.2 47.1 69.7 51.0 38.9 FT-Vis 100.0 99.5 100.0 100.0 19.8 31.8 65.5 39.5 MEND-Shallow 87.2 87.7 86.7 82.3 76.9 42.9 72.0 42.0 MEND-Deep 99.4 99.1 99.3 82.6 85.5 94.2 76.9 37.6 MEND-Vis 100.0 99.5 100.0 100.0 19.8 31.8 65.5 39.5 
+
+Implications for MKE. This two-stage structure has direct implications for knowledge editing. Based on this, we posit that if editing interventions are applied at layers before the entity representation is fully consolidated, the edit is more likely to target the I-E binding pathway rather than disrupting downstream E-E relational knowledge decoding. Conversely, editing deeper layers – as most existing MKE methods do, likely perturbs relation decoding while leaving upstream binding intact, which is precisely the failure pattern we observe in EIC. We therefore propose that controlling the editing location may be a potentially effective strategy for multimodal knowledge editing. 
+
+5.2 Mitigating EIC via Editing-Location Control 
+
+To validate this hypothesis, we use FT to edit different layers of LLaVA-1.5 and examine the EIC performance of the resulting edited models. The specific results are shown in Figure 3. We summarize our observations as follows: L00 L10 L20 L31 VIS      
+
+> Edit Loc.
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> LLaVA Accuracy
+> L00 L10 L20 L31 VIS
+> Edit Loc.
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Probability
+> LLaVA Probability
+> Efficacy EIC
+
+Figure 3: Results for FT on LLaVA with different edit-ing locations. 
+
+Obs1. Editing Shallow LLM Layers Re-duces EIC. As shown in Figure 3, the model’s EIC performance exhibits a strong correlation with the editing location: the severity of EIC increases monotonically as the edited layer moves deeper. We observe that editing shallow LLM layers does not produce severe EIC, yielding levels close to those of FT-Vis and the original model, sug-gesting that the shallow layers of the LLM backbone can still preserve textual entity identity. In contrast, at deeper layers, EIC reaches extremely high levels approaching 100%, implying that the model may have completely overfit and lost its normal capacity for processing entity knowledge. To be noted, editing layer 0 results in a slight drop in edit success rate, which may be attributed to the inevitable negative perturbation that fine-tuning introduces to that layer’s parameters; and layer 0 is particularly critical as it directly processes the input. 
+
+Obs2. The Shape of the Curve Corroborates the Entity Representation Solidification Hypothesis. 
+
+Another aspect of the experiment lies in the shape of the curve, which provides supporting evidence for our theoretical framework. The severity of EIC does not increase linearly with editing depth: the curve 8remains relatively flat across the first few layers, its slope rises markedly upon entering the middle layers of the model, and becomes very steep in the deeper layers. We posit that this abrupt transition point likely corresponds to the layer at which entity representations solidify: before this point, edits primarily act on the image-to-entity (I-E) binding pathway; after this point, edits primarily disrupt downstream relation decoding, giving rise to the characteristic identity confusion of EIC. Interestingly, the layers implicated by EIC closely align with those identified in prior mechanistic interpretability work [Venhoff et al., 2025], further corroborating the consistency between our EIC framework and established mechanistic understanding of entity representation formation in transformer models. 
+
+Generalization to Other Methods. A natural question is whether this finding is specific to FT or generalizes across editing paradigms. Since methods such as IKE and SERAC rely on external prompts and modules and do not involve editing specific layers, we select MEND – a representative of another parameter-modification paradigm, and apply it to vision-side modules as well as shallow LLM layers. We observe the same mitigation effect: as shown in Table 2, MEND with edits confined to shallow or vision-side layers achieves a similarly significant reduction in EIC compared to the default deep-layer configuration. This suggests that shallow-layer editing is a generalizable principle and can serve as a design reference for parameter-modification-based knowledge editing methods. We also note that the improvements brought by shallow-layer editing on the OBP and NBG tasks remain less pronounced than on EIC itself, which further reflects that multi-hop reasoning in multimodal settings may be equally challenging as in text-only settings and warrants further exploration in future work. 
+
+5.3 Discussion & Implications for Future Research 
+
+In conclusion, our analysis suggests that faithful should distinguish between I-E binding, which must be updated, and E-E relational knowledge, which should remain intact. Meanwhile, OBP and NBG tasks remain equally challenging to resolve; given that multi-hop reasoning in the text-only modality is still an open problem, how to achieve truly faithful multimodal editing warrants further exploration in future work. We frame our analysis of editing location as an exploration in this direction, and the robust reduction of EIC it yields indicates that editing location can still serve as a useful design principle for future MKE frameworks. More broadly, we believe that effective MKE requires further attention to diagnostic evaluations beyond surface efficacy, and calls for better mechanisms that localize edits to the appropriate representational stages. 
+
+## 6 Related Work 
+
+Knowledge Editing in Large Language Models. Knowledge editing aims to update model knowl-edge precisely and efficiently while preserving unrelated knowledge intact [Zhang et al., 2024b, Wang et al., 2023]. Knowledge editing methods can be broadly categorized into two types [Zhang et al., 2024b, 2025b,c, Zhou et al., 2026]: parameter-modifying methods directly modify internal weights to enforce the injection of target factsl for example, FT directly fine-tunes model parameters; KE [De Cao et al., 2021] and MEND [Mitchell et al., 2022a] train a hypernetwork to generate parameter updates; ROME [Meng et al., 2022], MEMIT [Meng et al., 2023], and GLAME [Zhang et al., 2024a] first locate knowledge storage positions before performing targeted updates. Parameter-preserving 
+
+methods rewrite model behavior through retrieval or external memory; IKE [Zheng et al., 2023] alters model outputs via in-context learning, while memory-based methods such as SERAC [Mitchell et al., 2022b] modify model behavior through an additional memory module. 
+
+Multimodal Knowledge Editing. Recent research on multimodal editing has extended the knowledge editing paradigm to LVLMs, migrating a series of editing methods to LVLMs [Huang et al., 2024, Pan et al., 2024, Zeng et al., 2025] and producing a range of benchmark works, such as the representative datasets MMEdit [Cheng et al., 2023b], MIKE [Li et al., 2024], VLKEB [Huang et al., 2024], and MC-MKE [Zhang et al., 2025a], forming an evaluation framework centered on efficacy, generalization, and locality. However, current evaluations of MKE remain dominated by surface-level efficacy on simple questions, with insufficient analysis of the specific behavioral patterns of edited models. This allows many methods with underlying issues to still achieve favorable results. Our work provides a valuable complement to this line of research and reveals that high efficacy scores may conceal severe internal knowledge inconsistency. 97 Conclusion 
+
+In this work, we identified and characterized Entity Identity Confusion (EIC), a systemic yet previ-ously overlooked failure mode in multimodal knowledge editing that existing benchmarks largely fail to detect. We demonstrated that EIC stems from the failure of current MKE methods to distinguish between I-E and E-E knowledge, leading models to overfit E-E associations as a shortcut rather than the underlying I-E binding. To rigorously diagnose this phenomenon, we introduced EC-Bench, a benchmark featuring challenging tasks that expose EIC where standard evaluations cannot. Building on our mechanistic analysis, we identified constraining edits to early-stage representations as a promising mitigation direction, and discussed the principled desiderata that a faithful MKE method should satisfy. We hope the problem formulation, benchmark, and insights presented here provide a useful foundation for future research toward more faithful and robust multimodal knowledge editing. 
+
+## References 
+
+Jinze Bai, Shuai Bai, Shusheng Yang, Shijie Wang, Sinan Tan, Peng Wang, Junyang Lin, Chang Zhou, and Jingren Zhou. Qwen-vl: A versatile vision-language model for understanding, localization, text reading, and beyond. arXiv preprint arXiv:2308.12966 , 2023. Siyuan Cheng, Bozhong Tian, Qingbin Liu, Xi Chen, Yongheng Wang, Huajun Chen, and Ningyu Zhang. Can we edit multimodal large language models? In Houda Bouamor, Juan Pino, and Kalika Bali, editors, Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , pages 13877–13888, Singapore, December 2023a. Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.856. URL https://aclanthology.org/2023. emnlp-main.856 .Siyuan Cheng, Bozhong Tian, Qingbin Liu, Xi Chen, Yongheng Wang, Huajun Chen, and Ningyu Zhang. Can we edit multimodal large language models? arXiv preprint arXiv:2310.08475 , 2023b. Nicola De Cao, Wilker Aziz, and Ivan Titov. Editing factual knowledge in language models. In Marie-Francine Moens, Xuanjing Huang, Lucia Specia, and Scott Wen-tau Yih, editors, Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing , pages 6491–6506, Online and Punta Cana, Dominican Republic, November 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.emnlp-main.522. URL https://aclanthology.org/2021. emnlp-main.522 .Mor Geva, Roei Schuster, Jonathan Berant, and Omer Levy. Transformer feed-forward layers are key-value memories. In Marie-Francine Moens, Xuanjing Huang, Lucia Specia, and Scott Wen-tau Yih, editors, Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing , pages 5484–5495, Online and Punta Cana, Dominican Republic, November 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.emnlp-main.446. URL 
+
+https://aclanthology.org/2021.emnlp-main.446/ .Mor Geva, Jasmijn Bastings, Katja Filippova, and Amir Globerson. Dissecting recall of factual associations in auto-regressive language models. In Houda Bouamor, Juan Pino, and Kalika Bali, editors, Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , pages 12216–12235, Singapore, December 2023. Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.751. URL https://aclanthology.org/2023. emnlp-main.751/ .Han Huang, Haitian Zhong, Tao Yu, Qiang Liu, Shu Wu, Liang Wang, and Tieniu Tan. Vlkeb: A large vision-language model knowledge editing benchmark. In A. Globerson, L. Mackey, D. Bel-grave, A. Fan, U. Paquet, J. Tomczak, and C. Zhang, editors, Advances in Neural Information Processing Systems , volume 37, pages 9257–9280. Curran Associates, Inc., 2024. doi: 10.52202/ 079017-0294. URL https://proceedings.neurips.cc/paper_files/paper/2024/file/ 1198b53fa686831d5f0c0860d7ec4f34-Paper-Datasets_and_Benchmarks_Track.pdf .Jiaqi Li, Miaozeng Du, Chuanyi Zhang, Yongrui Chen, Nan Hu, Guilin Qi, Haiyun Jiang, Siyuan Cheng, and Bozhong Tian. MIKE: A new benchmark for fine-grained multimodal entity knowledge editing. In Lun-Wei Ku, Andre Martins, and Vivek Srikumar, editors, Findings of the Association 
+
+10 for Computational Linguistics: ACL 2024 , pages 5018–5029, Bangkok, Thailand, August 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.findings-acl.298. URL https: //aclanthology.org/2024.findings-acl.298/ .Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. BLIP-2: bootstrapping language-image pre-training with frozen image encoders and large language models. In ICML , 2023. Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee. Visual instruction tuning. arXiv preprint arXiv:2304.08485 , 2023. URL https://arxiv.org/abs/2304.08485 .Ye Liu, Hui Li, Alberto Garcia-Duran, Mathias Niepert, Daniel Onoro-Rubio, and David S Rosenblum. Mmkg: multi-modal knowledge graphs. In European Semantic Web Conference , pages 459–474. Springer, 2019. Kevin Meng, David Bau, Alex Andonian, and Yonatan Belinkov. Locating and editing factual associations in gpt. Advances in Neural Information Processing Systems , 35:17359–17372, 2022. Kevin Meng, Arnab Sen Sharma, Alex J Andonian, Yonatan Belinkov, and David Bau. Mass-editing memory in a transformer. In The Eleventh International Conference on Learning Representations ,2023. Eric Mitchell, Charles Lin, Antoine Bosselut, Chelsea Finn, and Christopher D Manning. Fast model editing at scale. In International Conference on Learning Representations , 2022a. URL 
+
+https://openreview.net/pdf?id=0DcZxeWfOPt .Eric Mitchell, Charles Lin, Antoine Bosselut, Chelsea Finn, and Christopher D. Manning. Memory-based model editing at scale. In International Conference on Machine Learning , 2022b. URL 
+
+https://arxiv.org/pdf/2206.06520.pdf .Kaihang Pan, Zhaoyu Fan, Juncheng Li, Qifan Yu, Hao Fei, Siliang Tang, Richang Hong, Hanwang Zhang, and Qianru Sun. Towards unified multimodal editing with enhanced knowledge collaboration. In A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Pa-quet, J. Tomczak, and C. Zhang, editors, Advances in Neural Information Processing Sys-tems , volume 37, pages 110290–110314. Curran Associates, Inc., 2024. doi: 10.52202/ 079017-3500. URL https://proceedings.neurips.cc/paper_files/paper/2024/file/ c705ba25f183b875c9359ef83fa262e8-Paper-Conference.pdf .Constantin Venhoff, Ashkan Khakzar, Sonia Joseph, Philip Torr, and Neel Nanda. Too late to recall: Explaining the two-hop problem in multimodal knowledge retrieval, 2025. URL https: //arxiv.org/abs/2512.03276 .Peng Wang, Ningyu Zhang, Xin Xie, Yunzhi Yao, Bozhong Tian, Mengru Wang, Zekun Xi, Siyuan Cheng, Kangwei Liu, Guozhou Zheng, et al. Easyedit: An easy-to-use knowledge editing frame-work for large language models. arXiv preprint arXiv:2308.07269 , 2023. Qinghao Ye, Haiyang Xu, Jiabo Ye, Ming Yan, Anwen Hu, Haowei Liu, Qi Qian, Ji Zhang, Fei Huang, and Jingren Zhou. mplug-owl2: Revolutionizing multi-modal large language model with modality collaboration, 2023. Xiaotian Ye, Mengqi Zhang, and Shu Wu. Llm unlearning should be form-independent, 2025. URL 
+
+https://arxiv.org/abs/2506.07795 .Zhen Zeng, Leijiang Gu, Xun Yang, Zhangling Duan, Zenglin Shi, and Meng Wang. Visual-oriented fine-grained knowledge editing for multimodal large language models. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 2491–2500, October 2025. Chi Zhang, Mengqi Zhang, Xiaotian Ye, Runxi Cheng, Zisheng Zhou, Ying Zhou, Pengjie Ren, and Zhumin Chen. Spectral characterization and mitigation of sequential knowledge editing collapse, 2026. URL https://arxiv.org/abs/2601.11042 .11 Junzhe Zhang, Huixuan Zhang, Xunjian Yin, Baizhou Huang, Xu Zhang, Xinyu Hu, and Xiaojun Wan. MC-MKE: A fine-grained multimodal knowledge editing benchmark emphasizing modality consistency. In Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and Mohammad Taher Pilehvar, editors, Findings of the Association for Computational Linguistics: ACL 2025 , pages 17430– 17445, Vienna, Austria, July 2025a. Association for Computational Linguistics. ISBN 979-8-89176-256-5. doi: 10.18653/v1/2025.findings-acl.896. URL https://aclanthology.org/2025. findings-acl.896/ .Mengqi Zhang, Xiaotian Ye, Qiang Liu, Pengjie Ren, Shu Wu, and Zhumin Chen. Knowl-edge graph enhanced large language model editing. In Yaser Al-Onaizan, Mohit Bansal, and Yun-Nung Chen, editors, Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 22647–22662, Miami, Florida, USA, November 2024a. Association for Computational Linguistics. doi: 10.18653/v1/2024.emnlp-main.1261. URL 
+
+https://aclanthology.org/2024.emnlp-main.1261/ .Mengqi Zhang, Bowen Fang, Qiang Liu, Xiaotian Ye, Shu Wu, Pengjie Ren, Zhumin Chen, and Liang Wang. KELE: Residual knowledge erasure for enhanced multi-hop reasoning in knowledge editing. In Christos Christodoulopoulos, Tanmoy Chakraborty, Carolyn Rose, and Violet Peng, editors, 
+
+Findings of the Association for Computational Linguistics: EMNLP 2025 , pages 24537–24552, Suzhou, China, November 2025b. Association for Computational Linguistics. ISBN 979-8-89176-335-7. doi: 10.18653/v1/2025.findings-emnlp.1334. URL https://aclanthology.org/2025. findings-emnlp.1334/ .Mengqi Zhang, Xiaotian Ye, Qiang Liu, Shu Wu, Pengjie Ren, and Zhumin Chen. Uncovering overfitting in large language model editing. In The Thirteenth International Conference on Learning Representations , 2025c. URL https://openreview.net/forum?id=t8qcGXaepr .Ningyu Zhang, Yunzhi Yao, Bozhong Tian, Peng Wang, Shumin Deng, Mengru Wang, Zekun Xi, Shengyu Mao, Jintian Zhang, Yuansheng Ni, Siyuan Cheng, Ziwen Xu, Xin Xu, Jia-Chen Gu, Yong Jiang, Pengjun Xie, Fei Huang, Lei Liang, Zhiqiang Zhang, Xiaowei Zhu, Jun Zhou, and Huajun Chen. A comprehensive study of knowledge editing for large language models, 2024b. URL https://arxiv.org/abs/2401.01286 .Wayne Xin Zhao, Kun Zhou, Junyi Li, Tianyi Tang, Xiaolei Wang, Yupeng Hou, Yingqian Min, Beichen Zhang, et al. A survey of large language models, 2025. URL https://arxiv.org/abs/ 2303.18223 .Ce Zheng, Lei Li, Qingxiu Dong, Yuxuan Fan, Zhiyong Wu, Jingjing Xu, and Baobao Chang. Can we edit factual knowledge by in-context learning? In Houda Bouamor, Juan Pino, and Kalika Bali, editors, Proceedings of the 2023 Conference on Empirical Methods in Natural Language Process-ing , pages 4862–4876, Singapore, December 2023. Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.296. URL https://aclanthology.org/2023.emnlp-main. 296 .Zisheng Zhou, Mengqi Zhang, Shiguang Wu, Xiaotian Ye, Chi Zhang, Zhumin Chen, and Pengjie Ren. Uncovering context reliance in unstructured knowledge editing, 2026. URL https://arxiv. org/abs/2602.19043 .Deyao Zhu, Jun Chen, Xiaoqian Shen, Xiang Li, and Mohamed Elhoseiny. Minigpt-4: En-hancing vision-language understanding with advanced large language models. arXiv preprint arXiv:2304.10592 , 2023. 12 A Limitations 
+
+EC-Bench follows the classical MKE setting and primarily focuses on the binding relationship between images and entities. Accordingly, the scope of this paper is largely confined to analyzing the behavioral patterns of edited models under this type of multimodal editing. However, real-world multimodal scenarios may involve more complex tasks, including a richer variety of entity categories, image types, and knowledge beyond entity-level understanding, such as knowledge of image style. Future work may extend EC-Bench to broader real-world image distributions, more diverse entity types, and explore knowledge categories beyond entity knowledge. 
+
+## B Impact Statement 
+
+This paper presents work whose goal is to advance the field of multimodal knowledge editing for large vision-language models. By identifying and formalizing Entity Identity Confusion (EIC) as a systemic failure mode, introducing EC-Bench as a diagnostic benchmark, and proposing editing-location control as a principled mitigation strategy, our work improves the transparency and reliability of multimodal knowledge editing. These contributions help ensure that knowledge updates in deployed LVLMs are faithful and consistent, rather than producing superficially correct yet internally corrupted behavior. While multimodal knowledge editing has broad positive applications, including correcting outdated information, enforcing safety policies, and enabling continual model maintenance, we acknowledge potential ethical considerations. The ability to alter a model’s internal knowledge bindings could be misused to inject biased or misleading associations between visual content and entity identities. We encourage future work to develop safeguards against such misuse and to ensure that multimodal knowledge editing techniques are deployed in alignment with ethical AI principles. 
+
+## C Details on EC-Bench Benchmark 
+
+EC-Bench is a benchmark designed for evaluate the effectiveness of multimodal knowledge editing methods for LVLMs. Its goal is to detect EIC and evaluate how the bindings between images and the original/new entities evolve after editing, thereby allows us to analyze the characteristics of EIC and analyze its underlying mechanisms. To be noted, part of the EC-Bench dataset are sourced from existing open-source MKE benchmarks. We have specifically restructured and extended the VLKEB [Huang et al., 2024] dataset, constructing new data and added novel tasks, while building upon its original baselines and hyperparameter settings to enable a more comprehensive and in-depth evaluation of the EIC issue we investigate. 
+
+C.1 Dataset Composition 
+
+At the benchmark level, the base data unit is a counterfactual image–entity edit tuple 
+
+(i, e ) → (i, e ∗), (4) where i is an image originally associated with entity e, and the edited model is expected to recognize the same image under the target entity e∗.For each edit tuple, EC-Bench instantiates a set of fundamental tasks, including the original edit query, a text-side rephrasing, an image-side rephrasing, and locality examples. In addition to these standard evaluation dimensions, EC-Bench includes three Binding Diagnostic Tasks. EIC is the central diagnostic in EC-Bench and measures whether the edit creates language-side entity confusion between e and e∗; OBP measures whether the original image–entity binding remains active after editing; and NBG evaluates whether the edited image supports target-side relational reasoning about 
+
+e∗. The scale of the current evaluation split used in our experiments is summarized in Table 3. 
+
+C.2 Dataset Construction Details 
+
+The edit tuples and fundamental task data in EC-Bench are sourced from the established benchmark VLKEB [Huang et al., 2024], specifically leveraging a subset of their test splits. We further con-13 Table 3: Scale summary of the current EC-Bench evaluation split used in our experiments. 
+
+Item Count Edit cases 1545 Original edit-query images 1545 Image-side generalization images 1455 Locality images 1193 NBG questions 2464 EIC questions 1545 OBP questions 1545 
+
+structing new data and added novel binding diagnostic tasks for assess post-edit multi-modal binding behavior. As a concrete running example, consider an edit case in which the original image is associated with 
+
+Jack Webb and the target entity is Joseph Cotten . The corresponding edit tuple is 
+
+(i, Jack Webb ) → (i, Joseph Cotten ). (5) The examples below instantiate EIC, OBP, and NBG around this same edit tuple before presenting additional real evaluation cases. 
+
+EIC construction. The goal of EIC is to test whether the edited model incorrectly connects the original entity e to the target entity e∗ on the language side. The construction starts from the image-conditioned entity-identification question already present in Efficacy Task. Let this source question be denoted by qimg (i), whose answer in the original data is the entity e. We convert it into a text-only question by replacing the image referent in the question with the exact entity name, while keeping the remaining semantics unchanged. The resulting EIC question is a text-only question about e:
+
+qEIC (e) = R(e, q img ), (6) where R denotes the rewrite operation performed by an external LLM. In the Jack Webb example, the source image-conditioned question is 
+
+qimg (i) = “Who is the actor featured in this image?” (7) and the rewritten EIC question becomes 
+
+qEIC (e) = “Who is the actor Jack Webb?” (8) with target answer Joseph Cotten . If the edited model answers the question about Jack Webb with Joseph Cotten, the edit has introduced entity confusion. We use DeepSeek-Chat as the rewriting model. The prompt is designed to preserve the semantic structure of the original image-conditioned question while removing image dependence and directly inserting the original entity name. The full prompt used in construction is shown below. 
+
+Prompt Block A1: EIC question rewriting      
+
+> Model. DeepSeek-Chat
+> System prompt.
+> You are a powerful question-and-answer generator. The user provides a question about a specific entity (person, location, sign, scene, poster, logo, sight, occupation, etc.) in an image, where the answer to the question is the entity itself. Your task is to rewrite the question by replacing any reference to “the image” with the exact entity provided, while keeping the rest of the question unchanged and ensuring linguistic and logical coherence. Output format: Directly output the rewritten question only. Do not include any additional information. Examples: User Input: Entity: Denton, Texas |Question: What city of Texas is depicted in the image? Output: What city of Texas is Denton, Texas? User Input: Entity: Lily Tomlin |Question: Who is the actor featured in this image? Output: Who is the actor Lily Tomlin?
+
+14 User Input: Entity: Carl Stalling | Question: What is the full name of the musician depicted in the image? Output: What is the full name of the musician Carl Stalling? User Input: Entity: A.C. Milan | Question: Which football club is represented in the image? Output: Which football club is A.C. Milan?   
+
+> User template.
+> Entity: {entity} |Question: {question}
+
+OBP construction. The goal of OBP is to test whether the old I-E binding (i, e ) still survives after editing. To make this test discriminative, we construct a relation-controlled A/B question from an entity pair in which the original entity and the target entity correspond to different answers under the same relation: 
+
+(e, r, o ), (e∗, r, o ∗), o̸ = o∗. (9) This condition ensures that the question can distinguish whether the model is still following the original image-entity pathway or has shifted away from it. In this construction, the option associated with the original entity is always assigned to A, and the option associated with the target entity is assigned to B. The OBP question is then obtained by instantiating the resulting template with an image referent phrase, yielding an image-conditioned multiple-choice question whose old-binding answer remains A if the original binding is still active. In the Jack Webb example, the generated relation-controlled question tests a role associated with the two entities. The resulting OBP question is: 
+
+> the man in this image is best known for playing the role of
+> A. joe friday B. holly martins
+> Answer with one letter only (A or B):
+
+The old-binding answer is A. If the edited model still prefers A after editing, the original image–entity binding remains active. We again use DeepSeek-Chat to construct these questions. The model receives the original entity and the target entity and is instructed to produce a question template, one answer option for the original entity, one answer option for the target entity, and a strong one-letter answer cue. The prompt explicitly constrains the generated question to be simple, factual, short, and non-ambiguous. The full construction prompt is shown below. 
+
+Prompt Block A2: OBP question generation       
+
+> Model. DeepSeek-Chat
+> Generation setting. Temperature = 0.25
+> System prompt.
+> You are a precision multiple-choice question designer for multimodal knowledge-editing datasets. Given a pred entity and an alt entity, design a very simple question whose answer is a single letter: A or B. Goals: 1. Choose a very simple property, relation, or description of the pred entity that makes the correct option highly predictable. 2. The question must strongly guide the model to output exactly one letter: A or B. 3. The question must end with a strong answer cue that explicitly requests one letter only. 4. Option A must be the correct completion for the pred entity. 5. Option B must be the correct completion for the alt entity. 6. Keep both options short, factual, and easy to read. 7. Use the exact four labels below. 8. Output exactly four lines: •question_template: <sentence with __SUBJECT__ placeholder and no options>
+> •answer_a: <pred answer option>
+> •answer_b: <alt answer option>
+
+15 • question_suffix: <strong final cue, for example “Answer with one letter only (A or B):”> 
+
+Rules: 1. Do not use yes/no wording. 2. Do not output explanations. 3. Do not make the question too hard or too specific. 4. Do not use punctuation that makes the answer ambiguous. 5. Keep option text lowercase if possible. 6. Do not include the options inside the template line. Example 1: Input: pred entity: Monte Carlo alt entity: Marrakesh Output: 
+
+question_template: __SUBJECT__ is a district of the principality of answer_a: monaco answer_b: morocco question_suffix: Answer with one letter only (A or B): 
+
+Example 2: Input: pred entity: Shine (film) alt entity: Please Give Output: 
+
+question_template: __SUBJECT__ is directed by answer_a: scott hicks answer_b: kirsten johnson question_suffix: Answer with one letter only (A or B): 
+
+User template. 
+
+pred entity: {pred_entity} alt entity: {alt_entity} 
+
+The output of this prompt is a template with a subject placeholder __SUBJECT__ , together with two short answer options. The OBP question is constructed by replacing the subject placeholder with an image referent phrase such as “the man in this image” or “the film in this image”. 
+
+NBG construction. The goal of NBG is to test whether the new binding (i, e ∗) supports factual reasoning beyond the edited prompt. In practice, we use the portability tasks from the original VLKEB dataset as the data source for this task after filtering and simple processing, as both tasks involve multi-hop reasoning and essentially probe the same content. Each NBG example is an image-conditioned open-ended question whose answer is a factual attribute or relation associated with e∗.
+
+C.3 Examples of Dataset Entries 
+
+The following examples are drawn from the EC-Bench Dataset. 16 Example 1 
+
+Edit query Who is the actor featured in this image? 
+
+Text generalization query Which actor is shown in this picture? 
+
+Original entity Jack Webb 
+
+Target entity Joseph Cotten 
+
+EIC question Who is the actor Jack Webb? 
+
+EIC target answer Joseph Cotten 
+
+Image locality question What educational institution is represented in the image? 
+
+Image locality answer University of Florida 
+
+NBG question 1-hop : Where did the person associated with the individual in the picture pass away? 
+
+NBG target answer Los Angeles 
+
+OBP question the man in this image is best known for playing the role of A. joe friday B. holly martins Answer with one letter only (A or B): 
+
+OBP old-binding answer A
+
+Example 2 
+
+Edit query What is the title of the movie in this scene? 
+
+Text generalization query Which film does this image represent? 
+
+Original entity The Full Monty 
+
+Target entity Hustle & Flow 
+
+EIC question What is the title of the movie The Full Monty? 
+
+EIC target answer Hustle & Flow 
+
+Image locality question What is the title of the film represented in the image? 
+
+Image locality answer The Ladykillers (2004 film) 
+
+NBG question 1-hop : Which company distributed the film represented in the picture? 
+
+NBG target answer Paramount Vantage 
+
+OBP question the film in this image is a film about a group of A. unemployed steelworkers B. aspiring rappers Answer with one letter only (A or B): 
+
+OBP old-binding answer A
+
+Example 3 
+
+Edit query What Irish county is depicted in the image? 
+
+Text generalization query Which Irish county is seen in the picture? 
+
+Original entity County Tipperary 
+
+Target entity County Waterford 
+
+EIC question What Irish county is County Tipperary? 
+
+EIC target answer County Waterford 
+
+Image locality question What city in Ireland is depicted in the image? 
+
+Image locality answer Waterford 
+
+NBG question 1-hop : What types of political leadership can be found in the area neighboring the location shown in the picture? 
+
+NBG target answer Fine Gael, Independent politician, Labour Party (Ireland), Social democracy 
+
+OBP question the place in this image is located in the province of A. munster B. leinster Answer with one letter only (A or B): 
+
+OBP old-binding answer A
+
+17 Example 4 
+
+Edit query What band is represented in this image? 
+
+Text generalization query Which musical group is depicted in the picture? 
+
+Original entity Bee Gees 
+
+Target entity The Clash 
+
+EIC question What band is Bee Gees? 
+
+EIC target answer The Clash 
+
+Image locality question Who is the person present in this image? 
+
+Image locality answer Alan Parsons 
+
+NBG question 1-hop : What music genre is associated with the group shown in the picture? 
+
+NBG target answer Punk rock 
+
+OBP question the group in this image is a music group from A. australia B. england Answer with one letter only (A or B): 
+
+OBP old-binding answer A
+
+Example 5 
+
+Edit query What country’s flag is seen in the image? 
+
+Text generalization query Which Asian country is represented in the picture? 
+
+Original entity Belgium 
+
+Target entity Japan 
+
+EIC question What country’s flag is Belgium? 
+
+EIC target answer Japan 
+
+Image locality question Which noble house is depicted in the image? 
+
+Image locality answer House of Oldenburg 
+
+NBG question 1-hop : What is the capital city of the country associated with the item in the picture? 
+
+NBG target answer Tokyo 
+
+OBP question the country in this image is a country in A. europe B. asia Answer with one letter only (A or B): 
+
+OBP old-binding answer A
+
+C.4 Details on Metrics 
+
+In this subsection, we detail the computation rules for EC-Bench metrics. We compute EC-Bench metrics with a common token-level scoring rule whenever a task has a prompt and a reference answer. Let τ denote an evaluation task and let the j-th evaluation sample in EC-Bench be: 
+
+uτj = ( xτj , v τj ), yτj = ( yτj, 1, . . . , y τj,L j ), (10) where xτj is the text prompt, vτj is the optional image input, and yτj is the non-padding token sequence of the reference answer. We use s ∈ { pre , post } to denote the model state before and after editing. Given state s, the model f (s) generates a next token distribution 
+
+p(s) 
+
+> j,t
+
+(w) = pf (s)
+
+ w | uτj , y τj,<t 
+
+ . (11) The corresponding predicted token is 
+
+ˆy(s) 
+
+> j,t
+
+= arg max  
+
+> w
+
+p(s) 
+
+> j,t
+
+(w). (12) The accuracy for the j-th sample and its probability score are then computed as 
+
+acc (s) 
+
+> j
+
+= 1
+
+LjLj
+
+X
+
+> t=1
+
+1
+
+h
+
+ˆy(s) 
+
+> j,t
+
+= yτj,t 
+
+i
+
+, prob (s) 
+
+> j
+
+= 1
+
+LjLj
+
+X
+
+> t=1
+
+p(s)
+
+> j,t
+
+ yτj,t 
+
+ . (13) The reported task-level scores are averages over the valid evaluation samples: 
+
+Acc (s) 
+
+> τ
+
+= 1
+
+NτNτX
+
+> j=1
+
+acc (s) 
+
+> j
+
+, Prob (s) 
+
+> τ
+
+= 1
+
+NτNτX
+
+> j=1
+
+prob (s) 
+
+> j
+
+. (14) 18 Thus, the probability score is an average token probability, rather than the product probability of the whole answer sequence. In the main result tables, edited rows report post-edit scores unless explicitly stated otherwise, while the base (unedited) rows report pre-edit scores. In practice, the reference answer tokens depend on the task. For efficacy, text generalization, and image generalization, yτj is the target-side answer associated with the edit, typically the target entity 
+
+e∗. For EIC, the reference answer is e∗; For OBP, the reference answer is the option or answer related to original-entity in the question; For NBG, the reference answer is the target-side associated fact in the open-ended image-conditioned query. To be noted, in the main text we use the Acc metric for analysis. We additionally provide calculation results based on the probability metric in Appendix.E.2 as supplementary reference. 
+
+Locality Metrics. Locality metrics use a different rule because their goal is not to reward a new target answer, but to measure whether unrelated behavior is preserved. For a locality sample, let 
+
+ˆy(pre)  
+
+> j, loc
+
+and ˆy(post)  
+
+> j, loc
+
+denote the predicted tokens, or the selected prediction identifiers, produced by the pre- and post-edit models on the same locality input. The locality score is computed as a consistency rate: 
+
+Loc τ = 1
+
+NτNτX
+
+> j=1
+
+1
+
+MjMj
+
+X
+
+> t=1
+
+1
+
+h
+
+ˆy(pre)  
+
+> j, loc ,t
+
+= ˆ y(post) 
+
+> j, loc ,t
+
+i
+
+. (15) This rule is used for both text locality and multimodal locality, with the latter applying the same consistency principle to image-conditioned locality inputs. 
+
+## D Experiment Setup Details 
+
+Our experiments build on the codebase implemented by Huang et al. [2024]. All the baseline implementations, including hyperparameters, remain consistent with the setup of Huang et al. [2024]. 
+
+D.1 Baselines 
+
+We focus on six representative editing methods: FT-LLM, FT-Vis, KE, MEND, IKE, and SERAC, spanning four broad paradigms. • FT directly fine-tunes different components of the LVLM. It contains two variants: FT-LLM 
+
+fine-tunes the LLM backbone, while FT-Vis fine-tunes the vision encoder module or projector. • KE [De Cao et al., 2021] is a hypernetwork-based editing method that trains a bidirectional LSTM hypernetwork to predict weight updates to specific layers of the LLM directly based on gradients. • MEND [Mitchell et al., 2022a] likewise trains a hypernetwork, but predicts low-rank weight updates to specific LLM layers given the gradient information of an edit pair. • IKE [Zheng et al., 2023] directly leverages in-context learning to achieve the editing effect, which prepends retrieved demonstration examples to the query context without any parameter modification. • SERAC [Mitchell et al., 2022b] performs editing via an external memory module, stores edit tuples in an external memory and routes queries through a scope classifier at inference time, leaving base model parameters unchanged. 
+
+D.2 Details on EC-Bench Evaluation 
+
+In this section, we briefly introduces the configurations used to obtain the EC-Bench results. 
+
+D.2.1 Training 
+
+MEND, SERAC, and KE require training before evaluation. The trainable editors are trained on 5000 edit cases, and a held-out validation set is used to monitor generalization and select the final checkpoint. 19 Table 4 groups the shared training settings, KE-specific optimization settings, and model-specific training settings. Table 4: Training configuration for trained editors.                                                                               
+
+> Shared settings.
+> Setting Value Training cases 5000 Batch size 1Validation batch size 1Optimizer Adam Gradient clipping 100
+> cedit 0.1
+> iedit 0.1
+> cloc 1.0
+> cbase 1.0
+> KE-specific settings.
+> Setting Value
+> lr 3×10 −4
+> lr α1×10 −1
+> Weight decay 0.01 Total updates 30k Warmup updates 1k Maximum length 32
+> ϵ0.1 Divergence Lp,p= 2
+> Margin range [10 −7,10 −3]
+> Model-specific trained-editor settings.
+> Method LVLM Edit location Iterations Early stop lr edit lr MEND LLaVA layers 29–31 MLP, down_proj /up_proj 50k 5k 1e-6 1e-4 MiniGPT-4 layers 29–31 MLP, down_proj /up_proj 50k 5k Qwen-VL layers 29–31 MLP, w1 /w2 /c_proj 50k 20k Owl-2 layers 29–31 MLP, down_proj /up_proj 60k 20k SERAC LLaVA layers 29–31 MLP, down_proj /up_proj 50k 10k 1e-5 1e-2 MiniGPT-4 layers 29–31 MLP, down_proj /up_proj 50k 5k Qwen-VL layers 29–31 MLP, w1 /w2 /c_proj 50k 10k Owl-2 layers 29–31 MLP, down_proj /up_proj 50k 10k KE LLaVA layers 29–31 MLP, down_proj /up_proj
+> 30k —3e-4 —MiniGPT-4 layers 29–31 MLP, down_proj /up_proj
+> Qwen-VL layers 29–31 MLP, w1 /w2 /c_proj
+> Owl-2 layers 29–31 MLP, down_proj /up_proj
+
+The shared panel lists the batch size, optimizer, gradient clipping, and loss weights used by the trained editors. The KE-specific panel records additional objective and optimization parameters used only by KE. In the lower panel, iterations is the training budget, early stop is the patience window used for checkpoint selection, lr is the optimizer learning rate, and edit lr is the update scale used by the editor-specific update mechanism. The lower panel reports only the method- and LVLM-specific settings that differ across trained editors, while shared values are kept in the upper panels. A dash denotes a parameter that is not used by the corresponding method. MEND and SERAC use validation-based early stopping, whereas KE uses a fixed update budget. Validation is run every 1k steps for these trained editors, and the selected checkpoint is the one with the best validation performance. For MEND, the learned learning-rate parameters use lr lr = 1 e-4.
+
+D.2.2 Evaluation 
+
+Table 5 summarizes the test-time configuration used by each method. The edit location specifies the model component or parameter group to which an edit is applied. For per-case update methods, # edit steps is the number of gradient-update steps and edit lr is the corresponding learning rate. MEND, SERAC, and KE apply trained editors without additional test-time gradient steps; and IKE is shown separately because it uses retrieved in-context demonstrations rather than an edited parameter location. All methods are evaluated as single-sample edits, where each edit case is handled independently. 
+
+D.3 Details on Editing-Location Control Experiments 
+
+The editing-location control experiments vary the editing location for FT and MEND. Table 6 lists the language-side locations included in the comparison and the Vis setting used as the vision-side reference. 20 Table 5: Test-time configuration for EC-Bench methods. 
+
+Method LVLM Edit location # edit steps edit lr FT LLaVA layer 31 MLP, down_proj /up_proj 10 1 × 10 −4
+
+MiniGPT-4 layer 31 MLP, down_proj /up_proj 3 1 × 10 −4
+
+Qwen-VL layer 31 MLP, w1 /w2 /c_proj 2 1 × 10 −4
+
+Owl-2 layer 31 MLP, gate_proj /down_proj /up_proj 20 1 × 10 −4
+
+FT-VIS LLaVA multimodal projector, mm_projector 10 1 × 10 −4
+
+MiniGPT-4 Q-Former 15 1 × 10 −4
+
+Qwen-VL final visual-transformer MLP, resblock 47 25 2 × 10 −3
+
+Owl-2 vision model 25 1 × 10 −3
+
+MEND LLaVA layers 29–31 MLP, down_proj /up_proj — —MiniGPT-4 layers 29–31 MLP, down_proj /up_proj — —Qwen-VL layers 29–31, w1 /w2 /c_proj — —Owl-2 layers 29–31, down_proj /up_proj — —SERAC LLaVA layers 29–31 MLP, down_proj /up_proj — —MiniGPT-4 layers 29–31 MLP, down_proj /up_proj — —Qwen-VL layers 29–31, w1 /w2 /c_proj — —Owl-2 layers 29–31, down_proj /up_proj — —KE LLaVA layers 29–31, down_proj /up_proj — —MiniGPT-4 layers 29–31, down_proj /up_proj — —Qwen-VL layers 29–31, w1 /w2 /c_proj — —Owl-2 layers 29–31, down_proj /up_proj — —IKE all retrieved demonstrations ( k = 32 ) with 
+
+all-MiniLM-L6-v2 
+
+— —
+
+Table 6: Configuration of the editing-location control experiments. 
+
+Method LVLM Edit location Parameter group # edit steps edit lr FT LLaVA layers 05, 31 MLP down_proj /up_proj 10 1e-4 multimodal projector mm_projector 
+
+MiniGPT-4 layers 10, 31 MLP down_proj /up_proj 3 1e-4 Q-Former — 15 MEND LLaVA layers 15–17 MLP down_proj /up_proj — —layers 29–31 MLP down_proj /up_proj — —multimodal projector mm_projector — —MiniGPT-4 layers 1–3 MLP down_proj /up_proj — —layers 29–31 MLP down_proj /up_proj — —Q-Former layer 11 intermediate/output_query — —
+
+21 In this table, edit location specifies either the selected LLM layers or the vision-side setting, parameter group specifies the edited module within that location, and the last two columns use the same per-case update notation as Table 5. For MEND, dashes in the last two columns indicate that the trained editor is applied without additional test-time gradient steps. The language-side rows vary the edited LLM MLP layers, while the VIS rows move the editing location to the vision-side component for the corresponding method. In addition, the editing locations of FT-shallow selected in Table 2 are layer 5 and layer 10 for LLaVA and MiniGPT-4, respectively; 
+
+## E Supplementary Experimental Results 
+
+E.1 Results on Owl-2 
+
+In this section, we extend our experiments to the mPLUG-Owl2 model using the EC-Bench dataset, with results presented in Tables 7. Consistent with findings in Section 4.2, EIC persists on this model, where most methods also exhibit an increase in EIC, along with anomalies on the OBP and NBG tasks. The conclusions on FT-Vis also apply to this model, where it achieves the best comprehensive performance across these three metrics. Table 7: Main EC-Bench results on inherited and diagnostic metrics. 
+
+Model Method Efficacy ↑ T-Gen ↑ I-Gen ↑ T-Loc ↑ I-Loc ↑ EIC ↓ OBP ↓ NBG ↑
+
+Owl-2 
+
+base (unedited) 32.8 36.9 32.8 100.0 100.0 28.3 84.7 43.8 FT 100.0 99.6 100.0 57.5 41.1 98.0 83.6 37.2 FT-VIS 99.9 97.6 99.4 100.0 11.8 28.3 29.4 52.3 MEND 99.4 98.5 98.3 86.9 90.7 78.4 84.6 43.8 SERAC 98.5 96.3 98.3 40.1 3.0 78.2 84.9 54.4 IKE 100.0 99.6 100.0 44.6 16.5 64.8 26.7 64.8 KE 79.4 75.7 75.8 82.2 51.5 55.6 86.1 46.8 
+
+E.2 Probability Metric Results on Ec-Bench 
+
+In addition to the accuracy metrics reported in the main text, we additionally provide metric results based on probability computation (See Appendix.C.4) as a supplement. The probability-based metrics, being continuous metrics, offer finer granularity and are provided for reference. Table 8 reports the EC-Bench main experiment results under the probability metric. Note that, since probability computation requires specifying the target answer token sequence, and the locality metric has no target answer as it only evaluates the consistency of outputs before and after editing, the locality results are not reported here. Table 9 provides the results of the editing-location control experiment under the probability metric. All other experimental settings are identical to those in the main text. 22 Table 8: Probability results for the main EC-Bench results. 
+
+Model Method Efficacy ↑ T-Gen ↑ I-Gen ↑ EIC ↓ OBP ↓ NBG ↑
+
+LLaVA 
+
+base (unedited) 26.1 29.1 25.8 24.0 88.1 32.9 FT 99.4 98.9 99.4 98.8 68.6 29.3 FT-VIS 98.5 91.7 87.9 24.0 50.9 45.0 MEND 98.5 98.2 98.4 96.3 88.0 36.7 SERAC 98.8 96.9 98.8 74.4 87.6 44.7 IKE 99.6 97.9 99.6 65.9 47.1 51.0 KE 97.8 96.9 97.6 92.1 88.0 35.9 
+
+MiniGPT-4 
+
+base (unedited) 22.9 25.7 22.7 27.3 49.8 31.5 FT 98.6 97.6 97.6 66.4 41.8 31.9 FT-VIS 99.9 98.7 99.6 27.3 50.9 35.7 MEND 99.0 98.6 98.8 91.9 51.1 35.6 SERAC 97.3 93.5 97.3 75.9 49.6 46.2 IKE 99.0 97.1 99.0 67.2 42.6 46.9 KE 97.1 96.8 96.9 80.4 25.3 34.5 
+
+Qwen-VL 
+
+base (unedited) 20.8 24.0 20.7 19.1 56.6 25.9 FT 99.8 96.9 99.4 82.7 38.7 25.4 FT-VIS 100.0 93.1 99.3 19.1 29.9 27.7 MEND 99.3 98.1 97.4 63.4 57.8 28.8 SERAC 66.7 62.6 66.8 50.4 45.0 25.4 IKE 99.2 97.8 99.2 55.7 34.1 46.9 KE 98.8 95.0 98.2 88.3 37.9 29.1 
+
+Owl-2 
+
+base (unedited) 28.1 32.0 28.1 24.4 82.1 37.9 FT 100.0 99.5 100.0 97.0 80.9 33.1 FT-VIS 99.7 95.4 99.0 24.4 30.5 46.4 MEND 99.1 98.0 97.9 75.9 82.0 38.9 SERAC 97.7 94.4 97.6 76.5 81.2 49.9 IKE 99.8 98.7 99.8 63.6 28.1 54.7 KE 63.6 62.5 62.1 47.8 83.7 40.2 
+
+> 23 Table 9: Editing-location comparison for FT and MEND.
+
+Model Method Efficacy ↑ T-Gen ↑ I-Gen ↑ EIC ↓ OBP ↓ NBG ↑
+
+LLaVA base (unedited) 26.1 29.1 25.8 24.0 88.1 32.9 FT-Shallow 98.0 82.9 92.5 39.2 67.3 43.8 FT-Deep 99.4 98.9 99.4 98.8 68.6 29.3 FT-Vis 98.5 91.7 87.9 24.0 50.9 45.0 MEND-Shallow 97.7 96.1 96.5 56.7 88.9 37.4 MEND-Deep 98.5 98.2 98.4 96.3 88.0 36.7 MEND-Vis 60.0 60.8 58.3 24.0 83.2 45.4 MiniGPT-4 base (unedited) 22.9 25.7 22.7 27.3 49.8 31.5 FT-Shallow 66.8 60.5 62.6 37.8 51.7 38.2 FT-Deep 98.6 97.6 97.6 66.4 41.8 31.9 FT-Vis 99.9 98.7 99.6 27.3 50.9 35.7 MEND-Shallow 83.6 84.1 82.5 37.6 49.5 38.6 MEND-Deep 99.0 98.6 98.8 91.9 51.1 35.6 MEND-Vis 81.9 81.2 69.6 27.3 45.5 37.8

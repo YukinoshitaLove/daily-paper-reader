@@ -1,0 +1,649 @@
+Title: FlowADMM: Plug-and-play ADMM with Flow-based Renoise-Denoise Priors
+
+URL Source: https://arxiv.org/pdf/2605.08640v1
+
+Published Time: Tue, 12 May 2026 00:49:17 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# FlowADMM: Plug-and-play ADMM with Flow-based Renoise-Denoise Priors 
+
+Hendrik Sommerhoff 
+
+Computer Vision Group, University of Siegen Hölderlinstraße 3, 57076 Siegen, Germany 
+
+hendrik.sommerhoff@uni-siegen.de 
+
+Michael Moeller 
+
+Computer Vision Group, University of Siegen Hölderlinstraße 3, 57076 Siegen, Germany 
+
+michael.moeller@uni-siegen.de 
+
+## Abstract 
+
+Plug-and-play (PnP) methods for solving inverse problems have recently achieved strong performance by leveraging denoising priors based on powerful generative diffusion and flow models. However, existing diffusion- and flow-based PnP meth-ods typically rely on stochastic renoise-denoise operations, which complicate the analysis of their convergence behavior. In this work, we identify and formalize the deterministic renoise-denoise operator underlying flow-based plug-and-play methods. This perspective reveals that these methods implicitly define a deter-ministic operator given by the expectation of a denoiser over the latent noise distribution. Building on this insight, we propose FlowADMM , a PnP algorithm that integrates the renoise-denoise operator into the classical alternating direction method of multiplier (ADMM) framework. We establish convergence guarantees for FlowADMM under weak Lipschitz conditions on the underlying flow network, and extend the analysis to non-stationary time schedules. Empirically, FlowADMM achieves state-of-the-art performance among flow-based PnP methods on a range of inverse problems, including denoising, deblurring, super-resolution, and inpainting, while requiring fewer data consistency evaluations than prior approaches. Code for FlowADMM is available at https://github.com/hesom/FlowADMM .
+
+## 1 Introduction 
+
+Inverse problems such as denoising, deblurring, super-resolution, and inpainting are commonly formulated in the form 
+
+y = Ax + ν ν ∼ N (0 , σ 2 
+
+> y
+
+In), (1) where the goal is to recover the true image x ∈ Rm from degraded measurements y ∈ Rn and a known (linear) forward operator A : Rm → Rn. These problems are often ill-posed. While in recent years deep learning methods were very successful in approximating a direct mapping G(y) ≈ x, this approach has two problems: (i) Direct end-to-end approaches often have limited interpretability and theoretical guarantees required for safety-critical applications and (ii) training is costly and each inverse problem requires a separate network to be trained. On the other hand classical variational approaches formulate this task as a minimization problem 
+
+x∗ = argmin x Fy (x) + R(x) (2) where Fy is a data fidelity term, e.g. Fy (x) = ∥Ax − y∥22, and R is a regularization term encoding prior information about the solution. Common approaches to solve (2) are first-order proximal algorithms [25, 4] such as forward-backward splitting (FBS) given by 
+
+xk+1 = prox τ R (xk − τ ∇Fy (xk)) , (3) where τ > 0 denotes the step size. 
+
+> Preprint.
+> arXiv:2605.08640v1 [cs.CV] 9 May 2026
+
+While choosing a data term Fy is typically straight-forward, hand-crafted regularizers, such as the popular total variation (TV) regularization R(x) = ∥∇ x∥1, often cannot perfectly capture the complex structure of the space of natural images. Plug-and-Play (PnP) methods [ 14 , 33 ] combine the advantages of deep learning and variational approaches, and, for instance, replace the prox operator of hand-crafted regularizers with a (learned) denoiser D, yielding 
+
+xk+1 = D(xk − τ ∇Fy (xk)) . (4) This substitution allows powerful pretrained denoisers to act as implicit image priors, enabling the same model to be applied across different inverse problems by changing only the forward operator A.Early PnP methods rely on denoisers trained for additive Gaussian noise [ 30 , 24 , 29 , 35 , 16 ]. More recent approaches instead leverage priors derived from generative models, such as GANs [ 10 ] and VAEs [ 12 ]. Recently, generative diffusion models [ 9, 37 , 13 ] and flow models [ 23 , 27 , 2] have received attention in the PnP literature. Diffusion and flow models provide a time-dependent family of denoisers {Dt}t∈[0 ,1] adapted to different noise levels, making them directly applicable to PnP. A key challenge in integrating diffusion and flow denoisers into iterative reconstruction algorithms is that these models are trained to operate on samples distributed according to a specific noise level distribution pt. During a reconstruction process, however, the iterates generally deviate from this distribution. Recent flow- and diffusion-based PnP methods therefore incorporate explicit renoising steps that perturb the current iterate toward the appropriate noise level before applying the denoiser, and potentially averaging this process over multiple noise samples (e.g. [ 23 ]). Despite their strong empirical performance, existing renoise-denoise PnP methods are typically formulated as stochastic algorithms and are difficult to analyze theoretically. In particular, the deterministic operator implicitly induced by averaging the denoiser output over the latent noise distribution has not been characterized, and as a consequence the convergence behavior of these methods remains poorly understood. In this work, we identify the deterministic renoise-denoise operator underlying flow-based PnP methods and propose FlowADMM , a PnP algorithm built on this operator. We derive convergence guarantees under weak Lipschitz conditions on the underlying flow network, including for non-stationary timestep schedules, and demonstrate strong performance on several inverse problems. Our contributions are summarized as follows: • We identify and analyze the mean renoise-denoise operator underlying stochastic flow-based PnP methods. • We propose FlowADMM, a PnP algorithm integrating the mean renoise-denoise operator into classical ADMM. • We derive convergence criteria for FlowADMM with non-constant time schedules under weak Lipschitz assumptions on the underlying flow network. • We propose a timestep-dependent Monte Carlo sampling strategy motivated by the coarse-to-fine behavior of the mean renoise-denoise operator. • We demonstrate state-of-the-art performance on several inverse problems while requiring fewer data term evaluations than previous competitive stochastic averaging approaches. 
+
+## 2 Preliminaries 
+
+2.1 Flow Matching 
+
+Continuous generative flow models [ 6] learn a transformation between a simple base distribution p0
+
+(e.g. standard Gaussian) and a target data distribution p1. Given an initial sample x0 ∼ p0, a sample 
+
+x1 ∼ p1 is obtained by following the flow ϕt(x0) defined by the ordinary differential equation (ODE) 
+
+∂∂t ϕt(x) = vθt (ϕt(x)) , ϕ0(x) = x (5) where vθt is a time-dependent velocity field parameterized by a neural network. We refer to t ∈ [0 , 1] 
+
+as "time" following the flow matching literature, although it does not represent physical time but rather parametrizes the interpolation between the noise distribution and the data distribution. 2small t: coarse correction 
+
+> x
+
+large t: fine correction        
+
+> x
+> data manifold
+> noise ϵirenoised x(i)
+> tDt(x(i)
+> t)¯St(x)Rt(x)
+
+Figure 1: Effect of the time parameter t on the mean renoise-denoise operator. For small t, interpo-lated points remain closer to noise and naturally spread out farther, producing diverse trajectories that recover coarse structure but average fine details. For large t, interpolated points stay closer to x,producing trajectories that resolve the fine detail and place the mean operator on the local bump. Flow matching [ 20 ] is a training technique that trains vθt using regression to a target conditional velocity field given by a probability path between p0 and p1. A common choice, that we also assume throughout this paper, is linear interpolation, as e.g. used in rectified flow [ 21 ] and optimal transport (OT) flow [32], which defines a path conditioned on two endpoints ( x0 and x1) by 
+
+xt = tx 1 + (1 − t)x0 (6) which defines intermediate distributions pt for t ∈ [0 , 1] , resulting in the flow matching objective 
+
+min  
+
+> θ
+
+Et∼U (0 ,1) ,x 0∼p0,x 1∼p1 (∥vθt (xt) − (x1 − x0)∥22). (7) Under this construction, the trained velocity network induces a family of MMSE denoisers 
+
+Dt(xt) = E[x1 | xt] = xt + (1 − t)vθt (xt). (8) 
+
+2.2 Flow-based plug-and-play reconstruction 
+
+Flow-based PnP methods apply the denoiser within an iterative reconstruction scheme while adapting the iterate to the corresponding noise level through an explicit renoising step. For example, PnP-Flow [23] performs the updates 
+
+zk+1 = xk − τk∇Fy (xk)˜zk+1 = tkzk+1 + (1 − tk)ϵ, ϵ ∼ p0 = N (0 , 1) 
+
+xk+1 = Dtk (˜ zk+1 ),
+
+(9) where (tk)k is a time-step schedule controlling the noise level. PnP-Flow additionally notes that the denoising step may be averaged over multiple noise realizations. However, this averaged mapping is introduced only as an algorithmic variant, and its intrinsic operator properties are not characterized. In particular, the existing convergence analysis is only carried out for the stochastic iteration and does not study the residual structure or Lipschitz behavior of the mean denoiser. In the next section, we make this averaged operator explicit and analyze it directly. 
+
+## 3 FlowADMM 
+
+3.1 Mean renoise-denoise operator 
+
+We now formalize the deterministic operator implicitly underlying sstochastic renoise-denoise plug-and-play methods. Assume that we have a pretrained flow velocity network vθ : [0 , 1] × Rm → Rm
+
+defining a time-dependent MMSE denoiser 
+
+Dt = I + (1 − t)vθt . (10) 3Existing flow-based PnP methods apply the denoiser after explicitly renoising the current iterate with a random noise sample. Averaging over the latent noise distribution naturally defines the following deterministic operator, which we call the mean renoise-denoise operator , as 
+
+¯St(x) = Eϵ∼N (0 ,I )[Dt(tx + (1 − t)ϵ)] (11) with timestep t ∈ [0 , 1] . This operator represents the expected output of a renoise-denoise step and can be viewed as the deterministic limit of stochastic updates used by methods such as PnP-Flow [ 23 ]or Flower [ 27 ]. Figure 1 visualizes the action of the operator. The following remark shows that, under the ideal MMSE assumption, the operator leaves points on the data manifold unchanged, which implies that the data manifold is a fixed-point set of the operator. 
+
+Remark 1. Assume that Dt is the ideal MMSE denoiser for the flow path xt = tx 1 + (1 − t)x0,where x0 ∼ p0 and x1 ∼ p1, meaning that Dt(xt) = Ex1 [x1 | xt]. Then ¯St(x) = x for x ∼ p1.
+
+Our upcoming analysis involves the residual form of the mean renoise-denoise operator given by 
+
+Rt(x) = ¯St(x) − x (12) where Rt represents the average correction induced by the denoiser at noise level t. The residual thus defines a vector field, which can be interpreted as a local correction toward the data manifold. 
+
+3.2 Integration into ADMM 
+
+We integrate the mean renoise-denoise operator into ADMM. Compared to forward-backward splitting as used in (9) , ADMM allows multiple prior operators through auxiliary variables, can be extended to non-differentiable data terms, and does not contain an operator-dependend step size restriction [ 4 ]. The classical ADMM algorithm aims to solve (2) by restating it as the constrained problem 
+
+min  
+
+> x,z
+
+Fy (x) + R(z) s.t. x = z, (13) and solving it by minimizing the augmented Lagrangian 
+
+Lρ(x, z, u ) = Fy (x) + R(z) + ⟨u, x − z⟩ + ρ
+
+2 ∥x − z∥22, (14) where ρ > 0 is a penalty parameter and u is the scaled dual variable. The Lagrangian is minimized with alternating steps on x and z. This leads to the following proximal updates 
+
+xk+1 = prox τ F y (zk − uk) (15) 
+
+zk+1 = prox τ R (xk+1 + uk) (16) 
+
+uk+1 = uk + xk+1 − zk+1 . (17) where τ = 1 /ρ and the proximal operator is defined as 
+
+prox f (v) = argmin x
+
+12 ∥x − v∥22 + f (x). (18) In the spirit of previous plug-and-play methods [ 31 , 24 ], we propose to replace the proximal operator of the regularization function with the implicit prior given by the mean renoise-denoise operator, defining the algorithmic scheme, which we call FlowADMM 
+
+xk+1 = prox τ F y (zk − uk) (19) 
+
+zk+1 = ¯Stk (xk+1 + uk) (20) 
+
+uk+1 = uk + xk+1 − zk+1 , (21) where (tk)k defines a time-schedule controlling the strength of the denoiser. 
+
+3.3 Convergence analysis 
+
+We now analyze the stability of the mean renoise-denoise operator, which will be used to develop convergence criteria for FlowADMM. Proofs in this section are given in Appendix A. 
+
+Lemma 1. Let the flow network vθt be Lipschitz with constant Lv (t). Then the residual operator 
+
+Rt = ( ¯St − I) is Lipschitz continuous with constant (1 − t)(1 + tL v (t)) .
+
+4This result shows that the strength of the operator decreases as t → 1, where ¯St approaches the identity. A convergence analysis of FlowADMM is delicate, since the mean denoise-renoise operators changes between iterations through the time schedule (tk)k. Our analysis involves the notion of 
+
+α-averaged operators, which are defined as follows. 
+
+Definition 1. A operator T : Rd → Rd is called, α-averaged (or just averaged), if there exists 
+
+α ∈ (0 , 1) and a non-expansive operator N : Rd → Rd such that 
+
+T = αI + (1 − α)N, (22) 
+
+where I is the identity operator. 
+
+If an averaged operator has a fixed point, then the fixed point iteration xk+1 = T (xk) converges [ 15 ]. Moreover, T has the same fixed point set as N . We start the convergence analysis of FlowADMM with a proposition that gives convergence guarantees for a constant time schedule tk = t, that is based on results of Ryu et al. [31]. 
+
+Proposition 1. Let t ∈ (0 , 1) , let the flow network vθt be Lipschitz continuous with constant Lv (t) < 
+
+> 11−t
+
+and assume Fy is differentiable and μ-strongly convex. Let ξ = (1 − t)(1 + tL v (t)) denote the Lipschitz constant of the residual operator Rt. Then for data term penalty τ satisfying 
+
+τ > ξ
+
+(1 + ξ − 2ξ2)μ , (23) 
+
+the operator Tt representing the fixed-t FlowADMM iteration, i.e. the operator mapping the FlowADMM state (zk, u k) to Tt(zk, u k) = ( zk+1 , u k+1 ), is averaged. Thus, if a fixed point ex-ists, fixed-t FlowADMM converges. 
+
+Proposition 1 establishes conditions on the underlying flow network and the step size of the data term in the simplified setting of a fixed timestep schedule. The Lipschitz condition Lv < 11−t is substantially weaker compared to standard contraction conditions in other PnP methods, which require the residual denoising networks to have Lipschitz constants less than 1. This is especially prominent if t becomes close to 1. In practice, PnP methods based on flow and diffusion models achieve better results when using increasing time schedules (or, equivalently, decreasing noise schedules in the diffusion setting). For large t, the renoising distribution remains concentrated near the current iterate x. Consequently, the operator acts as a local refinement step only when x is already close to the data distribution. If x is far from the data manifold, large-t denoising remains off-distribution and does not necessarily move the iterate toward a plausible image. This motivates using smaller values of t in early iterations to obtain coarse global corrections, followed by larger values of t for refinements once the iterate is closer to the learned prior. Note that Prop. 1 already covers the convergence analysis for time schedules that become constant after finitely many iterations, i.e., tk = tmax for all k ≥ K. The following proposition is generalization for non-constant time schedules. 
+
+Proposition 2. Let (tk)k be a sequence in [0 , t max ] with lim k→∞ tk = tmax < 1 and 
+
+> ∞
+
+X
+
+> k=1
+
+|tk − tmax | < ∞. (24) 
+
+Let Ttk denote the FlowADMM iteration at timestep tk and let there be a δ > 0 such that for all 
+
+ˆt ∈ [tmax − δ, t max ] the iterations Tˆt satisfy the assumptions in Proposition 1. Let the underlying flow network additionally be Lipschitz in t, i.e. for some positive constant Lt
+
+∥vθs (x) − vθt (x)∥ ≤ Lt|s − t| ∀x. (25) 
+
+Then FlowADMM converges to a fixed point of T∗ = Ttmax , if such a fixed point exists. 
+
+This result can be interpreted as a convergence guarantee for a non-stationary fixed point iteration whose operators asymptotically approach a limiting averaged operator. Notably, the Lipschitz restriction with respect to x on the flow network only applies in the neighborhood of tmax , which is close to 1 in practice. There is no contraction bound restriction on the Lipschitz constant with respect to time Lt.Although in this paper we do not explicitly enforce the Lipschitz condition on the flow networks, we give experimental evidence for the stability of FlowADMM by analyzing the Lipschitz behavior of pretrained networks during late-stage FlowADMM iterations in Appendix B. 53.4 Practical implementation 
+
+In practice, the expectation in the definition of the mean renoise-denoise operator ¯St is intractable and must be approximated using Monte Carlo sampling. Given N i.i.d. samples {ϵi}Ni=1 , ϵi ∼ N (0 , I ),we define the empirical operator as the unbiased estimator 
+
+ˆS(N ) 
+
+> t
+
+(x) = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+Dt(tx + (1 − t)ϵi). (26) In FlowADMM, we replace ¯Stk with its Monte Carlo counterpart ˆS(Nk ) 
+
+> tk
+
+, yielding a stochastic iteration. We control the number of samples and thus the variance of the operator per iteration 
+
+through the schedule Nk. Motivated by the coarse-to-fine behavior of ¯St (see Figure 1), we employ a sampling strategy in which the number of samples increases in later iterations. For small tk, and when the current iterate is still far away from the manifold, the operator makes large, coarse corrections and is relatively insensitive to sampling noise, so a small number of samples suffices. In contrast, during late iteration refinements, an accurate estimation becomes more critical to refine small local structure and not kick the iterate off the manifold. Increasing Nk in later iterations therefore reduces variance when precision matters most. In our implementation, we fix the total budget of flow evaluations and distribute it across iterations by increasing Nk in late iterations. This allocates more computational resources to later iterations, where higher accuracy is required. 
+
+## 4 Related Work 
+
+Stochastic regularization. SNORE [ 28 ] is closely related to our work in that it also addresses the distribution mismatch of applying denoisers to PnP iterates outside of their training noise levels. SNORE introduces an explicit stochastic regularization function based on Gaussian perturbations of the current iterate, leading to a stochastic gradient descent algorithm. It also introduces an annealed variant, in which the noise levels are gradually reduced. Our work differs in three main aspects. First, SNORE is formulated as optimization of an explicit scalar regularizer, whereas our prior is defined directly through a deterministic mean renoise-denoise operator and does not, in general, correspond to the gradient of a scalar energy. Second, SNORE relies on additive Gaussian corruption with Gaussian denoisers, while our construction is tailored to the linear interpolation path used by straight-line flow matching. Third, SNORE analyzes the convergence of their stochastic gradient descent method to critical points under boundedness assumptions, whereas our analysis studies fixed-point convergence of a non-stationary ADMM operator under Lipschitz conditions on the underlying flow network. 
+
+Flow-based PnP methods. Recent plug-and-play methods increasingly leverage denoisers derived from generative flow matching models [ 23 , 27 , 2]. PnP-Flow [ 23 ] introduces a renoise-denoise iteration within a forward-backward splitting framework and additionally observes that averaging over multiple noise realizations can improve stability. Their convergence analysis, however, relies on strong assumptions on the boundedness of iterates and vanishing data-term step-sizes. Flower [ 27 ]further improves reconstruction quality by using proximal steps on the data term with adaptive step size. Their best-performing variant averages multiple complete stochastic reconstruction trajectories. In contrast to these approaches, our work explicitly formalizes and analyzes the deterministic operator induced by averaging over the latent noise distribution and integrates it directly into an ADMM framework. Moreover, we derive convergence guarantees for non-constant timestep schedules with Lipschitz conditions directly on the underlying flow network. Beyond plug-and-play approaches, D-Flow [ 2] formulates inverse problems through optimization in the latent source space of the flow model by differentiating through the generation dynamics. 
+
+Convergence analysis of PnP methods. The convergence analysis of PnP algorithms in prior work commonly relies on contraction or averagedness properties of the denoising operator [ 31 , 5, 17 ]. While these provide strong guarantees, directly extending them to flow-based methods is challenging due to the stochastic renoise-denoise setting and the time-dependence of the denoiser. Our analysis builds on classical PnP theory while accounting for flow-based renoise-denoise operators and non-stationary timestep schedules. Moreover, we do not require the denoiser to be non-expansive. 6Posterior sampling methods for inverse problems. A related line of work uses diffusion or flow models for approximate posterior sampling in inverse problems [ 18 , 8 , 19 , 11 ]. These approaches aim to sample from the posterior distribution conditioned on the measurements and are typically motivated from a Bayesian perspective. In contrast, plug-and-play methods are generally optimization-oriented and aim to compute a single high-quality reconstruction rather than sampling from the full posterior distribution. Our work follows this deterministic PnP perspective and studies the resulting reconstruction dynamics through an operator-theoretic analysis. 
+
+## 5 Numerical experiments 
+
+5.1 Experimental setup and baselines 
+
+We evaluate the performance of FlowADMM on a range of inverse problems and compare it to recent state-of-the-art plug-and-play methods based on flow and diffusion models. We consider tasks including denoising, deblurring, super-resolution, random inpainting and box inpainting. Details on each task is provided in Appendix D. Unless stated otherwise, we follow the experimental setup of Flower [ 27 ] to ensure a fair comparison. Specifically, we use 100 images of size 128 × 128 from the CelebA dataset [ 22 ] and 100 images from the AFHQ-Cat dataset [ 7 ]. For all experiments, we use the same pretrained flow models provided by [23], which is also used in the experiments in [27]. In addition to PnP-Flow [ 23 ] and Flower [ 27 ] we also compare against several other recent methods, including the flow-based approaches OT-ODE [ 26 ], D-Flow [ 2] and Flow-Priors [ 36 ], the diffusion-based method DiffPIR [ 37 ] and PnP-GS with a Gaussian gradient-step denoiser [ 16 ]. For these methods, we report the quantitative results provided in [ 27 ], which were obtained under the same experimental setup as our work. 
+
+5.2 Computational budget 
+
+To maintain a fair comparison, we match the total number of iterations K and flow evaluations to those used by Flower5-OT [ 27 ], which is our main competitor. Flower5-OT averages 5 independent runs of the stochastic Flower algorithm, which leads to 5K flow evaluations. We want to stress that although Flower5-OT uses the same amount of flow evaluations as FlowADMM, it actually requires 5× more data-term proximal operator evaluations, because it averages full reconstructions, while FlowADMM only averages the prior step within each iteration. While flow evaluations often dominate the computational cost, the data consistency step can be non-negligible depending on the forward operator, making this reduction practically relevant. Since the number of iterations is finite, we employ a power law time schedule between tmin and tmax 
+
+defined as 
+
+tk = tmin +
+
+ k + 1 
+
+K
+
+γ
+
+(tmax − tmin ), (27) where γ < 1 uses more late time steps and γ > 1 keeps the iterates near tmin for longer. For the Monte Carlo approximation of the mean renoise-denoise operator, we considered both a constant and a piecewise-constant three-stage sampling schedule, which allocates an increasing amount of samples to later iterations. We treat the positions and height of the steps as hyperparameters while keeping the total number of samples across all iterations fixed. This allows us to concentrate more computational resources on steps where higher accuracy is required. 
+
+5.3 Hyperparameter tuning 
+
+The hyperparameters of FlowADMM, including the data term weight τ and the step-based sampling schedule (Nk)k, are tuned separately for each task on a validation set of 32 images per dataset, following the tuning protocol of [ 23 , 27 ]. We observed that mainly the data term strength τ varies greatly between tasks, while the other parameters show a more consistent behavior. We also found that a late-heavy three-phase Nk schedule consistently outperforms the constant schedule overall, validating our sampling hypothesis. An ablation (see Appendix F.2) further shows that transferring the same late-heavy Monte carlo sampling schedule idea to PnP-Flow improves all five CelebA tasks significantly, but still remains below FlowADMM, indicating that both the schedule and the ADMM 7formulation contribute to the final gains. Other ablations and further details on the tuning and the final per-task parameter choices can be found in Appendix E. 
+
+5.4 Results 
+
+Table 1: Results for different inverse problems on the CelebA test set.                                                                                                                                                                                         
+
+> Method Denoising Deblurring Super-resolution Random inpainting Box inpainting PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS Degraded 20.00 0.348 0.372 27.83 0.740 0.126 10.26 0.183 0.827 11.95 0.196 1.041 22.27 0.742 0.214 PnP-GS 32.64 0.910 0.035 34.03 0.924 0.041 31.31 0.892 0.064 29.22 0.875 0.070 –––DiffPIR 31.20 0.885 0.060 32.77 0.912 0.060 31.52 0.895 0.033 31.74 0.917 0.025 –––OT-ODE 30.54 0.859 0.032 33.01 0.921 0.029 31.46 0.907 0.025 28.68 0.871 0.051 29.40 0.920 0.038 D-Flow 26.04 0.607 0.092 31.25 0.854 0.038 30.47 0.843 0.026 33.67 0.943 0.015 30.70 0.899 0.026 Flow-Priors 29.34 0.768 0.134 31.54 0.858 0.056 28.35 0.713 0.102 32.88 0.871 0.019 30.07 0.858 0.048 PnP-Flow1 31.80 0.905 0.044 34.48 0.936 0.040 31.09 0.902 0.045 33.05 0.944 0.018 30.47 0.933 0.037 Flower1-OT 32.28 0.914 0.034 34.98 0.947 0.026 32.36 0.923 0.034 33.08 0.944 0.018 31.19 0.945 0.022
+> PnP-Flow5 32.30 0.911 0.056 34.80 0.940 0.047 31.49 0.906 0.056 33.98 0.953 0.022 31.09 0.940 0.043 Flower5-OT 33.14 0.926 0.038 35.67 0.954 0.032 33.09 0.932 0.040 33.95 0.953 0.020 31.87 0.952 0.023 FlowADMM (ours) 33.19 0.918 0.027 35.53 0.950 0.035 33.94 0.940 0.025 35.23 0.965 0.020 31.72 0.949 0.034
+
+Table 2: Results for different inverse problems on the AFHQ-Cat test set.                                                                                                                                                                                         
+
+> Method Denoising Deblurring Super-resolution Random inpainting Box inpainting PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS Degraded 20.00 0.314 0.509 23.94 0.517 0.444 11.70 0.208 0.873 13.36 0.223 1.081 21.80 0.740 0.198 PnP-GS 32.58 0.894 0.072 27.91 0.753 0.349 24.15 0.632 0.362 29.42 0.836 0.126 –––DiffPIR 30.58 0.835 0.189 27.56 0.728 0.342 23.65 0.624 0.402 31.70 0.881 0.062 –––OT-ODE 30.03 0.815 0.076 27.06 0.713 0.123 25.91 0.716 0.108 29.40 0.839 0.090 24.62 0.875 0.085 D-Flow 26.13 0.574 0.175 27.82 0.721 0.164 24.64 0.601 0.190 32.20 0.894 0.040 26.26 0.842 0.077 Flow-Priors 29.41 0.763 0.153 26.47 0.700 0.181 23.51 0.570 0.272 32.37 0.906 0.047 26.20 0.818 0.118 PnP-Flow1 31.18 0.863 0.135 27.87 0.760 0.304 26.94 0.763 0.171 33.00 0.918 0.037 26.00 0.897 0.103 Flower1-OT 31.69 0.879 0.102 28.64 0.775 0.255 26.23 0.741 0.272 32.97 0.918 0.040 26.19 0.915 0.063
+> PnP-Flow5 31.43 0.864 0.168 28.19 0.766 0.332 27.37 0.774 0.183 33.75 0.929 0.048 26.68 0.901 0.120 Flower5-OT 32.35 0.891 0.116 28.97 0.784 0.283 26.57 0.750 0.282 33.70 0.927 0.045 26.88 0.922 0.066 FlowADMM (ours) 32.90 0.890 0.082 28.96 0.792 0.284 28.12 0.808 0.199 34.82 0.938 0.048 27.39 0.903 0.068
+
+The quantitative evaluation in Table 1 and Table 2 show that FlowADMM matches or improves the best competing methods in distortion metrics. In particular, FlowADMM obtains best PSNR in 7 out of 10 tasks and the best SSIM on 6 out of 10 tasks, with especially large gains on for super-resolution and inpainting. FlowADMM performs worse on the LPIPS metric, which is consistent with the perception-distortion tradeoff [ 3], since we optimized for PSNR. Qualitative examples in Figure 2 further show that FlowADMM preserves fine structures, such as the cat whiskers in the super-resolution example. We give additional results in the Appendix. 
+
+Timing and memory. We also compare wall-clock time and GPU memory on CelebA Gaussian deblurring, using the same protocol as in the PnP-Flow paper (100 test images, evaluated as 25 batches of 4 images each). The experiments were conducted on a machine with an i7-8700K CPU and a single RTX 4090 GPU. Table 3 reports the results for PnP-Flow5, Flower5-OT, and our 100-step FlowADMM configuration. We also report a FlowADMM version that uses batched instead of sequential averaging, which substantially increases performance at the cost of higher peak memory. The speed-up compared to Flower5-OT is due to two factors: FlowADMM performs fewer data term evaluations, and in our implementation these proximal steps are computed in closed form using the structure of the forwarrd operators, whereas Flower uses conjugate gradient iterations (see Appendix C). 
+
+## 6 Conclusion and Limitations 
+
+We introduced FlowADMM, a PnP ADMM framework based on the mean renoise-denoise operator induced by flow matching models. By explicitly formalizing this operator, we derived convergence guarantees for both constant and non-constant timestep schedules under Lipschitz conditions on 8GT Degraded OT-ODE Flow-Priors PnP-Flow5 Flower5-OT FlowADMM CelebA Denoising                          
+
+> 20.01 29.48 29.63 31.38 32.22 32.35
+> CelebA Deblurring
+> 26.04 32.09 30.95 31.15 34.82 34.82
+> AFHQ-Cat Super-Resolution
+> 9.75 28.44 26.06 29.66 28.08 30.24
+> AFHQ-Cat Box Inpainting  18.83 20.54 28.72 27.28 27.47 28.13
+> CelebA Random Inpainting
+> 12.92 24.95 26.48 26.50 27.44 27.67
+
+Figure 2: Example reconstructions for each task. We report the PSNR above each image. Table 3: Timing and memory metrics per image on the deblurring task on CelebA (128 × 128) for 100 iterations. 
+
+Method Time / image (s) Peak memory (GiB) PnP-Flow5 2.84 0.30 Flower5-OT 5.10 0.30 FlowADMM (sequential averaging) 2.82 0.43 FlowADMM (batched averaging) 1.51 1.51 
+
+the underlying flow network. Empirically, FlowADMM achieves state-of-the-art reconstruction quality across a range of inverse problems. Our work analyzes flow-based PnP methods through an operator-theoretic lens and suggests several directions for future work, including stronger convergence guarantees, and the explicit Lipschitz regularization of flow networks to improve stability. 
+
+Limitations. Our convergence analysis relies on the Lipschitz constant of the underlying flow network that is not explicitly penalized during training. Moreover, the convergence guarantees assume the existence of a fixed point of the limiting FlowADMM operator. In addition, our theoretical analysis focuses on the deterministic mean renoise-denoise operator, whereas the practical Monte Carlo approximation introduces additional stochasticity that is not fully captured by the current theory. Finally, our analysis assumes idealized flow-based denoisers and does not explicitly account for approximation errors from imperfect training. 
+
+Broader impact. This work focuses on theoretical and algorithmic aspects of solving image inverse problems using flow-based plug-and-play methods, and provides criteria for provable convergence. Potential applications include medical imaging, scientific imaging, and image restoration, where improved reconstruction quality may be beneficial, although limitations in robustness should be carefully considered in safety-critical settings. 9References 
+
+[1] Heinz H. Bauschke and Patrick L. Combettes. Fejér Monotonicity and Fixed Point Iterations ,pages 91–109. Springer International Publishing, Cham, 2017. ISBN 978-3-319-48311-5. doi: 10.1007/978-3-319-48311-5_5. URL https://doi.org/10.1007/978-3-319-48311-5_ 5.[2] Heli Ben-Hamu, Omri Puny, Itai Gat, Brian Karrer, Uriel Singer, and Yaron Lipman. D-flow: Differentiating through flows for controlled generation. arXiv preprint arXiv:2402.14017 , 2024. [3] Yochai Blau and Tomer Michaeli. The perception-distortion tradeoff. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 6228–6237, 2018. [4] Stephen Boyd, Neal Parikh, Eric Chu, Borja Peleato, and Jonathan Eckstein. Distributed optimization and statistical learning via the alternating direction method of multipliers. Machine Learning , 3(1):1–122, 2010. [5] Stanley H Chan, Xiran Wang, and Omar A Elgendy. Plug-and-play admm for image restoration: Fixed-point convergence and applications. IEEE Transactions on Computational Imaging , 3(1): 84–98, 2016. [6] Ricky TQ Chen, Yulia Rubanova, Jesse Bettencourt, and David K Duvenaud. Neural ordinary differential equations. Advances in neural information processing systems , 31, 2018. [7] Yunjey Choi, Youngjung Uh, Jaejun Yoo, and Jung-Woo Ha. StarGAN v2: Diverse image synthesis for multiple domains. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , 2020. [8] Hyungjin Chung, Jeongsol Kim, Michael Thompson Mccann, Marc Louis Klasky, and Jong Chul Ye. Diffusion posterior sampling for general noisy inverse problems. In The Eleventh Inter-national Conference on Learning Representations , 2023. URL https://openreview.net/ forum?id=OnD9zGAGT0k .[9] Giannis Daras, Hyungjin Chung, Chieh-Hsin Lai, Yuki Mitsufuji, Jong Chul Ye, Peyman Milanfar, Alexandros G Dimakis, and Mauricio Delbracio. A survey on diffusion models for inverse problems. arXiv preprint arXiv:2410.00083 , 2024. [10] Margaret AG Duff, Neill DF Campbell, and Matthias J Ehrhardt. Regularising inverse problems with generative machine learning models. Journal of Mathematical Imaging and Vision , 66(1): 37–56, 2024. [11] Julius Erbach, Dominik Narnhofer, Andreas Robert Dombos, Bernt Schiele, Jan Eric Lenssen, and Konrad Schindler. Solving inverse problems with FLAIR. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2026. URL https://openreview. net/forum?id=w9xETx7HT1 .[12] Mario Gonzalez, Andrés Almansa, Mauricio Delbracio, Pablo Musé, and Pauline Tan. Solv-ing inverse problems by joint posterior maximization with a vae prior. arXiv preprint arXiv:1911.06379 , 2019. [13] Alexandros Graikos, Nikolay Malkin, Nebojsa Jojic, and Dimitris Samaras. Diffusion models as plug-and-play priors. Advances in Neural Information Processing Systems , 35:14715–14728, 2022. [14] Felix Heide, Markus Steinberger, Yun-Ta Tsai, Mushfiqur Rouf, Dawid Paj ˛ ak, Dikpal Reddy, Orazio Gallo, Jing Liu, Wolfgang Heidrich, Karen Egiazarian, et al. Flexisp: A flexible camera image processing framework. ACM Transactions on Graphics (ToG) , 33(6):1–13, 2014. [15] Patrick L. Combettes Heinz H. Bauschke. Convex Analysis and Monotone Operator Theory in Hilbert Spaces . Springer, 2017. [16] Samuel Hurault, Arthur Leclaire, and Nicolas Papadakis. Gradient step denoiser for convergent plug-and-play. arXiv preprint arXiv:2110.03220 , 2021. 10 [17] Samuel Hurault, Arthur Leclaire, and Nicolas Papadakis. Proximal denoiser for convergent plug-and-play optimization with nonconvex regularization. In International Conference on Machine Learning , pages 9483–9505. PMLR, 2022. [18] Bahjat Kawar, Michael Elad, Stefano Ermon, and Jiaming Song. Denoising diffusion restoration models. Advances in neural information processing systems , 35:23593–23606, 2022. [19] Jeongsol Kim, Bryan Sangwoo Kim, and Jong Chul Ye. Flowdps: Flow-driven posterior sampling for inverse problems. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 12328–12337, 2025. [20] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matthew Le. Flow matching for generative modeling. In The Eleventh International Conference on Learning Representations , 2023. URL https://openreview.net/forum?id=PqvMRDCJT9t .[21] Xingchao Liu, Chengyue Gong, and qiang liu. Flow straight and fast: Learning to generate and transfer data with rectified flow. In The Eleventh International Conference on Learning Representations , 2023. URL https://openreview.net/forum?id=XVjTT1nw5z .[22] Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang. Deep learning face attributes in the wild. In Proceedings of International Conference on Computer Vision (ICCV) , December 2015. [23] Ségolène Martin, Anne Gagneux, Paul Hagemann, and Gabriele Steidl. Pnp-flow: Plug-and-play image restoration with flow matching. In International Conference on Learning Representations ,2025. [24] Tim Meinhardt, Michael Moller, Caner Hazirbas, and Daniel Cremers. Learning proximal operators: Using denoising networks for regularizing inverse imaging problems. In Proceedings of the IEEE international conference on computer vision , pages 1781–1790, 2017. [25] Neal Parikh and Stephen Boyd. Proximal algorithms. Foundations and Trends in optimization ,1(3):127–239, 2014. [26] Ashwini Pokle, Matthew J Muckley, Ricky TQ Chen, and Brian Karrer. Training-free linear image inverses via flows. arXiv preprint arXiv:2310.04432 , 2023. [27] Mehrsa Pourya, Bassam El Rawas, and Michael Unser. Flower: A flow-matching solver for inverse problems. In International Conference on Learning Representations , 2026. [28] Marien Renaud, Jean Prost, Arthur Leclaire, and Nicolas Papadakis. Plug-and-play image restoration with stochastic denoising regularization. In Forty-first International Conference on Machine Learning , 2024. [29] JH Rick Chang, Chun-Liang Li, Barnabas Poczos, BVK Vijaya Kumar, and Aswin C Sankara-narayanan. One network to solve them all–solving linear inverse problems using deep projection models. In Proceedings of the IEEE International Conference on Computer Vision , pages 5888–5897, 2017. [30] Yaniv Romano, Michael Elad, and Peyman Milanfar. The little engine that could: Regularization by denoising (red). SIAM journal on imaging sciences , 10(4):1804–1844, 2017. [31] Ernest Ryu, Jialin Liu, Sicheng Wang, Xiaohan Chen, Zhangyang Wang, and Wotao Yin. Plug-and-play methods provably converge with properly trained denoisers. In International Conference on Machine Learning , pages 5546–5557. PMLR, 2019. [32] Alexander Tong, Kilian FATRAS, Nikolay Malkin, Guillaume Huguet, Yanlei Zhang, Jarrid Rector-Brooks, Guy Wolf, and Yoshua Bengio. Improving and generalizing flow-based genera-tive models with minibatch optimal transport. Transactions on Machine Learning Research ,2024. ISSN 2835-8856. URL https://openreview.net/forum?id=CD9Snc73AW .[33] Singanallur V Venkatakrishnan, Charles A Bouman, and Brendt Wohlberg. Plug-and-play priors for model based reconstruction. In 2013 IEEE global conference on signal and information processing , pages 945–948. IEEE, 2013. 11 [34] Aladin Virmaux and Kevin Scaman. Lipschitz regularity of deep neural networks: analysis and efficient estimation. Advances in neural information processing systems , 31, 2018. [35] Kai Zhang, Wangmeng Zuo, Shuhang Gu, and Lei Zhang. Learning deep cnn denoiser prior for image restoration. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 3929–3938, 2017. [36] Yasi Zhang, Peiyu Yu, Yaxuan Zhu, Yingshan Chang, Feng Gao, Ying N Wu, and Oscar Leong. Flow priors for linear inverse problems via iterative corrupted trajectory matching. Advances in Neural Information Processing Systems , 37:57389–57417, 2024. [37] Yuanzhi Zhu, Kai Zhang, Jingyun Liang, Jiezhang Cao, Bihan Wen, Radu Timofte, and Luc Van Gool. Denoising diffusion models for plug-and-play image restoration. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 1219–1229, 2023. 
+
+## A Proofs 
+
+Proof of Remark 1. For x1 = x we have xt = tx + (1 − t)x0. By the law of total expectation 
+
+¯St(x) = Ex0 [Dt(tx 1 + (1 − t)x0) | x1 = x] = Ex0 [E[x1 | xt] | x1 = x] = x (28) 
+
+Lemma 2. Let Dt be Lipschitz continuous with constant L. Then ¯St is Lipschitz continuous with constant tL .Proof. Let x, y ∈ Rd.
+
+¯St(x) − ¯St(y) = Eϵ[Dt(tx − (1 − t)ϵ) − Dt(ty − (1 − t)ϵ)] (29) Taking the norm and applying Jensen’s inequality yields 
+
+∥ ¯St(x) − ¯St(y)∥ ≤ Eϵ[∥Dt(tx − (1 − t)ϵ) − Dt(ty − (1 − t)ϵ)∥]
+
+≤ Eϵ[L∥tx − (1 − t)ϵ − (ty − (1 − t)ϵ)∥]= Eϵ[L∥tx − ty ∥]= tL ∥x − y∥
+
+Proof of Lemma 1. First, assume (Dt − I) is Lipschitz with some constant L. Let x, y ∈ Rd and for brevity define xϵ = tx + (1 − t)ϵ, yϵ = ty + (1 − t)ϵ which implies xϵ − yϵ = t(x − y).
+
+Rt(x) − Rt(y) = ( ¯St − I)( x) − ( ¯St − I)( y)= Eϵ[Dt(xϵ) − Dt(yϵ)] − (x − y)= Eϵ[Dt(xϵ) − Dt(yϵ)] − (t(x − y) + (1 − t)( x − y)) = Eϵ[Dt(xϵ) − Dt(yϵ) − t(x − y)] − (1 − t)( x − y)= Eϵ[Dt(xϵ) − Dt(yϵ) − (xϵ − yϵ)] − (1 − t)( x − y)= Eϵ[( Dt − I)( xϵ) − (Dt − I)( yϵ)] − (1 − t)( x − y)
+
+Taking the norm and applying Jensen’s inequality and the triangle inequality yields 
+
+∥( ¯St − I)( x) − ( ¯St − I)( y)∥ ≤ Eϵ[∥(Dt − I)( xϵ) − (Dt − I)( yϵ)∥] + (1 − t)∥x − y∥≤ Eϵ[L∥t(x − y)∥] + (1 − t)∥x − y∥
+
+= tL ∥x − y∥ + (1 − t)∥x − y∥
+
+This means Rt is Lipschitz with constant tL + (1 − t). If the underlying flow network is Lv Lipschitz then (Dt − I) = (1 − t)vθt is ((1 − t)Lv )-Lipschitz. Setting L = (1 − t)Lv in the proof above proves the lemma. We can now give a proof of FlowADMM convergence with fixed t:12 Proof of Proposition 1. From Lemma 1 it follows that ( ¯St − I) is ξ := ((1 − t)(1 + tL v )) -Lipschitz. If Lv < 11−t then ξ < 1. Since Lv is a Lipschitz constant it is also greater or equal to 0 which means 
+
+ξ ≥ (1 − t). This means that Corollary 3 in [ 31 ] is applicable, which proves the convergence of the algorithm under the conditions stated in the proposition. Moreover, the proof in [ 31 ] shows that the ADMM iteration is averaged. We define Tt as the operator defined by a FlowADMM iteration. We just showed that under certain conditions Tt is averaged. Assume that Tt has a fixed point. Then the fixed point iteration 
+
+xk+1 = Tt(xk) (30) converges. In the following, we will generalize this result to varying t-schedules. We start with a more general proposition about general sequences of operators that eventually become averaged. 
+
+Proposition 3. Let (tk)k be a sequence in [0 , t max ] with lim k→∞ tk = tmax < 1 and 
+
+> ∞
+
+X
+
+> k=1
+
+|tk − tmax | < ∞ (31) 
+
+Let Ttk : Rd → Rd be a family of operators indexed by tk. Let T∗ = Ttmax be averaged and 
+
+∥Ts(w) − Tt(w)∥ < C |s − t|. (32) 
+
+Then the iteration 
+
+wk+1 = Ttk (wk) (33) 
+
+converges to a fixed point of T∗, if such a fixed point exists. Proof. Denote 
+
+ek = Ttk (wk) − T∗(wk). (34) We have 
+
+∥ek∥ = ∥Ttk (wk) − T∗(wk)∥ ≤ C|tk − tmax | (35) and thus ∞X
+
+> k=1
+
+∥ek∥ < ∞ (36) from the assumptions. Since T∗ is averaged, we can write 
+
+T∗ = (1 − λ)I + λN (37) with some non-expansive operator N . Thus, 
+
+Ttk (wk) = T∗(wk) + ek (38) 
+
+= wk + λ(N (wk) − wk) + ek (39) 
+
+= wk + λ(N (wk) + ek
+
+λ − wk) (40) This form allows us to directly apply Proposition 5.34 of Bauschke and Combettes [1] . With 
+
+(λk)k = λ we get ∞X
+
+> k=1
+
+λk∥ ek
+
+λ ∥ =
+
+> ∞
+
+X
+
+> k=1
+
+∥ek∥ < ∞. (41) The convergence to a fixed point now directly follows from Proposition 5.34 in [ 1] and the fact that 
+
+T∗ has the same fixed points as N .These results can finally be used to show the convergence of FlowADMM with varying t.
+
+Proof of Proposition 2. From the assumptions of Proposition 1 vθt (x) is already Lipschitz in x. To apply Proposition 3 we need to show that Tt(w) is Lipschitz in t. Together with the new condition on the Lipschitzness in t on the flow network we have 
+
+∥vθs (x) − vθt (y)∥ ≤ Lx∥x − y∥ + Lt|s − t| (42) 13 Clearly the denoiser Dt(x) = x + (1 − t)vθt (x) is also Lipschitz in x and t, with constants Cx and 
+
+Cs. For the mean denoising operator we have with xα = αx + (1 − α)ϵ we have 
+
+∥ ¯St(x) − ¯Ss(x)∥ = ∥E[Dt(xt)] − E[Ds(xs)] ∥ (43) 
+
+= ∥E[Dt(xt) − Dt(xs)] + E[Dt(xs) − Ds(xs)] ∥ (44) 
+
+≤ E[∥Dt(xt) − Dt(xs)∥] + E[∥Dt(xs) − Ds(xs)∥] (45) 
+
+≤ CxE[∥xt − xs∥] + Ct|s − t|. (46) Since xt − xs = ( t − s)( x − ϵ) we get 
+
+E[∥xt − xs∥] = |t − s|(E[∥(x − ϵ)∥]. (47) From the assumption that Ttk becomes averaged in a δ-neighborhood of tmax , it follows that it becomes averaged after a finite number of steps and the sequence of iterates is therefore bounded. Therefore, E[∥(x − ϵ)∥] is also bounded, so 
+
+E[∥xt − xs∥] < C ϵ|t − s| (48) and in total we have 
+
+∥ ¯St(x) − ¯Ss(x)∥ ≤ (CxCϵ + Ct)|s − t|. (49) Since the only ADMM step that depends on t is the application of ¯St, the T∗ operator inherits the Lipschitzness from ¯St. The rest follows immediately from Proposition 3 
+
+## B Experiments on the Lipschitz condition 
+
+To better understand the stability of the mean denoiser in FlowADMM, we estimate the Lipschitz constants of the underlying flow network by analyzing the distribution of Jacobian spectral norms along the late-stage trajectory of FlowADMM for a denoising task 
+
+ˆLv (x, t ) ≈ ∥ Jxvθt (x)∥2 (50) We estimated this quantity at denoiser inputs ˜zk = ( t(xk+1 + uk) + (1 − t)ϵ) on the last 10 of the 100 stages (corresponding to t > 0.9) of FlowADMM evaluated on CelebA. We estimate the Jacobian norms by matrix free power iterations on (Jxvt(˜ zk)) ⊤Jxvt(˜ zk), implemented with forward and reverse mode autodiff in PyTorch, which efficiently compute jacobian-vector-products (jvp) and vector-jacobian-products (vjp). Specifically, we iterate 
+
+˜wk+1 = Jw k
+
+∥Jw k∥ (using jvp), (51) 
+
+wk+1 = J⊤ ˜wk+1 
+
+∥J⊤ ˜wk+1 ∥ (using vjp) . (52) We plot the distributions of the (1 − t) ˆLv (˜ zk, t ) estimates in histograms for each evaluated timestep in Figure 3. This quantity corresponds to the Lipschitz condition in Proposition 1, where values smaller than 1 suggest stability. The histograms in Figure 3 shows that the median of (1 − t) ˆLv is below 1. This suggests that FlowADMM trajectories largely stay in stable regions. Nevertheless, the distributions also show long tails with clear spikes above 1, which shows that convergence using Proposition 1 cannot be guaranteed without enforcing a hard Lipschitz constraint on the underlying flow network. Note, that the experiments in this section are only heuristics and we do not claim to compute the global Lipschitz constant of the flow network. Finding a tight upper bound for the global Lipschitz constant of a neural network is in general hard to do [34]. 
+
+## C Computing proximal operators 
+
+In this work, we consider quadratic data fidelity terms of the form 
+
+Fy (x) = 12 ∥Ax − y∥22, (53) whose proximal operator is given in closed form by 
+
+prox μF y (v) = ( I + μA ⊤A)−1(v + μA ⊤y). (54) 14 Figure 3: Distribution of the Jacobian norm Lipschitz estimates along the late-stage FlowADMM trajectory on the denoising task. For large-scale problems, explicitly forming or inverting the matrix (I +μA ⊤A) is typically infeasible, and matrix-free iterative solvers are often employed. However, many linear operators in imaging applications have a decomposition 
+
+A = Q⊤ΛP, (55) where P and Q are orthogonal transforms and Λ is diagonal. This includes, for example, convolution operators (diagonalized by the discrete Fourier transform), masking operators (diagonal in the pixel domain), and subsampling operators. Using this decomposition, we obtain 
+
+A⊤A = P ⊤Λ⊤ΛP, A⊤y = P ⊤Λ⊤Qy, (56) which allows rewriting the proximal operator in the transformed domain (left multiplying with P ) as 
+
+P prox μF y (v) = ( I + μΛ⊤Λ) −1  P v + μΛ⊤Qy  . (57) Defining z = P prox μF y (v), the problem reduces into element-wise equations that can be solved by 
+
+zi = (P v )i + μλ i(Qy )i
+
+1 + μλ 2
+
+> i
+
+, (58) where λi denotes the i-th diagonal entry of Λ. The solution is then obtained via the inverse transform 
+
+prox μF y (v) = P ⊤z. (59) We use this formulation wherever possible and fall back to a CG solver where such a decomposition is not available. 15 D Task Details and Forward Operators 
+
+In the main paper, we evaluated on the same task settings as [ 23 ] and [ 27 ]. In all cases, the measurement model is 
+
+y = Ax + ϵ, (60) where A is the task-specific forward operator and ϵ is additive Gaussian noise with standard deviation 
+
+σnoise . The implementation of the forward operators and their transposes was taken without change from the official PnP-Flow code [23], which will be detailed in the following paragraphs. 
+
+Denoising. For denoising, the forward operator is the identity, A = I. Thus the measurement is simply a noisy version of the clean image. We use Gaussian noise with standard deviation 
+
+σnoise = 0 .2.
+
+Gaussian deblurring. For deblurring, A is convolution with a Gaussian blur kernel implemented in the Fourier domain. The transposed operator A⊤ is implemented as convolution with the conjugate filter in the FFT representation. We use a kernel size of 61 × 61 , with blur standard deviation 
+
+σblur = 1 .0 on CelebA and σblur = 3 .0 on AFHQ-Cat, followed by additive Gaussian noise with 
+
+σnoise = 0 .05 .
+
+Super-resolution. For super-resolution, A is a strided subsampling operator that keeps one pixel every s pixels in each spatial direction. Its adjoint A⊤ is the corresponding zero-filled upsampling operator. We use scale factor s = 2 on CelebA and s = 4 on AFHQ-Cat, with additive Gaussian noise σnoise = 0 .05 .
+
+Box inpainting. For box inpainting, A is a binary masking operator that removes a centered square region, and A⊤ = A since the mask is diagonal. The mask half-size is 20 pixels on CelebA and 40 
+
+pixels on AFHQ-Cat, corresponding to a missing square of side length 40 and 80 , respectively. We add Gaussian noise with σnoise = 0 .05 .
+
+Random inpainting. For random inpainting, A is a Bernoulli masking operator with independent probability of missing pixels of p = 0 .7, so that on average 70% of pixels are removed. Again, the operator is symmetric, i.e. A⊤ = A. The random mask is fixed across runs using a fixed random seed. We add Gaussian noise with σnoise = 0 .01 on the observed pixels. 
+
+## E Hyperparameter tuning details 
+
+Algorithm 1 FlowADMM with Monte Carlo Sampling 
+
+Require: Measurements y, forward operator A, pretrained flow denoiser Dt, iterations K, data term step size τ , time schedule (tk)k, sample schedule (Nk)k 
+
+> 1:
+
+Initialize z0 = A⊤y, x0 = A⊤y, u0 = 0  
+
+> 2:
+
+for k = 0 , . . . , K − 1 do  
+
+> 3:
+
+xk+1 ← prox τ F y (zk − uk) 
+
+> 4:
+
+zk+1 ← 0 
+
+> 5:
+
+for i = 1 , . . . , N k do  
+
+> 6:
+
+Sample ϵi ∼ N (0 , I ) 
+
+> 7:
+
+zk+1 ← zk+1 + 1 
+
+> Nk
+
+Dtk (tk(xk+1 + uk) + (1 − tk)ϵi) 
+
+> 8:
+
+end for  
+
+> 9:
+
+uk+1 ← uk + xk+1 − zk+1  
+
+> 10:
+
+end for  
+
+> 11:
+
+return zK
+
+We explored a 3-phase schedule and a constant schedule for Nk. The three phase schedule is defined as 
+
+Nk =
+
+
+
+Ne, kK < s 1,Nm, s1 ≤ kK < s 2,Nl kK ≥ s2,
+
+(61) 16 Table 4: Hyperparameters used for the CelebA experiments. For baselines, we report the tuned parameters computed in [27]                                                                                                                   
+
+> Method Hyperparameter Denoising Deblurring Super-resolution Random inpainting Box inpainting OT-ODE t00.3 0.4 0.1 0.1 0.1
+> γtd td const const td D-Flow
+> λ0.001 0.001 0.001 0.001 0.001
+> α0.1 0.1 0.1 0.1 0.1
+> niter 3710 20 9Flow-Priors λ100 1000 10000 10000 10000
+> η0.01 0.01 0.1 0.01 0.01 PnP-Flow5
+> K100 100 100 100 100
+> Navg 55555
+> α0.8 0.01 0.3 0.01 0.5 Flower5-OT K100 100 100 100 100
+> Navg 55555FlowADMM
+> K100 100 100 100 100
+> τ5.0 0.5 0.5 0.25 1.0
+> tmin 0.5 0.5 0.3 0.3 0.1
+> tmax 0.95 0.95 0.95 0.95 0.95
+> γ1.0 0.5 1.0 0.5 2.0
+> Nk3ph (1 ,1,41; 0 .5,0.9) 3ph (1 ,1,41; 0 .5,0.9) 3ph (1 ,3,35; 0 .6,0.9) 3ph (1 ,4,29; 0 .5,0.9) 3ph (1 ,4,35; 0 .7,0.9)
+
+Table 5: Hyperparameters used for the AFHQ-Cat experiments. For baselines, we report the tuned parameters computed in [27]                                                                                                 
+
+> Method Hyperparameter Denoising Deblurring Super-resolution Random inpainting Box inpainting OT-ODE t00.3 0.3 0.1 0.1 0.1
+> γtd td const const td Flow-Priors λ100 1000 10000 10000 10000
+> η0.01 0.01 0.1 0.01 0.01 PnP-Flow5
+> K100 500 500 200 100
+> Navg 55555
+> α0.8 0.01 0.01 0.01 0.5 Flower5-OT K100 100 500 200 100
+> Navg 55555FlowADMM
+> K100 100 500 200 100
+> τ5.0 0.25 0.25 0.125 0.5
+> tmin 0.5 0.5 0.3 0.3 0.1
+> tmax 0.95 0.95 0.95 0.95 0.9
+> γ1.0 0.5 1.0 0.5 2.0
+> Nk3ph(1 ,1,41; 0 .5,0.9) const 3ph(1 ,4,29; 0 .5,0.9) 3ph(1 ,3,33; 0 .5,0.9) 3ph(1 ,3,19; 0 .6,0.8)
+
+We denote a three phase schedule with the above parameters as 3ph (Ne, N m, N l; s1, s 2) and "const" means Nk = 5 for all k. The sweep over the three-phase schedule parameters was done in such a way that the total number of Nk stays constant. This ensures that FlowADMM uses the same number of flow evaluations as Flower5-OT and PnP-Flow5. We want to mention that we mainly explored 3-phase over 2-phase or other schedules to be more easily able to satisfy that constraint, and mainly explored schedules with low Nm, i.e. the mid-phase was used to "fill up" the remaining sample budget. In real world settings more complicated schedules are possible and might even lead to better performance. We did a grid search with the following values • τ ∈ { 0.125 , 0.25 , 0.5, 1.0, 2.0, 5.0, 10 .0}
+
+• tmin ∈ { 0.1, 0.2, 0.3, 0.5}
+
+• tmax ∈ { 0.9, 0.95 }
+
+• γ ∈ { 0.5, 1.0, 2.0}
+
+• s1 ∈ { 0.5, 0.6, 0.7}
+
+• s2 ∈ { 0.8, 0.9}
+
+• Ne = 1 (fixed early phase) • Nm ∈ { 1, 3, 4},
+
+• Nl was chosen to fix the flow evaluation budget constraint of matching Flower5-OT’s and PnP-Flow5’s flow evalutions, i.e. K · Navg flow evaluations in total Note, that while all CelebA experiments use K = 100 iterations, some experiments on AFHQ-Cat use more, namely super-resolution with 500 and random inpainting with 200 iterations. 17 Table 6: Ablation of FlowADMM on the CelebA validation set for the five inverse problems. We report mean PSNR over the five tasks. The top row is the final method used in the paper, and all subsequent rows are measured relative to it.                               
+
+> Setting Mean PSNR ↑∆vs final method Max single-task drop Final method 34.1815 --Shared 3ph(1 ,3,18; 0 .5,0.8) 34.1527 -0.0288 -0.0484 Constant Nk= 5 33.9064 -0.2751 -0.3499 Shared tmin = 0 .334.1396 -0.0419 -0.1508 Shared γ= 1 .034.1198 -0.0617 -0.2594
+
+Table 7: CelebA test-set per-task PSNR comparison between the standard PnP-Flow5 baseline, using the late-heavy Nk schedule in PnP-Flow (PnP-Flow-KAvg), and FlowADMM. Positive deltas indicate improvements over the corresponding reference method. 
+
+Task PnP-Flow5 PnP-Flow-KAvg FlowADMM ∆ vs PnP-Flow5 ∆ vs FlowADMM Denoising 32.3119 32.3972 33.2049 +0.0853 -0.8077 Deblurring 34.8035 34.8616 35.6008 +0.0581 -0.7392 Super-resolution 31.5030 33.3271 34.0372 +1.8241 -0.7101 Box inpainting 31.0589 31.5672 31.7281 +0.5083 -0.1609 Random inpainting 34.0700 34.2278 35.4008 +0.1578 -1.1730 
+
+## F Ablations 
+
+F.1 Influence of hyperparameters 
+
+We evaluate the sensitivity of our hyperparameters and whether they can be shared between tasks. Table 6 shows that the main gains come from late-heavy three-phase averaging rather than from fine-tuning the time schedule. Relative to the final per-task tuned method, replacing the task-specific schedule by the shared three-phase schedule 3ph(1 , 3, 18; 0 .5, 0.8) costs only 0.0288 dB on average, whereas reverting to constant averaging loses 0.2751 dB, showing that the principled late-heavy schedule leads to significant performance gains. We also find that sharing tmin = 0 .3 or γ = 1 .0
+
+incurs modest average drops of 0.0419 dB and 0.0617 dB, respectively, with the largest degradation concentrated on box inpainting. These results suggest that most hyperparameters except τ can be unified between tasks, incuring only modest performance penalties. 
+
+F.2 Applying the late-heavy sampling schedule to PnP-Flow 
+
+We further investigate the influence of the late-heavy Nk schedule by also applying it to PnP-Flow. We tune the schedule together with other PnP-Flow hyperparameters for each task on CelebA. Table 7 shows that late-heavy sampling schedule improves PnP-Flow on all five CelebA tasks, with the largest gains on super-resolution and box inpainting. However, FlowADMM still remains better on every task, with the remaining gap ranging from 0.1609 dB on box inpainting to 1.1730 dB on random inpainting. This suggests that the Nk schedule is inherently advantageous for renoise-denoise methods, while also giving evidence that ADMM has an advantage over forward-backward splitting methods for flow-based PnP methods. 
+
+## G Additional results 
+
+G.1 Trajectory visualizations 
+
+Figures 4, 5, 6 and 7 visualize the FlowADMM trajectory through the primal data-consistency iterate 
+
+x, the prior iterate z, and the dual variable u. In the first iterations, x and z can differ a lot. x reacts directly to the measurement model through the proximal update, whereas z stays closer to the flow prior. As the iterations proceed, the gap between the two iterates shrinks and both converge to the same reconstruction, indicating that the consensus constraint is being satisfied. This highlights an advantage of the ADMM over proximal gradient descent: data consistency and prior regularization are handled by separate, interpretable states rather than being entangled in a single update. 18 This separation is especially useful in the early phase of the reconstruction, where the observation model and the learned prior may disagree strongly. FlowADMM allows each component to make large task-specific corrections before forcing consensus, which is not directly visible in single-state proximal gradient descent trajectories. Note that we initialize x = z = A⊤y.Toward the end of the iteration the dual variable u becomes 0. This can be explained with the following. Near the end of the algorithm ¯St(x) ≈ x. This happens because t gets closer to 1 (i.e. the prior gets weaker) and from Remark 1 because x is near the manifold. This means the z and u
+
+updates become 
+
+zk+1 = xk+1 + uk (62) 
+
+uk+1 = uk + xk+1 − (xk+1 + uk) = 0 , (63) so u naturally vanishes in late iterations. 
+
+Figure 4: Trajectory visualization of a deblurring experiment 
+
+Figure 5: Trajectory visualization of a super-resolution experiment 
+
+G.2 Confidence intervals for improvements 
+
+TO quanitify uncertainty in the reported test-set improvements over our main competitors PnP-Flow5 and Flower5-OT, we computed paired bootstrap confidence intervals over the per-image test PSNR. For each task, we formed imagewise metric differences, over the same 100 test images, and then used bootstrapping to compute 95% confidence intervals. Several of the main gains of FlowADMM are clearly separated from zero, especially on our main improved tasks of super-resolution and random inpainting, which we report in Table 8. At the same time the intervals also confirm that the 19 Figure 6: Trajectory visualization of a random inpainting experiment 
+
+Figure 7: Trajectory visualization of a box inpainting experiment. advantage is not uniform across all tasks: deblurring is the clearest exception, with FlowADMM underperforming Flower5-OT significantly. Still, FlowADMM significantly outperforms or matches state-of-the art performance on most of the tasks. What 
+
+G.3 Additional tasks 
+
+We additionally consider the severely ill-posed problem of 8× super-resolution on the CelebA dataset, which is not part of the standard benchmark used in prior work, which only evaluated 2× super-resolution on that dataset. We tuned FlowADMM and PnP-Flow on the validation set with the same procedure as usual. Flower does not expose hyperparameters for tuning, so we use it as is. As always, we keep the total number of flow iterations the same between methods. The tuned hyperparameters for these experiments are shown in Table 9 The results are shown in Table 10. In this challenging setting, FlowADMM drastically outperforms the two competitors. We also tested the generality of our method on radial mask compressed sensing MRI (similar to the supplementary material of Flower) and motion deblurring. We did not tune hyperparameters for these tasks. The results can be found in Figures 8 and 9. 20 Table 8: Representative paired per-image bootstrap confidence intervals for PSNR differences. Positive values favor FlowADMM. 
+
+Dataset Task / Comparison ∆PSNR (95% CI) CelebA super-resolution vs. Flower5-OT +0 .869 [+0 .818 , +0 .919] 
+
+CelebA random inpainting vs. Flower5-OT +1 .172 [+1 .076 , +1 .270] 
+
+AFHQ-Cat super-resolution vs. Flower5-OT +1 .138 [+0 .889 , +1 .411] 
+
+AFHQ-Cat deblurring vs. Flower5-OT −0.715 [ −0.959 , −0.499] 
+
+Table 9: Hyperparameters for the CelebA 8× super-resolution test. 
+
+Method Hyperparameters Flower5-OT (N, N avg ) = (100 , 5) 
+
+PnP-Flow5 (N, N avg , lr , γ -style , α ) = (100 , 5, 2.0, const , 0.001) 
+
+FlowADMM (N, τ, t min , t max , γ, N k )= (100 , 0.1, 0.2, 0.95 , 1.0, 3ph (1 , 3, 35; 0 .6, 0.9)) 
+
+Table 10: CelebA 8× super-resolution on 100 test images. We compare against our main flow-based competitors 
+
+Method PSNR ↑ SSIM ↑ LPIPS ↓
+
+Flower5-OT 14.21 0.374 0.383 PnP-Flow5 16.32 0.418 0.297 FlowADMM 21.28 0.667 0.184 
+
+Figure 8: Results for CS MRI 
+
+Figure 9: Results for motion deblurring 21
