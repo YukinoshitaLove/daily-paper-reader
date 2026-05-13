@@ -1,0 +1,3070 @@
+Title: One-Step Generative Modeling via Wasserstein Gradient Flows
+
+URL Source: https://arxiv.org/pdf/2605.11755v1
+
+Published Time: Wed, 13 May 2026 01:49:33 GMT
+
+Number of Pages: 38
+
+Markdown Content:
+# One-Step Generative Modeling via Wasserstein Gradient Flows 
+
+Jiaqi Han 1∗ Puheng Li 1∗ Qiushan Guo 2
+
+Renyuan Xu 1† Stefano Ermon 1† Emmanuel J. Candès 1†
+
+> 1
+
+Stanford University 2ByteDance Seed 
+
+Project Page: https://hanjq17.github.io/W-Flow/ 
+
+## Abstract 
+
+Diffusion models and flow-based methods have shown impressive generative ca-pability, especially for images, but their sampling is expensive because it requires many iterative updates. We introduce W-Flow , a framework for training a generator that transforms samples from a simple reference distribution into samples from a target data distribution in a single step. This is achieved in two steps: we first define an evolution from the reference distribution to the target distribution through a Wasserstein gradient flow that minimizes an energy functional; second, we train a static neural generator to compress this evolution into one-step generation. We instantiate the energy functional with the Sinkhorn divergence, which yields an efficient optimal-transport-based update rule that captures global distributional discrepancy and improves coverage of the target distribution. We further prove that the finite-sample training dynamics converge to the continuous-time distributional dynamics under suitable assumptions. Empirically, W-Flow sets a new state of the art for one-step ImageNet 256 ×256 generation, achieving 1.29 FID, with improved mode coverage and domain transfer. Compared to multi-step diffusion models with similar FID scores, our method yields approximately 100 × faster sampling. These results show that Wasserstein gradient flows provide a principled and effective foundation for fast and high-fidelity generative modeling. 
+
+## 1 Introduction 
+
+Generative modeling can be viewed as transporting a simple reference distribution (often referred to as a prior) to a complex data distribution. In modern high-dimensional settings, this transport is rarely learned from scratch as a single global map. Instead, the dominant paradigm constructs it through a sequence of simpler updates. Diffusion models [ 53 , 57 , 56 , 26 ] learn a sequence of ‘infinitesimal’ denoising steps and then unroll them over many inference steps. Flow models [ 37 , 38 ]learn a sequence of velocity fields and likewise unroll the dynamics over many steps. Despite high sample quality, multi-step inference leads to significant latency and computational cost. It would be convenient to use an iterative procedure during training to specify the evolution of the data distribution, and then compress this evolution into a static map. In this way, the resulting generator would directly transform an input from the reference distribution into an output from the   
+
+> ∗Equal contribution. Correspondence to: jiaqihan@stanford.edu ,puhengli@stanford.edu .
+> †Equal advising. Preprint.
+> arXiv:2605.11755v1 [cs.LG] 12 May 2026
+
+Figure 1: (Left) 1-NFE samples from W-Flow-L/2 trained from scratch on ImageNet-256 ×256. 
+
+(Right) Sample quality (measured by FID) vs. effective sampling compute [ 39 ] (billion parameters ×
+
+number of function evaluations during sampling) evaluated on ImageNet 256 ×256. target distribution in one step. This would combine the efficiency of one-step generation with the flexibility of a distributional evolution during training. The fundamental question would thus be: 
+
+What principles should govern the training dynamics of one-step generators? 
+
+Existing approaches fall short of providing a satisfactory answer. Generative Adversarial Networks (GANs) [ 20 , 47 , 3] evolve the model via discriminator-induced gradients, yet inherit the well-known instability of minimax optimization. More recently, Drifting Model [ 11 ] achieves strong empirical performance by iteratively displacing particles 3 via handcrafted attractive and repulsive fields. Yet, the underlying dynamics remain heuristic and lack a clear and principled interpretation, leaving the model vulnerable to unpredictable convergence and mode collapse (see Fig. 6). In this paper, we propose W-Flow, a new framework for one-step generative modeling. W-Flow prescribes how the entire model distribution should evolve toward the target distribution. This evolution is given by a Wasserstein gradient flow (WGF): at each training step, the current generated distribution moves along the steepest descent direction of a chosen energy functional to the target distribution. We instantiate this energy functional with the Sinkhorn divergence, an optimal-transport-based distance that can be estimated efficiently from mini-batches. The resulting Sinkhorn update combines two batch-level transport plans: a generated-to-real transport plan and a generated-to-generated self-transport plan. This makes each update depend on the batch-level transport structure, rather than on a single matched sample or nearest neighbor. We then train a generator to imitate these updates, thereby compressing the multi-step training evolution into a single one-step map at inference time. This fundamentally differs from one/few-step diffusion methods [ 55 , 70 ], which typically distill or follow a path originally designed for iterative reverse diffusion. Notably, W-Flow achieves a new state of the art for one-step generation on ImageNet 256 ×256, obtaining 1.29 FID at XL scale and 1.35 at L scale, significantly outperforming [ 11 ] while also surpassing many multi-step diffusion and flow models (see Fig. 1). Beyond class-conditional generation, experiments on FFHQ further demonstrate improved mode coverage and strong domain transfer capability, enabled by the globally coordinated OT dynamics. Overall, W-Flow establishes a new framework for designing the training dynamics of generators, showing that WGFs can serve as a powerful foundation for fast and high-fidelity generative modeling. 
+
+## 2 Related work 
+
+(Few/one-step) diffusion and flow-based models. Diffusion [ 53 , 57 , 26 ] and flow models [ 37 , 38 ]learn to transport a simple reference distribution to a complex target distribution through a forward noising process and its time-reverse. However, they require many sequential steps for sampling, leading to substantial computational cost and latency. Many works distill multi-step teachers into few/one-step models via variational score distillation [ 66 , 65 , 61 , 50 ] or learning shortcuts along the diffusion ODE specified by the teacher [ 55 , 54 , 39 , 49 ]. Efforts have also been applied to directly learn-
+
+> 3A particle is one candidate sample/image as it evolves through the algorithm.
+
+2(b) (a) Figure 2: (a) The conceptual diagram of W-Flow. (b) Visualization of the training dynamics projected onto the Sinkhorn divergence landscape on 8 Gaussian mixtures, shown on a logarithmic scale. ing a few/one-step generator from scratch, typically by enforcing certain self-consistency conditions on the trajectory [ 18 , 19 , 4 , 55 ] or the intermediate marginals [ 70 ]. These methods largely inherit their training signal from a predefined diffusion transport path, which is originally designed for iterative generation. We instead directly define the training-time evolution of a one-step generator via WGFs. 
+
+One-step generator mappings. An alternative is to directly learn a static map that takes an input from the reference distribution and outputs a sample from the target distribution. The most studied is the family of GANs [ 20 , 3, 47 , 17 ], which train the generator using discriminator-driven gradients in a minimax game. However, adversarial training is often unstable and requires considerable effort to stabilize. Recently, Drifting Model [ 11 ] guides the generator via an empirically constructed drifting field using kernel interactions and achieves strong performance [ 35 , 16 ]. Yet, the design of this technique remains largely heuristic, lacking a principled understanding of the induced dynamics. Subsequent works [ 32 , 60 ] connect Drifting Model to score-based formulations under Gaussian kernels, while [ 24 , 6] explores links to Sinkhorn divergence and WGFs. However, they provide neither a clear theoretical foundation for designing the training dynamics nor empirical evidence of improved generative performance on standard benchmarks. 
+
+Optimal transport in generative models. Existing applications of OT in generative models broadly fall into two categories. The first uses OT-inspired discrepancies as the training objectives. Wasser-stein GANs [ 3, 21 , 59 ] optimize a dual form of the Wasserstein distance via an adversarial critic, while Sinkhorn GANs [ 17 ] leverage OT-based divergence computed by Sinkhorn iterations. The second em-ploys OT to guide dynamic transport paths, including Schrödinger bridges [ 2, 9, 40 ] and OT-inspired flow models [ 1, 37 , 38 , 36 ]. Yet, static OT losses require adversarial approximation or differentiation through iterative solvers, while dynamic transport methods still rely on multi-step sampling. 
+
+Wasserstein gradient flows in generative models. WGFs provide a principled description of the evolution of probability measures. A standard discretization is the Jordan–Kinderlehrer–Otto (JKO) scheme [ 28 ], which has inspired several recent approaches and theoretical frameworks [ 42 , 8, 13 , 63 ]. However, JKO-based methods require solving a complex inner optimization problem at each step, of-ten involving adversarial training over dual potentials, which makes them difficult to scale in practice. 
+
+## 3 Method 
+
+We introduce W-Flow, a deterministic one-step generator with its training dynamics guided by a WGF. The main idea is to separate the design of training dynamics from the parameterization of the generator: we first prescribe how the model distribution should evolve toward the data distribution during training, and then learn a neural network to realize this evolution through particle updates. 
+
+3.1 W-Flow: Learning one-step transport map under Wasserstein gradient flow One-step transport maps. Given a reference distribution pref ∈ P (Rm) and a target distribution 
+
+p ∈ P (Rn), the goal is to learn a mapping f : Rm → Rn such that if an input z is sampled from the reference distribution, the output f (z) follows the target distribution p. In distribution space, this is 3denoted by the pushforward operator f#, meaning we aim to learn a map f such that f#pref ≈ p. In practice, p is only observed through a finite dataset of samples. We adopt an incremental construction of f , which breaks this complex transport into a sequence of simpler steps. Specifically, let f (0) : Rm → Rn be an initial map and set q(0) = f (0) # pref . We then build the generator through a sequence of local transport maps {g(k)}K−1 
+
+> k=0
+
+: Rn → Rn satisfying 
+
+q(k+1) = g(k)# q(k), f (k+1) = g(k) ◦ f (k) = g(k) ◦ · · · ◦ g(0) ◦ f (0) , (1) so that the final map f (K) pushes pref to q(K) ≈ p (see Fig. 2 (a)). Explicitly, f (K) is a static 
+
+map obtained by composing stepwise transport maps {g(k)}K−1 
+
+> k=0
+
+and the initial f (0) . The role of this sequence is not to define a standalone multi-step generative model, but rather to provide an incremental procedure for constructing the target one-step map f (K) used at inference time. 
+
+Velocity field. We parameterize the maps g(k) to reflect incremental displacements between iterations: 
+
+g(k)(x) := x + ηV (k)(x), (2) where V (k) : Rn → Rn is a continuous velocity field, also referred to as the drifting field [ 11 ], and 
+
+η > 0 is the step size. Under this parameterization, each iteration moves a data sample x ∼ q(k) only locally, while their composition yields a flexible global transport, and the field V (k) determines how the intermediate distributions evolve. In principle, the recursion in (1) would make the generator an increasingly long composition, so exact sampling from f (k)# pref becomes prohibitively costly when k is large. To keep the model one-step throughout training, we represent the generator by a neural network and learn fθ(k+1) to match the updated map f (k+1) . Using fθ(k) as a surrogate for f (k), we optimize 
+
+L(k)(θ) := Ez∼pref fθ (z) − g(k) ◦ ˜f (k)(z) 2
+
+, ˜f (k)(x) := sg( fθ(k) (z)) , (3) where sg( ·) denotes stop-gradient. The parameter θ(k+1) is then obtained by taking a gradient step in (3). The scale of the loss L(k)(θ) is Ez∼pref ηV (k)(fθ(k) (z)) 2, hence L(k) = 0 implies V (k) = 0 .A central challenge, however, is to design the vector field V (k) to guide the iteration in (1) towards the target distribution. Existing approaches, such as [ 11 ], are largely heuristic and guarantee only that the target distribution is a stationary point of the dynamics: V (k) = 0 if q(k) = p. However, the converse generally fails. In particular, during training, observing that V (k) → 0 does not imply that 
+
+q(k) → p. Moreover, the intermediate distributional dynamics {q(k)} induced by such velocity fields remain largely uncharacterized, and convergence guarantees are generally unavailable. 
+
+Continuous-time Wasserstein velocity field. To obtain a principled and well-behaved velocity field 
+
+V (k) in Eq. (2), we take a step back and first specify the desired evolution of the model distribution in continuous time, and then derive the corresponding discrete updates. Specifically, we model the evolution of {q(k)} via a WGF. Let F : P(Rn) → R be an energy functional defined on probability distributions. The associated WGF is given by 
+
+∂tqt = ∇ · 
+
+
+
+qt∇ δF
+
+δq (qt)
+
+
+
+, (4) where δF 
+
+> δq
+
+(qt) denotes the first variation of F at qt. Eq. (4) defines a continuous evolution of distributions qt ∈ P (Rn) that decreases the energy F. Equivalently, this evolution can be expressed through the continuity equation with a specific form of the velocity field 
+
+∂tqt + ∇ · (qtVt) = 0 , Vt(x) = −∇ δF
+
+δq (qt)( x). (5) This characterization provides a clear variational interpretation: the distribution qt evolves along the 
+
+steepest descent direction of F in Wasserstein space (see Fig. 2 (b) for an illustration). To drive the dynamics toward the target distribution p, we choose the energy functional F(q) = D(q ∥ p) where 
+
+D is a suitable divergence such that p = arg min q F(q). Under this choice, the induced velocity field in (5) transports qt to progressively reduce its discrepancy from p.4Table 1: Comparison of energy functionals and their induced continuous velocity fields under Wasserstein gradient flow. Detailed derivations are in Appendix B.1.                            
+
+> Divergence DEnergy Functional F(ρt)Continuous Velocity Field Vt(x)
+> Squared MMD 12MMD 2(qt, p )R∇xk(x, y )p(dy )−R∇xk(x, y )qt(dy )
+> KL divergence DKL (qt∥p)∇log p(x)− ∇ log qt(x)
+> Sinkhorn divergence Sε(qt, p )Tεqt,p (x)−Tεqt,q t(x)(Eq. (10))
+
+Time discretization. Discretizing the continuous-time evolution provides a concrete prescription for the step-wise transport maps introduced earlier. Applying an explicit Euler scheme to the WGF over time steps {t(k) : t(k) = kη, k ∈ N≥0} yields 
+
+g(k)(x) := x + ηV (k)(x), V (k)(x) = −∇ δF
+
+δq (q(k))( x), (6) where q(k) = qt(k) . This recovers exactly the stepwise velocity-based update in Eq. (2), now with the velocity field V (k) specified by the underlying gradient flow. The map {g(k)} operates directly on individual data points in Rn. By moving these points, the resulting empirical distribution approximates the continuous transport trajectory in distribution space, while composing these local updates yields a map f (k) that approximates the flow at time t(k). In sum, the gradient flow defines the training-time dynamics in distribution space, whereas the learned model is ultimately a static map 
+
+obtained by compressing these local transports into a single generator. The diagram is provided in Fig. 2 (a). 
+
+3.2 Instantiation via Sinkhorn divergence Choices of the energy functional F. The choice of F is critical, as it determines both the geometry of the WGF and the tractability of the induced velocity field. Ideally, F should satisfy two properties: (i) its minimizer coincides with the target distribution p, and (ii) the induced flow is well-behaved and can be implemented efficiently in high dimensions. Common choices include Maximum Mean Discrepancy (MMD) [ 34 ] and KL divergence (see Table 1 for the corresponding velocity fields). However, both of them face significant limitations in practice. MMD induces a kernel-based interaction between the sampled data points. When qt is far from p,the kernel values can become small, causing the gradients to vanish and the process to stall. The KL divergence involves the score function ∇ log qt(x), which is generally intractable and must be approximated, introducing additional bias and instability. Our ablations in Table 2a confirm that both choices lead to inferior performance. These motivate us to seek an alternative energy functional that is computationally tractable and geometrically well behaved. To this end, we adopt the Sinkhorn divergence, an OT-based discrepancy that avoids explicit score estimation and admits a natural and direct implementation on data samples. While the convergence of WGFs to a global minimizer is not automatic, a recent result in [ 22 ] shows that, under Gaussian distributional assumptions, the WGF of the Sinkhorn divergence converges to its global minimizer. 
+
+Entropic optimal transport and Sinkhorn divergence. A natural candidate is the entropically regularized OT cost, which is computationally attractive due to Sinkhorn iterations. However, it is biased: in general, OT ε(p, p )̸ = 0 , so OT ε(·, p ) does not define an energy whose minimizer is exactly the target distribution. This motivates the use of the debiased Sinkhorn divergence. We start by introducing some general notations. Let P2(Rn) denote the set of probability measures on Rn with finite second moment. Take q, p ∈ P 2(Rn). Define the set of couplings Π( q, p ) := π ∈P(Rn × Rn) : π(·, Rn) = q, π (Rn, ·) = p , which is contained in P2(Rn × Rn) as both marginals have finite second moments. We then define the entropic optimal transport (EOT) functional under quadratic cost 
+
+OT ε(q, p ) := inf 
+
+> π∈Π( q,p )
+
+Z 12 ∥x − y∥2 π(dx, dy ) + ε D KL (π ∥ q ⊗ p)
+
+
+
+, (7) where ε > 0 is the entropic regularization parameter. The associated Sinkhorn divergence is given by 
+
+Sε(q, p ) = OT ε(q, p ) − 12 OT ε(q, q ) − 12 OT ε(p, p ). (8) 5Velocity field induced by Sinkhorn divergence. Let πεq,p ∈ Π( q, p ) and πεq,q ∈ Π( q, q ) be the optimal couplings for OT ε(q, p ) and OT ε(q, q ), respectively. Expressing these joint couplings in terms of their conditional distributions as πεq,p (dx, dy ) = q(dx ) πεq,p (dy | x) and πεq,q (dx, dx ′) = 
+
+q(dx ) πεq,q (dx ′ | x), we define the barycentric projections 
+
+T εq,p (x) := 
+
+Z
+
+y π εq,p (dy | x), T εq,q (x) := 
+
+Z
+
+x′ πεq,q (dx ′ | x). (9) It is well known (see, e.g. , [ 17 , 45 , 43 ] and the proof in Appendix B.1) that the velocity field coincides with the Wasserstein gradient direction of the Sinkhorn divergence 
+
+V εq,p (x) = −∇ δS ε(·, p )
+
+δq (q)( x) = T εq,p (x) − T εq,q (x). (10) 
+
+Characterization of equilibrium. The velocity field vanishes V εq,p ≡ 0 if and only if q = p (see [ 14 ]). In particular, the Sinkhorn divergence admits no spurious stationary point: the only equilibrium is the target distribution. This is a notable advantage over local drifting dynamics, where the interaction field can vanish at some q̸ = p, causing the dynamics to stall before reaching the target. 
+
+Interpretation of the drift. The velocity field in Eq. (10) admits a natural interpretation as a balance between attraction and self-interaction. The first term T εq,p (x) transports the current distribution toward the target distribution, while the correction term T εq,q (x) enforces consistency with the current distribution through a global mass-conserving coupling. This structure ensures that the resulting dynamics are globally coordinated, in contrast to purely local interaction rules, and plays a key role in stabilizing the transport and preventing mode collapse (see Sec. 4.3 for experimental illustrations). 
+
+3.3 Interactive particle dynamics 
+
+In practice, we operate on finite mini-batches. Given N i.i.d samples {xi}Ni=1 ∈ Rn from qt and 
+
+M i.i.d samples {yi}Mj=1 ∈ Rn from p, let the weighted empirical measures be bqt = PNi=1 ai δxi ,
+
+bp = PMj=1 bj δyj , with ai, b j > 0, and P 
+
+> i
+
+ai = P 
+
+> j
+
+bj = 1 . In this discrete setting, the general definition in Eq. (7) reduces to the finite-dimensional problem over the coupling matrix π ∈ Π( bqt, bp):
+
+OT ε
+
+ bqt, bp := min 
+
+> π∈Π( bqt,bp)
+
+X
+
+> i,j
+
+12 ∥xi − yj ∥2πij + ε X
+
+> i,j
+
+πij (log πij − 1) , (11) One -batch 
+
+> Two -batch
+
+Figure 3: Comparison between one-batch and two-batch estimators on learning a 2D Gaussian. where Π( bqt, bp) is the set of matrices with prescribed marginals. Denote the optimal solution πε, ∗ 
+
+> bqt,bp
+
+.
+
+Two-batch estimate for self-transport. Naïvely estimating the self-entropic OT term OT ε(bqt, bqt) from a single empirical batch introduces a self-matching artifact: since each particle can be matched to itself at zero transport cost, the resulting coupling tends to overemphasize the diagonal entries πii . To mitigate it, we adopt a two-batch strategy. We draw an independent second batch {x′
+
+> l
+
+}Nl=1 from qt and define the empirical measure bq′ 
+
+> t
+
+=
+
+PNl=1 alδx′ 
+
+> l
+
+. We then compute the coupling between bqt and 
+
+bq′
+
+> t
+
+, yielding the optimal plan πε, ∗
+
+> bqt,bq′
+> t
+
+. This construction removes the need for the diagonal masking heuristic used in [ 11 ] and admits a cleaner theoretical interpretation. Fig. 3 compares the two-batch strategy with the naïve one-batch estimate on learning a 2D Gaussian. The one-batch strategy fails to capture the Gaussian tails, whereas the two-batch strategy recovers the target faithfully. Additional illustrations are in Appendix B.2. The discrete counterparts of the barycentric maps ((9)) are, therefore, 
+
+T ε
+
+> bqt,bp
+
+(xi) = 1
+
+ai
+
+X
+
+> j
+
+(πε, ∗
+
+> bqt,bp
+
+)ij yj , T ε 
+
+> bqt,bq′
+> t
+
+(xi) = 1
+
+ai
+
+X
+
+> l
+
+(πε, ∗
+
+> bqt,bq′
+> t
+
+)il x′
+
+> l
+
+, (12) 6Algorithm 1 W-Flow Training 
+
+Input: Generator fθ , reference distribution pref , target distribution p, step size η, regularization ε, iterations L 
+
+> 1:
+
+repeat  
+
+> 2:
+
+Sample input {zi}Ni=1 ∼ pref , {z′
+
+> i
+
+}Ni=1 ∼ pref  
+
+> 3:
+
+Sample target {yj }Mj=1 ∼ p 
+
+> 4:
+
+xi ← fθ (zi), x′ 
+
+> i
+
+← sg( fθ (z′
+
+> i
+
+))  
+
+> 5:
+
+{T ε  
+
+> ˆqθ,ˆp
+
+(xi)} ← SINKHORN ({xi}, {yj }, ε, L ) 
+
+> 6:
+
+{T ε 
+
+> ˆqθ,ˆq′
+> θ
+
+(xi)} ← SINKHORN ({xi}, {x′ 
+
+> j
+
+}, ε, L ) 
+
+> 7:
+
+V ε(xi) ← T ε  
+
+> ˆqθ,ˆp
+
+(xi) − T ε 
+
+> ˆqθ,ˆq′
+> θ
+
+(xi) 
+
+> 8:
+
+˜xi ← stopgrad( xi + ηV ε(xi))  
+
+> 9:
+
+Take a gradient descent step on 
+
+∇θ 1
+
+> N
+
+PNi=1 ∥fθ (zi) − ˜xi∥2 
+
+> 10:
+
+until converged 
+
+Algorithm 2 Sinkhorn Projection (S INKHORN )
+
+Input: Source particles {xi}Ni=1 , target particles 
+
+{yj }Mj=1 , regularization ε, Sinkhorn iterations L 
+
+> 1:
+
+a ← 1 
+
+> N
+
+1N , b ← 1 
+
+> M
+
+1M ▷ Uniform weights  
+
+> 2:
+
+Cij ← 12 ∥xi − yj ∥2 ▷ Cost matrix  
+
+> 3:
+
+Kij = exp( −Cij /ε ) ▷ Gibbs kernel  
+
+> 4:
+
+v(0) ← 1M ▷ Initialization  
+
+> 5:
+
+for ℓ = 0 , . . . , L − 1 do ▷ Sinkhorn-Knopp  
+
+> 6:
+
+u(ℓ+1) ← a ⊘ (Kv (ℓ)) 
+
+> 7:
+
+v(ℓ+1) ← b ⊘ (K⊤u(ℓ+1) ) 
+
+> 8:
+
+end for  
+
+> 9:
+
+Πε ← diag( u(L)) K diag( v(L)) ▷ Coupling  
+
+> 10:
+
+T ε(xi) = 1
+
+> ai
+
+PMj=1 Πεij yj ▷ Projection  
+
+> 11:
+
+return {T ε(xi)}Ni=1 
+
+where in practice the optimal couplings πε, ∗ 
+
+> bqt,bp
+
+and πε, ∗
+
+> bqt,bq′
+> t
+
+can be efficiently approximated using the Sinkhorn-Knopp algorithm [ 52 ]. We present the subroutine in Alg. 2. With these, the particle-based estimate of the velocity field in Eq. (10) is 
+
+V ε
+
+> bqt,bp
+
+(xi)4 = T ε
+
+> bqt,bp
+
+(xi) − T ε 
+
+> bqt,bq′
+> t
+
+(xi). (13) 
+
+Convergence of the particle dynamics. Now that V εq,p and V ε 
+
+> bq, bp
+
+are defined, we present a convergence guarantee from the empirical dynamics to the population dynamics. This theorem shows that the finite-particle, discrete-time transport mechanism used in our method is a consistent approximation of the intended population-level WGF. As a result, the training dynamics induced by our algorithm faithfully track the continuous distributional evolution toward the target, thereby giving a principled justification for learning the generator through these sequential local transports. See Fig. 2 (b) for an illustration. The full statement, assumptions, and proof are deferred to Appendix A. 
+
+Theorem 3.1 (Informal) . Let bpM be the empirical measure based on M i.i.d. samples {yj }Mj=1 from the target measure p. The particles {x(k) 
+
+> i
+
+}Ni=1 evolve as x(k+1)  
+
+> i
+
+= x(k) 
+
+> i
+
++ η V ε  
+
+> bqNk,bpM
+
+(x(k) 
+
+> i
+
+), where bqNk
+
+denotes the empirical measure of {x(k) 
+
+> i
+
+}Ni=1 . Define the continuous-time interpolation as xηi (t) := 
+
+x(k) 
+
+> i
+
++ ( t − tk) VbqNk ,bpM (x(k) 
+
+> i
+
+), t ∈ [tk, t k+1 ), with the empirical measure bqN,M,η t := 1
+
+> N
+
+PNi=1 δxηi (t).Assume suitable regularity conditions (specified in Assumption A.1). Then for every T > 0, there exists a unique q ∈ C([0 , T ]; P2(Rd)) that solves the continuity equation 
+
+∂tqt + ∇ ·  qt Vqt,p 
+
+ = 0 
+
+in the weak sense. Moreover, as η → 0 and N, M → ∞ , it holds that 
+
+sup  
+
+> t∈[0 ,T ]
+
+W2
+
+ bqN,M,η t , q t
+
+ → 0.
+
+3.4 Implementation Training. Empirically, we construct the training loss by learning the generator fθ to simulate the discrete particle dynamics driven by the velocity in Eq. (13). This can be viewed as a finite-sample counterpart of the population-level objective in (3), where expectations with respect to q(k) and p are replaced by empirical measures. Specifically, at each training step, we optimize 
+
+LW-Flow (θ) = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+xi − sg  xi + η V ε 
+
+> bqθ,bp
+
+(xi) 2 , xi = fθ (zi), (14) where {zi}Ni=1 are i.i.d. samples from pref . Crucially, the stop-gradient operator sg( ·) precisely aligns with the discrete WGF dynamics by treating the regression target as fixed, which also avoids     
+
+> 4Here we omit the second-batch bq′in the subscript of Vfor brevity.
+
+7differentiation through the OT plan and stabilizes the optimization. We summarize the overall training procedure in Alg. 1. 
+
+Classifier-free guidance. Our framework naturally supports baking classifier-free guidance (CFG) [ 27 ] into the pushforward map fθ at training time . The idea is to use a small batch of unconditional samples as additional reference particles, thereby introducing an extra repulsive effect on the generated samples. A natural implementation in [ 11 ] is to modify the repulsive distribution as 
+
+˜qwθ (x|c) := 1
+
+w + 1 qθ (x|c) + ww + 1 p(x|∅), (15) where w ≥ 0 is the guidance scale and p(x|∅) is the unconditional (marginal) distribution. Opera-tionally, this amounts to sampling additional particles from p(x|∅) with importance weight w w.r.t. qθ .However, this approach implicitly alters the target being learned. One can show that it corresponds to learning a linearly extrapolated target distribution ˜pw(x|c) = p(x|c) + w(p(x|c) − p(x|∅)) , which deviates from the standard CFG formulation based on exponential tilting [27, 12]. In light of this, we instead introduce guidance directly at the velocity field level . Specifically, we define 
+
+˜V ε,w qθ ,p (xi) := 
+
+
+
+T εqθ (·| c),p (·| c)(xi)−T εqθ (·| c),q θ (·| c)(xi)
+
+
+
++w
+
+
+
+T εqθ (·| c),p (·| c)(xi)−T εqθ (·| c),p (·| ∅)(xi)
+
+
+
+,
+
+(16) where T εqθ (·| c),p (·| ∅) denotes the Sinkhorn barycentric projection (Alg. 2) between qθ (·| c) and the unconditional data distribution p(·| ∅). This construction injects guidance via the underlined term that computes the difference between the conditional and unconditional velocity fields (see Appendix B.3). Due to the conceptual differences, we refer to Eq. (15) as distribution guidance and to Eq. (16) as veloc-ity guidance . Although the effective target distribution induced by Eq. (16) is generally not available in closed form, it admits a natural geometric interpretation through a barycentric construction. More-over, we show in Appendix B.3 that, when the KL divergence is used as F, this formulation exactly recovers the standard exponentially tilted target. This provides a conceptual justification for adopting the same design under the Sinkhorn divergence, whose empirical benefits are demonstrated in Sec. 4.1. 
+
+Sinkhorn divergence in feature space. Rather than evaluating the Sinkhorn divergence directly in the target space Rn, we may first lift the particles {xi}, {x′
+
+> i
+
+}, {yj } into a feature space through a feature map ϕ : Rn → Rd. The velocity field and training loss are then computed using the embedded particles {ϕ(xi)}, {ϕ(x′
+
+> i
+
+)}, {ϕ(yj )}, while gradients are backpropagated through ϕ to update the generator. In practice, following [ 11 ], we use multiple feature maps and sum the corresponding losses. 
+
+## 4 Experiments 
+
+Experiment setup. We conduct our main experiments on ImageNet [ 10 ] generation with 256 ×256 resolution. We directly adopt the DiT-style [ 44 ] generator architecture in [ 11 ]. We also use the offi-cially released pretrained MAE feature extractors from [ 11 ]. More details are deferred to Appendix C. 
+
+4.1 Ablation study Ablation setting. To enable an informative comparison in a controlled setting, we follow the default ablation setup of [ 11 ]. Specifically, all ablation experiments are conducted in the SD-VAE [ 48 ] latent space, using a B/2 DiT generator together with the pretrained latent-MAE feature encoder from [ 11 ]. The generator is trained for 100 epochs, and FID [ 25 ] is evaluated on 50K generated images. We set 
+
+ε = 0 .05 by default with additional detailed hyperparameters provided in Appendix C. 
+
+Energy functionals in gradient flow. We implement and compare three different potentials: squared MMD, KL-divergence, and Sinkhorn divergence (Eq. (8)). Results in Table 2a confirm that Sinkhorn divergence performs the best, whereas both MMD and KL divergence yield noticeably weaker results, highlighting the advantage of the OT-driven dynamics. The Sinkhorn-based gradient flow also significantly outperforms the heuristic design of Drifting Model when both use distribution guidance. 
+
+Classifier-free guidance. We further equip the Sinkhorn W-Flow with our proposed velocity-guidance CFG (denoted as velo. ). As reported in Table 2b, this guidance mechanism is fully compatible with Sinkhorn W-Flow and further improves the FID to 7.08, outperforming distribution guidance ( dist. ). We adopt it as the default configuration in the subsequent studies. 8Divergence FID, 1-NFE Drifting [ 11 ] 8.46 MMD 10.40 KL 10.17 Sinkhorn 7.29  
+
+> (a) Choice of divergence . Sinkhorn divergence leads to the lowest FID, out-performing heuristic designs in [11].
+
+ε CFG FID, 1-NFE 0.05 dist. 7.29 0.05 velo. 7.08 
+
+0.025 velo. 7.11 0.075 velo. 7.26        
+
+> (b) Ablation on CFG and ε. Our pro-posed velo CFG with ε= 0 .05 for Sinkhorn divergence performs the best.
+
+Cost Mask 2-batch FID, 1-NFE 
+
+∥ · ∥ - ✓ 7.16  
+
+> 12
+
+∥·∥ 2 - ✓ 7.08  
+
+> 12
+
+∥·∥ 2 - - 17.57  
+
+> 12
+
+∥·∥ 2 ✓ - 7.45           
+
+> (c) OT cost and Vtestimation. “Mask” and “2-batch” refers to the diagonal mask
+> and two-batch estimator in Tεq,q (§ 3.3).
+
+Table 2: Ablation study on ImageNet 256 ×256 generation. We use a B/2 backbone with 100 epoch training from scratch. The FID on 50K images is reported. The default settings are marked in gray . Table 3: Class-conditional generation on ImageNet 256 ×256. FID is computed on 50K images and all methods are reported with CFG if applicable. “#Params” denotes the number of parameters of “generator + decoder”. All generators are trained from scratch without distilling from teacher model. 
+
+#Params NFE FID ↓ IS ↑
+
+Multi-step Diffusion/Flows 
+
+ADM-G [12] 554M 250 ×2 4.59 186.7 DiT-XL/2 [44] 675M+49M 250 ×2 2.27 278.2 SiT-XL/2 [41] 675M+49M 250 ×2 2.06 270.3 SiT-XL/2+REPA [67] 675M+49M 250 ×2 1.42 305.7 LightningDiT-XL/2 [64] 675M+70M 250 ×2 1.35 295.3 RAE+DiT DH -XL/2 [69] 839M+415M 50 ×2 1.13 262.6 
+
+Masking & Autoregressive 
+
+MaskGIT [7] 227M+31M 8 6.18 182.1 VAR-d30 [58] 2B+61M 10 ×2 1.92 323.1 MAR-H [33] 943M+41M 256 ×2 1.55 303.7 
+
+GANs 
+
+BigGAN [5] 112M 1 6.95 152.8 GigaGAN [29] 569M 1 3.45 225.5 StyleGAN-XL [51] 166M 1 2.30 265.1 
+
+#Params NFE FID ↓ IS ↑
+
+Single-step Diffusion/Flows 
+
+iCT-XL/2 [54] 675M+49M 1 34.24 –Shortcut-XL/2 [15] 675M+49M 1 10.60 –MeanFlow-XL/2 [18] 676M+49M 1 3.43 –TiM-XL/2 [62] 664M+49M 1 3.26 210.3 
+
+α-Flow-XL/2+ [68] 676M+49M 1 2.58 –AdvFlow-XL/2 [36] 673M+49M 1 2.38 284.2 iMeanFlow-XL/2 [19] 610M+49M 1 1.72 282.0 
+
+Drifting Models 
+
+Drifting Model, B/2 [11] 133M+49M 1 1.75 263.2 Drifting Model, L/2 [11] 463M+49M 1 1.54 258.9 
+
+W-Flow, B/2 133M+49M 1 1.52 271.8 
+
+W-Flow, L/2 463M+49M 1 1.35 272.5 
+
+W-Flow, XL/2 679M+49M 1 1.29 265.4 
+
+Entropy regularization parameter ε. We next study the effect of the parameter ε in the EOT problems; the results are reported in Table 2b. Overall, W-Flow is fairly robust to the choice of ε.Among the values we consider, ε = 0 .05 yields the best performance under the ablation setting. See Table 9 for more details. For the main experiments, we set ε = 0 .05 by default, with detailed choices specified in Table 5. 
+
+The cost function in OT. We compare our default choice of quadratic cost c(x, y ) = 12 ∥x − y∥2
+
+with the ℓ2 distance cost c(x, y ) = ∥x − y∥. The results in Table 2c demonstrate that the quadratic cost yields superior performance, in line with our theoretical assumptions in Eq. (7). 
+
+Velocity field estimation. We validate the two-batch estimator in Sec. 3.3 for the self-transport map. As shown in Table 2c, estimating T ε  
+
+> bqθ,bqθ
+
+from a single batch leads to a substantially worse FID of 17.57, due to the intrinsic self-matching bias of this estimator. Our two-batch strategy also outperforms the mask-diagonal heuristic used in [11], while admitting a principled theoretical interpretation. 
+
+4.2 Main results on ImageNet Setup. Putting together the key components validated in the ablation study, we scale up training to achieve state-of-the-art results on ImageNet 256 ×256 generation. We follow the setup of [ 11 ] with the SD-VAE latent space, adopting the same generator architecture and the same pretrained feature encoder weights. We also largely retain their hyperparameter configuration (see Appendix C). 
+
+Results. We compare W-Flow with state-of-the-art one-step generators and multi-step diffusion and flow models. Results are reported in Table 3. Notably, W-Flow establishes a new state of the art for one-step class-conditional generation on ImageNet 256 ×256, achieving an FID of 1.29 at XL scale and 1.35 at L scale, outperforming MeanFlow-based methods and Drifting Models by a clear margin. Remarkably, W-Flow B/2, with only 133M generator parameters, achieves an FID of 1.52, surpassing Drifting Model L/2 despite its substantially larger 463M-parameter generator. Furthermore, despite 9                      
+
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> !  
+> 
+> 
+>  
+> 
+>  
+> 
+>  
+> 
+> 
+>  
+> 
+>  
+> 
+>  
+> 
+> 
+>  
+> 
+>   
+> 
+>  
+> 
+> 
+>  
+> 
+>  
+> 
+>  
+> "
+>  !
+> "
+>  !
+> CFG scale
+
+Figure 4: Classifier-free guidance. Left: The FID and Inception Score curve when sweeping over CFG scales. Right: Image samples by W-Flow, L/2 with CFG increasing from 0.0 to 2.0. 1-NFE sampling, W-Flow outperforms most diffusion models requiring up to 250 steps, such as LightningDiT-XL/2. These strong empirical results support our central claim that principled WGF dynamics can translate into exceptional generation performance. W-Flow also exhibits a favorable scaling behavior with model size. See image samples in Appendix F. 
+
+The effect of CFG. Fig. 4 shows the FID and Inception Score with different CFG scales at inference time, where W-Flow clearly achieves a better tradeoff compared with Drifting [ 11 ]. Samples in Fig. 4 demonstrate that increasing CFG leads to clearer class-specific details and higher perceptual quality, which aligns with the expected CFG behavior. Table 4: FID vs. training epoch. 
+
+Epoch B/2 L/2 Drifting [11] 1280 1.75 1.54 W-Flow 384 1.75 1.55 640 1.63 1.46 1280 1.52 1.35 
+
+Convergence speed. W-Flow induces training dynamics that follow the steepest descent of the energy functional, leading to faster convergence at training time. We empirically validate this effect in Table 4, where W-Flow converges substantially faster than Drifting Model. In particular, both W-Flow B/2 and L/2 trained for only 384 epochs closely match the FID of Drifting Model trained for 1280 epochs. 
+
+4.3 Domain transfer and mode coverage Domain transfer. Unlike standard generative models that typically map Gaussian noise to data, W-Flow can instead define a WGF between arbitrary distributions. This makes it naturally suited for domain transfer tasks where the source and target share the same semantic space. By setting 
+
+pref to be a source data distribution, it learns a one-step domain-transfer map, e.g. , from senior to young-adult faces. To preserve the source semantics, we parameterize the map as a residual network [23], fθ (z) = z + Nθ (z), and zero-initialize the final layer of Nθ , such that fθ0 (z) = z.In a 2D oval-to-circle toy example in Fig. 5 (a), Drifting Model shows erratic intermediate states and often moves particles far from their initial positions. In contrast, the OT-induced velocity in W-Flow produces coordinated, nearly straight, and much shorter trajectories toward the target. We further evaluate one-step age translation on FFHQ [ 31 ], mapping senior faces (ages 55–100) to young-adult faces (ages 18–30) in the 512-dimensional latent space of a pretrained autoencoder [ 46 ]. We train a 4-layer MLP that maps source latent codes to the target domain. Fig. 5 (b) & (c) show that W-Flow achieves shorter latent ℓ2 transport distances and better preserves source identity. 
+
+Mode coverage. We further investigate whether the globally structured OT plan in W-Flow can mitigate mode collapse, a known vulnerability of Drifting Model (see Appendix B.4). We construct a 2D Gaussian mixtures dataset with six large tightly concentrated modes and two small distant minority modes. As shown in Fig. 6 (a), Drifting Model greedily collapses on the dominant clusters, while the Sinkhorn barycentric projections in W-Flow instead enforce global marginal constraints and successfully preserve the coverage of all modes. We further extend this observation to image generation on FFHQ under an imbalanced training distribution, where target batches contain 95% senior faces (ages 55–100) and 5% child faces (ages 0–12). The PCA visualization in Fig. 6 (b) shows that Drifting Model almost entirely drops the minority child mode, whereas W-Flow successfully captures it while maintaining high fidelity on the dominant senior mode. See Appendix F for representative samples. 10 W-Flow    
+
+> Drifting
+> Epoch 2000 Epoch 5000
+> Drifting
+> W-Flow
+> Source
+> (a) (b) (c)
+
+Figure 5: (a) Oval-to-circle domain transfer. Source and target are constructed by sampling angles uniformly from [0 , 2π) with parametric curves corrupted by Gaussian noise. (b) & (c) One-step facial age translation on FFHQ, mapping older faces to younger ones. (b) Histogram of the latent 
+
+ℓ2 distance between 2,000 source images and their generated targets. (c) Visual comparison. (a) (b) Drifting  
+
+> W-Flow
+> Drifting W-Flow
+
+Figure 6: Evaluation of mode coverage under imbalanced target distributions. (a) Evaluation of mode coverage on a 2D Gaussian mixtures dataset featuring six dominant modes and two distant minority modes. (b) PCA scatter plot of generated latent codes for an artificially imbalanced FFHQ target distribution (95% senior faces, 5% child faces). See Appendix F for generated samples showing the comparison of mode coverage behavior. 
+
+## 5 Conclusion 
+
+We introduced W-Flow, a new paradigm for one-step generative modeling that guides the training dynamics of image generators by Wasserstein gradient flow. Our method derives the velocity field via the steepest descent of Sinkhorn divergence, yielding a globally coordinated OT-based update rule with consistent particle dynamics. Empirically, W-Flow sets a new state of the art for one-step ImageNet 256 ×256 generation with 1.29 FID. The results establish the WGF dynamics as a foundation for fast, high-fidelity generation. Future work include exploring a broader class of energy functionals within the WGF framework and extending this paradigm beyond class-conditional image generation to more complex settings such as text-to-image generation. 
+
+## Acknowledgments 
+
+We gratefully acknowledge the Stanford Marlowe cluster [ 30 ] for supporting part of the GPU computing resources. RX was partially supported by an NSF CAREER Award DMS-2614933 and a gift fund from Point72. SE was supported by ARO (W911NF-21-1-0125), ONR (N00014-23-1-2159), and the CZ Biohub. EC was supported by ONR (N00014-24-1-2305) and the NIH (1R01AG08950901A1). EC thanks Yaniv Romano for feedback on an early version of this paper. 
+
+## References 
+
+[1] Michael S Albergo and Eric Vanden-Eijnden. Building normalizing flows with stochastic interpolants. arXiv preprint arXiv:2209.15571 , 2022. 3 [2] Alexandre Alouadi, Pierre Henry-Labordère, Grégoire Loeper, Othmane Mazhar, Huyên Pham, and Nizar Touzi. Lightsbb-m: Bridging schrödinger and bass for generative diffusion modeling. 11 arXiv preprint arXiv:2601.19312 , 2026. 3 [3] Martin Arjovsky, Soumith Chintala, and Léon Bottou. Wasserstein generative adversarial networks. In International conference on machine learning , pages 214–223. Pmlr, 2017. 2, 3 [4] Nicholas M Boffi, Michael S Albergo, and Eric Vanden-Eijnden. How to build a consistency model: Learning flow maps via self-distillation. arXiv preprint arXiv:2505.18825 , 2025. 3 [5] Andrew Brock, Jeff Donahue, and Karen Simonyan. Large scale GAN training for high fidelity natural image synthesis. arXiv preprint arXiv:1809.11096 , 2018. 9 [6] Jiarui Cao, Zixuan Wei, and Yuxin Liu. Gradient flow drifting: Generative modeling via wasserstein gradient flows of kde-approximated divergences. arXiv preprint arXiv:2603.10592 ,2026. 3 [7] Huiwen Chang, Han Zhang, Lu Jiang, Ce Liu, and William T Freeman. Maskgit: Masked generative image transformer. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 11315–11325, 2022. 9 [8] Jaemoo Choi, Jaewoong Choi, and Myungjoo Kang. Scalable Wasserstein gradient flow for generative modeling through unbalanced optimal transport. In Proceedings of the 41st Inter-national Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pages 8629–8650. PMLR, 21–27 Jul 2024. 3, 29 [9] Valentin De Bortoli, James Thornton, Jeremy Heng, and Arnaud Doucet. Diffusion schrödinger bridge with applications to score-based generative modeling. arXiv preprint arXiv:2106.01357 ,2021. 3 [10] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. ImageNet: A large-scale hierarchical image database. In CVPR , pages 248–255. Ieee, 2009. 8 [11] Mingyang Deng, He Li, Tianhong Li, Yilun Du, and Kaiming He. Generative modeling via drifting. arXiv preprint arXiv:2602.04770 , 2026. 2, 3, 4, 6, 8, 9, 10, 26, 28, 29, 30, 32 [12] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat GANs on image synthesis. 
+
+NeurIPS , 34:8780–8794, 2021. 8, 9 [13] Jiaojiao Fan, Qinsheng Zhang, Amirhossein Taghvaei, and Yongxin Chen. Variational wasser-stein gradient flow. arXiv preprint arXiv:2112.02424 , 2021. 3 [14] Jean Feydy, Thibault Séjourné, François-Xavier Vialard, Shun-ichi Amari, Alain Trouvé, and Gabriel Peyré. Interpolating between optimal transport and mmd using sinkhorn divergences. In The 22nd international conference on artificial intelligence and statistics , pages 2681–2690. PMLR, 2019. 6 [15] Kevin Frans, Danijar Hafner, Sergey Levine, and Pieter Abbeel. One step diffusion via shortcut models. arXiv preprint arXiv:2410.12557 , 2024. 9 [16] Yuxuan Gao, Yedong Shen, Shiqi Zhang, Wenhao Yu, Yifan Duan, Jiajia Wu, Jiajun Deng, Yanyong Zhang, et al. Drift-based policy optimization: Native one-step policy learning for online robot control. arXiv preprint arXiv:2604.03540 , 2026. 3 [17] Aude Genevay, Gabriel Peyré, and Marco Cuturi. Learning generative models with sinkhorn divergences. In International Conference on Artificial Intelligence and Statistics , pages 1608– 1617. PMLR, 2018. 3, 6, 30 [18] Zhengyang Geng, Mingyang Deng, Xingjian Bai, J Zico Kolter, and Kaiming He. Mean flows for one-step generative modeling. arXiv preprint arXiv:2505.13447 , 2025. 3, 9 [19] Zhengyang Geng, Yiyang Lu, Zongze Wu, Eli Shechtman, J Zico Kolter, and Kaiming He. Improved mean flows: On the challenges of fastforward generative models. arXiv preprint arXiv:2512.02012 , 2025. 3, 9 [20] Ian J Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil Ozair, Aaron Courville, and Yoshua Bengio. Generative adversarial nets. NeurIPS , 2014. 2, 3 12 [21] Ishaan Gulrajani, Faruk Ahmed, Martin Arjovsky, Vincent Dumoulin, and Aaron C Courville. Improved training of wasserstein gans. Advances in neural information processing systems , 30, 2017. 3 [22] Mathis Hardion and Théo Lacombe. The wasserstein gradient flow of the sinkhorn divergence between gaussian distributions. arXiv preprint arXiv:2602.10726 , 2026. 5 [23] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image recognition. In CVPR , pages 770–778, 2016. 10 [24] Ping He, Om Khangaonkar, Hamed Pirsiavash, Yikun Bai, and Soheil Kolouri. Sinkhorn-drifting generative models. arXiv preprint arXiv:2603.12366 , 2026. 3 [25] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. GANs trained by a two time-scale update rule converge to a local nash equilibrium. NeurIPS ,2017. 8 [26] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. NeurIPS ,33:6840–6851, 2020. 1, 2 [27] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 , 2022. 8 [28] Richard Jordan, David Kinderlehrer, and Felix Otto. The variational formulation of the fokker– planck equation. SIAM journal on mathematical analysis , 29(1):1–17, 1998. 3 [29] Minguk Kang, Jun-Yan Zhu, Richard Zhang, Jaesik Park, Eli Shechtman, Sylvain Paris, and Taesung Park. Scaling up GANs for text-to-image synthesis. In CVPR , pages 10124–10134, 2023. 9 [30] Craig Kapfer, Kurt Stine, Balasubramanian Narasimhan, Christopher Mentzel, and Emmanuel Candes. Marlowe: Stanford’s gpu-based computational instrument, 2025. 11 [31] Tero Karras, Samuli Laine, and Timo Aila. A style-based generator architecture for generative adversarial networks. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 4401–4410, 2019. 10 [32] Chieh-Hsin Lai, Bac Nguyen, Naoki Murata, Yuhta Takida, Toshimitsu Uesaka, Yuki Mitsufuji, Stefano Ermon, and Molei Tao. A unified view of drifting and score-based models. arXiv preprint arXiv:2603.07514 , 2026. 3 [33] Tianhong Li, Yonglong Tian, He Li, Mingyang Deng, and Kaiming He. Autoregressive image generation without vector quantization. NeurIPS , 37:56424–56445, 2024. 9 [34] Yujia Li, Kevin Swersky, and Rich Zemel. Generative moment matching networks. In ICML ,pages 1718–1727. PMLR, 2015. 5, 30 [35] Zirong Li, Siyuan Mei, Weiwen Wu, Andreas Maier, Lina Gölz, and Yan Xia. Generative drifting for conditional medical image generation. arXiv preprint arXiv:2604.19736 , 2026. 3 [36] Shanchuan Lin, Ceyuan Yang, Zhijie Lin, Hao Chen, and Haoqi Fan. Adversarial flow models. 
+
+arXiv preprint arXiv:2511.22475 , 2025. 3, 9 [37] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. arXiv preprint arXiv:2210.02747 , 2022. 1, 2, 3 [38] Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate and transfer data with rectified flow. arXiv preprint arXiv:2209.03003 , 2022. 1, 2, 3 [39] Cheng Lu and Yang Song. Simplifying, stabilizing and scaling continuous-time consistency models. arXiv preprint arXiv:2410.11081 , 2024. 2 [40] Jin Ma, Ying Tan, and Renyuan Xu. Schrödinger bridge for generative ai: Soft-constrained formulation and convergence analysis. arXiv preprint arXiv:2510.11829 , 2025. 3 13 [41] Nanye Ma, Mark Goldstein, Michael S Albergo, Nicholas M Boffi, Eric Vanden-Eijnden, and Saining Xie. SiT: Exploring flow and diffusion-based generative models with scalable interpolant transformers. In ECCV , pages 23–40. Springer, 2024. 9, 31, 32 [42] Petr Mokrov, Alexander Korotin, Lingxiao Li, Aude Genevay, Justin M Solomon, and Evgeny Burnaev. Large-scale wasserstein gradient flows. Advances in Neural Information Processing Systems , 34:15243–15256, 2021. 3 [43] Marcel Nutz and Johannes Wiesel. Entropic optimal transport: Convergence of potentials. 
+
+Probability Theory and Related Fields , 184(1):401–424, 2022. 6 [44] William Peebles and Saining Xie. Scalable diffusion models with transformers. In CVPR , pages 4195–4205, 2023. 8, 9 [45] Gabriel Peyré and Marco Cuturi. Computational optimal transport: With applications to data science . Now Foundations and Trends, 2019. 6 [46] Stanislav Pidhorskyi, Donald A Adjeroh, and Gianfranco Doretto. Adversarial latent autoen-coders. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 14104–14113, 2020. 10 [47] Alec Radford, Luke Metz, and Soumith Chintala. Unsupervised representation learning with deep convolutional generative adversarial networks. arXiv preprint arXiv:1511.06434 , 2015. 2, 3[48] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In CVPR , pages 10684–10695, 2022. 8[49] Tim Salimans and Jonathan Ho. Progressive distillation for fast sampling of diffusion models. 
+
+arXiv preprint arXiv:2202.00512 , 2022. 2 [50] Tim Salimans, Thomas Mensink, Jonathan Heek, and Emiel Hoogeboom. Multistep distillation of diffusion models via moment matching. NeurIPS , 37:36046–36070, 2024. 2 [51] Axel Sauer, Katja Schwarz, and Andreas Geiger. StyleGAN-XL: Scaling StyleGAN to large diverse datasets. In SIGGRAPH , pages 1–10, 2022. 9 [52] Richard Sinkhorn and Paul Knopp. Concerning nonnegative matrices and doubly stochastic matrices. Pacific Journal of Mathematics , 21(2):343–348, 1967. 7 [53] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsuper-vised learning using nonequilibrium thermodynamics. In ICML , pages 2256–2265. pmlr, 2015. 1, 2 [54] Yang Song and Prafulla Dhariwal. Improved techniques for training consistency models. arXiv preprint arXiv:2310.14189 , 2023. 2, 9 [55] Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. 2023. 2, 3 [56] Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data distribution. Advances in neural information processing systems , 32, 2019. 1 [57] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 , 2020. 1, 2 [58] Keyu Tian, Yi Jiang, Zehuan Yuan, Bingyue Peng, and Liwei Wang. Visual autoregressive modeling: Scalable image generation via next-scale prediction. NeurIPS , 37:84839–84865, 2024. 9 [59] Ilya Tolstikhin, Olivier Bousquet, Sylvain Gelly, and Bernhard Schoelkopf. Wasserstein auto-encoders. arXiv preprint arXiv:1711.01558 , 2017. 3 14 [60] Erkan Turan and Maks Ovsjanikov. Generative drifting is secretly score matching: a spectral and variational perspective. arXiv preprint arXiv:2603.09936 , 2026. 3 [61] Zhengyi Wang, Cheng Lu, Yikai Wang, Fan Bao, Chongxuan Li, Hang Su, and Jun Zhu. Pro-lificdreamer: High-fidelity and diverse text-to-3d generation with variational score distillation. 
+
+Advances in neural information processing systems , 36:8406–8441, 2023. 2 [62] Zidong Wang, Yiyuan Zhang, Xiaoyu Yue, Xiangyu Yue, Yangguang Li, Wanli Ouyang, and Lei Bai. Transition models: Rethinking the generative learning objective. arXiv preprint arXiv:2509.04394 , 2025. 9 [63] Yao Xie and Xiuyuan Cheng. Flow-based generative models as iterative algorithms in probability space. arXiv preprint arXiv:2502.13394 , 2025. 3 [64] Jingfeng Yao, Bin Yang, and Xinggang Wang. Reconstruction vs. generation: Taming opti-mization dilemma in latent diffusion models. In CVPR , pages 15703–15712, 2025. 9, 31, 32 [65] Tianwei Yin, Michaël Gharbi, Taesung Park, Richard Zhang, Eli Shechtman, Fredo Durand, and William T Freeman. Improved distribution matching distillation for fast image synthesis. 
+
+Advances in neural information processing systems , 37:47455–47487, 2024. 2 [66] Tianwei Yin, Michaël Gharbi, Richard Zhang, Eli Shechtman, Fredo Durand, William T Freeman, and Taesung Park. One-step diffusion with distribution matching distillation. In 
+
+CVPR , pages 6613–6623, 2024. 2 [67] Sihyun Yu, Sangkyung Kwak, Huiwon Jang, Jongheon Jeong, Jonathan Huang, Jinwoo Shin, and Saining Xie. Representation alignment for generation: Training diffusion transformers is easier than you think. arXiv preprint arXiv:2410.06940 , 2024. 9 [68] Huijie Zhang, Aliaksandr Siarohin, Willi Menapace, Michael Vasilkovsky, Sergey Tulyakov, Qing Qu, and Ivan Skorokhodov. AlphaFlow: Understanding and improving MeanFlow models. 
+
+arXiv preprint arXiv:2510.20771 , 2025. 9 [69] Boyang Zheng, Nanye Ma, Shengbang Tong, and Saining Xie. Diffusion transformers with representation autoencoders. arXiv preprint arXiv:2510.11690 , 2025. 9 [70] Linqi Zhou, Stefano Ermon, and Jiaming Song. Inductive moment matching. arXiv preprint arXiv:2503.07565 , 2025. 2, 3, 30 15 Appendix 
+
+# Table of Contents 
+
+A Proofs 16 
+
+A.1 Complete statement and the proof of Theorem 3.1 . . . . . . . . . . . . . . . . 16 
+
+B Additional discussions 22 
+
+B.1 Wasserstein gradient flows of energy functionals . . . . . . . . . . . . . . . . . 22 B.2 More discussion on the estimators for self-transport . . . . . . . . . . . . . . . 26 B.3 More discussions on velocity guidance . . . . . . . . . . . . . . . . . . . . . . 27 B.4 More discussions on related works . . . . . . . . . . . . . . . . . . . . . . . . 28 
+
+C Additional implementation details 30 D Sampling throughput comparison 31 E Additional experimental results 32 F Additional generated samples 32 G Limitations & Broader impacts 32 
+
+## A Proofs 
+
+In this section, we present the detailed statements of assumptions and theorems discussed in the main paper, along with their proofs. 
+
+A.1 Complete statement and the proof of Theorem 3.1 
+
+For N ∈ N and step size η > 0, let particles {x(k) 
+
+> i
+
+}Ni=1 evolve according to 
+
+x(k+1)  
+
+> i
+
+= x(k) 
+
+> i
+
++ η V ε  
+
+> bqNk,bpM
+
+(x(k) 
+
+> i
+
+), bqNk := 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+δx(k)
+
+> i
+
+, tk := kη, (17) with the initial data points x0 
+
+> i
+
+sampled i.i.d. from q0.Define the piecewise-linear interpolation xηi : [0 , ∞) → Rd by 
+
+xηi (t) := x(k) 
+
+> i
+
++ ( t − tk) V ε  
+
+> bqNk,bpM
+
+(x(k) 
+
+> i
+
+), t ∈ [tk, t k+1 ), i = 1 , 2, · · · , N, (18) and the associated empirical measure 
+
+bqN,M,η t := 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+δxηi (t).
+
+We study the limiting behavior of Eq. (18) under a joint asymptotic regime in which N, M → ∞ and 
+
+η → 0.
+
+Assumption A.1. Assume there exist constants L1, L 2, L 3 < ∞ such that for all q, ˜q, p, ˜p ∈ P 2(Rd)
+
+and all x, x ′ ∈ Rd,
+
+|V εq,p (x) − V εq,p (x′)| ≤ L1|x − x′|, (19) 
+
+sup 
+
+> x∈Rd
+
+|V εq,p (x) − V ε
+
+> ˜q,p
+
+(x)| ≤ L2 W2(q, ˜q), (20) 
+
+sup 
+
+> x∈Rd
+
+|V εq,p (x) − V εq, ˜p(x)| ≤ L3 W2(p, ˜p). (21) 16 Remark A.2 (Localization on bounded domains) . When the input marginals p and q are supported on a bounded domain, the Wasserstein gradient flow (pt)0≤t≤T remains supported on a bounded domain over any finite time horizon T < ∞. The radius of this domain may depend on T . Therefore, for the purpose of the analysis on a fixed finite horizon, the assumptions imposed on the energy functional and its first variation only need to hold on such a bounded domain. In particular, although the ambient space is Rd, the required regularity and stability conditions can be verified locally on a bounded region containing the supports of p, q, and (pt)0≤t≤T .Under these conditions, one can establish a quantitative convergence result showing that the interpo-lated empirical measure bqN,M,η t converges to the unique solution of a nonlinear PDE as N, M → ∞ 
+
+and η → 0.Now we present the formal version of Theorem 3.1 below, followed by the detailed proof. 
+
+Theorem A.3. Assume Assumption A.1 holds and q0, p ∈ P 2(Rd). For every T > 0, there exists a unique q ∈ C([0 , T ]; P2(Rd)) solving the nonlinear continuity equation 
+
+∂tqt + ∇ ·  qt V εqt,p 
+
+ = 0 (22) 
+
+in the weak sense 
+
+Z
+
+> Rd
+
+φ dq t −
+
+Z
+
+> Rd
+
+φ dq 0 =
+
+Z t
+
+> 0
+
+Z
+
+> Rd
+
+∇φ(x) · V εqs,p (x) dq s(x) ds, ∀φ ∈ C1 
+
+> c
+
+(Rd).
+
+Moreover, for all N, M and all η > 0,
+
+sup  
+
+> t∈[0 ,T ]
+
+W2
+
+ bqN,M,η t , q t
+
+ ≤ e(L1+L2)T W2(bqN 
+
+> 0
+
+, q 0) + L3
+
+L1 + L2
+
+(e(L1+L2)T − 1) W2(bpM , p )+ CT η
+
+"Z 
+
+> Rd
+
+|x|2 dbqN 
+
+> 0
+
+(x)
+
+1/2
+
++
+
+Z 
+
+> Rd
+
+|x|2 dbpM (x)
+
+1/2#
+
+where CT < ∞ depends only on T, L 1, L 2. Consequently, as η → 0 and N, M → ∞ ,
+
+sup  
+
+> t∈[0 ,T ]
+
+W2
+
+ bqN,M,η t , q t
+
+ → 0, almost surely. (23) 
+
+Proof. Fix q, p ∈ P 2(Rd). Take (X, Y ) ∼ πεq,p , by Jensen’s inequality, 
+
+Z
+
+> Rd
+
+|T εq,p (x)|2 dq (x) = 
+
+Z
+
+|E[Y | X = x]|2 dq (x) ≤
+
+Z
+
+E[|Y |2 | X = x] dq (x) = 
+
+Z
+
+|y|2 d p (y).
+
+Similarly, if (X, Z ) ∼ πεq,q ,
+
+Z
+
+> Rd
+
+|T εq,q (x)|2 dq (x) ≤
+
+Z
+
+|z|2 dq (z).
+
+Hence Z
+
+|V εq,p (x)| dq (x) ≤ 2
+
+Z
+
+|y|2 dp (y) + 2 
+
+Z
+
+|z|2 dq (z). (24) Moreover, for every x ∈ Rd,
+
+|V εq,p (x)| ≤ |V εq,p (x) − V εq,p (0) | + |V εq,p (0) − V εδ0,p (0) | + |V εδ0,p (0) |≤ L1|x| + L2
+
+Z 
+
+> Rd
+
+|z|2 dq (z)
+
+1/2
+
++
+
+Z 
+
+> Rd
+
+|y|2 dp (y)
+
+1/2
+
+where we used Eqs. (19), (20), and (24) with q = δ0. In particular, V εq,p has at most linear growth in 
+
+x.For generic xxx = ( x1, . . . , x N ) ∈ (Rd)N , define its corresponding empirical measure as 
+
+bqN := 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+δxi ,
+
+17 and define 
+
+V N,M (xxx) :=  V ε  
+
+> bqN,bpM
+
+(x1), . . . , V ε  
+
+> bqN,bpM
+
+(xN ) ∈ (Rd)N .
+
+Equip (Rd)N with the norm 
+
+∥xxx∥2,N := 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+|xi|2
+
+!1/2
+
+.
+
+It is easy to show that V N,M is globally Lipschitz in ∥ · ∥ 1,N with constant L1 + L2:
+
+∥V N,M (xxx) − V N,M (xxx′)∥2,N ≤ (L1 + L2)∥xxx − xxx′∥2,N .
+
+Indeed, if bqN ′ := 1
+
+> N
+
+PNi=1 δx′ 
+
+> i
+
+, then 
+
+∥V N,M (xxx) − V N,M (xxx′)∥2,N = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+V ε  
+
+> bqN,bpM
+
+(xi) − V ε  
+
+> bqN′,bpM
+
+(x′
+
+> i
+
+)
+
+≤ 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+|V ε  
+
+> bqN,bpM
+
+(xi) − V ε  
+
+> bqN,bpM
+
+(x′
+
+> i
+
+)|2
+
+!1/2
+
++ 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+|V ε  
+
+> bqN,bpM
+
+(x′
+
+> i
+
+) − V ε  
+
+> bqN′,bpM
+
+(x′
+
+> i
+
+)|2
+
+!1/2
+
+≤ L1∥xxx − xxx′∥2,N + L2W2(bqN , bqN ′) = ( L1 + L2)∥xxx − xxx′∥2,N ,
+
+where 
+
+W2(bqN , bqN ′) ≤
+
+ 1
+
+N
+
+> N
+
+X
+
+> j=1
+
+|xj − x′ 
+
+> j
+
+|2
+
+
+
+> 2
+
+= ∥xxx − xxx′∥2,N 
+
+by coupling particle j with particle j.Consider now the ODE 
+
+˙xxxN,M (t) = V N,M (xxxN,M (t)) , xxxN,M (0) = ( x(0) 1 , . . . , x (0)  
+
+> N
+
+), (25) with the initialization x(0)  
+
+> i
+
+defined below Eq. (17). Since V N,M is globally Lipschitz in ∥ · ∥ 2,N , Eq. (25) has a unique global solution by the Picard– Lindelöf theorem. Let 
+
+bqN,M t := 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+δxN,M i (t).
+
+For any φ ∈ C1 
+
+> c
+
+(Rd),
+
+ddt 
+
+Z
+
+φ d bqN,M t = ddt 
+
+1
+
+N
+
+> N
+
+X
+
+> i=1
+
+φ(xN,M i (t)) = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+∇φ(xN,M i (t)) · ˙xN,M i (t)=
+
+Z
+
+∇φ(x) · V ε  
+
+> bqN,M t,bpM
+
+(x) dbqN,M t (x).
+
+Thus bqN,M t is a weak solution of 
+
+∂t bqN,M t + ∇ · 
+
+bqN,M t V ε 
+
+> bqN,M t,bpM
+
+
+
+= 0 .
+
+We next derive a stability estimate. Let μt, ν t be weak solutions of 
+
+∂tμt + ∇ · (μtV εμt,p ) = 0 , ∂tνt + ∇ · (νtV ενt, ˜p) = 0 ,
+
+18 where p, ˜p ∈ P 2(Rd) are fixed. Since V εμt,p (·) and V ενt, ˜p(·) are globally Lipschitz in x by Eq. (19), and have at most linear growth by the bound above, the associated characteristic flows Φμt and Φνt are globally well defined, and 
+
+μt = (Φ μt )#μ0, νt = (Φ νt )#ν0.
+
+Let γ0 ∈ Π( μ0, ν 0) be optimal for W2(μ0, ν 0), and define 
+
+γt := (Φ μt × Φνt )#γ0 ∈ Π( μt, ν t).
+
+Then 
+
+W2(μt, ν t) ≤
+
+Z
+
+|x − y| dγ t(x, y ).
+
+Let (x0, y 0) ∼ γ0 and (xt, y t) := (Φ μt (x0), Φνt (y0)) ∼ γt. For a.e. t,
+
+ddt |xt − yt| ≤ | V εμt,p (xt) − V ενt, ˜p(yt)|≤ | V εμt,p (xt) − V εμt,p (yt)| + |V εμt,p (yt) − V ενt, ˜p(yt)|≤ L1|xt − yt| + L2W2(μt, ν t) + L3W2(p, ˜p)
+
+where the last inequality used Eqs. (19)–(21), Taking the L2-norm with respect to γ0, and using W2(μt, ν t) ≤ (E|xt − yt|2)1/2, gives 
+
+ddt 
+
+
+
+E|xt − yt|
+
+1/2
+
+≤ (L1 + L2)
+
+
+
+E|xt − yt|21/2
+
++ L3W2(p, ˜p).
+
+Hence, for all t ∈ [0 , T ], by Grönwall’s inequality, 
+
+W2(μt, ν t) ≤ e(L1+L2)tW2(μ0, ν 0) + L3
+
+L1 + L2
+
+(e(L1+L2)t − 1) W2(p, ˜p). (26) In particular, taking ˜p = p, the uniqueness of weak solutions to Eq. (22) follows. We now prove existence. Let (bqN 
+
+> 0
+
+)N and (bpM )M be the empirical measures so that 
+
+bqN 
+
+> 0
+
+→ q0, bpM → p in W2
+
+almost surely. Applying Eq. (26) to bqtN,M and bqtN ′,M ′
+
+yields 
+
+sup  
+
+> t∈[0 ,T ]
+
+W2( bqtN,M , bqtN ′,M ′
+
+) ≤ e(L1+L2)T W2(bqN 
+
+> 0
+
+, bqN ′ 
+
+> 0
+
+) + L3
+
+L1 + L2
+
+
+
+e(L1+L2)T − 1
+
+
+
+W2(bpM , bpM ′
+
+).
+
+Since bqN 
+
+> 0
+
+→ q0 and bpM → p in W2 almost surely, the right-hand side tends to 0 as N, N ′, M, M ′ →∞. Hence (b¯qN,M )N,M is a Cauchy family in C([0 , T ]; ( P2(Rd), W2)) . Since (P2(Rd), W2) is complete, there exists 
+
+q ∈ C([0 , T ]; P2(Rd)) 
+
+such that 
+
+sup  
+
+> t∈[0 ,T ]
+
+W2( bqtN,M , q t) → 0 almost surely as N, M → ∞ . (27) In particular, 
+
+W2(q0, q 0) ≤ W 2(¯ q0, bqN 
+
+> 0
+
+) + W2(bqN 
+
+> 0
+
+, q 0) → 0 almost surely ,
+
+so q0 = q0.We also need a uniform second-moment bound. Set 
+
+mN,M  
+
+> 2
+
+(t) := 
+
+Z 
+
+|x|2 d bqtN,M (x)
+
+1/2
+
+= ∥xxxN,M (t)∥2,N .
+
+For a.e. t, using the ODE and the norm derivative estimate, we have 
+
+ddt mN,M (t) ≤ ∥ V N,M (xxxN,M (t)) ∥2,N .
+
+19 By the particle-level linear-growth estimate in Eq. (24), 
+
+∥V N,M (xxxN,M (t)) ∥2,N ≤
+
+Z 
+
+|y| dbpM (y)
+
+1/2
+
++ ( L1 + L2)mN,M  
+
+> 2
+
+(t),
+
+Therefore, by Grönwall’s inequality, for every t ∈ [0 , T ],
+
+mN,M  
+
+> 2
+
+(t) ≤ e(L1+L2)tmN,M  
+
+> 2
+
+(0) + e(L1+L2)t − 1
+
+L1 + L2
+
+Z 
+
+> Rd
+
+|y|2 dbpM (y)
+
+1/2
+
+.
+
+Equivalently, 
+
+Z 
+
+> Rd
+
+|x|2 dbqN,M t (x)
+
+1/2
+
+≤ e(L1+L2)t
+
+Z 
+
+> Rd
+
+|x|2 dbqN 
+
+> 0
+
+(x)
+
+1/2
+
++ e(L1+L2)t − 1
+
+L1 + L2
+
+Z 
+
+> Rd
+
+|y|2 dbpM (y)
+
+1/2
+
+. (28) Since bqN 
+
+> 0
+
+→ q0 and bpM → p in W2 almost surely, the sequences    R |x|2 dbqN
+
+> 0
+
+1/2 
+
+> N
+
+and 
+
+   R |y|2 dbpM 1/2 
+
+> M
+
+are bounded. Hence there exists CT > 0 such that 
+
+sup 
+
+> N,M
+
+sup  
+
+> t∈[0 ,T ]
+
+Z
+
+|x| d bqtN,M (x) ≤ CT .
+
+From the uniform second-moment estimate in Eq. (28) and the convergence in Eq. (27) , passing to the limit, we also obtain 
+
+sup  
+
+> t∈[0 ,T ]
+
+Z
+
+|x| d¯qt(x) ≤ CT .
+
+It remains to pass to the limit in the weak formulation. For every φ ∈ C1 
+
+> c
+
+(Rd), bqN,M t satisfies 
+
+Z
+
+φ d bqN,M t −
+
+Z
+
+φ d bqN 
+
+> 0
+
+=
+
+Z t
+
+> 0
+
+Z
+
+∇φ(x) · V ε  
+
+> bqN,M s,bpM
+
+(x) dbqN,M s (x) ds. 
+
+We pass to the limit as N, M → ∞ . The left-hand side converges to 
+
+Z
+
+φ d ¯qt −
+
+Z
+
+φ dq 0
+
+because bqN,M t → ¯qt uniformly in t in W2, and bqN 
+
+> 0
+
+→ q0 in W2, almost surely. For the right-hand side, fix s ∈ [0 , T ]. Writing 
+
+IN,M (s) := 
+
+Z
+
+∇φ(x) · V ε  
+
+> bqN,M s,bpM
+
+(x) dbqN,M s (x), I(s) := 
+
+Z
+
+∇φ(x) · V ε
+
+> ¯qs,p
+
+(x) d¯qs(x),
+
+we have 
+
+|IN,M (s) − I(s)| ≤ 
+
+Z
+
+∇φ(x) ·  V ε  
+
+> bqN,M s,bpM
+
+(x) − V ε
+
+> ¯qs,p
+
+(x) dbqN,M s (x)
+
++
+
+Z
+
+∇φ(x) · V ε
+
+> ¯qs,p
+
+(x) d(bqN,M s − ¯qs)( x)
+
+≤ ∥∇ φ∥∞
+
+
+
+L2W2 bqN,M s , ¯qs) + L3W2(bpM , p )
+
+
+
++
+
+Z
+
+∇φ(x) · V ε
+
+> ¯qs,p
+
+(x) d(bqN,M s − ¯qs)( x) .
+
+The first term tends to 0 uniformly in s ∈ [0 , T ]. For the second term, since ∇φ has compact support by the fact that φ ∈ C1 
+
+> c
+
+(Rd), the function 
+
+x 7 → ∇ φ(x) · V ε
+
+> ¯qs,p
+
+(x)
+
+20 is bounded and continuous; hence it tends to 0 for each fixed s, because b¯qsN,M → ¯qs in W2.Moreover, if K := supp ∇φ, then 
+
+Z
+
+∇φ(x) · V ε
+
+> ¯qs,p
+
+(x) d( b¯qsN,M − ¯qs)( x) ≤ 2∥∇ φ∥∞ sup 
+
+> x∈K
+
+|V ε
+
+> ¯qs,p
+
+(x)|.
+
+By the linear-growth bound above and the uniform second-moment bound on ¯qs, the quantity 
+
+sup x∈K |V ε
+
+> ¯qs,p
+
+(x)| is uniformly bounded for s ∈ [0 , T ]. Therefore, by dominated convergence, 
+
+Z t
+
+> 0
+
+IN,M (s) ds →
+
+Z t
+
+> 0
+
+I(s) ds. 
+
+Passing to the limit in the weak formulation, we obtain 
+
+Z
+
+φ d ¯qt −
+
+Z
+
+φ dq 0 =
+
+Z t
+
+> 0
+
+Z
+
+∇φ(x) · V ε
+
+> ¯qs,p
+
+(x) d¯qs(x) ds. 
+
+Thus ¯q is a weak solution of Eq. (22). By uniqueness, ¯q is the unique weak solution; we denote it by 
+
+q.Now apply the stability estimate in Eq. (26) with 
+
+μt = qt, νt = bqN,M t , ˜p = bpM
+
+gives, for all t ∈ [0 , T ],
+
+W2(bqN,M t , q t) ≤ e(L1+L2)tW2(bqN 
+
+> 0
+
+, q 0) + L3
+
+L1 + L2
+
+(e(L1+L2)t − 1) W2(bpM , p ). (29) Taking the supremum over t ∈ [0 , T ] gives 
+
+sup  
+
+> t∈[0 ,T ]
+
+W2( bqtN,M , q t) ≤ e(L1+L2)T W2(bqN 
+
+> 0
+
+, q 0) + L3
+
+L1 + L2
+
+(e(L1+L2)T − 1) W2(bpM , p ).
+
+On the other hand, let xxxN,M,η (t) be the piecewise linear Euler interpolation of Eq. (25), namely 
+
+xxxN,M,η (tk+1 ) = xxxN,M,η (tk) + η V N,M (xxxN,M,η (tk)) ,
+
+and 
+
+xxxN,M,η (t) = xxxN,M,η (tk) + ( t − tk)V N,M (xxxN,M,η (tk)) , t ∈ [tk, t k+1 ).
+
+Let 
+
+bqN,M,η t := 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+δxN,M,η i (t).
+
+Set 
+
+e(t) := ∥xxxN,M,η (t) − xxxN,M (t)∥2,N .
+
+A standard Euler truncation estimate in ∥ · ∥ 1,N , using the Lipschitz constant L1 + L2 , combined with Grönwall’s gives, 
+
+sup  
+
+> t∈[0 ,T ]
+
+e(t) ≤ Lη e LT 
+
+Z T
+
+> 0
+
+∥V N,M (xxxN,M (s)) ∥2,N ds. (30) Now we bound the integral term in Eq. (30). By the pointwise linear-growth estimate above, applied with q = bqN,M s and p = bpM , we have 
+
+∥V N,M (xxxN,M (s)) ∥2,N = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+V ε  
+
+> bqN,M s,bpM
+
+(xN,M i (s)) 2
+
+!1/2
+
+≤ (L1 + L2)
+
+Z 
+
+> Rd
+
+|x|2 dbqN,M s (x)
+
+1/2
+
++
+
+Z 
+
+> Rd
+
+|y|2 dbpM (y)
+
+1/2
+
+.(31) 21 Using Eq. (28), there exists a constant CT < ∞, depending only on T, L 1, L 2, such that, for all 
+
+s ∈ [0 , T ],
+
+∥V N,M (xxxN,M (s)) ∥2,N ≤ CT
+
+"Z 
+
+> Rd
+
+|x|2 dbqN 
+
+> 0
+
+(x)
+
+1/2
+
++
+
+Z 
+
+> Rd
+
+|y|2 dbpM (y)
+
+1/2#
+
+. (32) Therefore, by Eq. (30), 
+
+sup  
+
+> t∈[0 ,T ]
+
+e(t) ≤ CT η
+
+"Z 
+
+> Rd
+
+|x|2 dbqN 
+
+> 0
+
+(x)
+
+1/2
+
++
+
+Z 
+
+> Rd
+
+|y|2 dbpM (y)
+
+1/2#
+
+, (33) where CT may change from line to line but depends only on T, L 1, L 2.Since the coupling that matches xN,M,η i (t) with xN,M i (t) is admissible, we have 
+
+W2(bqN,M,η t , bqN,M t ) ≤ ∥ xxxN,M,η (t) − xxxN,M (t)∥2,N = e(t).
+
+Combining this estimate with Eqs. (29) and (33), we obtain, for all t ∈ [0 , T ],
+
+W2(bqN,M,η t , q t) ≤ W 2(bqN,M,η t , bqN,M t ) + W2(bqN,M t , q t)
+
+≤ CT η
+
+"Z 
+
+> Rd
+
+|x|2 dbqN 
+
+> 0
+
+(x)
+
+1/2
+
++
+
+Z 
+
+> Rd
+
+|y|2 dbpM (y)
+
+1/2#
+
++ e(L1+L2)tW2(bqN 
+
+> 0
+
+, q 0) + L3
+
+L1 + L2
+
+
+
+e(L1+L2)t − 1
+
+
+
+W2(bpM , p ).
+
+Taking the supremum over t ∈ [0 , T ] gives 
+
+sup  
+
+> t∈[0 ,T ]
+
+W2(bqN,M,η t , q t) ≤ e(L1+L2)T W2(bqN 
+
+> 0
+
+, q 0) + L3
+
+L1 + L2
+
+
+
+e(L1+L2)T − 1
+
+
+
+W2(bpM , p )+ CT η
+
+"Z 
+
+> Rd
+
+|x|2 dbqN 
+
+> 0
+
+(x)
+
+1/2
+
++
+
+Z 
+
+> Rd
+
+|y|2 dbpM (y)
+
+1/2#
+
+.
+
+This proves Eq. (23). Finally, since q0, p ∈ P 2(Rd), the empirical measures satisfy 
+
+W2(bqN 
+
+> 0
+
+, q 0) → 0, W2(bpM , p ) → 0, almost surely .
+
+Moreover, 
+
+Z
+
+> Rd
+
+|x|2 dbqN 
+
+> 0
+
+(x) →
+
+Z
+
+> Rd
+
+|x|2 dq 0(x),
+
+Z
+
+> Rd
+
+|y|2 dbpM (y) →
+
+Z
+
+> Rd
+
+|y|2 dp (y), almost surely .
+
+Letting N, M → ∞ and η ↓ 0, we obtain 
+
+sup  
+
+> t∈[0 ,T ]
+
+W2(bqN,M,η t , q t) → 0, almost surely ,
+
+## B Additional discussions 
+
+B.1 Wasserstein gradient flows of energy functionals 
+
+In this section, we derive the WGFs induced by the functionals listed in Table 1. For MMD and KL divergence, we also provide their particle-based estimators in the same spirit as the Sinkhorn estimator used in Sec. 3.3. The estimators are then used in the ablation study in Table 2a. Throughout this section, p denotes the target data distribution. Given an energy functional F, recall that the corresponding WGF follows 
+
+∂tqt = ∇ · 
+
+
+
+qt∇ δF
+
+δq (qt)
+
+
+
+,
+
+or equivalently, through the continuity equation, we have 
+
+∂tqt + ∇ · (qtVt) = 0 , Vt(x) = −∇ δF
+
+δq (qt)( x).
+
+22 Gradient flow of Sinkhorn divergence. To compute the first variation of Sε(q, p ) under quadratic cost with respect to q, we first consider the dual formulation of the EOT problem: 
+
+OT ε(q, p ) = max 
+
+> u,v
+
+Z
+
+> Rd
+
+u(x)dq (x) + 
+
+Z
+
+> Rd
+
+v(y)dp (y)
+
+− ε
+
+Z Z 
+
+> Rd×Rd
+
+exp 
+
+ u(x) + v(y) − 12 ∥x − y∥2
+
+ε
+
+
+
+dq (x)dp (y) + ε, (34) where u(x) and v(y) are the dual potentials. By the envelope theorem, the first variation of the EOT cost Eq. (34) with respect to the marginal distribution q is exactly the optimal dual potential uεq,p (x):
+
+δOT ε(q, p )
+
+δq (x) = uεq,p (x).
+
+Consequently, the first variation of Sε(·, p ) evaluated at q is: 
+
+δS ε(·, p )
+
+δq (q)( x) = uεq,p (x) − uεq,q (x).
+
+From the optimality conditions of the dual problem, uεq,p (x) satisfies the following structural equation: 
+
+uεq,p (x) = −ε log 
+
+Z
+
+> Rd
+
+exp vεq,p (y) − 12 ∥x − y∥2
+
+ε
+
+!
+
+dp (y).
+
+Taking the gradient with respect to x yields: 
+
+∇xuεq,p (x) = 
+
+R 
+
+> Rd
+
+∇x 12 ∥x − y∥2 exp 
+
+ vεq,p (y)− 12 ∥x−y∥2
+
+> ε
+
+
+
+dp (y)
+
+R 
+
+> Rd
+
+exp 
+
+ vεq,p (y)− 12 ∥x−y∥2
+
+> ε
+
+
+
+dp (y)=
+
+Z
+
+> Rd
+
+∇x
+
+12 ∥x − y∥2πεq,p (dy |x)=
+
+Z
+
+> Rd
+
+(x − y)πεq,p (dy |x)=x − T εq,p (x).
+
+Combining the previous results, we obtain 
+
+V εqt,p (x) = −∇ x
+
+δS ε(·, p )
+
+δq (qt)( x)= −∇ x
+
+ uεqt,p (x) − uεqt,q t (x)
+
+= −  x − T εqt,p (x) +  x − T εqt,q t (x)
+
+= T εqt,p (x) − T εqt,q t (x).
+
+This recovers the Sinkhorn divergence velocity field reported in Table 1. 
+
+Gradient flow of MMD. Let k : Rd × Rd → R be a differentiable positive definite kernel. For probability measures p, q ∈ P (Rd), we consider the energy 
+
+FMMD (q) := 12 MMD 2(q, p ),
+
+where 
+
+MMD 2(q, p ) = 
+
+Z Z 
+
+k(x, y )q(dx )q(dy ) − 2
+
+Z Z 
+
+k(x, y )q(dx )p(dy ) + 
+
+Z Z 
+
+k(x, y )p(dx )p(dy ).
+
+23 Equivalently, 
+
+FMMD (q) = 12
+
+Z Z 
+
+k(x, y )( q − p)( dx )( q − p)( dy ).
+
+To compute the first variation, consider a perturbation qs = q + s χ with signed measure χ satisfying R χ(dx ) = 0 . Then 
+
+dds FMMD (qs)
+
+> s=0
+
+=
+
+Z Z 
+
+k(x, y )χ(dx )( q − p)( dy )=
+
+Z Z 
+
+k(x, y )( q − p)( dy )
+
+
+
+χ(dx ).
+
+Therefore, up to an additive constant, 
+
+δFMMD 
+
+δq (q)( x) = 
+
+Z
+
+k(x, y )q(dy ) −
+
+Z
+
+k(x, y )p(dy ).
+
+Taking the negative spatial gradient gives the Wasserstein velocity field 
+
+V MMD  
+
+> t
+
+(x) = −∇ x
+
+δFMMD 
+
+δq (qt)( x)=
+
+Z
+
+∇xk(x, y )p(dy ) −
+
+Z
+
+∇xk(x, y )qt(dy ),
+
+with qt the corresponding flow under the initial condition q0. This is the MMD velocity field reported in Table 1. 
+
+Particle-based estimator for MMD. Given generated particles {xi}Ni=1 ∼ qt and target particles 
+
+{yj }Mj=1 ∼ p, define the empirical measures 
+
+bqt =
+
+> N
+
+X
+
+> i=1
+
+aiδxi , bp =
+
+> M
+
+X
+
+> j=1
+
+bj δyj , X
+
+> i
+
+ai = X
+
+> j
+
+bj = 1 .
+
+As in the Sinkhorn self-transport estimator, we draw an independent second batch {x′
+
+> ℓ
+
+}N ′ 
+
+> ℓ=1
+
+∼ qt and define 
+
+bq′ 
+
+> t
+
+= 
+
+> N′
+
+X
+
+> ℓ=1
+
+a′
+
+> ℓ
+
+δx′ 
+
+> ℓ
+
+.
+
+Then the particle estimator of the MMD-induced velocity at xi is 
+
+bV MMD  
+
+> bqt,bp
+
+(xi) = 
+
+> M
+
+X
+
+> j=1
+
+bj ∇xk(xi, y j ) − 
+
+> N′
+
+X
+
+> ℓ=1
+
+a′
+
+> ℓ
+
+∇xk(xi, x ′
+
+> ℓ
+
+).
+
+For uniform weights, this becomes 
+
+bV MMD  
+
+> bqt,bp
+
+(xi) = 1
+
+M
+
+> M
+
+X
+
+> j=1
+
+∇xk(xi, y j ) − 1
+
+N ′ 
+
+> N′
+
+X
+
+> ℓ=1
+
+∇xk(xi, x ′
+
+> ℓ
+
+).
+
+If k(·, ·) is the Gaussian kernel 
+
+kσ (x, y ) = exp 
+
+
+
+− ∥x − y∥2
+
+2σ2
+
+
+
+,
+
+then 
+
+∇xkσ (x, y ) = y − xσ2 kσ (x, y ),
+
+and hence 
+
+bV MMD  
+
+> bqt,bp
+
+(xi) = 1
+
+M σ 2
+
+> M
+
+X
+
+> j=1
+
+(yj − xi)kσ (xi, y j ) − 1
+
+N ′σ2 
+
+> N′
+
+X
+
+> ℓ=1
+
+(x′ 
+
+> ℓ
+
+− xi)kσ (xi, x ′
+
+> ℓ
+
+).
+
+The corresponding particle update follows: 
+
+xi ← xi + η bV MMD  
+
+> bqt,bp
+
+(xi).
+
+24 Gradient flow of KL divergence. For p, q ∈ P (Rd), we next consider the KL energy 
+
+FKL (q) := DKL (q∥p) = 
+
+Z
+
+q(x) log q(x)
+
+p(x) dx, 
+
+assuming that q and p admit smooth positive densities with respect to the Lebesgue measure. For a perturbation qs = q + s χ with R χ(x)dx = 0 , we have 
+
+dds FKL (qs)
+
+> s=0
+
+=
+
+Z
+
+(log q(x) − log p(x) + 1) χ(x)dx. 
+
+Therefore, up to an additive constant, 
+
+δFKL 
+
+δq (q)( x) = log q(x) − log p(x).
+
+The induced Wasserstein velocity field is 
+
+V KL  
+
+> t
+
+(x) = −∇ x
+
+δFKL 
+
+δq (qt)( x)= ∇x log p(x) − ∇ x log qt(x),
+
+with qt the corresponding flow under the initial condition q0. This recovers the KL velocity field reported in Table 1. The first term attracts particles toward high-density regions of the target distribution, while the second term is a repulsive score term induced by the current model distribution. 
+
+Particle-based estimator for KL. Unlike MMD and Sinkhorn divergence, the KL velocity field requires access to the score functions ∇ log p and ∇ log qt. In the absence of analytic scores, a particle-based estimator can be constructed through kernel density estimation (KDE). Let kσ (·, ·) be a smooth kernel with bandwidth σ > 0, for example, 
+
+kσ (x, y ) = exp 
+
+
+
+− ∥x − y∥2
+
+2σ2
+
+
+
+.
+
+Using target particles {yj }Mj=1 ∼ p and an independent generated batch {x′
+
+> ℓ
+
+}N ′ 
+
+> ℓ=1
+
+∼ qt, define 
+
+bpσ (x) = 
+
+> M
+
+X
+
+> j=1
+
+bj kσ (x, y j ), bqt,σ (x) =  
+
+> N′
+
+X
+
+> ℓ=1
+
+a′
+
+> ℓ
+
+kσ (x, x ′
+
+> ℓ
+
+).
+
+The KDE-based score estimators are 
+
+bsp(x) := ∇x log bpσ (x) = 
+
+PMj=1 bj ∇xkσ (x, y j )
+
+PMj=1 bj kσ (x, y j ) ,
+
+and 
+
+bsqt (x) := ∇x log bqt,σ (x) = 
+
+PN ′ 
+
+> ℓ=1
+
+a′
+
+> ℓ
+
+∇xkσ (x, x ′
+
+> ℓ
+
+)
+
+PN ′ 
+
+> ℓ=1
+
+a′
+
+> ℓ
+
+kσ (x, x ′
+
+> ℓ
+
+) .
+
+The particle estimator of the KL-induced velocity is 
+
+bV KL 
+
+> bqt,bp
+
+(xi) = bsp(xi) − bsqt (xi).
+
+For the Gaussian kernel, we have 
+
+∇xkσ (x, y ) = y − xσ2 kσ (x, y ).
+
+Therefore, 
+
+bsp(xi) = 1
+
+σ2
+
+PMj=1 bj kσ (xi, y j )yj
+
+PMj=1 bj kσ (xi, y j ) − xi
+
+!
+
+,
+
+and similarly 
+
+bsqt (xi) = 1
+
+σ2
+
+PN ′ 
+
+> ℓ=1
+
+a′
+
+> ℓ
+
+kσ (xi, x ′
+
+> ℓ
+
+)x′
+
+> ℓ
+
+PN ′ 
+
+> ℓ=1
+
+a′
+
+> ℓ
+
+kσ (xi, x ′
+
+> ℓ
+
+) − xi
+
+!
+
+.
+
+25 One-batch w/ diag. mask Two-batch Batch size 64 Batch size 128 Batch size 256 Figure 7: Evaluation of self-transport estimators on a 2D Gaussian mixtures dataset featuring six dominant modes and two distant minority modes. “One-batch” refers to the single batch estimator with diagonal masking. “Two-batch” refers to our two-batch debiased estimator with resampling. The particle-based estimate of the velocity field simplifies to the difference between two kernel-weighted local means: 
+
+bV KL 
+
+> bqt,bp
+
+(xi) = 1
+
+σ2
+
+" P Mj=1 bj kσ (xi, y j )yj
+
+PMj=1 bj kσ (xi, y j ) −
+
+PN ′ 
+
+> ℓ=1
+
+a′
+
+> ℓ
+
+kσ (xi, x ′
+
+> ℓ
+
+)x′
+
+> ℓ
+
+PN ′ 
+
+> ℓ=1
+
+a′
+
+> ℓ
+
+kσ (xi, x ′
+
+> ℓ
+
+)
+
+#
+
+.
+
+The corresponding particle update then follows: 
+
+xi ← xi + η bV KL 
+
+> bqt,bp
+
+(xi).
+
+B.2 More discussion on the estimators for self-transport 
+
+As introduced in Sec. 3.3, estimating the self-interaction velocity field T εq,q (x) requires computing the OT plan of the model distribution q with itself. A naive empirical approximation based a single mini-batch of size B, i.e., {xi}Bi=1 , inherently suffers from a self-matching bias, as shown in Fig. 3. Following [ 11 ], which addresses a similar issue, one may instead apply a diagonal mask to the cost matrix (setting Cii = ∞), which explicitly prevents any particle from matching with itself. However, this masking strategy introduces a new source of bias that is sensitive to the batch size B.For any given particle xi, the diagonal mask effectively forces it to transport its mass to an empirical target distribution composed of the remaining particles: 
+
+bq−i = 1
+
+B − 1
+
+X 
+
+> j̸=i
+
+δxj .
+
+Because xi is excluded from its own target space, the particle is artificially forced to move a strictly positive distance towards its neighbors, even if it is already situated perfectly at a high-density peak of the true distribution q. The magnitude of this structural bias scales proportionally to O(1 /B ),26 effectively meaning that a fraction of the mass corresponding to roughly (B − 1) /B is mapped sub-optimally. As B becomes smaller, this forced redistribution dominates the velocity field, pushing particles away from their true local density centers (as observed in the left column of Fig. 7). By drawing an independent second batch {x′
+
+> l
+
+}Bl=1 ∼ qt, our two-batch estimator effectively avoids this issue. The OT plan is computed between two independent empirical measures, allowing a particle 
+
+xi to freely match with a particle x′ 
+
+> l
+
+that happens to be infinitesimally close to it, without any artificial 
+
+∞-cost penalty. This yields a consistent estimate of the continuous self-transport map that remains robust even at small batch sizes. 
+
+B.3 More discussions on velocity guidance 
+
+In this section, we first show that our proposed velocity guidance recovers the standard exponentially tilted target distribution when the energy functional is chosen as the KL divergence. We then show how this understanding is leveraged to construct the proposed velocity guidance in Eq. (16), which also serves as a conceptual justification for Eq. (16). Let p(·| c) denote the conditional data distribution, p(·| ∅) denote the unconditional data distribution, and w ≥ 0 be the guidance weight. In analogy with Eq. (16), we construct the velocity-guidance field by adding a term scaled by w that points from the unconditional to the conditional distribution: 
+
+eV KL ,w t (x) := 
+
+
+
+∇x log p(x|c) − ∇ x log qt(x|c)
+
+| {z } 
+
+> VKL
+> qt(·| c),p (·| c)
+
++w
+
+
+
+∇x log p(x|c) − ∇ x log p(x|∅)
+
+| {z }  
+
+> VKL
+> qt(·| c),p (·| c)−VKL
+> qt(·| c),p (·| ∅)
+
+. (35) We formalize the connection between this constructed velocity field and CFG in the following proposition. 
+
+Proposition B.1. The velocity-guidance field eV KL ,w t in Eq. (35) is exactly the WGF velocity field of the combined energy functional 
+
+Fw
+
+> KL
+
+(qt(·| c)) = (1 + w)DKL 
+
+ qt(·| c)∥p(·| c) − wD KL 
+
+ qt(·| c)∥p(·| ∅).
+
+Furthermore, the unique global minimizer of Fw is the exponentially tilted target distribution pw(·| c),defined as 
+
+pw(x|c) := 1
+
+Zw(c) p(x|c)
+
+ p(x|c)
+
+p(x|∅)
+
+w
+
+,
+
+where Zw(c) is the normalizing constant. Proof. We first expand the combined energy functional Fw
+
+> KL
+
+(qt(·| c)) :
+
+Fw
+
+> KL
+
+(qt) = (1 + w)
+
+Z
+
+qt log qt
+
+p(·| c) − w
+
+Z
+
+qt log qt
+
+p(·| ∅)=
+
+Z
+
+qt log qt −
+
+Z
+
+qt log 
+
+
+
+p(·| c)1+ wp(·| ∅)−w
+
+=
+
+Z
+
+qt log qt
+
+pw(·| c) − log Zw(c)= DKL 
+
+ qt(·| c)∥pw(·| c) − log Zw(c).
+
+Since log Zw(c) is a constant with respect to the distribution qt, it is evident that Fw
+
+> KL
+
+(qt(·| c)) 
+
+achieves its unique global minimum when qt(·| c) = pw(·| c), which proves the second part of the proposition. To derive the induced WGF, we compute the first variation of Fw
+
+> KL
+
+(qt(·| c)) . Because the addi-tive constant − log Zw(c) vanishes upon differentiation, the first variation is identical to that of 
+
+DKL 
+
+ qt(·| c)∥pw(·| c):
+
+δFw
+
+> KL
+
+δq (qt(·| c))( x) = log qt(x|c) − log pw(x|c) + const .
+
+27 The corresponding Wasserstein velocity field is the negative spatial gradient of the first variation: 
+
+−∇ x
+
+δFw
+
+> KL
+
+δq (qt(·| c))( x) = ∇x log pw(x|c) − ∇ x log qt(x|c)= ∇x
+
+
+
+(1 + w) log p(x|c) − w log p(x|∅) − log Zw(c)
+
+
+
+− ∇ x log qt(x|c)= (1 + w)∇x log p(x|c) − w∇x log p(x|∅) − ∇ x log qt(x|c).
+
+Rearranging the terms, we obtain: 
+
+−∇ x
+
+δFw
+
+> KL
+
+δq (qt(·| c))( x) = 
+
+
+
+∇x log p(x|c)−∇ x log qt(x|c)
+
+
+
++w
+
+
+
+∇x log p(x|c)−∇ x log p(x|∅)
+
+
+
+,
+
+which is exactly the constructed velocity-guidance field eV KL ,w t (x) defined in Eq. (35). Therefore, under the KL energy, our velocity-guidance formulation is precisely equivalent to running the WGF toward the exponentially tilted distribution pw(x|c). This corresponds exactly to the standard CFG target form, where the conditional distribution is amplified relative to the unconditional distribution by the density ratio p(x|c)/p (x|∅). The results in Appendix E verify that velocity guidance yields enhanced performance over distribution guidance when KL divergence is leveraged as the energy functional. 
+
+Connection to the Sinkhorn velocity guidance. For the Sinkhorn divergence, the same closed-form target distribution is generally unavailable, because the velocity field is expressed through barycentric projections rather than score functions. Nevertheless, the KL case shows that adding the velocity-level correction 
+
+Vqt(·| c),p (·| c) − Vqt(·| c),p (·| ∅)
+
+has the correct interpretation in the score-based limit: it changes the effective target from p(x|c) to the exponentially tilted distribution p(x|c)( p(x|c)/p (x|∅)) w. This motivates applying the analogous guidance design to the Sinkhorn-induced velocity field. Specifically, we have 
+
+˜V ε,w qθ ,p (xi) = 
+
+
+
+T εqθ (·| c),p (·| c)(xi)−T εqθ (·| c),q θ (·| c)(xi)
+
+| {z }  
+
+> Vϵqθ(·| c),p (·| c)
+
++w
+
+
+
+T εqθ (·| c),p (·| c)(xi)−T εqθ (·| c),p (·| ∅)(xi)
+
+| {z }    
+
+> Vϵqθ(·| c),p (·| c)−Vϵqθ(·| c),p (·| ∅)
+
+,
+
+where 
+
+V ϵqθ (·| c),p (·| c)(xi) = T εqθ (·| c),p (·| c)(xi)−T εqθ (·| c),q θ (·| c)(xi), (36) 
+
+V ϵqθ (·| c),p (·| ∅)(xi) = T εqθ (·| c),p (·| ∅)(xi)−T εqθ (·| c),q θ (·| c)(xi), (37) which recovers Eq. (16). 
+
+Toy illustration. To empirically compare our proposed velocity guidance with distribution guidance, we evaluate conditional generation on a 2D 3-mode Gaussian mixtures. Here, each mode is treated as a distinct class. We train a generator x = fθ (z, c, w ) where the guidance scale w is randomly sampled during training. As illustrated in Fig. 8 (top row), velocity guidance reflects the behavior of an exponentially tilted target distribution pw(x|c). As w increases, the probability mass is amplified at the highest-density regions of the conditional mode. In contrast, the distribution guidance implicitly targets a linear mixture between the conditional and unconditional distributions. Fig. 8 (bottom row) demonstrates that increasing w will result in particles scattered away from the modes. 
+
+B.4 More discussions on related works 
+
+Our proposed W-Flow framework is related to several prominent directions in generative modeling. We highlight the key distinctions below. 
+
+Connection to Drifting Model. Our formulation shares the forward, iterative pushforward structure with Drifting Model [ 11 ]. The main difference lies in the construction of the velocity field. Drifting Model employs heuristic attraction and repulsion terms ( V + 
+
+> p
+
+and V − 
+
+> q
+
+) based on localized kernel 28 Velocity guidance    
+
+> Distribution guidance
+> w= 0w=0.5 w=1.0 w=1.5
+
+Figure 8: Comparison of velocity guidance and distribution guidance for conditional generation on a 2D 3-mode Gaussian mixtures dataset. Row Normalization      
+
+> Column Normalization
+> Drifting Model
+> Our Method Sinkhorn Iteration
+
+Figure 9: Illustrations on the difference in the velocity field computation between Drifting Model (Alg. 2 in [ 11 ]) and our approach. “ √·” refers to the element-wise square root, and the gray blocks refer to the diagonal mask adopted in [ 11 ]. Drifting Model adopts a heuristic construction with separate row-wise and column-wise Softmax normalizations. Our approach leverages Sinkhorn iteration to compute the barycentric projection. interactions, resulting in a mean-shift-type dynamics driven by local proximity. Such local updates can lead to unstable behavior and require careful tuning to avoid mode collapse. In contrast, W-Flow derives the velocity field from a WGF and instantiates it via Sinkhorn divergence. The resulting dynamics are governed by global OT couplings, which enforce marginal constraints and coordinate particle movement at the distribution level. This yields a principled and globally consistent transport mechanism. 
+
+Distinction from JKO-based WGF models. Another line of work formulates generative processes as WGFs using the JKO scheme [ 8], which corresponds to an implicit time discretization. However, each JKO step requires solving a nontrivial optimization problem, which in practice often necessitates adversarial training, thereby introducing training instability and limiting scalability. Distinct from [ 8], W-Flow adopts an explicit Euler discretization of the flow. By computing the Sinkhorn velocity field V ε via efficient Sinkhorn scaling, the learning problem reduces to a simple regression objective, avoiding inner optimization loops and eliminating the need for adversarial training. This enables scalable learning of a one-step pushforward map. 29 Distinction from Sinkhorn GANs. The use of EOT in generative modeling was popularized by Sinkhorn GAN [ 17 ], which directly employs the Sinkhorn divergence as the target loss function. This approach requires auto-differentiating through the Sinkhorn iterations and backpropagating gradients through the transport plan, inducing numerical instability and memory overhead. W-Flow instead interprets the Sinkhorn divergence as an energy functional that defines the velocity field of the dynamics. The transport plan is treated as an empirical oracle, without backpropagation through Sinkhorn iterations. This avoids instability and allows the method to scale effectively. 
+
+Distinction from moment matching. Generative Moment Matching Networks (GMMNs) [ 34 ]learn generators through particle updates driven by the squared MMD, which can be viewed as an instance of the MMD-based variant of W-Flow in Table 1. However, MMD relies on kernel-based interactions between particles, which can suffer from the curse of dimensionality and yield vanishing gradients when the current pushforward distribution is far from the target, as also reflected in our ablation experiments. Inductive Moment Matching [ 70 ] performs kernel-based moment matching along a prescribed static interpolation between the prior and target distributions. As a result, it inherits the same kernel-related limitations and typically requires multiple pushforward sampling steps to simulate transitions along the interpolator. W-Flow instead leverages the OT-based dynamics and directly parametrizes a one-step map that does not require any intermediate simulations at inference time. 
+
+## C Additional implementation details 
+
+ImageNet experiments. We provide detailed hyperparameters and configurations in Table 5. Note that we largely follow the configurations and setups adopted in [ 11 ], without extensive hyperparameter tuning. We conduct experiments on 8 Nvidia H100 GPU nodes, where each GPU has 80GB of memory. The training on L/2 takes around 3 days. 
+
+FFHQ experiments. For the FFHQ experiments, we operate in the 512-dimensional latent space of a pretrained Adversarial Latent Autoencoder (ALAE), utilizing a training split of 60,000 images. The generator is parameterized as a 4-layer MLP with hidden dimensions of 1024, utilizing LayerNorm and SiLU activations in the hidden blocks. Models are trained using the AdamW optimizer with a constant learning rate of 2 × 10 −4, β1 = 0 .9, β2 = 0 .95 , and zero weight decay. We apply gradient clipping at 5.0 and maintain an exponential moving average (EMA) of the weights with a decay rate of 0.999. During training, we use a batch size of N = 64 for the generated particles and M = 64 for the target particles, with a fixed step size of η = 1 . For the Sinkhorn divergence, we use the quadratic cost with an entropy regularization parameter ε = 0 .02 , with Sinkhorn iteration 10. Consistent with Sec. 3.3, we explicitly use the two-batch debiased self-transport estimator, avoiding any heuristic diagonal masking. We evaluate this setup on two distinct tasks: domain transfer and mode coverage, as shown in Sec. 4.3. For the domain transfer task, we map a source distribution of senior faces (ages 55–100) to a target distribution of young adult faces (ages 18–30). The initial particles are drawn directly from the source data distribution, and we apply the residual identity initialization by zero-initializing the final layer of the MLP to learn the residual update. For the mode coverage experiment, we perform unconditional generation starting from a standard Gaussian prior. The target batches are constructed to be highly imbalanced, comprising 95% senior faces and 5% child faces (ages 0–12). In this setting, the standard network initialization is used without the residual connection. 
+
+Settings for plotting Fig. 2 (b). We train W-Flow with the Sinkhorn divergence on toy datasets for 20000 iterations, saving a checkpoint every 400 iterations. This yields a sequence of parameter vectors {θk}Kk=0 , where K = 50 . We visualize the Sinkhorn-divergence energy landscape over a two-dimensional affine slice of the parameter space. Each point (x, y ) on the xy -plane is mapped to a parameter vector θx,y , and the corresponding height is given by Sε(qθx,y , p ), where qθx,y denotes the model distribution induced by θx,y .We construct the xy -grid as follows. First, we place the training trajectory along the x-axis by assigning checkpoint θk to coordinate (k, 0) for k = 0 , . . . , K . Let 
+
+dk = θk+1 − θk, k = 0 , . . . , K − 1,
+
+30 Table 5: Configurations and hyperparameters for ImageNet experiments. 
+
+Ablation setup (Table 2) W-Flow B/2 (Table 3) W-Flow L/2 (Table 3) W-Flow XL/2 (Table 3) 
+
+Generator Architecture 
+
+arch DiT-B/2 DiT-B/2 DiT-L/2 DiT-L/2 input size 32 ×32 ×4 32 ×32 ×4 32 ×32 ×4 32 ×32 ×4patch size 2×2 2×2 2×2 2×2hidden dim 768 768 1024 1024 depth 12 12 24 24 register tokens 16 16 16 16 style embedding tokens 32 32 32 32 
+
+Feature Encoder 
+
+architecture ResNet ResNet ResNet ResNet SSL pre-train method latent-MAE latent-MAE latent-MAE latent-MAE ResNet: input size 32 ×32 ×4 32 ×32 ×4 32 ×32 ×4 32 ×32 ×4ResNet: conv 1 stride 1 1 1 1ResNet: base width 256 640 640 640 ResNet: block type bottleneck ResNet: blocks / stage [3, 4, 6, 3] ResNet: size / stage [32 2, 16 2, 8 2, 4 2]MAE: masking ratio 50% MAE: pre-train epochs 192 1280 1280 1280 classification finetune No 3k steps 3k steps 3k steps 
+
+Generator Optimizer 
+
+optimizer AdamW ( β1 = 0.9, β2 = 0.95) learning rate 2e-4 4e-4 4e-4 3e-4 weight decay 0.01 0.0 0.01 0.01 warmup steps 5k 10k 10k 10k gradient clip 2.0 2.0 2.0 2.0 training steps 30k 200k 200k 200k training epochs 100 1280 1280 1280 EMA decay 0.999 0.999 0.999 0.999 
+
+Training Loss Computation 
+
+class labels Nc 64 128 128 128 positive samples Npos 64 64 64 128 generated samples Nneg 64 64 64 64 effective batch B (Nc×Nneg ) 4096 8192 8192 8192 iteration L 10 10 1 1regularization ε 0.05 0.05 0.05 0.01 step size η 1.0 1.0 1.0 1.0 
+
+CFG Configuration 
+
+train: CFG w range [0 , 3] [0 , 3] [0 , 3] [0 , 3] 
+
+train: CFG w sampling p(w)∝(w + 1) −3 p(w) ∝ (w + 1) −5 50%: w=0 , 50%: p(w)∝(w + 1) −3 20%: w=0 , 80%: p(w)∝(w + 1) −4
+
+train: uncond samples Nuncond 16 32 32 32 inference: CFG w search [0.0, 2.5] 
+
+denote the displacement directions along the checkpoint trajectory. We then sample a random direction 
+
+v in parameter space and project it onto the orthogonal complement of span {d0, . . . , d K−1}, followed by normalization. This direction v is used as a common transverse direction for the y-axis. For each interval x ∈ [k, k + 1] , we interpolate along the local trajectory direction dk and extend transversely along v:
+
+θx,y = θk + ( x − k)dk + yv, k ≤ x ≤ k + 1 , −Y ≤ y ≤ Y. 
+
+This defines the landscape grid over 0 ≤ x ≤ K and −Y ≤ y ≤ Y , while ensuring that the saved checkpoints lie exactly on the x-axis. To visualize the landscape beyond the training trajectory, we further extend the x-axis to −X ≤ x ≤
+
+K + X. For the left extension −X ≤ x ≤ 0, we use the initial trajectory direction d0 = θ1 − θ0:
+
+θx,y = θ0 + xd 0 + yv. 
+
+For the right extension K ≤ x ≤ K + X, we use the final trajectory direction dK−1 = θK − θK−1:
+
+θx,y = θK + ( x − K)dK−1 + yv. 
+
+Together, this construction yields a continuous two-dimensional slice of the parameter space on which we evaluate and plot the Sinkhorn-divergence energy. 
+
+## D Sampling throughput comparison 
+
+We compare our one-step W-Flow against multi-step diffusion model SiT [ 41 ] and LightningDiT [ 64 ]in terms of actual sampling throughput measured by wallclock time. We benchmark on a single Nvidia H100 GPU with batch size 4 for all models. For SiT-XL/2 and LightningDit-XL/2, we adopt 31 250 sampling steps with CFG enabled, strictly follow the configuration in the original papers [ 41 , 64 ]that leads to a reported FID of 2.06 and 1.35, respectively. Note that we also include the latent preparation and VAE decoding time when recording the actual runtime and calculating the throughput. The results are depicted in Table. 6, where clearly W-Flow yields significant speedup while achieving competitive generation quality measured by FID on ImageNet 256 ×256. Table 6: Generation quality and throughput comparison. Throughput is measured in images per second . The time is recorded as the actual wallclock time . The speedup is computed w.r.t. SiT-XL/2.                     
+
+> FID ↓Throughput (images/sec) ↑Speedup ↑
+> W-Flow, B/2 1.52 107.76 115.87 ×
+> W-Flow, L/2 1.35 84.88 91.27 ×
+> W-Flow, XL/2 1.29 77.88 83.74 ×
+> LightningDiT-XL/2 [64] 1.35 1.14 1.22 ×
+> SiT-XL/2 [41] 2.06 0.93 –
+
+## E Additional experimental results 
+
+Sinkhorn iterations. We provide more ablation results on number of Sinkhorn iterations L used when computing the Sinkhorn barycentric projection (Alg. 2). We follow the same ablation setup in Sec. 4.1 with distribution guidance. The results in Table 7 show that performance improves as the number of Sinkhorn iterations increases, plateauing at around 10 iterations. Table 7: Ablation on Sinkhorn iterations L.      
+
+> LFID, 1-NFE ↓
+> 17.92 57.45 10 7.29 20 7.33
+
+Table 8: Velocity guidance vs. distribution guidance applied to KL divergence.     
+
+> CFG FID, 1-NFE ↓
+> dist. 10.17
+> velo. 7.68
+
+Table 9: Ablation on ε with ℓ2
+
+OT cost.      
+
+> εFID, 1-NFE ↓
+> 0.025 7.19 0.05 7.16 0.075 7.40
+
+Velocity guidance. We further show in Table 8 that the proposed velocity guidance not only enhances the performance of Sinkhorn divergence-driven WGF, but also that of KL divergence. This observation aligns with our theoretical analysis in Appendix B.3, where we draw a connection to the exponentially tilted target distribution when using velocity guidance with KL divergence. Note that KL-divergence with velocity guidance also outperforms the design in [ 11 ] with 8.46 FID, further highlighting the significance of our principled WGF framework. 
+
+Entropic regularization parameter ε. We provide more results under the ablation study setting for the entropic regularization parameter ε with the ℓ2 distance cost, under velocity guidance. As shown in Table 9, the ℓ2 distance OT cost yields consistently higher FIDs than the quadratic OT cost, while both of them achieve the best performance under ε = 0 .05 .
+
+## F Additional generated samples 
+
+In this section, we provide additional generated image samples. We provide uncurated samples on ImageNet 256 ×256 in Fig. 10 and Fig. 11, and additional samples in Fig. 12 with a larger guidance scale. We provide uncurated samples on FFHQ for the mode coverage experiment in Fig. 13 and Fig. 14 for Drifting Model and our W-Flow, respectively. 
+
+## G Limitations & Broader impacts 
+
+Limitations. While W-Flow achieves strong one-step generation performance, several limitations remain. First, our empirical evaluation is focused on ImageNet 256 ×256 and FFHQ; extending the framework to higher-resolution, text-conditioned, video, or other multimodal generation settings 32 Class 012: house finch, linnet, Carpodacus mexicanus Class 031: tree frog, tree -frog              
+
+> Class 022: bald eagle, American eagle, Haliaeetus leucocephalus Class 992: agaric
+> Class 698: palace Class 323: monarch, …, Danaus plexippus
+> Class 927: trifle Class 985: daisy
+> Class 975: lakeside, lakeshore Class 001 : g oldfish, Carassius auratus
+> Class 113 :snail Class 980 : v olcano
+
+Figure 10: Uncurated samples generated by W-Flow, L/2 with CFG w = 0 .15 .remains future work. Second, training still requires pretrained feature encoders or autoencoders in our large-scale experiments, and the choice of the feature encoders remains heuristic. Third, our theoretical convergence result analyzes the particle dynamics under regularity and asymptotic 33 Class 130 : flamingo Class 829 : streetcar, tram, tramcar, trolley, trolley car 
+
+Class 014: Indigo bunting, …, Passerina cyanea Class 090: lorikeet 
+
+Class 024: great grey owl, great gray owl, Strix nebulosa Class 0 84: peacock 
+
+Class 979: valley, vale Class 973: coral reef 
+
+Class 970: alp Class 958: hay 
+
+Class 042: agama Class 649: megalith, megalithic structure Figure 11: Uncurated samples generated by W-Flow, XL/2 (Top) and B/2 (Bottom) with CFG 
+
+w = 0 .15 .assumptions, and does not fully characterize finite-network optimization or finite-compute training in high-dimensional neural generators. 34 Broader impacts. This work advances fast high-fidelity generative modeling by reducing sampling from many iterative steps to a single generator evaluation, which can lower latency and inference cost and make generative models more accessible for creative tools, simulation, data augmentation, and domain-transfer applications. At the same time, improved image generation can also amplify risks associated with synthetic media, including impersonation, disinformation, biased representations, and privacy concerns, especially in face-related applications such as age translation. Responsible deployment should therefore include safeguards such as provenance tracking or watermarking, clear usage restrictions, dataset and model documentation, consent-aware use of face data, and monitoring or filtering mechanisms when models are released beyond research settings. 35 Class 829 : streetcar, tram, tramcar, trolley, trolley car 
+
+Class 291 : lion, king of beasts, Panthera leo 
+
+Class 263 : Pembroke, Pembroke Welsh corgi 
+
+Class 817 : sports car, sport car 
+
+Class 145 : king penguin, Aptenodytes patagonica Figure 12: Uncurated samples generated by W-Flow, XL/2 with CFG w = 2 .0.36 Figure 13: Uncurated samples generated by Drifting Model in the mode coverage experiment (Sec. 4.3). None of the 100 randomly generated images is a child’s face, showing failure in covering the minority mode. 37 Figure 14: Uncurated samples generated by W-Flow in the mode coverage experiment (Sec. 4.3). 4 of the 100 randomly generated images are child faces, which is close to the 5% child face ratio in the down-sampled population. 38

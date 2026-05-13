@@ -1,0 +1,1677 @@
+Title: Principled Design of Diffusion-based Optimizers for Inverse Problems
+
+URL Source: https://arxiv.org/pdf/2605.11506v1
+
+Published Time: Wed, 13 May 2026 00:43:39 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+# Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Julio Oscanoa 1 * Irmak Sivgin 2 * Cagan Alkan 2 * Daniel Ennis 3
+
+John Pauly 2 Mert Pilanci 2 † Shreyas Vasanawala 3 † 
+
+Abstract 
+
+Score-based diffusion models achieve state-of-the-art performance for inverse problems, but their practical deployment is hindered by long infer-ence times and cumbersome hyperparameter tun-ing. While pretrained diffusion models can be reused across tasks without retraining, inference-time hyperparameters such as the noise sched-ule and posterior sampling weights typically re-quire ad-hoc adjustment for each problem setup. We propose principled reparameterizations that induce invariances, allowing the same hyperpa-rameters to be reused across multiple problems without re-tuning. In addition, building on the RED-diff framework, which reformulates poste-rior sampling as an optimization problem, we further develop the OptDiff pipeline. OptDiff provides a simplified tuning framework that facil-itates the integration of convex optimization tools to accelerate inference. Experiments on image reconstruction, deblurring, and super-resolution show substantial speedups and improved image quality. 
+
+1. Introduction 
+
+The flexibility and expressiveness of diffusion models (Song et al., 2021; Ho et al., 2020) as powerful image priors have made them strong candidates for solving inverse problems, where the goal is to reconstruct data from incomplete and noisy measurements (Jalal et al., 2021; Chung et al., 2022; Mardani et al., 2023). The key idea is to leverage a pre-trained diffusion model to sample from the posterior distri-bution. However, existing diffusion-based inverse solvers face two major challenges: slow convergence and strong dependence on hyperparameter selection. The iterative sam-pling process often requires hundreds of steps, resulting in 
+
+> *
+
+Equal contribution †Equal senior contribution 1Department of Bioengineering 2Deparment of Electrical Engineering 
+
+> 3
+
+Department of Radiology, Stanford University, USA. Correspon-dence to: Julio Oscanoa <joscanoa@stanford.edu >, Irmak Sivgin 
+
+<isivgin@stanford.edu >.
+
+Preprint. May 13, 2026. 
+
+high computational cost that limits practical deployment in time-sensitive applications. Moreover, reconstruction qual-ity is highly sensitive to hyperparameter choices, and poor selection can lead to instability or degraded performance (Zheng et al., 2025; Zhang et al., 2025). In this work, we address these challenges through two complementary contributions. First, inspired by maximal update parameterization ( μP) (Yang & Hu, 2020), which stabilizes training hyperparameters for large neural net-works, we introduce principled reparameterizations that stabilize inference-time hyperparameters in diffusion-based inverse solvers. These reparameterizations induce invari-ances across problem configurations, substantially reducing the need for manual tuning. Second, building on the RED-diff framework (Mardani et al., 2023), which reformulates posterior sampling as a stochastic optimization problem, we propose the Optimizers with Diffusion-based priors (Opt-Diff) pipeline for robust hyperparameter selection. This framework enables the integration of established tools from the optimization literature to design faster inverse solvers. We show that the resulting methods outperform state-of-the-art diffusion-based approaches in both reconstruction quality and inference speed. 
+
+1.1. Contributions 
+
+• We introduce principled reparameterizations of inference-time hyperparameters for diffusion-based in-verse solvers. We organize these into two families: (i) noise schedule hyperparameters , such as the start and stop noise levels σmax and σmin , and (ii) sampler hyperparameters , such as the step size α and regular-ization weight λ. The proposed reparameterizations induce invariances across problem setups, enabling ro-bust hyperparameter reuse and substantially reducing the need for manual tuning. • We develop a principled theory-driven framework for noise schedule design in inverse problems. By ana-lyzing reverse diffusion through the lens of spectral auto-regression (Dieleman, 2024; Falck et al., 2025), we derive tolerance-based criteria for selecting σmax 
+
+and σmin that adapt naturally to the spectral properties of the data and the measurement model. 1
+
+> arXiv:2605.11506v1 [cs.CV] 12 May 2026
+
+Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Figure 1. (Top) Comparison of standard and proposed hyperparameters for different experimental settings. Our proposed reparame-terization ( τmax , τ min ) for noise schedule hyperparameters ( σmax , σ min ) produces aligned normalized PSNR curves across different inverse problem settings, showcasing invariance of OptDiff parameters. Similarly, our reparameterized sampler hyperparameter ˆλ
+
+yield aligned curves for different iteration intervals, implying that a single ˆλ value suffices during the entire reverse process in OptDiff. 
+
+(Bottom) Runtime comparisons between OptDiff and other diffusion-based inverse problem solvers. Our method OptDiff achieves the best runtime-PSNR tradeoff. 
+
+• Building on the RED-diff formulation, we propose the OptDiff pipeline for simplified and robust hyperparam-eter selection. OptDiff combines invariant reparam-eterizations with an optimal hyperparameter scheme, allowing noise schedule and sampler hyperparameters to be decoupled and tuned efficiently using a small tuning set. • Using the OptDiff pipeline, we demonstrate that in-corporating advanced convex optimization techniques leads to significantly faster inference while maintain-ing or improving reconstruction accuracy. Our results show consistent reductions in both the number of func-tion evaluations and overall runtime. • We evaluate OptDiff across a range of inverse problems, including MRI reconstruction, deblurring, and super-resolution. Across all tasks, our approach achieves state-of-the-art runtime performance while maintaining competitive or improved reconstruction quality. 
+
+2. Background 
+
+2.1. Score-based diffusion models 
+
+Score-based diffusion models involve forward and reverse diffusion processes that are formulated by stochastic differ-ential equations (SDEs). In particular, the forward process for t ∈ [0 , T ] is represented by (Song et al., 2020) 
+
+dxt = b (xt, t ) d t + pa(t) d Wt, (1) where x0 ∼ pdata , x0 ∈ Rn, and Wt is an n-dimensional Wiener process. For sufficiently large T , the distribution 
+
+pT (xT ) approaches an isotropic Gaussian distribution. The reverse diffusion process recovers the data distribution p(x0)
+
+from pure noise via the corresponding reverse SDE (Ander-son, 1982) 
+
+dxt = ( b (xt, t ) − a(t)∇xt log pt(xt)) d t + pa(t) d ¯Wt.
+
+(2) where ∇xt log pt(xt) is the score function. In practice, the score function is approximated by a neural network ϵθ (xt; t)
+
+which is typically trained using denoising score matching (Vincent, 2011): 
+
+arg min 
+
+> θ
+
+Et, x0,xt
+
+"
+
+−ϵθ (xt; t)
+
+σt
+
+− ∇ xt log pt(xt|x0)
+
+> 22
+
+#
+
+.
+
+(3) where σt is the standard deviation of the perturbation kernel 
+
+pt(xt|x0).
+
+2Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+2.2. Diffusion models for inverse problems 
+
+Inverse problems are described according to a forward model y = A(x0) + η, where y ∈ Rm represents the measurements, x0 ∈ Rn is the signal to be estimated, η ∼N (0, σ 2 
+
+> η
+
+I) is the measurement noise, and A : Rn → Rm
+
+is the measurement operator. The goal in inverse problems is to recover the underlying signal x0 from a potentially incomplete set of measurements y.Diffusion-based inverse problem solvers aim to represent and sample from p(x0|y) in a computationally efficient manner. Given the measurements y, the conditional score function can be expressed using the Bayes’ Theorem as 
+
+∇xt log pt(xt|y) = ∇xt log pt(xt) + ∇xt log pt(y|xt).
+
+(4) Then, the reverse process in (2) can be modified to yield samples from p(x0|y) (Song et al., 2022). The inverse prob-lem scenario additionally requires evaluating the intractable likelihood score function ∇xt log pt(y|xt) (Chung et al., 2022). To address this challenge, diffusion-based inverse problem solvers seek to approximate the likelihood score function efficiently using various strategies. A comprehen-sive overview of these methods is provided in the survey by Daras et al. (2024). 
+
+2.3. Regularization by denoising diffusion (RED-diff) 
+
+Mardani et al. (2023) propose a variational inference driven formulation called Regularization by Denoising Diffusion (RED-diff) for solving inverse problems, converting dif-fusion sampling into an optimization problem. RED-diff represents the complex posterior distribution p(x0|y) with a variational distribution q ∼ N (μ, σ 2I), and minimizes the KL divergence between them. The final optimization objective is: 
+
+min  
+
+> μ
+
+∥y − A (μ)∥22 + Et, ϵ
+
+h
+
+λt ∥ϵθ (xt; t) − ϵ∥22
+
+i
+
+(5) where we absorb σ2 
+
+> η
+
+into λt, and λt is a time-dependent weighting, for which Mardani et al. (2023) propose a signal-to-noise ratio (SNR)-based formulation. 
+
+3. Theory 
+
+We develop a theoretical framework that yields invariant reparameterizations for diffusion-based inverse solvers. 
+
+3.1. Noise schedule 
+
+While noise schedule design has been extensively studied for unconditional generation (Nichol & Dhariwal, 2021; Song et al., 2021; Karras et al., 2022), its extension to inverse problems remains largely unexplored. We develop princi-pled guidelines for selecting the noise schedule parameters       
+
+> Figure 2. (Top) Due to the power-law spectrum of natural images (van der Schaaf & van Hateren, 1996), the reverse diffusion pro-cess acts as a spectral auto-regression , recovering low-frequency components first and progressively reconstructing higher frequen-cies conditioned on them. (Bottom) This perspective motivates a
+> principled noise schedule design , adapting the start and stop noise levels to measured low-frequency content and dataset noise floor. Furthermore, we propose reparameterizations ( τmax ,τmin ) that enable robust parameter reuse across problem setups.
+
+σmax and σmin by viewing reverse diffusion as spectral auto-regression (Dieleman, 2024; Falck et al., 2025) in the inverse problem setting (Figure 2). We analyze the estimation error covariance and derive tolerance-based reparameterizations that generalize across problem setups. 
+
+Setup. In Variance Exploding (VE) diffusion, we observe 
+
+xt = x0 + σtn, n ∼ N (0 , I). Let Σ ⪰ 0 be the prior covariance, the LMMSE-optimal estimator yields the co-variance posterior map: 
+
+Φ( Σ; σt) = Σ − Σ(Σ + σ2 
+
+> t
+
+I)−1Σ. (6) 3.1.1. S TART NOISE LEVEL σmax 
+
+Assume the low-frequency (LF) content of x0 is known exactly, and let the prior ΣH|L be the covariance of the high-frequency (HF) components conditioned on LF. Define the covariance residual 
+
+∆max  
+
+> t
+
+:= ΣH|L − Φ( ΣH|L; σt) ⪰ 0,
+
+3Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+and seek the region where this residual is small, meaning that the choice of σt has negligible effect on estimation. We therefore start the reverse diffusion process at a noise level where the first step reduces the covariance by at most a fraction τmax ∈ (0 , 1) of the prior covariance. 
+
+Theorem 3.1 (Start bound) . If ∆max  
+
+> t
+
+⪯ τmax ΣH|L, then 
+
+σ2max ≥ 1 − τmax 
+
+τmax 
+
+νmax 
+
+ ΣH|L
+
+, (7) where νmax (·) denotes the maximum eigenvalue. 
+
+Corollary 3.2 (WSS/PSD) . Under a WSS model with ideal LF mask, ΣH|L = diag( S(ω) : ω ∈ ΩH ), where S(ω)
+
+denotes the power spectral density of the signal. In this case, 
+
+σ2max ≥ 1 − τmax 
+
+τmax 
+
+max 
+
+> ω∈ΩH
+
+S(ω). (8) The proofs are provided in Appendix B and C. In practice, we choose σmax at the lower bound, since larger values provide little reduction in error covariance (smaller 
+
+∆max  
+
+> t
+
+) but increase the number of reverse diffusion steps. Expressing the bound in terms of the tolerance τmax ensures natural scaling with the spectral density and yields a more robust criterion. 3.1.2. S TOP NOISE LEVEL σmin 
+
+Assume the data has an additive white noise floor σ2 
+
+> s
+
+, and let Σs denote the covariance of the clean signal. The best attainable posterior (after removing VE diffusion noise) is 
+
+Σ0 := Φ( Σs; σs).
+
+Define the covariance residual 
+
+∆min  
+
+> t
+
+:= Φ( Σs;
+
+q
+
+σ2 
+
+> s
+
++ σ2 
+
+> t
+
+) − Σ0 ⪰ 0,
+
+and seek the region where this residual is small, i.e., the current posterior is sufficiently close to the best attainable posterior. We stop the reverse diffusion once this distance is less than a fraction τmin ∈ (0 , 1) .
+
+Theorem 3.3 (Stop bound) . If ∆min  
+
+> t
+
+⪯ τmin Σ0 and 
+
+νmax := νmax (Σs) satisfies νmax > τ min σ2 
+
+> s
+
+, then 
+
+σ2min ≤ κ(σs) := τmin σ2 
+
+> s
+
+(νmax + σ2 
+
+> s
+
+)
+
+νmax − τmin σ2
+
+> s
+
+, (9) 
+
+If νmax ≤ τmin σ2 
+
+> s
+
+, the bound is vacuous. 
+
+Corollary 3.4 (High-SNR regime) . If νmax ≫ σ2 
+
+> s
+
+, then 
+
+κ(σs) ≈ τmin σ2 
+
+> s
+
+, so that 
+
+σ2min ≲ τmin σ2 
+
+> s
+
+. (10) The proofs are provided in Appendix D and E. In practice, we set σmin at the upper bound, since smaller values already yield a posterior sufficiently close to the best attainable. Expressing the bound in terms of τmin ensures natural scaling with the dataset’s spectral characteristics, yielding a robust stopping criterion. 
+
+3.2. Sampler hyperparameters 
+
+Similarly, we propose a reparameterization of the sampler hyperparameters for the RED-diff objective in (5) . We show the usefulness of our proposed parameterization from an invariance and common descent direction (Fliege & Svaiter, 2000). Originally, RED-diff solves: 
+
+min  
+
+> μ
+
+f (μ) + Et[λt g(μ; t)] , f (μ) = ∥y − A (μ)∥22.
+
+At iteration k, let ∇f k = ∇f (μk), ∇gk = ∇g(μk; tk),
+
+λk = λtk . Then the stochastic gradient descent (SGD) update is 
+
+μk+1 ← μk − αk  ∇f k + λk∇gk (11) 
+
+Proposed reparameterization. Defining rk := 
+
+∥∇ f k∥2/∥∇ gk∥2, we use 
+
+αk = ˆαk
+
+∥∇ f k∥2
+
+, λk = ˆλ r k, (12) with ˆαk, ˆλ > 0, yielding the unit-gradient update 
+
+∆μk = −ˆαk
+
+ ∇f k
+
+∥∇ f k∥2
+
++ ˆλ ∇gk
+
+∥∇ gk∥2
+
+
+
+. (13) 
+
+Theorem 3.5 (Re-scaling invariance) . Let ϕf , ϕ g : R → R
+
+be strictly increasing C1 functions and set ef = ϕf ◦ f ,
+
+eg = ϕg ◦ g. Applying (12) –(13) to ( ef , eg) yields the same update as with (f, g ); the step’s direction and length are invariant to monotone reparameterizations. 
+
+The proof is provided in Appendix F. 
+
+Corollary 3.6 (Practical advantage over RED-diff) . In RED-diff, the prior gradient often can be modeled as ∇g(μ; t) = 
+
+ϕ′(t) q(μ; t) with a noise-level factor ϕ′(t) (e.g., via σt). Normalization cancels this factor: 
+
+∇g(μ; t)
+
+∥∇ g(μ; t)∥2
+
+= q(μ; t)
+
+∥q(μ; t)∥2
+
+.
+
+Thus the data–prior balance is the constant ˆλ across all 
+
+t, eliminating the need to handcraft/tune an SNR-based schedule λt and avoiding searches over functional forms (linear, square-root, logarithmic, etc.). 
+
+4Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Remark 3.7 (Interpretation) . The update depends only on the directions of ∇f k and ∇gk, since both gradients are normalized. This cancels out any effect of scaling (e.g., gains, noise levels), so a single ˆλ generalizes across forward models and diffusion levels. This idea is related to normalized SGD methods (Murray et al., 2017; Cutkosky & Mehta, 2020), which rescale up-dates to remove dependence on gradient magnitudes, and to the Muon optimizer (Jordan et al., 2024), which enforces normalization and orthogonalization of updates to stabilize training. Our method brings these normalization principles to the diffusion-based composite objective: instead of nor-malizing a single gradient, we normalize both components 
+
+(data consistency and diffusion prior) so that their relative contribution is controlled solely by the trade-off parame-ter ˆλ.
+
+Theorem 3.8 (Common descent condition) . Let dk =
+
+∇f k + λk∇gk where λk > 0 and cos ϑk = ⟨∇ f k ,∇gk ⟩∥∇ f k ∥ ∥∇ gk ∥ .Then common descent ( ⟨∇ f k, d k⟩ > 0 and ⟨∇ gk, d k⟩ > 0)holds if 
+
+
+
+cos ϑk ≥ 0 : λk > 0 (all positive λk are valid ),
+
+cos ϑk < 0 : λk ∈  rk(− cos ϑk), r k(−1/ cos ϑk).
+
+The proof is provided in Appendix G. 
+
+Corollary 3.9 (Simplifications under two-sided normaliza-tion) . Under (12) , λk = ˆλ r k with global ˆλ > 0, and Theorem 3.8 reduces to 
+
+ˆλ ∈   − cos ϑk, −1/ cos ϑk whenever cos ϑk < 0.
+
+The case cos ϑk ≥ 0 is equivalent to Theorem 3.8. 
+
+We display averaged common descent bounds and different values for ˆλ in Figure 3. A single global ˆλ can guarantee common descent and performance drops whenever ˆλ falls out of bounds. 
+
+4. OptDiff Pipeline 
+
+The OptDiff pipeline combines invariant reparameteriza-tions (Section 3) with the RED-diff optimization perspective to enable a simplified and robust strategy for hyperparame-ter tuning. We demonstrate its effectiveness by designing a family of efficient optimizers for inverse problems. Below, we outline the pipeline for a given inverse problem setup (e.g., MRI reconstruction with acceleration R = 8 ) and a chosen optimizer (e.g., vanilla gradient descent). 
+
+4.1. Hyperparameter tuning 
+
+A central component of OptDiff is an optimal hyperparam-eter scheme that uses a small tuning set (5 to 10 samples),                           
+
+> Figure 3. Satisfying the common descent condition (Theorem 3.8) leads to higher-PSNR reconstructions. (Left) Standard squared weighting λk= ˆλ/ (SNR k)2produces λk/r ktrajectories that violate the condition bounds (−cos ϑk,−1/cos ϑk), resulting in degraded performance. (Right) The OptDiff invariant formulation yields straight λk/r ktrajectories, simplifying the selection of ˆλ
+> and enabling higher PSNR.
+
+similar to standard grid search, but additionally decouples noise schedule and sampler hyperparameters, and constrains the search space. This procedure also provides an upper-bound performance reference and enables the integration of convex optimization tools for accelerated posterior sampling (Subsection 5.3.2). 4.1.1. O PTIMAL SAMPLER HYPERPARAMETERS 
+
+At each step with update rule from Eq. 11, define U k := 
+
+∇f k ∇gk and wk := αk αkλkT, x∗ is the corre-sponding ground-truth image from the small tuning dataset. We estimate the optimal hyperparameters ˆwk as follows: 
+
+ˆwk = arg min 
+
+> w∈R2+
+
+∥x∗ − (μk − U kw)∥22, (14) which can be solved via non-negative least squares (NNLS). This methodology is flexible and can be extended to incor-porate additional optimization techniques, e.g. momentum and preconditioning. Details in Appendix H. 4.1.2. N OISE SCHEDULE TUNING 
+
+We perform a grid search over the tolerance parameters τmin 
+
+and τmax , which define the noise schedule bounds σmin and 
+
+σmax via (8) and (10) . For practical implementation, we assume a WSS signal model and compute radially averaged power spectral densities. During this step, optimal sampler hyperparameters are used to decouple sampler effects, en-suring a fair and consistent comparison across candidate noise schedules. 5Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+4.1.3. S AMPLER HYPERPARAMETERS TUNING 
+
+Once the noise schedule is fixed, we perform a reduced grid search over the sampler hyperparameters ˆαk and ˆλ. Com-pared to Mardani et al. (2023), our invariant reparameteri-zation eliminates the need to select a heuristic SNR-based schedule for λt, reducing the dimensionality of the search space. In practice, the optimal hyperparameter curves also serve as reference points, allowing the grid search to be restricted to a small neighborhood around these values. 
+
+4.2. Inference 
+
+The selected hyperparameters can be directly applied to the test dataset and reused across different setups without further tuning, as shown in Figure 1. In particular, the same hyperparameters generalize across varying calibration regions, noise levels, accelerations, and sampling masks for the MRI reconstruction (Figure 1 and Appendix J.2). In practice, only the step-size hyperparameter required minor adjustment between setups. 
+
+5. Experiments 
+
+5.1. Datasets and tasks 
+
+We perform evaluation in three main tasks: (1) MRI recon-struction with fastMRI (Knoll et al., 2020), (2) Gaussian deblurring with the ImageNet dataset, (3) Super-resolution with the FFHQ dataset. Further details in Appendix I. 
+
+5.2. Invariance tests 
+
+We evaluate the invariance property of our proposed repa-rameterizations using the fastMRI dataset with random un-dersampling masks at acceleration factor R = 8 . We choose MRI reconstruction as the base task since its flexible acqui-sition setups allow systematic analysis of each component. We conducted the experiments on 10 slices from 10 different patients from the validation subset. 5.2.1. N OISE SCHEDULE HYPERPARAMETERS 
+
+The optimal sampler hyperparameters described in subsec-tion 4.1.1 were used in the following experiments to analyze the impact of the noise schedule in isolation. • Maximum noise level ( σmax ). From (7) and (8) , the optimal σmax depends on the low-frequency compo-nents through the conditional covariance ΣH|L and, under the WSS assumption, on the power spectral den-sity. Enlarging the calibration region modifies ΣH|L,thereby shifting the optimal σmax . To assess invariance, we vary calibration sizes and compare the resulting 
+
+σmax values with their reparameterized counterparts 
+
+τmax .• Minimum noise level σmin . Similarly, Eq. 9 shows that the optimal σmin depends on the measurement noise floor. We test invariance by varying the measure-ment noise level and comparing σmin with the repa-rameterized τmin .
+
+Results. As shown in Figure 1, the τ -parameterizations produce well-aligned curves across conditions, whereas the original σ-parameterizations show large variability. This confirms that our reparameterization scales naturally with the spectral properties of the data and the problem setup. 5.2.2. S AMPLER HYPERPARAMETERS 
+
+As discussed in Section 3.2, inverse solving performance depends on the choice of the weighting function λk, which compensates for variations in the norm of ∇g. Our repa-rameterization cancels any positive rescaling of the prior gradient, thereby removing the need for a handcrafted sched-ule. To test this invariance, we examine whether multiple base values ˆλ ∈ R are required across the reverse diffusion pro-cess. We sweep ˆλ for both the standard update in Eq. 5 with a linear schedule and the normalized update in Eq. 12, evaluating performance over three intervals: k ∈ [0 , 33] ,
+
+[33 , 66] , and [66 , 99] . We use the optimal step size αk as described in subsection 4.1.1. 
+
+Results. Figure 1 shows that with the standard formula-tion, the ˆλ curves are dispersed across intervals, implying that multiple base values are needed. In contrast, our repa-rameterization aligns the curves, demonstrating that a single 
+
+ˆλ suffices across the entire reverse process by accounting for the dynamics of ∥∇ g∥2.
+
+5.3. Ablations 
+
+We conduct performance ablations to evaluate the contribu-tions of (i) our invariant reparameterizations, and (ii) the inclusion of advanced optimization tools. Similar to Sec-tion 5.2, we use the MRI reconstruction at acceleration factor R = 8 with 100 iterations as our base task. 5.3.1. N OISE SCHEDULE AND SAMPLER PARAMETERS 
+
+We compare the reconstruction performance across each λ-weighting method with and without optimized noise sched-ule. We use the default EDM (Karras et al., 2022) noise schedule with σmin = 0 .002 , σmax = 20 as the standard, non-optimized noise schedule. 
+
+Results. Table 1 highlights the performance gains from both our λ-parameterization and noise schedule bounds. Additionally, we provide the upper performance bound ob-tained from optimal hyperparameters (Section 4.1.1). The 6Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Table 1. Comparison of λ weighting methods with and without op-timized noise scheduling. Optimal λ (first row) provides an upper bound on the performance as it requires having access to ground truth x∗ at each step. All other rows use fixed functional forms 
+
+λk = h(SNR k ) or our reparameterization in OptDiff. Across both the optimal and standard noise schedule settings, our λ reparame-terization outperforms all SNR-based λ functions.                                                                                           
+
+> Standard noise schedule Optimized noise schedule
+> λmethod PSNR SSIM PSNR SSIM Optimal 33 .13 ±1.22 0.904 ±0.020 34 .78 ±1.24 0.941 ±0.021
+> Constant 30 .53 ±1.31 0.732 ±0.040 33 .56 ±1.49 0.910 ±0.030
+> Linear 30 .40 ±1.35 0.846 ±0.041 34 .39 ±1.24 0.928 ±0.021
+> Square 29 .62 ±1.18 0.834 ±0.024 32 .35 ±1.29 0.910 ±0.025
+> Square-root 32 .19 ±1.24 0.835 ±0.034 34 .13 ±1.31 0.921 ±0.025
+> Log 31 .98 ±1.82 0.893 ±0.025 34 .36 ±1.25 0.928 ±0.021
+> Ours 32.87 ±1.31 0.895 ±0.026 34.51 ±1.37 0.927 ±0.025
+
+use of the optimized noise schedule uniformly improves all methods, independent of the chosen hyperparameter λ. In both the optimized and standard noise schedule settings, our 
+
+λ reparameterization outperforms all SNR-based functions. 5.3.2. A DVANCED OPTIMIZERS 
+
+OptDiff leverages the RED-diff optimization formula-tion to enable a simplified hyperparameter tuning scheme that makes the incorporation of advanced optimization methods practical. In standard diffusion-based inverse solvers, adding such methods typically introduces addi-tional hyperparameters, further complicating an already high-dimensional and unstable tuning process. By contrast, the invariant reparameterizations and decoupled tuning strat-egy of OptDiff allow these tools to be integrated without increasing tuning complexity. Using this framework, we evaluate the impact of advanced optimization techniques on posterior sampling, focusing on momentum and polynomial preconditioning methods. We consider three configurations: (1) 20 iterations with a single noise instance, (2) 100 iterations with a single noise in-stance, and (3) 20 iterations with five noise instances, which matches the number of function evaluations of the 100-step configuration while enabling faster inference through paral-lelization. 
+
+Results. Table 2 shows the results. Momentum and pre-conditioning improve over vanilla implementation. Increas-ing the number of noise instances yields similar performance to increasing the number of steps, emphasizing that recon-struction quality is primarily determined by the total number of function evaluations. Since noise instances can be paral-lelized, this provides a practical way to accelerate inference. 
+
+Table 2. Optimizer ablations. Performance evaluation for differ-ent optimizers under different compute configurations (steps ×
+
+noise instances). ”Vanilla”, ”Moment”, ”Precond” refer to vanilla optimizer, optimizer with momentum, optimizer with momentum and preconditioner, respectively. The latter consistently improves over the corresponding vanilla updates, and allocating computa-tion across multiple noise instances yields performance close to increasing the number of steps at comparable NFEs.                                                                                                                                            
+
+> 20 steps ×1 noise inst. 20 steps ×5 noise inst. 100 steps ×1 noise inst. PSNR SSIM PSNR SSIM PSNR SSIM RED-diff 29 .7±1.20.84 ±0.03 29 .8±1.20.87 ±0.03 32 .2±1.20.84 ±0.03
+> Optimal Vanilla 30 .1±1.70.89 ±0.04 30 .8±1.70.90 ±0.04 33 .8±1.40.92 ±0.02
+> Moment 31 .8±2.10.89 ±0.04 33 .4±1.90.91 ±0.04 34 .6±1.40.93 ±0.02
+> Precond 32 .3±2.20.90 ±0.05 33 .9±2.00.92 ±0.04 34 .6±1.40.93 ±0.02
+> OptDiff Vanilla 29 .9±1.70.88 ±0.04 30 .1±1.70.89 ±0.04 33 .4±1.60.91 ±0.03
+> Moment 31 .7±2.10.87 ±0.05 33 .0±2.00.91 ±0.04 34 .4±1.30.92 ±0.02
+> Precond 32 .3±2.10.89 ±0.05 33 .2±2.10.92 ±0.04 34 .5±1.40.92 ±0.02
+
+5.4. Baseline methods 
+
+We compare our method versus other state-of-the-art diffusion-based inverse solvers. We evaluate the perfor-mance on three tasks on three different datasets: MRI re-construction on fastMRI, deblurring on ImageNet, super-resolution on FFHQ. 
+
+Results. Visual comparisons and image quality metrics are shown in Figure 4 and Table 3 respectively. Across all number of steps and tasks, OptDiff achieves significantly higher PSNR and SSIM than the baseline methods. In partic-ular, our lowest NFE variant ( 20 × 1 steps) outperforms all the baseline methods at 100 steps in the MRI reconstruction and deblurring tasks. These gains are reflected visually in Figure 4, where OptDiff exhibits cleaner error maps and sharper, more faithful details across all three tasks. OptDiff also offers a strong speed-quality profile. It is either the fastest method or matches the best runtime while achieving higher reconstruction quality (Table 3). This aligns with the runtime comparisons at the bottom of Figure 1, where OptDiff attains the best runtime-PSNR tradeoff. Overall, these results show that our optimization-driven framework improves both efficiency and quality, providing a strong alternative to existing diffusion-based approaches for inverse problems. 
+
+6. Limitations 
+
+Our work has limitations that suggest directions for future research. While the proposed reparameterizations can in principle be extended to other posterior sampling algorithms, the integration of optimization tools is less straightforward, since these techniques are not naturally formulated as opti-mization problems. Extending our approach to more general diffusion-based solvers that lack an optimization structure would require additional theoretical justification. Another limitation arises from the assumptions underly-7Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Table 3. Comparison with baseline methods at 20 and 100 steps. We report mean ± standard deviation across test set images for PSNR/SSIM and per-image runtime. Shaded cells indicate methods that are not applicable (see Appendix I). The results indicate that OptDiff achieves the best overall performance across tasks.                                                                                                                                                                                                                                                                                                                                                                                               
+
+> 20 steps Method MRI Recon R=8 (fastMRI) Deblurring (ImageNet) Super-resolution (FFHQ) PSNR (dB) SSIM Time (s) PSNR (dB) SSIM Time (s) PSNR (dB) SSIM Time (s)
+> DPS (Chung et al., 2022) 27 .36 ±1.48 0.682 ±0.054 3.45 ±0.55 24 .41 ±4.72 0.614 ±0.205 5.58 ±1.25 28 .80 ±2.92 0.819 ±0.070 1.79 ±0.90
+> DDRM (Kawar et al., 2022) 31 .89 ±2.98 0.895 ±0.043 2.61 ±0.72 30 .51 ±2.25 0.859 ±0.042 1.09 ±0.16
+> Pi-GDM (Song et al., 2023) 28 .04 ±1.24 0.707 ±0.062 3.96 ±0.55 32 .93 ±3.23 0.904 ±0.053 8.22 ±0.66 30 .94 ±2.45 0.874 ±0.040 2.47 ±0.18
+> DDS (Chung et al., 2024) 25 .42 ±1.38 0.765 ±0.031 6.59 ±0.71 29 .14 ±3.67 0.852 ±0.073 3.10 ±0.25 29 .44 ±2.25 0.843 ±0.044 1.13 ±0.10
+> RED-diff (Mardani et al., 2023) 29 .43 ±1.58 0.825 ±0.042 1.84 ±0.55 31 .57 ±3.51 0.895 ±0.035 2.52 ±0.79 29 .54 ±2.08 0.831 ±0.041 0.98 ±0.14
+> DAPS (Zhang et al., 2025) 29 .85 ±1.64 0.806 ±0.055 1.97 ±0.56 33 .24 ±1.41 0.877 ±0.035 8.57 ±2.23 27 .34 ±1.17 0.612 ±0.027 2.49 ±0.18
+> OptDiff (Ours) 33 .23 ±2.08 0.903 ±0.046 1.87 ±0.60 40 .07 ±3.38 0.977 ±0.007 1.59 ±0.43 31 .23 ±2.57 0.879 ±0.039 0.72 ±0.084
+> 100 steps Method MRI Recon R=8 (fastMRI) Deblurring (ImageNet) Super-resolution (FFHQ) PSNR (dB) SSIM Time (s) PSNR (dB) SSIM Time (s) PSNR (dB) SSIM Time (s)
+> DPS (Chung et al., 2022) 30 .80 ±1.55 0.755 ±0.088 16 .72 ±0.54 27 .51 ±4.92 0.734 ±0.163 40 .48 ±0.63 30 .50 ±2.62 0.866 ±0.044 8.56 ±0.69
+> DDRM (Kawar et al., 2022) 36 .24 ±3.23 0.953 ±0.019 11 .79 ±0.75 31 .08 ±2.31 0.869 ±0.039 5.34 ±0.59
+> Pi-GDM (Song et al., 2023) 28 .88 ±1.27 0.734 ±0.078 19 .27 ±0.55 33 .85 ±2.84 0.928 ±0.029 40 .61 ±1.61 30 .35 ±2.72 0.863 ±0.047 12 .37 ±0.44
+> DDS (Chung et al., 2024) 28 .92 ±1.28 0.828 ±0.027 22 .46 ±8.65 30 .54 ±3.97 0.881 ±0.061 13 .40 ±1.65 29 .09 ±2.35 0.835 ±0.050 4.77 ±0.22
+> RED-diff (Mardani et al., 2023) 31 .92 ±1.44 0.840 ±0.034 8.37 ±0.75 35 .94 ±4.03 0.955 ±0.020 11 .69 ±0.78 31 .25 ±2.37 0.875 ±0.037 5.30 ±0.65
+> DAPS (Zhang et al., 2025) 31 .38 ±1.42 0.771 ±0.057 9.68 ±0.71 35 .03 ±2.27 0.921 ±0.017 30 .86 ±0.24 29 .63 ±1.73 0.763 ±0.028 18 .90 ±0.48
+> OptDiff (Ours) 34 .93 ±1.38 0.921 ±0.029 8.58 ±0.59 41 .04 ±3.41 0.982 ±0.006 7.52 ±0.72 31 .84 ±2.55 0.888 ±0.037 3.22 ±0.38
+
+Figure 4. Performance comparison versus baseline methods. OptDiff demonstrates superior image quality compared to baseline methods, as shown by the error maps and highlighted image details. Notably, even with only 20 steps, OptDiff outperforms baselines that use a greater number of steps. 
+
+ing our noise-schedule design. Our analysis assumes that the measurements preserve sufficient low-frequency compo-nents, which allows us to reduce the maximum noise level 
+
+σmax without losing relevant information. This assumption holds for many inverse problems, including the ones studied here such as MRI reconstruction, deblurring, and super-resolution. However, it does not generalize to all inverse problems, e.g., image inpainting. In such cases, the start and stop criteria may not be able to be reduced and we would basically get the default noise schedule from unconditional generation. 
+
+7. Conclusion 
+
+We introduced OptDiff, a framework for improving the prac-tical robustness and computational efficiency of diffusion-based inverse solvers through principled reparameterization and the incorporation of optimization tools. Our results show that invariant reparameterizations and a decoupled tuning process substantially reduce sensitivity to hyperpa-rameter selection by restricting the effective search space. This leads to more stable performance across inverse prob-lem setups and enables hyperparameter reuse with minimal retuning. Building on the RED-diff optimization perspec-tive, OptDiff further enables the integration of advanced op-timization tools without increasing tuning complexity, sug-gesting promising directions for future work such as adap-tive preconditioning and higher-order optimization methods (Nocedal & Wright, 2006; Boyd & Vandenberghe, 2004). 8Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Impact Statement 
+
+This paper presents work whose goal is to advance ma-chine learning methods for solving inverse problems, with a focus on making diffusion-based solvers faster and less sensitive to inference-time hyperparameters. Potential posi-tive impacts include more practical reconstruction pipelines in imaging applications. Potential risks include misuse of enhanced reconstruction capabilities in high-stakes settings. Standard safeguards and further domain-specific validation are required, such as expert radiologist evaluations before deployment in clinical settings. 
+
+References 
+
+Anderson, B. D. O. Reverse-time diffusion equation models. 
+
+Stochastic Processes and their Applications , 12(3):313– 326, 1982. Bhotto, Z. A., Ahmad, M. O., and Swamy, M. N. S. An improved fast iterative shrinkage thresholding algorithm for image deblurring. SIAM Journal on Imaging Sciences ,8(3):1640–1657, 2015. Boyd, S. and Vandenberghe, L. Convex Optimization . Cam-bridge University Press, 2004. Choi, J., Kim, S., Jeong, Y., Gwon, Y., and Yoon, S. ILVR: Conditioning method for denoising diffusion probabilistic models. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , 2021. Chung, H., Kim, J., McCann, M. T., Klasky, M. L., and Ye, J. C. Diffusion posterior sampling for general noisy in-verse problems. In International Conference on Learning Representations , 2022. Chung, H., Lee, S., and Ye, J. C. Decomposed diffusion sampler for accelerating large-scale inverse problems. In 
+
+International Conference on Learning Representations ,2024. URL https://openreview.net/forum? id=DsEhqQtfAG .Cutkosky, A. and Mehta, H. Momentum improves normalized SGD. In International Conference on Machine Learning (ICML) , 2020. URL 
+
+https://proceedings.mlr.press/v119/ cutkosky20b/cutkosky20b.pdf .Daras, G., Shah, K., Dagan, Y., Gollakota, A., Dimakis, A., and Klivans, A. Ambient diffusion: Learning clean dis-tributions from corrupted data. In Conference on Neural Information Processing Systems , 2023. URL https: //openreview.net/forum?id=wBJBLy9kBY .Daras, G., Chung, H., Lai, C.-H., Mitsufuji, Y., Ye, J. C., Milanfar, P., Dimakis, A. G., and Delbracio, M. A survey on diffusion models for inverse problems. arXiv preprint arXiv:2410.00083 , 2024. Dieleman, S. Diffusion is spectral autoregression, 2024. URL https://sander.ai/2024/09/02/ spectral-autoregression.html .Falck, F., Pandeva, T., Zahirnia, K., Lawrence, R., Turner, R., Meeds, E., Zazo, J., and Karmalkar, S. A Fourier space perspective on diffusion models. arXiv preprint arXiv:2505.11278 , 2025. Fliege, J. and Svaiter, B. F. Steepest descent methods for multicriteria optimization. Mathematical Methods of Op-erations Research , 51(3):479–494, 2000. Ho, J., Jain, A., and Abbeel, P. Denoising diffusion prob-abilistic models. In Advances in Neural Information Processing Systems , volume 33, pp. 6840–6851, 2020. Iyer, S., Ong, F., Setsompop, K., Doneva, M., and Lustig, M. SURE-based automatic parameter selection for ESPIRiT calibration. Magnetic Resonance in Medicine , 84(6): 3423–3437, 2020. Iyer, S. S., Ong, F., Cao, X., Liao, C., Daniel, L., Tamir, J. I., and Setsompop, K. Polynomial preconditioners for regularized linear inverse problems. SIAM Journal on Imaging Sciences , 17(1):116–146, 2024. Jalal, A., Arvinte, M., Daras, G., Price, E., Dimakis, A. G., and Tamir, J. I. Robust compressed sensing MRI with deep generative priors. In Advances in Neural Informa-tion Processing Systems , 2021. Johnson, O. G., Micchelli, C. A., and Paul, G. Polynomial preconditioners for conjugate gradient calculations. SIAM Journal on Numerical Analysis , 20(2):362–376, 1983. Jordan, K., Jin, Y., Boza, V., You, J., Cesista, F., New-house, L., and Bernstein, J. Muon: An optimizer for hidden layers in neural networks, 2024. URL https: //kellerjordan.github.io/posts/muon/ .Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating the design space of diffusion-based generative models. In Advances in Neural Information Processing Systems ,volume 35, pp. 26565–26577, 2022. Kawar, B., Elad, M., Ermon, S., and Song, J. Denoising diffusion restoration models. In Advances in Neural Infor-mation Processing Systems , volume 35, pp. 23593–23606, 2022. Kay, S. M. Fundamentals of Statistical Signal Processing: Estimation Theory . Prentice-Hall, Inc., 1993. 9Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Knoll, F., Zbontar, J., Sriram, A., Muckley, M. J., Bruno, M., Defazio, A., Parente, M., Geras, K. J., Katsnelson, J., Chandarana, H., et al. fastMRI: A publicly available raw k-space and DICOM dataset of knee images for acceler-ated MR image reconstruction using machine learning. 
+
+Radiology: Artificial Intelligence , 2(1):e190007, 2020. Mardani, M., Song, J., Kautz, J., and Vahdat, A. A varia-tional perspective on solving inverse problems with diffu-sion models. arXiv preprint arXiv:2305.04391 , 2023. Murray, R., Swenson, B., and Kar, S. Revisiting nor-malized gradient descent: Fast evasion of saddle points. 
+
+arXiv preprint arXiv:1711.05224 , 2017. URL https: //arxiv.org/abs/1711.05224 .Nichol, A. Q. and Dhariwal, P. Improved denoising diffu-sion probabilistic models. In International conference on machine learning , pp. 8162–8171. PMLR, 2021. Nocedal, J. and Wright, S. J. Numerical Optimization .Springer Series in Operations Research and Financial Engineering. Springer, 2nd edition, 2006. Ozturkler, B., Liu, C., Eckart, B., Mardani, M., Song, J., and Kautz, J. SMRD: SURE-based robust MRI reconstruc-tion with diffusion models. In International Conference on Medical Image Computing and Computer-Assisted Intervention , pp. 199–209. Springer, 2023. Papoulis, A. and Pillai, S. U. Probability, Random Variables, and Stochastic Processes . McGraw-Hill, 4th edition, 2002. Song, J., Meng, C., and Ermon, S. Denoising diffusion implicit models. In International Conference on Learning Representations , 2021. URL https://openreview. net/forum?id=St1giarCHLP .Song, J., Vahdat, A., Mardani, M., and Kautz, J. Pseudoinverse-guided diffusion models for inverse prob-lems. In International Conference on Learning Represen-tations , 2023. URL https://openreview.net/ forum?id=9_gsMA8MRKQ .Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-mon, S., and Poole, B. Score-based generative modeling through stochastic differential equations. In International Conference on Learning Representations , 2020. Song, Y., Shen, L., Xing, L., and Ermon, S. Solving inverse problems in medical imaging with score-based genera-tive models. In International Conference on Learning Representations , 2022. URL https://openreview. net/forum?id=vaRCHVj0uGI .Uecker, M., Lai, P., Murphy, M. J., Virtue, P., Elad, M., Pauly, J. M., Vasanawala, S. S., and Lustig, M. ESPIRiT— an eigenvalue approach to autocalibrating parallel MRI: Where SENSE meets GRAPPA. Magnetic Resonance in Medicine , 71(3):990–1001, 2014. van der Schaaf, A. and van Hateren, J. H. Modelling the power spectra of natural images: Statistics and informa-tion. Vision Research , 36(17):2759–2770, 1996. Vincent, P. A connection between score matching and de-noising autoencoders. Neural Computation , 23(7):1661– 1674, 2011. Wang, Y., Yu, J., and Zhang, J. Zero-shot image restoration using denoising diffusion null-space model. The Eleventh International Conference on Learning Representations ,2023. Weller, D. S., Ramani, S., Nielsen, J.-F., and Fessler, J. A. Monte Carlo SURE-based parameter selection for parallel magnetic resonance imaging reconstruction. Magnetic Resonance in Medicine , 71(5):1760–1770, 2014. Yang, G. and Hu, E. J. Feature learning in infinite-width neural networks. arXiv preprint arXiv:2011.14522 , 2020. Zhang, B., Chu, W., Berner, J., Meng, C., Anandkumar, A., and Song, Y. Improving diffusion inverse problem solving with decoupled noise annealing. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 20895–20905, 2025. Zheng, H., Chu, W., Zhang, B., Wu, Z., Wang, A., Feng, B. T., Zou, C., Sun, Y., Kovachki, N., Ross, Z. E., et al. InverseBench: Benchmarking plug-and-play diffusion priors for inverse problems in physical sciences. arXiv preprint arXiv:2503.11043 , 2025. Zhu, Y., Zhang, K., Liang, J., Cao, J., Wen, B., Timofte, R., and Van Gool, L. Denoising diffusion models for plug-and-play image restoration. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) Workshops , pp. 1219–1229, June 2023. 10 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+A. LMMSE-estimator and the conditional covariance 
+
+Consider a linear observation model with Gaussian noise 
+
+v = Bu + σ n, n ∼ N (0, I), E[u] = E[v] = 0, (15) with Cov( u, n) = 0. For random vectors p, q we write 
+
+Cov( p) = E[pp T], Cov( p, q) = E[pq T].
+
+Let Σu = Cov( u). Linearity of expectations gives 
+
+Σv = BΣ uBT + σ2I, Σuv = Cov( u, v) = ΣuBT. (16) The LMMSE estimator (Kay, 1993) is the linear map D that minimizes E∥u − Dv∥2. By the orthogonality principle, 
+
+D = Σuv Σ† 
+
+> v
+
+. (17) The corresponding error covariance is 
+
+Σu|v = Cov( u − ˆu) = Σu − Σuv Σ† 
+
+> v
+
+Σvu . (18) This matrix quantifies the reduction in uncertainty about u after observing v. It is positive semidefinite Σu|v ⪰ 0 and 
+
+Σu|v ⪯ Σu, making it a natural measure of estimator quality. Smaller values indicate a more informative observation and a more accurate estimation. For an identity observation B = I, Σu|v reduces directly to the posterior map Φ( Σu; σ) used in the main text in (6). 
+
+A.1. Conditional covariance ΣH|L
+
+We now apply the LMMSE framework to quantify the uncertainty in the high-frequency content of a signal after its low-frequency content is known. Let u be a zero-mean random vector, and let uL and uH denote the components of u
+
+associated with the low- and high-frequency subspaces, respectively. Viewing uH as the unknown quantity and uL as an available noise-less observation, we may treat uL as the vector v in the LMMSE model ( (15) ) with observation matrix B
+
+equal to the selector that extracts the LF components. The LMMSE error covariance ( (18) ) directly gives the conditional HF covariance 
+
+ΣH|L = ΣH − ΣHL Σ† 
+
+> L
+
+ΣLH , (19) where ΣH = Cov( uH ), ΣL = Cov( uL), and ΣHL = Cov( uH , uL). This matrix characterizes the uncertainty of the HF component when LF information is known. When the LF and HF components are uncorrelated ( ΣHL = 0 ), the conditional covariance reduces to ΣH|L = ΣH , indicating that the LF part carries no predictive information about the HF part. 
+
+B. Proof of Theorem 3.1 (Start bound) 
+
+Recall that 
+
+∆max  
+
+> t
+
+= ΣH|L − Φ( ΣH|L; σt) = ΣH|L(ΣH|L + σ2 
+
+> t
+
+I)−1ΣH|L,
+
+where we used the posterior identity 
+
+Φ( Σ; σ) = Σ − Σ(Σ + σ2I)−1Σ.
+
+For brevity, write 
+
+Σ := ΣH|L, ∆ := ∆max  
+
+> t
+
+.
+
+Eigen-decomposition and diagonalization. Let 
+
+Σ = q Λ qT, Λ = diag( ν1, . . . , ν D ), νi ≥ 0. (20) Because 
+
+Σ + σ2 
+
+> t
+
+I = q(Λ + σ2 
+
+> t
+
+I)qT, (Σ + σ2 
+
+> t
+
+I)−1 = q(Λ + σ2 
+
+> t
+
+I)−1qT,
+
+11 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+we obtain 
+
+∆ = Σ(Σ + σ2 
+
+> t
+
+I)−1Σ (21) 
+
+= q Λ(Λ + σ2 
+
+> t
+
+I)−1Λ qT. (22) Thus Σ and ∆ are simultaneously diagonalizable with eigenvectors q, and the eigenvalues of ∆ are 
+
+ν2
+
+> i
+
+νi + σ2
+
+> t
+
+, i = 1 , . . . , D. (23) 
+
+Matrix inequality as scalar inequalities. The condition 
+
+∆ ⪯ τmax Σ
+
+is equivalent, in the common eigenbasis, to 
+
+ν2
+
+> i
+
+νi + σ2
+
+> t
+
+≤ τmax νi for all eigenvalues νi > 0. (24) 
+
+Solving the scalar inequality. Fix any ν > 0. Inequality (24) becomes 
+
+ν2
+
+ν + σ2
+
+> t
+
+≤ τmax ν. 
+
+Cancelling the factor ν > 0 gives νν + σ2
+
+> t
+
+≤ τmax .
+
+Multiply both sides by ν + σ2 
+
+> t
+
+:
+
+ν ≤ τmax (ν + σ2 
+
+> t
+
+) = τmax ν + τmax σ2 
+
+> t
+
+.
+
+Rearranging yields 
+
+(1 − τmax ) ν ≤ τmax σ2 
+
+> t
+
+.
+
+Since τmax > 0,
+
+σ2 
+
+> t
+
+≥ 1 − τmax 
+
+τmax 
+
+ν. 
+
+Worst-case mode and conclusion. The bound must hold for every eigenvalue νi. Because the right-hand side increases with ν, the most restrictive condition occurs at the largest eigenvalue νmax (ΣH|L). Thus 
+
+σ2 
+
+> t
+
+≥ 1 − τmax 
+
+τmax 
+
+νmax (ΣH|L).
+
+Identifying the minimal feasible starting noise level with σmax proves the claim. 
+
+C. Proof of Corollary 3.2 (WSS/PSD assumption) 
+
+Under the WSS assumption, the covariance of x0 is diagonalized by the discrete Fourier transform (DFT) (Papoulis & Pillai, 2002). Let bx0 = Fx0 and note that F is unitary. Then 
+
+bΣ0 := Cov( bx0) = F Σ 0 FH = diag  S(ω) : ω ∈ Ω, (25) where S(ω) is the power spectral density (PSD). Because F is unitary, it preserves eigenvalues and Loewner order: 
+
+A ⪯ B ⇐⇒ FAFH ⪯ FBFH.
+
+Thus transforming to the frequency domain does not change the eigenvalue bounds in Theorem 3.1; it simply diagonalizes the matrices involved. 12 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+LF/HF splitting under WSS. An ideal LF/HF mask corresponds to diagonal projection matrices PL and PH = I − PL
+
+selecting disjoint frequency sets ΩL and ΩH . Since bΣ0 is diagonal, there is no cross-covariance between LF and HF components: bΣHL = PH bΣ0PL = 0. (26) Therefore the HF covariance is simply 
+
+bΣH = PH bΣ0PH = diag  S(ω) : ω ∈ ΩH
+
+. (27) 
+
+Conditional HF covariance. The conditional covariance of HF given LF satisfies 
+
+ΣH|L = ΣH − ΣHL Σ†
+
+> L
+
+ΣLH .
+
+Since ΣHL = 0 under WSS with an ideal LF mask, we have 
+
+ΣH|L = bΣH|L = bΣH = diag  S(ω) : ω ∈ ΩH
+
+.
+
+Thus the eigenvalues of ΣH|L are precisely the PSD values S(ω) on the HF set ΩH . In particular, 
+
+νmax (ΣH|L) = max 
+
+> ω∈ΩH
+
+S(ω). (28) 
+
+Substitution into the start bound. Theorem 3.1 states that 
+
+σ2max ≥ 1 − τmax 
+
+τmax 
+
+νmax (ΣH|L).
+
+Substituting the PSD expression for νmax (ΣH|L) yields 
+
+σ2max ≥ 1 − τmax 
+
+τmax 
+
+max 
+
+> ω∈ΩH
+
+S(ω),
+
+which is exactly the claimed PSD form (8). 
+
+D. Proof of Theorem 3.3 (Stop bound) 
+
+The proof follows the same diagonalization argument used in Theorem 3.1. Since the posterior map Φ( Σ; σ) is the same functional form appearing in the start-bound proof, it is diagonalized by the eigenvectors of Σ. Thus, as in the previous theorem, all Loewner inequalities may be checked mode-wise in the eigenbasis of Σs.
+
+Eigenbasis and per-mode posterior variances. Let 
+
+Σs = q Λ qT, Λ = diag( ν1, . . . , ν D ), νi ≥ 0. (29) Since Φ( Σ; σ) is diagonalized by the same eigenvectors as Σ (as in the proof of Theorem 3.1), the matrices 
+
+Σ0 = Φ( Σs; σs) and Φ( Σs;
+
+q
+
+σ2 
+
+> s
+
++ σ2 
+
+> t
+
+)
+
+are diagonal in the same basis q. Their diagonal entries are obtained by applying the scalar posterior formula 
+
+νi σ2
+
+νi + σ2
+
+to each eigenvalue νi of Σs.Thus, per mode νi,eigenvalue of Σ0 : νi σ2
+
+> s
+
+νi + σ2
+
+> s
+
+, (30) eigenvalue of Φ( Σs;
+
+q
+
+σ2 
+
+> s
+
++ σ2 
+
+> t
+
+) : νi (σ2 
+
+> s
+
++ σ2 
+
+> t
+
+)
+
+νi + σ2 
+
+> s
+
++ σ2
+
+> t
+
+. (31) 13 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Residual and tolerance condition. The residual covariance is 
+
+∆min  
+
+> t
+
+= Φ 
+
+
+
+Σs;
+
+q
+
+σ2 
+
+> s
+
++ σ2
+
+> t
+
+
+
+− Σ0 ⪰ 0.
+
+Since both matrices on the right-hand side share the eigenvectors of Σs, the Loewner inequality 
+
+∆min  
+
+> t
+
+⪯ τmin Σ0
+
+is equivalent to a set of scalar inequalities on their eigenvalues. Let ν > 0 be any eigenvalue of Σs. The corresponding eigenvalues of Σ0 = Φ( Σs; σs) and Φ( Σs; pσ2 
+
+> s
+
++ σ2 
+
+> t
+
+) are, respectively, 
+
+ν σ 2
+
+> s
+
+ν + σ2
+
+> s
+
+and ν (σ2 
+
+> s
+
++ σ2 
+
+> t
+
+)
+
+ν + σ2 
+
+> s
+
++ σ2
+
+> t
+
+.
+
+Thus the matrix inequality ∆min  
+
+> t
+
+⪯ τmin Σ0 is equivalent to requiring, for every ν > 0,
+
+ν (σ2 
+
+> s
+
++ σ2 
+
+> t
+
+)
+
+ν + σ2 
+
+> s
+
++ σ2
+
+> t
+
+− ν σ 2
+
+> s
+
+ν + σ2
+
+> s
+
+≤ τmin 
+
+ν σ 2
+
+> s
+
+ν + σ2
+
+> s
+
+. (32) Canceling the common factor ν > 0 gives 
+
+σ2 
+
+> s
+
++ σ2
+
+> t
+
+ν + σ2 
+
+> s
+
++ σ2
+
+> t
+
+− σ2
+
+> s
+
+ν + σ2
+
+> s
+
+≤ τmin 
+
+σ2
+
+> s
+
+ν + σ2
+
+> s
+
+. (33) Multiplying both sides by (ν + σ2 
+
+> s
+
+)( ν + σ2 
+
+> s
+
++ σ2 
+
+> t
+
+) leads to the linear inequality in σ2 
+
+> t
+
+:
+
+(ν − τmin σ2 
+
+> s
+
+) σ2 
+
+> t
+
+≤ τmin σ2 
+
+> s
+
+(ν + σ2 
+
+> s
+
+). (34) 
+
+Active and inactive modes. If ν ≤ τmin σ2 
+
+> s
+
+, then the left-hand side of (34) is non-positive and the right-hand side is non-negative; the inequality holds automatically for all σ2 
+
+> t
+
+≥ 0. Such modes impose no constraint. If ν > τ min σ2 
+
+> s
+
+, we divide by the positive factor ν − τmin σ2 
+
+> s
+
+to obtain 
+
+σ2 
+
+> t
+
+≤ τmin σ2 
+
+> s
+
+(ν + σ2 
+
+> s
+
+)
+
+ν − τmin σ2
+
+> s
+
+. (35) 
+
+Worst-case eigenvalue and final bound. The right-hand side of (35) is a strictly decreasing function of ν on (τmin σ2 
+
+> s
+
+, ∞).Thus the most restrictive constraint is obtained by taking the largest eigenvalue νmax = νmax (Σs), giving 
+
+σ2 
+
+> t
+
+≤ τmin σ2 
+
+> s
+
+(νmax + σ2 
+
+> s
+
+)
+
+νmax − τmin σ2
+
+> s
+
+. (36) If νmax ≤ τmin σ2 
+
+> s
+
+, then all modes are inactive and the constraint is vacuous. Identifying the maximal allowable reverse-diffusion variance at termination with σ2min produces 
+
+σ2min ≤ τmin σ2 
+
+> s
+
+(νmax + σ2 
+
+> s
+
+)
+
+νmax − τmin σ2
+
+> s
+
+,
+
+which establishes the claim. 
+
+E. Proof of Corollary 3.4 (High-SNR assumption) 
+
+From Theorem 3.3, the upper bound on σ2min is 
+
+τmin σ2 
+
+> s
+
+(νmax + σ2 
+
+> s
+
+)
+
+νmax − τmin σ2
+
+> s
+
+, (37) 14 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+where νmax = νmax (Σs) is the largest eigenvalue of the clean-signal covariance. Factor out νmax from numerator and denominator: 
+
+τmin σ2
+
+> s
+
+νmax + σ2
+
+> s
+
+νmax − τmin σ2
+
+> s
+
+= τmin σ2
+
+> s
+
+1 + σ2 
+
+> s
+
+/ν max 
+
+1 − τmin σ2 
+
+> s
+
+/ν max 
+
+. (38) In the high-SNR regime νmax ≫ σ2 
+
+> s
+
+, both ratios σ2 
+
+> s
+
+/ν max and τmin σ2 
+
+> s
+
+/ν max are small, and we obtain the approximation 
+
+1 + σ2 
+
+> s
+
+/ν max 
+
+1 − τmin σ2 
+
+> s
+
+/ν max 
+
+≈ 1, (39) so that τmin σ2 
+
+> s
+
+(νmax + σ2 
+
+> s
+
+)
+
+νmax − τmin σ2
+
+> s
+
+≈ τmin σ2 
+
+> s
+
+. (40) Then, from Theorem 3.3, we conclude that in this regime 
+
+σ2min ≲ τmin σ2 
+
+> s
+
+, (41) which is the claim. 
+
+F. Proof of Theorem 3.5 (Re-scaling invariance) 
+
+We consider the unit-gradient update form used in (13). At iteration k, the update applied to (f, g ) is 
+
+∆μk = −ˆαk
+
+ ∇f k
+
+∥∇ f k∥2
+
++ ˆλ ∇gk
+
+∥∇ gk∥2
+
+
+
+, (42) where ˆαk > 0 and ˆλ > 0 is a global sampler parameters. Let ϕf , ϕ g : R → R be strictly increasing C1 functions and define 
+
+ef = ϕf ◦ f, eg = ϕg ◦ g. 
+
+By the chain rule, 
+
+∇ ef k = ϕ′ 
+
+> f
+
+(f k) ∇f k, ∇egk = ϕ′ 
+
+> g
+
+(gk) ∇gk, (43) with ϕ′ 
+
+> f
+
+(f k) > 0 and ϕ′ 
+
+> g
+
+(gk) > 0 because ϕf , ϕ g are strictly increasing. Hence 
+
+∥∇ ef k∥2 = ϕ′ 
+
+> f
+
+(f k) ∥∇ f k∥2, ∥∇ egk∥2 = ϕ′ 
+
+> g
+
+(gk) ∥∇ gk∥2. (44) Therefore the normalized gradients are unchanged: 
+
+∇ ef k
+
+∥∇ ef k∥2
+
+= ϕ′ 
+
+> f
+
+(f k)∇f k
+
+ϕ′ 
+
+> f
+
+(f k)∥∇ f k∥2
+
+= ∇f k
+
+∥∇ f k∥2
+
+, (45) 
+
+∇egk
+
+∥∇ egk∥2
+
+= ϕ′ 
+
+> g
+
+(gk)∇gk
+
+ϕ′ 
+
+> g
+
+(gk)∥∇ gk∥2
+
+= ∇gk
+
+∥∇ gk∥2
+
+. (46) Applying the same unit-gradient update (42) to ( ef , eg) with the same parameters (ˆ αk, ˆλ) yields 
+
+∆ eμk = −ˆαk ∇ ef k
+
+∥∇ ef k∥2
+
++ ˆλ ∇egk
+
+∥∇ egk∥2
+
+!
+
+= −ˆαk
+
+ ∇f k
+
+∥∇ f k∥2
+
++ ˆλ ∇gk
+
+∥∇ gk∥2
+
+
+
+= ∆ μk.
+
+Thus both the direction and the magnitude of the update are invariant under any strictly increasing C1 reparameterizations of f and g (including positive scalings). 15 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+G. Proof of Theorem 3.8 (Common descent condition) 
+
+Let 
+
+dk = ∇f k + λk∇gk, cos ϑk = ⟨∇ f k, ∇gk⟩∥∇ f k∥2 ∥∇ gk∥2
+
+, rk = ∥∇ f k∥2
+
+∥∇ gk∥2
+
+.
+
+Simultaneous descent (Fliege & Svaiter, 2000) requires 
+
+⟨∇ f k, d k⟩ > 0 and ⟨∇ gk, d k⟩ > 0.
+
+We compute both inner products in terms of cos ϑk, rk, and λk. First, 
+
+⟨∇ f k, d k⟩ = ∥∇ f k∥22 + λk⟨∇ f k, ∇gk⟩ (47) 
+
+= ∥∇ f k∥22 + λk∥∇ f k∥2∥∇ gk∥2 cos ϑk (48) 
+
+= ∥∇ f k∥22
+
+ 1 + λk cos ϑk
+
+> rk
+
+. (49) Similarly, 
+
+⟨∇ gk, d k⟩ = ⟨∇ gk, ∇f k⟩ + λk∥∇ gk∥22 (50) 
+
+= ∥∇ gk∥22
+
+ rk cos ϑk + λk. (51) Since both norm-squared factors are strictly positive, the signs of (49)–(51) are determined by 
+
+1 + λk cos ϑk
+
+rk and rk cos ϑk + λk.
+
+We now distinguish two geometric regimes. 
+
+Case 1: cos ϑk ≥ 0. The gradients form an acute angle. Since λk > 0 by construction, and noting that cos ϑk ≥ 0,
+
+rk > 0, we obtain 
+
+1 + λk cos ϑk
+
+rk ≥ 1 > 0, rk cos ϑk + λk ≥ 0,
+
+with strict positivity whenever at least one gradient is nonzero (as assumed). Thus every λk > 0 yields simultaneous descent. 
+
+Case 2: cos ϑk < 0. The gradients form an obtuse angle; the two inequalities now impose nontrivial constraints. From (49), 
+
+1 + λk cos ϑk
+
+rk > 0 ⇐⇒ λk < − rk
+
+cos ϑk .
+
+Here cos ϑk < 0 and rk > 0, so multiplying by rk/ cos ϑk reverses the inequality. From (51), 
+
+rk cos ϑk + λk > 0 ⇐⇒ λk > − rk cos ϑk.
+
+Combining both constraints gives the feasible interval 
+
+λk ∈  rk(− cos ϑk), r k(−1/ cos ϑk),
+
+which is exactly the claimed condition for cos ϑk < 0.
+
+H. Optimal sampler hyperparameters 
+
+We detail the update rules and the optimal-hyperparameters scheme for the suite of optimizers tested in this work. The proposed scheme resembles approaches in the compressed sensing and diffusion-based reconstruction literature, where unbiased MSE estimators have been employed for hyperparameter tuning (Iyer et al., 2020; Weller et al., 2014; Ozturkler et al., 2023). 
+
+μk+1 ← μk − U k ˆwk, ˆwk = arg min 
+
+> w∈R2+
+
+x∗ −  μk − U kw 22 . (52) 16 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Vanilla The first-order vanilla update is 
+
+vk+1 ← αk  ∇f k + λk∇gk , (53) 
+
+μk+1 ← μk − vk+1 . (54) These updates yield 
+
+U k = ∇f k ∇gk , wk := 
+
+ αk
+
+αkλk
+
+
+
+. (55) 
+
+Momentum The optimal hyperparameters scheme becomes: 
+
+ˆwk = arg min 
+
+> w∈R3+
+
+x∗ −  μk − U kw 22 . (56) The momentum update becomes 
+
+vk+1 ← αk  ∇f k + λk∇gk + βkvk, (57) 
+
+μk+1 ← μk − vk+1 . (58) These updates yield 
+
+U k = ∇f k ∇gk vk , wk := 
+
+
+
+αk
+
+αkλk
+
+βk
+
+ . (59) 
+
+Momentum + Preconditioner Adding a polynomial preconditioner for linear measurement operator A,
+
+vk+1 ← αk  pol (ATA)∇f k + λk∇gk + βkvk, (60) 
+
+μk+1 ← μk − vk+1 . (61) These updates yield 
+
+U k = pol (ATA)∇f k ∇gk vk , wk := 
+
+
+
+αk
+
+αkλk
+
+βk
+
+ . (62) 
+
+I. Datasets and Implementation Details 
+
+We implemented the OptDiff pipeline with momentum and preconditioner addons in our GitHub repository. The repository will be made public upon publication. Single-image reconstruction runtimes were obtained on a single NVIDIA A40 GPU with 48 GB memory. 
+
+I.1. Preconditioners 
+
+We evaluated several polynomial preconditioners from the literature (Johnson et al., 1983; Bhotto et al., 2015; Iyer et al., 2024), with polynomial degrees ranging from 1 to 10. The best performance was achieved by the degree-2 preconditioner proposed by Iyer et al. (2024). 
+
+I.2. MRI Reconstruction Datasets: We use the fastMRI T2-weighted dataset (Knoll et al., 2020) with the following splits: 17 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+• Tuning set, 10 slices from the validation dataset used for hyperparameter tuning and invariance experiments (Subsection 5.2) • Ablation set, 275 slices from the validation dataset used for the ablation experiments (Subsections 5.3.1 and 5.3.2) • Test set, 330 slices from the test dataset used for comparisons against baseline methods (Subsection 5.4) 
+
+Score model: Score network from Daras et al. (2023) 
+
+Implementation: In MRI, the measurement operator A is a complex valued mapping that incorporates coil sensitivities, Fourier Transform and sub-sampling operations. We implemented the MRI forward model and subsampling operations in our OptDiff repository. T2-weighted brain MR images from the fastMRI dataset were center cropped to 384 × 384 matrix size similar to Jalal et al. (2021). We applied coil compression to retain 8 virtual channels per slice. Coil sensitivity maps were estimated using ESPIRiT (Uecker et al., 2014) algorithm. Experiments were conducted with several configurations combining different acceleration factors R = 4 and R = 8 , with calibration region sizes of 32 and 16 respectively, under both uniform and random undersampling masks. 
+
+Baseline methods: We adapted the DPS, Pi-GDM, RED-diff and DAPS solvers in our codebase for baseline comparisons. For DDS, we used the original codebase (Chung et al., 2024). We tuned the hyperparameters of all baseline methods for each setting. DDRM (Kawar et al., 2022) requires access to an explicit SVD of the measurement operator, which is computationally intractable for the multi-coil MRI forward model; therefore, DDRM is not included as a baseline for MRI reconstruction. 
+
+I.3. Deblurring Dataset: We use a subset of the ImageNet validation dataset (5 images for hyperparameter tuning, 330 images for testing) obtained from Kaggle. 
+
+Score model: Pretrained diffusion model from (Mardani et al., 2023). 
+
+Implementation: As pre-processing, the images were cropped to 3 × 250 × 250 . For the experiments, a 3 × 3 Gaussian kernel with variance 25 is applied, and Gaussian noise with variance 0.005 is added. The deblurring forward model was adopted from Mardani et al. (2023). 
+
+Baseline methods: DPS, DDRM, Pi-GDM, RED-diff baselines are based on the repository from Mardani et al. (2023). We adapted the DDS solver into the RED-diff repository. For DAPS, we used the original implementation Zhang et al. (2025). We used the hyperparameters provided by each repository as reference and further tuned them for each setting. 
+
+I.4. Super-resolution Dataset: We use a subset of the FFHQ validation dataset (5 images for hyperparameter tuning, 330 images for testing). 
+
+Score model: We adopt the unconditional pretrained diffusion model from Choi et al. (2021). 
+
+Implementation: As pre-processing, the images were cropped to 3 × 250 × 250 . For the experiments, each image is downsampled by a factor of 4 in both dimensions and corrupted with Gaussian noise of variance 0.01 . The super-resolution forward model was adopted from Mardani et al. (2023). 
+
+Baseline method: DPS, DDRM, Pi-GDM, RED-diff baselines were run using the RED-diff (Mardani et al., 2023) repository. We adapted the DDS solver into the RED-diff repository. For DAPS, we used the official implementation from Zhang et al. (2025). We used the hyperparameters provided by each repository as reference and further tuned them for each setting. 18 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+J. Additional Results 
+
+J.1. Additional Qualitative Results 
+
+We provide visual comparisons on additional test set slices for the MRI reconstruction, super-resolution, deblurring tasks. 
+
+Figure 5. Reconstruction performance comparison on a representative test slice for the MRI Reconstruction task with R = 8 random subsampling on the fastMRI dataset. 
+
+19 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+Figure 6. Reconstruction performance comparison on a representative test slice for deblurring task on the ImageNet dataset. 
+
+Figure 7. Reconstruction performance comparison on a representative test slice for super-resolution task on the FFHQ dataset. 
+
+20 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+J.2. Additional MRI Results 
+
+We present representative reconstruction results with equispaced undersampling masks for R = 8 acceleration in Figure 8. Table 4 reports the quantitative test set metrics for reconstruction with equispaced and random masks at acceleration with 20 and 100 steps. As indicated from the error maps, OptDiff achieves the highest reconstruction quality compared to the baselines. Additionally, even with 20 steps, OptDiff outperforms the baseline methods that use a greater number of steps. 
+
+Table 4. Comparison of methods using random subsampling and equispaced masks at acceleration R=4 and R=8 with 20 and 100 steps. 
+
+Methods Random R=4 Random R=8 Equispaced R=8 
+
+PSNR SSIM PSNR SSIM PSNR SSIM Pi-GDM (20) 29 .63 ± 1.27 0.739 ± 0.063 28 .04 ± 1.24 0.707 ± 0.062 27 .25 ± 1.51 0.685 ± 0.070 
+
+DDS (20) 30 .27 ± 1.27 0.901 ± 0.032 25 .42 ± 1.38 0.765 ± 0.031 24 .39 ± 1.64 0.800 ± 0.053 
+
+RED-diff (20) 33 .24 ± 1.49 0.870 ± 0.033 29 .43 ± 1.58 0.825 ± 0.042 28 .11 ± 1.82 0.802 ± 0.056 
+
+DAPS (20) 33 .02 ± 1.67 0.889 ± 0.030 29 .85 ± 1.64 0.806 ± 0.055 28 .65 ± 1.94 0.782 ± 0.064 
+
+OptDiff (20) 37 .19 ± 2.01 0.943 ± 0.030 33 .23 ± 2.08 0.903 ± 0.046 33 .07 ± 2.76 0.898 ± 0.055 
+
+Pi-GDM (100) 30 .69 ± 1.37 0.753 ± 0.086 28 .88 ± 1.27 0.734 ± 0.078 28 .03 ± 1.51 0.708 ± 0.088 
+
+DDS (100) 33 .72 ± 1.14 0.930 ± 0.030 28 .92 ± 1.28 0.828 ± 0.027 28 .30 ± 1.36 0.869 ± 0.039 
+
+RED-diff (100) 36 .79 ± 1.43 0.872 ± 0.035 31 .92 ± 1.44 0.840 ± 0.034 31 .21 ± 1.98 0.831 ± 0.038 
+
+DAPS (100) 34 .32 ± 1.76 0.875 ± 0.041 31 .38 ± 1.42 0.771 ± 0.057 29 .31 ± 1.99 0.738 ± 0.067 
+
+OptDiff (100) 38 .45 ± 1.58 0.948 ± 0.023 34 .93 ± 1.38 0.921 ± 0.029 35 .31 ± 1.62 0.924 ± 0.031 
+
+Figure 8. Reconstruction performance comparison on a representative test slice with equispaced undersampling for R = 8 . OptDiff achieves improved image quality over the baselines. 
+
+21 Principled Design of Diffusion-based Optimizers for Inverse Problems 
+
+J.3. Additional experiments across tasks and datasets 
+
+Table 5. Consolidated evaluation across tasks, datasets, and degradation severity. Comparison with best-performing baselines on ImageNet and FFHQ for deblurring, severe deblurring, SR ×4, SR ×16, and inpainting. Our method consistently achieves the best or comparable performance across all task–dataset pairs. 
+
+ImageNet FFHQ Task Method PSNR ↑ SSIM ↑ LPIPS ↓ FID ↓ PSNR ↑ SSIM ↑ LPIPS ↓ FID ↓
+
+Deblurring 
+
+k = 3 , σ = 25 
+
+DDRM (Kawar et al., 2022) 36 .24 ± 3.23 0.953 ± 0.019 0.024 ± 0.013 6.70 41 .71 ± 1.33 0.978 ± 0.005 0.023 ± 0.008 20 .23 
+
+DDNM (Wang et al., 2023) 40 .05 ± 3.79 0.972 ± 0.012 0.011 ± 0.005 2.48 42 .12 ± 1.57 0.981 ± 0.005 0.006 ± 0.002 5.34 
+
+DiffPIR (Zhu et al., 2023) 39 .57 ± 3.45 0.976 ± 0.009 0.006 ± 0.003 2.36 41 .15 ± 1.52 0.976 ± 0.005 0.012 ± 0.004 7.18 
+
+RED-diff (Mardani et al., 2023) 35 .94 ± 4.03 0.955 ± 0.020 0.027 ± 0.016 4.02 39 .01 ± 1.17 0.955 ± 0.005 0.015 ± 0.005 12 .98 
+
+DAPS (Zhang et al., 2025) 35 .03 ± 2.27 0.921 ± 0.017 0.051 ± 0.035 5.14 38 .04 ± 1.42 0.950 ± 0.006 0.036 ± 0.015 12 .89 
+
+OptDiff (Ours) 41 .04 ± 3.41 0.982 ± 0.006 0.004 ± 0.002 2.10 42 .45 ± 1.46 0.982 ± 0.004 0.012 ± 0.004 8.53 
+
+Severe deblurring 
+
+k = 12 , σ = 3 
+
+DDRM (Kawar et al., 2022) 27 .43 ± 3.83 0.740 ± 0.138 0.308 ± 0.142 53 .51 29 .46 ± 2.32 0.818 ± 0.051 0.194 ± 0.057 71 .30 
+
+DDNM (Wang et al., 2023) 28 .07 ± 4.12 0.789 ± 0.110 0.134 ± 0.059 21 .70 32 .54 ± 2.15 0.893 ± 0.030 0.074 ± 0.022 40 .83 
+
+DiffPIR (Zhu et al., 2023) 27 .41 ± 3.72 0.746 ± 0.114 0.145 ± 0.064 18 .51 32 .05 ± 1.95 0.870 ± 0.030 0.060 ± 0.019 33 .21 
+
+RED-diff (Mardani et al., 2023) 24 .19 ± 3.49 0.604 ± 0.171 0.428 ± 0.156 65 .65 29 .46 ± 2.32 0.818 ± 0.051 0.194 ± 0.057 64 .09 
+
+DAPS (Zhang et al., 2025) 26 .28 ± 2.80 0.671 ± 0.086 0.247 ± 0.075 78 .48 28 .38 ± 2.19 0.786 ± 0.055 0.199 ± 0.040 61 .03 
+
+OptDiff (Ours) 27 .70 ± 3.87 0.772 ± 0.106 0.211 ± 0.088 28 .10 32 .61 ± 2.22 0.891 ± 0.031 0.127 ± 0.034 45 .88 
+
+Super-resolution 4×
+
+DDRM (Kawar et al., 2022) 25 .49 ± 3.66 0.682 ± 0.157 0.355 ± 0.148 69 .26 31 .08 ± 2.31 0.869 ± 0.039 0.144 ± 0.041 63 .74 
+
+DDNM (Wang et al., 2023) 25 .79 ± 3.93 0.703 ± 0.152 0.286 ± 0.136 36 .41 30 .94 ± 2.45 0.872 ± 0.041 0.085 ± 0.028 38 .20 
+
+DiffPIR (Zhu et al., 2023) 25 .28 ± 3.78 0.682 ± 0.152 0.242 ± 0.117 27 .70 31 .06 ± 2.44 0.873 ± 0.040 0.092 ± 0.031 37 .18 
+
+RED-diff (Mardani et al., 2023) 25 .90 ± 3.86 0.708 ± 0.142 0.328 ± 0.148 43 .54 31 .25 ± 2.37 0.875 ± 0.037 0.108 ± 0.034 45 .10 
+
+DAPS (Zhang et al., 2025) 26 .50 ± 3.43 0.706 ± 0.132 0.239 ± 0.067 41 .46 29 .63 ± 1.73 0.763 ± 0.028 0.179 ± 0.028 56 .44 
+
+OptDiff (Ours) 26 .07 ± 3.96 0.715 ± 0.148 0.350 ± 0.156 47 .06 31 .33 ± 2.73 0.869 ± 0.035 0.117 ± 0.035 53 .64 
+
+Super-resolution 16 ×
+
+DDRM (Kawar et al., 2022) 19 .87 ± 2.52 0.452 ± 0.184 0.688 ± 0.195 229 .83 23 .25 ± 2.15 0.679 ± 0.083 0.319 ± 0.088 118 .21 
+
+DDNM (Wang et al., 2023) 20 .15 ± 2.68 0.460 ± 0.183 0.633 ± 0.207 143 .32 22 .86 ± 2.12 0.663 ± 0.083 0.249 ± 0.079 83 .50 
+
+DiffPIR (Zhu et al., 2023) 19 .66 ± 2.61 0.439 ± 0.178 0.577 ± 0.194 111 .60 22 .77 ± 2.14 0.658 ± 0.085 0.246 ± 0.077 81 .20 
+
+RED-diff (Mardani et al., 2023) 20 .34 ± 2.76 0.460 ± 0.182 0.704 ± 0.193 174 .15 23 .01 ± 2.07 0.663 ± 0.082 0.282 ± 0.082 94 .77 
+
+DAPS (Zhang et al., 2025) 20 .53 ± 2.49 0.418 ± 0.136 0.522 ± 0.081 161 .43 22 .63 ± 1.96 0.572 ± 0.064 0.358 ± 0.046 98 .43 
+
+OptDiff (Ours) 20 .44 ± 2.75 0.468 ± 0.184 0.704 ± 0.186 195 .50 23 .58 ± 2.27 0.685 ± 0.083 0.356 ± 0.094 116 .57 
+
+Inpainting 
+
+64 × 64 
+
+DDRM (Kawar et al., 2022) 29 .11 ± 3.61 0.934 ± 0.015 0.057 ± 0.020 19 .44 34 .49 ± 2.40 0.961 ± 0.009 0.023 ± 0.007 19 .12 
+
+DDNM (Wang et al., 2023) 28 .07 ± 3.61 0.928 ± 0.013 0.036 ± 0.014 12 .95 34 .53 ± 2.57 0.970 ± 0.007 0.010 ± 0.004 5.37 
+
+DiffPIR (Zhu et al., 2023) 29 .18 ± 3.89 0.944 ± 0.012 0.047 ± 0.019 15 .90 35 .40 ± 2.62 0.975 ± 0.006 0.010 ± 0.004 6.10 
+
+RED-diff (Mardani et al., 2023) 27 .70 ± 3.02 0.932 ± 0.010 0.058 ± 0.016 21 .80 29 .49 ± 1.51 0.931 ± 0.009 0.035 ± 0.008 18 .94 
+
+DAPS (Zhang et al., 2025) 28 .80 ± 3.64 0.931 ± 0.011 0.059 ± 0.022 16 .21 34 .53 ± 2.79 0.967 ± 0.007 0.021 ± 0.009 6.60 
+
+OptDiff (Ours) 28 .36 ± 3.38 0.930 ± 0.014 0.054 ± 0.018 19 .17 33 .40 ± 3.77 0.966 ± 0.019 0.023 ± 0.023 12 .87 
+
+Table 6. Evaluation of noise schedule generalization. The optimized schedule is applied to several baseline methods for MRI reconstruction on fastMRI and deblurring on ImageNet . In most cases, replacing the standard schedule with the optimized one improves reconstruction quality. Our method achieves the highest performance under the optimized schedule.                                                                                                                                                                                                        
+
+> Method MRI Reconstruction R=8 (fastMRI) Deblurring (ImageNet) Standard Schedule Optimal Schedule Standard Schedule Optimal Schedule PSNR SSIM PSNR SSIM PSNR SSIM LPIPS FID PSNR SSIM LPIPS FID
+> DPS (Chung et al., 2022) 28 .94 ±1.54 0.774 ±0.066 30 .43 ±1.85 0.803 ±0.046 27 .51 ±4.92 0.734 ±0.163 0.296 ±0.162 59 .36 38 .17 ±3.96 0.967 ±0.013 0.007 ±0.005 3.08
+> DDRM (Kawar et al., 2022) 36 .24 ±3.23 0.953 ±0.019 0.024 ±0.013 6.70 39 .83 ±3.47 0.976 ±0.010 0.009 ±0.007 3.64
+> Pi-GDM (Song et al., 2023) 28 .88 ±1.27 0.734 ±0.078 29 .29 ±1.56 0.808 ±0.052 33 .85 ±2.84 0.928 ±0.029 0.027 ±0.024 7.60 32 .51 ±2.42 0.899 ±0.029 0.045 ±0.020 11 .58
+> RED-diff (Mardani et al., 2023) 31 .92 ±1.44 0.840 ±0.034 33 .38 ±2.10 0.888 ±0.042 35 .94 ±4.03 0.955 ±0.020 0.027 ±0.016 4.02 40 .05 ±3.21 0.977 ±0.008 0.003 ±0.002 2.56
+> DDS (Chung et al., 2024) 30 .54 ±3.97 0.881 ±0.061 0.097 ±0.042 11 .89 30 .75 ±1.98 0.837 ±0.052 0.063 ±0.053 11 .94
+> DAPS (Zhang et al., 2025) 31 .38 ±1.42 0.771 ±0.057 29 .89 ±2.25 0.700 ±0.066 35 .03 ±2.27 0.921 ±0.017 0.051 ±0.035 5.14 35 .96 ±1.27 0.926 ±0.024 0.048 ±0.041 4.28
+> OptDiff (Ours) 34 .93 ±1.38 0.921 ±0.029 41 .04 ±3.41 0.982 ±0.006 0.004 ±0.002 2.10
+
+22

@@ -6,142 +6,103 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-12
-- 运行时间：2026-05-12 21:35:14 UTC
+- 最新运行日期：2026-05-13
+- 运行时间：2026-05-13 20:39:38 UTC
 - 运行状态：成功
-- 本次总论文数：40
-- 精读区：29
+- 本次总论文数：27
+- 精读区：16
 - 速读区：11
 
 ### 今日简报（AI）
-今天聚焦生成模型与图像变换，共精读29篇、速读11篇。  
-重点关注StableI2I的图像转换稳定性与统一测度视角下扩散模型理论突破。  
-建议明天重点跟进生成模型评估指标的新趋势与跨任务稳定性研究。
-- 详情：[/202605/12/README](/202605/12/README)
+今日聚焦影像恢复与生成的新突破，精读与速读共 27 篇高质量论文。  
+重点关注无参考光照退化修复及多模态大模型融合频域专家的创新方向。  
+建议读者持续关注扩散模型在通用视觉修复和一体化生成中的应用演进。
+- 详情：[/202605/13/README](/202605/13/README)
 
 ### 精读区论文标签
-1. [StableI2I: Spotting Unintended Changes in Image-to-Image Transition](/202605/12/2605.04453v1-stablei2i-spotting-unintended-changes-in-image-to-image-transition)  
+1. [ZeroIDIR: Zero-Reference Illumination Degradation Image Restoration with Perturbed Consistency Diffusion Models](/202605/13/2605.11435v1-zeroidir-zero-reference-illumination-degradation-image-restoration-with-perturbed-consistency-diffusion-models)  
    标签：评分：10.0/10、query:real-ir
-   evidence：针对图像编辑和图像修复任务的评估框架
-2. [A Unified Measure-Theoretic View of Diffusion, Score-Based, and Flow Matching Generative Models](/202605/12/2605.06829v1-a-unified-measure-theoretic-view-of-diffusion-score-based-and-flow-matching-generative-models)  
+   evidence：基于扩散模型的照明退化图像修复框架
+2. [Leveraging Multimodal Large Language Models for All-in-One Image Restoration via a Mixture of Frequency Experts](/202605/13/2605.11444v1-leveraging-multimodal-large-language-models-for-all-in-one-image-restoration-via-a-mixture-of-frequency-experts)  
    标签：评分：10.0/10、query:real-ir
-   evidence：扩散模型与流匹配生成模型的统一视角
-3. [CASISR: Circular Arbitrary-Scale Image Super-Resolution](/202605/12/2605.08173v1-casisr-circular-arbitrary-scale-image-super-resolution)  
+   evidence：全能图像修复
+3. [Fast Image Super-Resolution via Consistency Rectified Flow](/202605/13/2605.12377v1-fast-image-super-resolution-via-consistency-rectified-flow)  
    标签：评分：10.0/10、query:real-ir
-   evidence：具有闭环架构的任意比例图像超分辨率
-4. [MicroDiffuse3D: A Foundation Model for 3D Microscopy Imaging Restoration](/202605/12/2605.08566v1-microdiffuse3d-a-foundation-model-for-3d-microscopy-imaging-restoration)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：用于三维显微成像修复与超分辨率的基础模型
-5. [DRNet: All-in-One Image Restoration via Prior-Guided Dynamic Reparameterization](/202605/12/2605.08627v1-drnet-all-in-one-image-restoration-via-prior-guided-dynamic-reparameterization)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：处理多种退化的全能图像修复
-6. [Restoration-Aligned Generative Flow Models for Blind Motion Deblurring](/202605/12/2605.08854v1-restoration-aligned-generative-flow-models-for-blind-motion-deblurring)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：用于盲运动去模糊的生成流模型
-7. [Score-Based Generative Modeling through Anisotropic Stochastic Partial Differential Equations](/202605/12/2605.08976v1-score-based-generative-modeling-through-anisotropic-stochastic-partial-differential-equations)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：基于分数的生成建模与扩散过程
-8. [Noise-Started One-Step Real-World Super-Resolution via LR-Conditioned SplitMeanFlow and GAN Refinement](/202605/12/2605.09328v1-noise-started-one-step-real-world-super-resolution-via-lr-conditioned-splitmeanflow-and-gan-refinement)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：基于扩散模型的真实世界图像超分辨率
-9. [DegBins: Degradation-Driven Binning for Depth Super-Resolution](/202605/12/2605.09628v1-degbins-degradation-driven-binning-for-depth-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：退化驱动的分箱用于深度超分辨率
-10. [Spatial-Frequency Gated Swin Transformer for Remote Sensing Single-Image Super-Resolution](/202605/12/2605.09687v1-spatial-frequency-gated-swin-transformer-for-remote-sensing-single-image-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：用于遥感单幅图像超分辨率的Swin Transformer
-11. [Qwen-Image-2.0 Technical Report](/202605/12/2605.10730v1-qwen-image-20-technical-report)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：高保真生成与精确图像编辑的基础模型
-12. [BRIDGE: Background Routing and Isolated Discrete Gating for Coarse-Mask Local Editing](/202605/12/2605.07846v2-bridge-background-routing-and-isolated-discrete-gating-for-coarse-mask-local-editing)  
+   evidence：通过一致性修正流和扩散先验实现图像超分辨率
+4. [StableI2I: Spotting Unintended Changes in Image-to-Image Transition](/202605/13/2605.04453v1-stablei2i-spotting-unintended-changes-in-image-to-image-transition)  
    标签：评分：9.5/10、query:real-ir
-   evidence：使用粗糙掩码进行局部图像编辑并保持背景稳定
-13. [Conservative Flows: A New Paradigm of Generative Models](/202605/12/2605.06905v1-conservative-flows-a-new-paradigm-of-generative-models)  
+   evidence：图像编辑与图像修复任务的评估框架
+5. [FlashClear: Ultra-Fast Image Content Removal via Efficient Step Distillation and Feature Caching](/202605/13/2605.09003v2-flashclear-ultra-fast-image-content-removal-via-efficient-step-distillation-and-feature-caching)  
+   标签：评分：9.5/10、query:real-ir
+   evidence：基于扩散模型的物体移除与图像内容消除
+6. [Principled Design of Diffusion-based Optimizers for Inverse Problems](/202605/13/2605.11506v1-principled-design-of-diffusion-based-optimizers-for-inverse-problems)  
+   标签：评分：9.5/10、query:real-ir
+   evidence：基于扩散模型的优化器用于图像修复等逆问题
+7. [Single-Shot HDR Recovery via a Video Diffusion Prior](/202605/13/2605.11628v1-single-shot-hdr-recovery-via-a-video-diffusion-prior)  
+   标签：评分：9.5/10、query:real-ir
+   evidence：使用视频扩散先验进行单次HDR图像重建
+8. [A Unified Measure-Theoretic View of Diffusion, Score-Based, and Flow Matching Generative Models](/202605/13/2605.06829v1-a-unified-measure-theoretic-view-of-diffusion-score-based-and-flow-matching-generative-models)  
    标签：评分：9.0/10、query:real-ir
-   evidence：使用离散随机动力学的生成模型新范式
-14. [SIMI: Self-information Mining Network for Low-light Image Enhancement](/202605/12/2605.07767v1-simi-self-information-mining-network-for-low-light-image-enhancement)  
+   evidence：扩散模型、基于分数的模型和流匹配生成模型的统一框架
+9. [APEX: Assumption-free Projection-based Embedding eXamination Metric for Image Quality Assessment](/202605/13/2605.07786v2-apex-assumption-free-projection-based-embedding-examination-metric-for-image-quality-assessment)  
    标签：评分：9.0/10、query:real-ir
-   evidence：无监督低光图像增强框架
-15. [MULTITEXTEDIT: Benchmarking Cross-Lingual Degradation in Text-in-Image Editing](/202605/12/2605.08163v1-multitextedit-benchmarking-cross-lingual-degradation-in-text-in-image-editing)  
+   evidence：生成模型评测
+10. [RewardHarness: Self-Evolving Agentic Post-Training](/202605/13/2605.08703v1-rewardharness-self-evolving-agentic-post-training)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基准测试文本图像编辑中的跨语言退化
-16. [Why Do DiT Editors Drift? Plug-and-Play Low Frequency Alignment in VAE Latent Space](/202605/12/2605.08250v1-why-do-dit-editors-drift-plug-and-play-low-frequency-alignment-in-vae-latent-space)  
+   evidence：指令引导的图像编辑
+11. [Qwen-Image-2.0 Technical Report](/202605/13/2605.10730v1-qwen-image-20-technical-report)  
    标签：评分：9.0/10、query:real-ir
-   evidence：扩散Transformer中的多轮图像编辑
-17. [P-Flow: Proxy-gradient Flows for Linear Inverse Problems](/202605/12/2605.08328v1-p-flow-proxy-gradient-flows-for-linear-inverse-problems)  
+   evidence：统一了高保真生成与精确图像编辑
+12. [HiDream-O1-Image: A Natively Unified Image Generative Foundation Model with Pixel-level Unified Transformer](/202605/13/2605.11061v1-hidream-o1-image-a-natively-unified-image-generative-foundation-model-with-pixel-level-unified-transformer)  
    标签：评分：9.0/10、query:real-ir
-   evidence：用于线性逆问题的流匹配方法
-18. [FlowADMM: Plug-and-play ADMM with Flow-based Renoise-Denoise Priors](/202605/12/2605.08640v1-flowadmm-plug-and-play-admm-with-flow-based-renoise-denoise-priors)  
+   evidence：使用像素级扩散Transformer的统一图像生成基础模型
+13. [LatentHDR: Decoupling Exposure from Diffusion via Conditional Latent-to-Latent Mapping for Text/Image-to-Panoramic HDR](/202605/13/2605.11115v1-latenthdr-decoupling-exposure-from-diffusion-via-conditional-latent-to-latent-mapping-for-textimage-to-panoramic-hdr)  
    标签：评分：9.0/10、query:real-ir
-   evidence：用于逆问题的基于流先验的即插即用ADMM
-19. [Supersampling Stable Diffusion and More: An Approach for Interpolating Neural Networks Using Common Interpolation Methods](/202605/12/2605.08698v1-supersampling-stable-diffusion-and-more-an-approach-for-interpolating-neural-networks-using-common-interpolation-methods)  
+   evidence：基于扩散的 HDR 图像生成与场景表示
+14. [A Mixture Autoregressive Image Generative Model on Quadtree Regions for Gaussian Noise Removal via Variational Bayes and Gradient Methods](/202605/13/2605.11585v1-a-mixture-autoregressive-image-generative-model-on-quadtree-regions-for-gaussian-noise-removal-via-variational-bayes-and-gradient-methods)  
    标签：评分：9.0/10、query:real-ir
-   evidence：通过插值神经网络解决Stable Diffusion生成高分辨率图像时的伪影问题
-20. [FlashClear: Ultra-Fast Image Content Removal via Efficient Step Distillation and Feature Caching](/202605/12/2605.09003v1-flashclear-ultra-fast-image-content-removal-via-efficient-step-distillation-and-feature-caching)  
+   evidence：用于高斯噪声去除的图像生成模型
+15. [Interactive State Space Model with Cross-Modal Local Scanning for Depth Super-Resolution](/202605/13/2605.11934v1-interactive-state-space-model-with-cross-modal-local-scanning-for-depth-super-resolution)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散模型的物体移除与图像编辑
-21. [Towards Robust Sequential Decomposition for Complex Image Editing](/202605/12/2605.09233v1-towards-robust-sequential-decomposition-for-complex-image-editing)  
+   evidence：用于深度超分辨率的交互式状态空间模型
+16. [L2P: Unlocking Latent Potential for Pixel Generation](/202605/13/2605.12013v1-l2p-unlocking-latent-potential-for-pixel-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：复杂图像编辑的鲁棒顺序分解
-22. [Outlier-Robust Diffusion Solvers for Inverse Problems](/202605/12/2605.09477v1-outlier-robust-diffusion-solvers-for-inverse-problems)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：利用扩散模型解决带有离群值的逆问题
-23. [A Stability Benchmark of Generative Regularizers for Inverse Problems](/202605/12/2605.10076v1-a-stability-benchmark-of-generative-regularizers-for-inverse-problems)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：成像逆问题中生成扩散先验的基准测试
-24. [Empty SPACE: Cross-Attention Sparsity for Concept Erasure in Diffusion Models](/202605/12/2605.10198v1-empty-space-cross-attention-sparsity-for-concept-erasure-in-diffusion-models)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：扩散模型中的概念擦除
-25. [LimeCross: Context-Conditioned Layered Image Editing with Structural Consistency](/202605/12/2605.10319v1-limecross-context-conditioned-layered-image-editing-with-structural-consistency)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：上下文约束的分层图像编辑
-26. [Progressive Photorealistic Simplification](/202605/12/2605.10409v1-progressive-photorealistic-simplification)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：用于写实图像简化的生成式编辑
-27. [Generate "Normal", Edit Poisoned: Branding Injection via Hint Embedding in Image Editing](/202605/12/2605.10600v1-generate-normal-edit-poisoned-branding-injection-via-hint-embedding-in-image-editing)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：文本引导的图像到图像编辑阶段的安全漏洞
-28. [Product-of-Gaussian-Mixture Diffusion Models for Joint Nonlinear MRI Reconstruction](/202605/12/2605.10629v1-product-of-gaussian-mixture-diffusion-models-for-joint-nonlinear-mri-reconstruction)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：用于联合非线性核磁共振重建的扩散模型
-29. [Masked Generative Transformer Is What You Need for Image Editing](/202605/12/2605.10859v1-masked-generative-transformer-is-what-you-need-for-image-editing)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：用于图像编辑的掩码生成Transformer
+   evidence：像素扩散模型与用于视觉生成的潜空间到像素转换
 
 ### 速读区论文标签
-1. [Discrete Langevin-Inspired Posterior Sampling](/202605/12/2605.09302v1-discrete-langevin-inspired-posterior-sampling)  
+1. [P-Flow: Proxy-gradient Flows for Linear Inverse Problems](/202605/13/2605.08328v2-p-flow-proxy-gradient-flows-for-linear-inverse-problems)  
    标签：评分：8.5/10、query:real-ir
-   evidence：使用离散扩散模型进行逆问题的后验采样
-2. [A unified Benchmark for Multi-Frame Image Restoration under Severe Refractive Warping](/202605/12/2605.05079v1-a-unified-benchmark-for-multi-frame-image-restoration-under-severe-refractive-warping)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：多帧图像修复与几何畸变去除的基准
-3. [MIND: Monge Inception Distance for Generative Models Evaluation](/202605/12/2605.06797v1-mind-monge-inception-distance-for-generative-models-evaluation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：解决FID局限性的生成模型评估指标
-4. [Test-Time Compositional Generalization in Diffusion Models via Concept Discovery](/202605/12/2605.07078v1-test-time-compositional-generalization-in-diffusion-models-via-concept-discovery)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：扩散模型中的组合泛化
-5. [Pixel Perfect: Relational Image Quality Assessment with Spatially-Aware Distortions](/202605/12/2605.02863v1-pixel-perfect-relational-image-quality-assessment-with-spatially-aware-distortions)  
+   evidence：用于图像重建等线性逆问题的流匹配方法
+2. [One-Step Generative Modeling via Wasserstein Gradient Flows](/202605/13/2605.11755v1-one-step-generative-modeling-via-wasserstein-gradient-flows)  
+   标签：评分：8.5/10、query:real-ir
+   evidence：通过Wasserstein梯度流进行单步生成建模
+3. [UniFixer: A Universal Reference-Guided Fixer for Diffusion-Based View Synthesis](/202605/13/2605.12169v1-unifixer-a-universal-reference-guided-fixer-for-diffusion-based-view-synthesis)  
+   标签：评分：8.5/10、query:real-ir
+   evidence：修复模糊细节和扭曲结构等退化伪影
+4. [AlphaGRPO: Unlocking Self-Reflective Multimodal Generation in UMMs via Decompositional Verifiable Reward](/202605/13/2605.12495v1-alphagrpo-unlocking-self-reflective-multimodal-generation-in-umms-via-decompositional-verifiable-reward)  
+   标签：评分：8.5/10、query:real-ir
+   evidence：用于生成和细化的AR-Diffusion统一多模态模型
+5. [MIND: Monge Inception Distance for Generative Models Evaluation](/202605/13/2605.06797v1-mind-monge-inception-distance-for-generative-models-evaluation)  
+   标签：评分：7.5/10、query:real-ir
+   evidence：生成模型评估指标
+6. [dFlowGRPO: Rate-Aware Policy Optimization for Discrete Flow Models](/202605/13/2605.09291v1-dflowgrpo-rate-aware-policy-optimization-for-discrete-flow-models)  
+   标签：评分：7.5/10、query:real-ir
+   evidence：离散流生成模型的强化学习
+7. [STARFlow2: Bridging Language Models and Normalizing Flows for Unified Multimodal Generation](/202605/13/2605.08029v1-starflow2-bridging-language-models-and-normalizing-flows-for-unified-multimodal-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：修复背景下针对失真的图像质量评估
-6. [How to Train Your Latent Diffusion Language Model Jointly With the Latent Space](/202605/12/2605.07933v1-how-to-train-your-latent-diffusion-language-model-jointly-with-the-latent-space)  
+   evidence：使用归一化流的多模态生成
+8. [MoCam: Unified Novel View Synthesis via Structured Denoising Dynamics](/202605/13/2605.12119v1-mocam-unified-novel-view-synthesis-via-structured-denoising-dynamics)  
    标签：评分：7.0/10、query:real-ir
-   evidence：用于非自回归文本生成的潜扩散模型
-7. [EditSleuth: A Dataset of Grounded Reasoning Chains for Image-Edit Forensics](/202605/12/2605.08695v1-editsleuth-a-dataset-of-grounded-reasoning-chains-for-image-edit-forensics)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：图像编辑取证与推理数据集
-8. [Deterministic Decomposition of Stochastic Generative Dynamics](/202605/12/2605.08794v1-deterministic-decomposition-of-stochastic-generative-dynamics)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：随机生成动力学与扩散
-9. [On the Tradeoffs of On-Device Generative Models in Federated Predictive Maintenance Systems](/202605/12/2605.07860v1-on-the-tradeoffs-of-on-device-generative-models-in-federated-predictive-maintenance-systems)  
+   evidence：扩散模型中用于视图合成的结构化去噪动力学
+9. [Inverse Design for Conditional Distribution Matching](/202605/13/2605.09439v1-inverse-design-for-conditional-distribution-matching)  
    标签：评分：6.5/10、query:real-ir
-   evidence：联邦系统中VAE、GAN和扩散等生成模型的分析
-10. [Uncovering Entity Identity Confusion in Multimodal Knowledge Editing](/202605/12/2605.06096v1-uncovering-entity-identity-confusion-in-multimodal-knowledge-editing)  
+   evidence：生成模型中的逆向设计
+10. [FlowDIS: Language-Guided Dichotomous Image Segmentation with Flow Matching](/202605/13/2605.05077v2-flowdis-language-guided-dichotomous-image-segmentation-with-flow-matching)  
    标签：评分：6.0/10、query:real-ir
-   evidence：多模态知识编辑评估
-11. [Digital Image Forgery Detection Using Transfer Learning](/202605/12/2605.08167v1-digital-image-forgery-detection-using-transfer-learning)  
+   evidence：用于图像编辑应用的图像分割
+11. [Auto-Rubric as Reward: From Implicit Preferences to Explicit Multimodal Generative Criteria](/202605/13/2605.08354v1-auto-rubric-as-reward-from-implicit-preferences-to-explicit-multimodal-generative-criteria)  
    标签：评分：6.0/10、query:real-ir
-   evidence：检测来自图像编辑工具的篡改数字内容
+   evidence：多模态生成模型的奖励建模
 
 
 <div class="dpr-home-promo-card">

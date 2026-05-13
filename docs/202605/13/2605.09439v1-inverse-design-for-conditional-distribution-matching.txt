@@ -1,0 +1,2040 @@
+Title: Inverse Design for Conditional Distribution Matching
+
+URL Source: https://arxiv.org/pdf/2605.09439v1
+
+Published Time: Tue, 12 May 2026 01:52:45 GMT
+
+Number of Pages: 49
+
+Markdown Content:
+# Inverse Design for Conditional Distribution Matching 
+
+Ori Meidler Shaul Tolkovsky Or Zuk 
+
+Department of Statistics and Data Science Hebrew University of Jerusalem 
+
+{ori.meidler, shaul.tolkovsky, or.zuk}@mail.huji.ac.il 
+
+# Abstract 
+
+Generative models are powerful tools for sampling from a learned distribution 
+
+P(Y | X), and inverse-design methods invert this map to find an input x that produces a desired point output y∗. However, many design goals are naturally distributional rather than pointwise, incorporating the inherent uncertainty of Y
+
+and targeting a specific form for it, a task not addressed by standard inverse design. To address this issue we introduce Conditional Distribution Matching (CDM) 1,a new inverse-design problem class in generative modeling: given a joint distri-bution P(X, Y ) and a target distribution G(Y ), find an input x∗ whose induced conditional distribution P(Y | X = x∗) matches G. We formally define two variants: Conditional Distribution Matching Sampling (CDMS) and Conditional Distribution Matching Optimization (CDMO). To solve these problems, we propose 
+
+MLGD-F (Matching-Loss Guided Diffusion with a Fast inner sampler ), a plug-and-play inference-time algorithm that combines a pretrained score-based diffusion model with a pretrained fast conditional sampler, requiring no additional training or fine-tuning. By leveraging single-step conditional sampling, MLGD-F enables tractable gradient computation, making the estimation of P(Y | X) both memory-efficient and computationally lightweight. We validate MLGD-F on synthetic benchmarks, structured image transformations, and generative editing optimization, demonstrating reliable recovery of inputs whose conditional distributions match diverse user-specified targets, including discrete mixtures and continuous low-rank supports. 
+
+# 1 Introduction 
+
+Generative models have emerged as a cornerstone of modern machine learning, achieving remarkable results in image synthesis, voice generation, and time-series modeling [ 19 , 39 , 43 ]. The paradigm has evolved from unconditional generation , learning to sample from an unknown data distribu-tion P(X) [ 17 , 33 , 34 ], toward increasingly controlled generation. Conditional generation allows sampling x0 ∼ P (X | Y = y) for a user-specified label y [9 , 16 ], loss-guided methods [6, 35 ]generate samples that minimize a given objective L : X → R while remaining faithful to the data distribution. A natural instantiation of loss-guided generation is inverse design : find an input x such that a forward learned model f (x) is close to a desired point output y∗ [ 31 ], successfully applied in protein engineering [ 8] and drug discovery [ 13 ]. However, this paradigm is inherently limited to point targets: it cannot express goals where the desired outcome is a distribution over outputs rather than a single value. In many modern settings the mapping from input to output is mediated by a complex generative process P(Y | X) that we cannot modify: a pretrained diffusion model with billions of parameters, a physical process such as protein folding, or a black-box simulator. The only lever the user 
+
+> 1The phrase "conditional distribution matching" is also used in the domain-adaptation literature [ 41 ] with a different meaning (aligning source and target conditionals across datasets); our use is an inverse-design problem over a fixed generative process. See Section 3 for details.
+> arXiv:2605.09439v1 [cs.LG] 10 May 2026
+
+controls is the input x. Classical inverse design uses this lever to match a specific target output 
+
+y∗: find x such that f (x) ≈ y∗. In many applications, however, the desired outcome is not a single value but a distribution over outcomes, for instance, an amino acid sequence x such that 
+
+P(structure | X = x) ≈ 12 δA + 12 δB for two target folds A and B [ 15 ], generative pipelines whose outputs are balanced across demographic groups, or design tasks that require diverse but constrained outputs. We address the more general distributional inverse-design problem: accept any frozen 
+
+P(Y | X), optimise the controllable input x, and target a user-specified distribution G over Y rather than a point y∗, without relying on domain-specific scoring functions. 
+
+Our contributions. 
+
+1. Problem formulation. We define two problems, Conditional Distribution Matching Sam-pling (Problem 1) and Conditional Distribution Matching Optimization (Problem 2), which move beyond characterizing samples by their own properties, instead seeking x∗ whose 
+
+induced conditional distribution P(Y | X = x∗) matches a user-specified target G(Y ).2. Algorithm. MLGD-F combines a pretrained score-based diffusion model with a pretrained fast conditional sampler to enable tractable gradient-based optimisation through single-step conditional sampling, operating entirely at inference time with no fine-tuning. 3. Empirical validation. We validate MLGD-F on synthetic Mixture of Gaussians, an MNIST rotation task, and a large-scale Stable Diffusion image editing pipeline, demonstrating recovery of inputs whose induced conditional distributions match user-specified targets. 
+
+# 2 Problem Formulation 
+
+We consider a joint distribution P(X, Y ) over paired random variables, where X denotes a variable of interest and Y an associated variable. Let ∥ · ∥ denote a distance metric between probability distributions (e.g., the Maximum Mean Discrepancy, MMD, or the Sliced Wasserstein Distance, SWD). 
+
+Problem 1 (Conditional Distribution Matching Sampling) .
+
+Given a target distribution G(Y ), the ideal target is the tilted distribution 
+
+Qβ (x) ∝ P (x) e−β L(x), where L(x) = ∥P (Y | X = x) − G (Y )∥,
+
+with β ≥ 0 an inverse temperature interpolating between the prior ( β = 0 ) and the optimum of L
+
+(β → ∞ ). Exact sampling from Qβ requires an intractable noisy-time guidance score; our algorithm (Section 4) provides an LGD-style approximate sampler, analysed in Remark 2 of Appendix E. 
+
+Problem 2 (Conditional Distribution Matching Optimization) .
+
+Find input x∗ that minimizes the distance between the induced conditional distribution and the target: 
+
+x∗ ≡ arg min  
+
+> x
+
+∥P (Y | X = x) − G (Y )∥.
+
+Problem 2 corresponds to Problem 1 in the limit β → ∞ , where Q(x) concentrates at the mode of the loss. Both problems are instances of loss-guided sampling [ 35 ] specialised to the distributional loss L(x) = ∥P (Y | X = x) − G (Y )∥.
+
+# 3 Background and Related Work 
+
+Diffusion models. Denoising Diffusion Probabilistic Models (DDPM) [ 17 , 33 ] define a forward pro-cess that gradually adds Gaussian noise to data x0 over T steps, producing a sequence x0, x 1, . . . , x T ,and learn a reverse process that denoises xT ∼ N (0 , I ) back to a sample x0 from the data distri-bution. Throughout we use this notation: xt is the noisy state at timestep t; the forward marginal has the closed form q(xt | x0) = √¯αt x0 + √1 − ¯αt ϵ with ϵ ∼ N (0 , I ) and noise schedule 
+
+{¯αt}Tt=1 ; sθ (xt, t ) denotes the learned score network of the unconditional model for P(X); and 
+
+ˆx0 = ( xt + (1 − ¯αt)sθ (xt, t )) /√¯αt is Tweedie’s estimate of the clean sample given xt. Score-based models [ 37 ] provide a unifying SDE framework for this family. A deterministic alternative to ancestral sampling is the probability flow ODE (used via the DDIM sampler [ 34 ]), which traces a deterministic trajectory through the same marginals and enables faster sampling with fewer steps. 2Few-step diffusion models. Standard diffusion models require 30 –1000 sequential denoising steps at inference time [ 17 , 34 ], motivating research into faster inference strategies. One direction is consistency models [ 36 , 38 ], which enforce self-consistency along the probability-flow ODE trajectory without requiring a pretrained teacher. Another direction is diffusion distillation , which compresses a pretrained diffusion model into a student that generates samples in one or very few steps [ 30 , 32 ]. We exploit the single-step property common to both families to make inner-loop conditional sampling tractable at every denoising step of the outer diffusion process. 
+
+Loss-guided sampling. Diffusion Posterior Sampling (DPS) [ 6 ] and Loss-Guided Diffusion (LGD) [ 35 ] modify the reverse diffusion process by incorporating gradient information from a differentiable loss function L(x0). At each denoising step, the score is augmented by ∇xt L(ˆ x0),where ˆx0 is an estimate of the clean sample obtained via Tweedie’s formula. LGD further stabilises the gradient by averaging over multiple Monte Carlo Tweedie estimates. This framework enables flexible, zero-shot guidance for a wide range of objectives without retraining the generative prior. 
+
+Distribution matching. A large family of generative methods trains a parametric generator so that its output distribution matches a target G, using losses based on Maximum Mean Discrepancy [ 21 , 22 ], Optimal Transport / Sinkhorn divergences [ 12 ], These approaches require differentiating through the generator and updating its weights, making them expensive and target-specific: a new G requires retraining. Our setting is orthogonal: the generative pipeline (both the diffusion prior and the conditional model fϕ) is frozen , and we instead optimise a single input x∗ such that P(Y | X = x∗)
+
+matches G. No generator weights are updated, no target-specific training is required, and the method operates entirely at inference time. 
+
+Terminological note. The phrase "conditional distribution matching" has prior unrelated uses. In the domain-adaptation literature [ 41 ] it refers to aligning the source and target conditionals 
+
+Psrc (X | Y ) and Ptgt (X | Y ) across two datasets so that a classifier learned on one transfers to the other. In concurrent work on discrete-diffusion distillation [ 11 ] it refers to a training objective in which a student model is trained to match a pretrained teacher’s reverse conditional transitions. Our use is unrelated to either: we study the inverse-design problem of finding an input x∗ whose induced conditional P(Y | X = x∗) matches a user-specified target G(Y ), with a single fixed generative process. The three problems share only a phrase, not a setup or method. 
+
+# 4 Methodology 
+
+MLGD (Matching-Loss Guided Diffusion) specialises Loss-Guided Diffusion [ 35 ] to the conditional distribution matching setting (Problems 1–2) by combining the pretrained score network sθ for 
+
+P(X) with a conditional sampler fϕ for P(Y | X). When fϕ is a few-step sampler, we refer to the instantiation as MLGD-F; MLGD is the broader framework that also covers slower choices of fϕ.The method has two components: an outer loop that performs loss-guided reverse diffusion with a black-box loss L(x) (the LGD skeleton), and an inner estimator that evaluates and differentiates the distribution-matching loss L(x) = ∥P (Y | X = x) − G (Y )∥ at each outer step. The inner estimator is the paper’s algorithmic contribution. 
+
+The two components at a glance. Algorithm 1 is the standard LGD skeleton with an abstract black-box loss L(x): at each reverse-diffusion step we form Tweedie’s estimate ˆx0, query the loss, and add its gradient (scaled by step size ζt) to the denoising update. Algorithm 2 specifies what we plug into that black box (the paper’s algorithmic contribution) via a fast differentiable conditional sampler fϕ.For any query x we draw ncond samples from fϕ(x, ·), compare them to a fixed set of target samples 
+
+SG ∼ G using a distributional distance (e.g. MMD or SWD), and propagate the gradient through 
+
+fϕ. The full detailed version, including Monte-Carlo perturbations around ˆx0 used to stabilise the gradient estimate, is given as Algorithm 3 in Appendix D. We write DDIM_ STEP (xt, s θ , t ) for one deterministic reverse-DDIM update [34]; the explicit form is given in Algorithm 3. 
+
+4.1 Inner estimator: discussion 
+
+We refer to any fast, few-step, differentiable conditional sampler used as fϕ generically; in the synthetic and MNIST experiments this is a consistency model, while in the Stable Diffusion pipeline 3Algorithm 1 MLGD outer loop (black-box loss) 
+
+Input: Pretrained score network sθ for P(X); black-box loss L : X → R; noise schedule {¯αt}Tt=1 ;guidance strengths {ζt}Tt=1 .
+
+Output: Sample x0 guided toward G. 
+
+> 1:
+
+xT ∼ N (0 , I ) 
+
+> 2:
+
+for t = T, T −1, . . . , 1 do  
+
+> 3:
+
+ˆx0 ← 1√ ¯αt
+
+ xt + (1 − ¯αt) sθ (xt, t ) ▷ Tweedie estimate  
+
+> 4:
+
+xt−1 ← DDIM_ STEP (xt, s θ , t ) − ζt ∇xt L(ˆ x0) ▷ Denoising step − inner-estimator guidance (Alg. 2)  
+
+> 5:
+
+end for  
+
+> 6:
+
+return x0
+
+Algorithm 2 Inner estimator for L(x) (our contribution) 
+
+Input: Query conditioning x; pretrained differentiable sampler fϕ for P(Y |X); target sample 
+
+SG ∼ G ; number of conditional samples ncond ; distributional distance L (e.g. MMD, SWD). 
+
+Output: Estimate bL(x) and its gradient ∇x bL(x). 
+
+> 1:
+
+Sample internal noise η1, . . . , η ncond 
+
+> iid
+
+∼ π 
+
+> 2:
+
+Scond ← { fϕ(x, η i)}ncond  
+
+> i=1
+
+▷ Fast conditional samples; differentiable in x 
+
+> 3:
+
+bL(x) ← L  Scond , SG
+
+ ▷ Plug-in distributional-loss estimator  
+
+> 4:
+
+∇x bL(x) ← AUTOGRAD ( bL(x), x ) ▷ Backprop through fϕ 
+
+> 5:
+
+return bL(x), ∇x bL(x)
+
+we use SDXL-Turbo [ 32 ], which shares the same key property of single-step sampling. The loss 
+
+L(x) = ∥P (Y | X = x) − G (Y )∥ cannot be evaluated analytically because P(Y | X = x) is unknown: neither its density nor a way to enumerate it is available; we have only a pretrained sampler. Algorithm 2 bypasses this by plug-in estimation, then relies on autograd through fϕ for the gradient. 
+
+Why a fast sampler. The choice of a fast model for fϕ is deliberate. Because the inner estimator is invoked at every one of the T outer denoising steps, a standard K⋆-step diffusion model would multiply the sampling cost by T · K⋆ · ncond and, more critically, would require backpropagating through a K⋆-step unrolled chain at each outer step, rendering gradient computation memory-intensive and effectively intractable. A single-step fϕ (Ks=1 ) keeps both cost and activation memory lightweight; we measure the resulting memory gap in Section 5.4. 
+
+Sampling vs. optimisation, and the role of β. Algorithm 1 interpolates between two regimes controlled by the inverse temperature β of the target Qβ (x) ∝ P (x) e−βL(x) (Problem 1). At β = 0 
+
+the guidance vanishes and the algorithm draws approximate samples from the prior P; as β → ∞ it concentrates at arg min x L(x), recovering the optimisation variant (Problem 2). In practice, β can be absorbed into the step-size schedule by setting ζt ← β ζ t, so the two are not separately identified. Following LGD, the trajectory targets Qβ only approximately (the exact noisy-time guidance score is intractable); Remark 2 in Appendix E states the approximation explicitly. In practice we report CDMO solutions by running at large β with R independent restarts x(r) 
+
+> T
+
+∼ N (0 , I ) and returning 
+
+x∗ = arg min r=1 ,...,R bL(x(r)0 ).
+
+4.2 Theoretical analysis 
+
+MLGD-F uses fϕ as an autograd oracle : at each reverse-diffusion step, ∇x bLϕ is obtained by backpropagating through fϕ. Appendix E analyses the squared-MMD estimator under three idealised assumptions: a kernel-smoothness condition; output fidelity Eη ∥fϕ(x, η ) − ftrue (x, η )∥2 ≤ ε2
+
+> s
+
+; and Jacobian fidelity εg := ( Eη ∥∂xfϕ − ∂xftrue ∥2 
+
+> F
+
+)1/2. Under these: (i) | bLϕ − L| = O(εs + n−1/2)
+
+(Prop. 1); (ii) the gradient has bias O(εg + εs) and variance O(n−1) (Prop. 2); (iii) replacing a 
+
+K⋆-step teacher with a Ks < K ⋆ step student reduces reverse-mode memory by Θ( K⋆/K s) (Prop. 3), 4formalising the 43 GB vs. 375 GB gap of Section 5.4, with gradient discrepancy controlled by distillation errors εdist , ε g, dist (the student-vs-teacher analogues of εs, ε g ). Neither εs nor εg follows from existing diffusion or consistency-model convergence results [ 1, 3,5, 30 , 38 ], and εg is unbounded by any current training-time analysis. We empirically verify the student-teacher component of both on SDXL-Base/Lightning [ 23 , 28 ] (Remark E.8, Appendix E.9), flagging the teacher-vs-truth gap as an open problem. The diagnostic shows comparable Jacobian gaps, with naturalistic prompts showing the closest agreement and stylised prompts exhibiting larger but comparable degradation. We treat this as regime identification rather than numerical confirmation. 
+
+# 5 Experiments 
+
+Our experiments address two core properties of MLGD-F: its capacity to optimize over high-dimensional input manifolds X, and its scalability to semantically complex output spaces Y . We evaluate across three settings of increasing scale: synthetic Mixture of Gaussians (Section 5.1), where low-dimensional X and Y allow verification against known ground-truth optima; an MNIST rotation task (Section 5.2), which scales X to image space ( R784 ) while keeping Y small; and a Stable Diffusion image optimization (Section 5.3), which scales both X and Y to high-dimensional spaces. 
+
+5.1 Synthetic Simulations 
+
+We compare MLGD-F against MLGD with a slow diffusion sampler on Mixture of Gaussians across multiple dimensionalities. We run 25 optimisation instances and select the top-10 by final loss (Problem 2). Reporting top-k reflects how multistart optimisation is used in practice: a user running 
+
+R restarts returns the best result by the same objective, so top-k captures achievable quality under finite restart budgets. We also report all-25 statistics to characterise variance across seeds. Full models and training details are provided in Appendix A. As shown in Figure 1, MLGD-F recovers near-optimal solutions with an 11 × speedup over MLGD (4.03 s vs. 45 .58 s for the representative run shown; full per-dimensionality timing across all 25 runs is reported in Appendix A). Notably, ECDF analysis (Figure 4) reveals that MLGD-F’s relative performance improves with dimensionality. We attribute this to the trade-off between sampler fidelity and gradient variance : while MLGD with a slow sampler uses a more accurate conditional model, backpropagating through its unrolled K⋆-step chain accumulates variance that scales poorly with dimension. MLGD-F’s single-step model provides a cleaner gradient signal, which becomes the decisive factor in high-dimensional settings (Appendix A.8). The β-sweep in Figure 1 (bottom) empirically illustrates the sampling-to-optimisation interpolation of Problem 1: as β increases from 0
+
+to large values, MLGD-F transitions from sampling the prior P to concentrating near arg min x L(x).
+
+5.2 MNIST: Rotated Digits 
+
+We apply MLGD-F to an image-space problem using the MNIST dataset [ 20 ], where X ∈ R784 is a digit image and Y ∈ R2 is its rotation angle encoded as (cos θ, sin θ); a standard diffusion model serves as P(X) and a consistency model as fϕ for P(Y | X). The goal is to find x∗ such that 
+
+P(Y | X = x∗) ≈ G for various user-specified target distributions G.Since the unconditional model can generate any digit at any orientation, the optimization searches over the full joint space of digit identity and rotation. We present the top-5 results by final loss across 15 runs (Figure 2, and Table 1); full qualitative results are provided in Appendix B.6. These runs are approximate samples from the β-tempered posterior Qβ (x) ∝ P (x)e−βL(x) (Problem 1), and the digit-class distribution in Table 1 is the empirical realisation of this posterior. While the objective is distributional and agnostic to digit identity, MLGD-F recovers semantically coherent digits that satisfy the orientation constraint G: symmetric digits dominate under the uniform target (digit 0) and bimodal target (narrow 0, 1, 8, 6, 9), while oriented digits (2, 3, 7) emerge under the unimodal target. 
+
+5.3 Stable Diffusion: Distribution-Guided Image Generation 
+
+To demonstrate scalability to large pretrained models, we apply MLGD-F to image editing with SDXL [ 28 ], which serves as P(X); SDXL-Turbo [ 32 ] serves as the fast conditional sampler fϕ
+
+for P(Y | X) . All targets are defined in CLIP [ 29 ] embedding space. We define four distribution 5Figure 1: Synthetic 2D simulation (Top): Joint distribution and conditional density comparison. MLGD-F (green) recovers an input whose induced conditional matches the target G(Y ) with high fidelity ( L2 = 0 .0076 ). (Bottom): Approximate CDMS β-sweep: orange is analytical Qβ , blue is empirical samples. As β increases, samples transition from the prior P(X) to a distribution closely aligned with Qβ , eventually concentrating at the optimum x∗ = −5.Table 1: MNIST rotated-digits task (15 seeds). SWD top-5 is the mean loss of the top-5 runs. Digit percentages are over classified seeds only (up to 3 seeds per scenario fell below the classifier threshold, consistent with the non-convex nature of high-dimensional optimization). Timing varies with T and 
+
+nMC (Alg. 3). Recovered digit (%) Target G SWD all SWD top5 Time (s) 0 1 2 3 4 5 6 7 8 9
+
+Gunif . 0.052 ± .03 0.033 ± .01 19 .2 ± 0.1 79 – – – – – – 7 – 14 
+
+Gbim . 0.081 ± .07 0.031 ± .01 22 .4 ± 3.5 15 15 – – – 8 15 – 38 8
+
+Gunim . 0.049 ± .02 0.033 ± .01 9.3 ± 0.2 – – 38 31 – – – 23 8 –matching tasks chosen to cover qualitatively distinct target shapes ranging from discrete mixtures to continuous low-rank support: 
+
+(i) Balanced (Gbal ): 0.5 · δmale + 0 .5 · δfemale , an equal-weight two-mode mixture. 
+
+(ii) Skewed (Gskew ): 0.25 · δmale + 0 .75 · δfemale , an unequal-weight two-mode mixture. 
+
+(iii) Gender interpolation (GinterpGender ): supported on a one-dimensional feminine-to-masculine continuum, approximated by four anchor classes. 
+
+(iv) Age interpolation (GinterpAge ): supported on a one-dimensional age continuum over male portraits, via prompts “a portrait of a {age}-year-old man” with uniform age distribution. Full construction details are provided in Appendix C. Together, these targets demonstrate the method’s target-shape generality: discrete mixtures and continuous low-rank submanifolds of output space are handled by the same algorithm without modification. The objective is to ensure the edited scribble x∗
+
+satisfies P(gender | scribble = x∗) ≈ G .
+
+Setup. Starting from a male portrait scribble (e.g. Figure 3), we employ SDEdit [ 26 ] to partially noise the image and denoise it, using MLGD-F as the guidance signal during the reverse diffusion trajectory. Concretely, line 1 of Algorithm 1 is replaced: rather than initialising from pure Gaussian noise xT ∼ N (0 , I ), we start from a partially noised version of the source scribble; all subsequent steps of Algorithm 1 are unchanged. At each denoising step, the predicted clean latent ˆx0 is decoded into a scribble and passed to ControlNet-Scribble [ 44 ] for conditional image generation; example outputs are shown in Figure 3. The resulting images are embedded via CLIP ViT-L/14 [ 29 ] and compared against the target distribution G. MLGD-F requires 171–241 minutes of wall-clock time 6Figure 2: MNIST rotation optimization. Left: Optimized digits x∗ for uniform (row 1), bimodal (row 2), and unimodal (row 3) targets. Without digit-identity supervision, MLGD-F recovers semanti-cally meaningful classes: circular “0” (uniform), narrow “0”,“1”,“8”,“6/9” (bimodal, 0◦/180 ◦), and oriented “2”,“3”,“7” (unimodal, 0◦). Right: Polar histograms of P(Y | X=x∗) (blue) vs. target G
+
+(orange), where each panel is labelled to match its corresponding digit on the left (U1–U2: uniform-2; B1–B2: bimodal; UM1–UM2: unimodal), closely matching the target in all cases. depending on the hyperparameters. We compare MLGD-F against two baselines: ( i) Average scribble : pixel-wise weighted mean of HED maps [ 44 ] from generated male and female portraits (e.g., 0.25 ·HED male + 0 .75 ·HED female ); ( ii ) SDEdit Best : unguided SDEdit applied repeatedly to the source scribble; the candidate minimising MMD against G is selected, with the number of candidates chosen so that SDEdit’s total runtime matches MLGD-F’s wall-clock time. 
+
+Results. Quantitative results are summarized in Table 2. Across all four scenarios, MLGD-F achieves the lowest MMD, with improvements of 22 –33% over the source scribble baseline. The average scribble baseline fails by construction: pixel-wise blending of HED maps produces ghosted facial structures that lie outside the data manifold (Figures 10–14). SDEdit Best, despite having an equal time budget, consistently underperforms. MLGD-F optimizes directly for G, the resulting 
+
+p(male ) values closely track the target proportions across both discrete scenarios ( 47 .4% vs. 50% 
+
+target; 26 .4% vs. 25% target). The smooth transition observed in the gender interpolation grids confirms that the method handles continuous low-rank submanifold targets while remaining on the data manifold (Figure 3). Extended qualitative comparisons, including age interpolation grids (Figure 18), are provided in Appendix C.9. Table 2: Quantitative results for distributional targets ( N = 2 ,000 images). Bold indicates the best result per target scenario. ∆MMD (%) is the relative MMD improvement over the source scribble baseline, computed as ∆MMD (%) = ( MMD source − MMD method )/MMD source × 100 .
+
+Discrete Targets Continuum Targets Method MMD ↓ ∆MMD % male (95% CI) Method MMD ↓ ∆MMD 
+
+Balanced ( 50% male) Gender Interpolation 
+
+Avg scribble 0.453 +9 .9% 40 .9 [38 .8, 43 .0] Avg scribble 0.499 −4.2% 
+
+SDEdit Best 0.427 +15 .1% 70 .3 [68 .3, 72 .3] SDEdit Best 0.411 +14 .3% 
+
+MLGD-F (ours) 0.339 +32 .5% 47 .4 [45 .3, 49 .5] MLGD-F 0.373 +22 .1%
+
+Skewed ( 25% male) Age Interpolation 
+
+Avg scribble 0.421 +12 .9% 27 .4 [25 .5, 29 .3] Avg scribble 0.514 +0 .9% 
+
+SDEdit Best 0.452 +6 .4% 38 .7 [36 .6, 40 .8] SDEdit Best 0.484 +6 .8% 
+
+MLGD-F (ours) 0.352 +27 .1% 26 .4 [24 .5, 28 .3] MLGD-F 0.371 +28 .5%
+
+5.4 Ablation Study: Necessity of distilled Models 
+
+We validate that few-step models (e.g., SDXL Turbo [ 32 ]) are essential for tractable optimization by comparing our approach against standard diffusion-based inner-loop sampling. The memory gap is 7Figure 3: Top-left: Source male portrait scribble. Top-middle: MLGD-F optimized scribble after distribution-guided editing. Top-right: CLIP PCA projection fitted on binary gender poles (male, woman). Background clusters represent reference distributions (Woman, Man, and mixed-feature sets) colored by their position along the primary semantic axis (PC1). The MLGD-F evaluation outputs (gold markers) cluster in the intermediate region, demonstrating successful semantic interpolation in the CLIP embedding manifold. Bottom: Continuum (low-rank) target. A subset of images generated from the MLGD-F optimized scribble (every ∼5th image out of 75 total), ordered by their projection onto the CLIP PC1 from most feminine (top-left) to most masculine (bottom-right). formalised by Proposition 3 in Appendix E: the few-step student reduces reverse-mode graph depth by the step-count ratio K⋆/K s, with the resulting student-teacher gradient discrepancy controlled by the additional distillation errors O(εg, dist + εdist ).
+
+Architectural Parity and Scaling. To isolate the impact of the denoising step count, we observe that our setup utilizes an identical architectural backbone across both configurations: the UNet (≈2.6B parameters), ControlNet [ 44 ], and CLIP text encoders [ 29 ] remain constant. Notably, SDXL-Turbo is obtained by distilling SDXL-Base with the architecture unchanged - the two models differ only in their weights, not their structure [ 32 ]. Consequently, the computational cost of a single forward pass is equivalent across both, and all observed differences in memory and speed are a direct consequence of the denoising step count alone. The observed differences in memory and speed are thus a direct consequence of the computation graph depth. Since SDXL Base requires K⋆ = 30 steps for high-quality reconstruction compared to Ks = 2 for SDXL Turbo, the resulting gradient graph is fundamentally 15 × deeper. To manage memory, one can employ gradient checkpointing ; however, while this technique avoids storing intermediate activations, the overhead of maintaining the computation graph nodes for each of the K
+
+denoising steps still scales linearly with the number of iterations. 
+
+Memory Tractability. At each outer denoising step, our method generates ncond conditional samples whose gradient graph must remain resident in GPU memory until autograd.grad is invoked. The peak memory cost decomposes as: 
+
+Mpeak = Mmodels + Mfixed + ncond · Mvar (K) (1) where Mmodels is the static model weight footprint, Mfixed is the unconditional forward pass cost, and 
+
+Mvar (K) is the per-sample graph cost for a sampler with K inner denoising steps. Since the autograd engine must track all unrolled iterations, total memory is Θ( ncond · K).For the Stable Diffusion experiment (Section 5.3), we measured peak memory empirically on an NVIDIA A100 (80 GB variant) using ncond = 100 conditional samples per step (the main optimization runs reported in Appendix C.7 were executed on an NVIDIA L40S; the A100 was used for the memory ablation and final validation on 2,000 samples): • SDXL Turbo ( Ks = 2 ): The full pipeline consumes 43 GB peak VRAM. 8• SDXL Base ( K⋆ = 30 ): Replacing the sampler with the base model, we project a peak memory requirement of approximately 375 GB (exceeding available hardware capacity by 4.4 ×), making the method entirely infeasible. 
+
+Temporal Efficiency. Beyond memory, the distilled model provides a critical speedup. For a run of 125 steps with ncond = 100 variations, the Turbo-based pipeline requires approximately 
+
+4 hr , compared to projected 52 hr for the Base-based pipeline. This order-of-magnitude reduction transforms MLGD-F into a tractable tool for iterative research and deployment. 
+
+# 6 Conclusion 
+
+We introduced Conditional Distribution Matching (CDM) , a new problem class that generalizes inverse design to the distributional setting. Rather than seeking an input x that produces a specific output y∗, CDM seeks an input x∗ whose entire induced conditional distribution P(Y | X = x∗)
+
+matches a user-specified target G(Y ). To our knowledge, this problem class has not been explicitly studied before. We formalized two variants, CDMS and CDMO, and introduced MLGD-F to solve them at inference time without any training or fine-tuning. A central advantage of the plug-and-play design is that MLGD-F directly inherits quality gains from improvements in the underlying pretrained models: as stronger diffusion priors and few-step conditional samplers become available, optimization quality improves automatically. The few-step model is essential for tractability: as demonstrated in Section 5.4, replacing a single-step sampler with a standard multi-step diffusion model increases peak memory by nearly an order of magnitude and runtime from hours to days, rendering the method infeasible at scale. Empirically, we validated MLGD-F across settings of increasing scale and complexity, from synthetic Mixture of Gaussians, through an MNIST rotation task, to a large-scale Stable Diffusion image editing pipeline, demonstrating reliable recovery of inputs whose induced conditional distributions match diverse user-specified targets, including discrete mixtures and continuous low-rank submanifolds. 
+
+Limitations. Optimization quality is bounded by the fidelity of the pretrained distilled model — if the conditional sampler fϕ poorly approximates P(Y | X), the guidance gradient will be biased regardless of the number of runs. The stochastic nature of the inner-loop loss estimation means multiple independent runs are often needed to find a good solution, which multiplies the compute cost. Runtime at large scale may be prohibitive for latency-sensitive applications. Finally, the method currently requires the conditional model to be differentiable end-to-end with respect to the input x;non-differentiable or black-box conditional models would require gradient-free extensions. 
+
+Future Work. CDM opens a research direction of optimizing over induced conditional distributions, one we hope will inspire dedicated solvers, tighter theoretical guarantees, and new application domains. This work focuses on continuous input spaces; an important direction is extending CDM to discrete spaces. A complementary direction is replacing the LGD-style approximate sampler (Remark 2) by an asymptotically exact corrector for the outer loop, twisted SMC, MCMC, or Feynman–Kac reweighting, to obtain Qβ samples with quantifiable bias at the cost of extra compute. Finally, an intriguing question is whether few-step samplers offer advantages beyond speed: their single-step structure may yield cleaner gradient signals compared to unrolled multi-step chains, as suggested by Appendix A.8. 
+
+Broader Impact. CDM opens both beneficial and potentially harmful applications. Distributional control can produce diverse and targeted outputs on complex models: for instance, the Stable Diffusion experiment (Section 5.3) demonstrates how MLGD-F can enforce demographic balance in generated portraits, a direct application to bias reduction. However, since G is defined with great freedom, the same mechanism could be misused to deliberately steer frozen pipelines toward harmful distributions. Since MLGD-F operates on frozen models, existing safety mechanisms remain fully active. 9References 
+
+[1] Joe Benton, Valentin De Bortoli, Arnaud Doucet, and George Deligiannidis. Nearly $d$-linear convergence bounds for diffusion models via stochastic localization. In International Conference on Learning Representations , 2024. URL https://openreview.net/forum? id=r5njV3BsuD .[2] Sebastian Bischoff, Alana Darcher, Michael Deistler, Richard Gao, Franziska Gerken, Manuel Gloeckler, Lisa Haxel, Jaivardhan Kapoor, Janne K. Lappalainen, Jakob H. Macke, Guy Moss, Matthijs Pals, Felix C. Pei, Rachel Rapp, A. Erdem Sa˘ gtekin, Cornelius Schröder, Auguste Schulz, Zinovia Stefanidi, Shoji Toyota, Linda Ulmer, and Julius Vetter. A practical guide to sample-based statistical distances for evaluating generative models in science. Transactions on Machine Learning Research , 2024. ISSN 2835-8856. URL https://openreview.net/ forum?id=isEFziui9p .[3] Valentin De Bortoli. Convergence of denoising diffusion models under the manifold hy-pothesis. Transactions on Machine Learning Research , 2022. ISSN 2835-8856. URL 
+
+https://openreview.net/forum?id=MhK5aXo3gB . Expert Certification. [4] Gabriel Cardoso, Yazid Janati El Idrissi, Sylvain Le Corff, and Eric Moulines. Monte carlo guided denoising diffusion models for Bayesian linear inverse problems. In International Conference on Learning Representations , 2024. URL https://openreview.net/forum? id=nHESwXvxWK .[5] Sitan Chen, Sinho Chewi, Jerry Li, Yuanzhi Li, Adil Salim, and Anru Zhang. Sampling is as easy as learning the score: theory for diffusion models with minimal data assumptions. In 
+
+International Conference on Learning Representations , 2023. URL https://openreview. net/forum?id=zyLVMgsZ0U_ .[6] Hyungjin Chung, Jeongsol Kim, Michael Thompson Mccann, Marc Louis Klasky, and Jong Chul Ye. Diffusion posterior sampling for general noisy inverse problems. In International Con-ference on Learning Representations , 2023. URL https://openreview.net/forum?id= OnD9zGAGT0k .[7] Wojciech M Czarnecki, Simon Osindero, Max Jaderberg, Grzegorz Swirszcz, and Razvan Pascanu. Sobolev training for neural networks. In Advances in Neural Information Processing Systems , volume 30, 2017. [8] Justas Dauparas, Ivan Anishchenko, Nathaniel Bennett, Hua Bai, Robert J Ragotte, Lukas F Milles, Basile IM Wicky, Alexis Courbet, Rob J de Haas, Neville Bethel, et al. Robust deep learning–based protein sequence design using proteinmpnn. Science , 378(6615):49–56, 2022. [9] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. In 
+
+Advances in Neural Information Processing Systems , volume 34, pages 8780–8794, 2021. [10] Zehao Dou and Yang Song. Diffusion posterior sampling is computationally unstable. In 
+
+International Conference on Machine Learning , 2024. [11] Yansong Gao and Yu Sun. Distillation of discrete diffusion by exact conditional distribution matching. arXiv preprint arXiv:2512.12889 , 2025. [12] Aude Genevay, Gabriel Peyré, and Marco Cuturi. Learning generative models with sinkhorn divergences. In International Conference on Artificial Intelligence and Statistics , volume 84, pages 1608–1617. PMLR, 2018. [13] Rafael Gómez-Bombarelli, Jennifer N Wei, David Duvenaud, José Miguel Hernández-Lobato, Benjamín Sánchez-Lengeling, Dennis Sheberla, Jorge Aguilera-Iparraguirre, Timothy D Hirzel, Ryan P Adams, and Alán Aspuru-Guzik. Automatic chemical design using a data-driven continuous representation of molecules. ACS central science , 4(2):268–276, 2018. [14] Arthur Gretton, Karsten Borgwardt, Malte Rasch, Bernhard Schölkopf, and Alex Smola. A kernel method for the two-sample-problem. In Advances in Neural Information Processing Systems , volume 19, 2006. 10 [15] Jeung-Hoi Ha and Stewart N Loh. Protein conformational switches: from nature to design. 
+
+Chemistry–A European Journal , 18(26):7984–7999, 2012. [16] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 , 2022. [17] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In 
+
+Advances in Neural Information Processing Systems , volume 33, pages 6840–6851, 2020. [18] Wassily Hoeffding. A class of statistics with asymptotically normal distribution. In Break-throughs in statistics: Foundations and basic theory , pages 308–334. Springer, 1992. [19] Xinrong Hu, Yuxin Jin, Jinxing Liang, Junping Liu, Ruiqi Luo, Min Li, and Tao Peng. Diffusion model for image generation-a survey. In 2023 2nd International Conference on Artificial Intelligence, Human-Computer Interaction and Robotics (AIHCIR) , pages 416–424. IEEE, 2023. [20] Yann LeCun, Leon Bottou, Yoshua Bengio, and Patrick Haffner. Gradient-based learning applied to document recognition. Proceedings of the IEEE , 86(11):2278–2324, 1998. [21] Chun-Liang Li, Wei-Cheng Chang, Yu Cheng, Yiming Yang, and Barnabás Póczos. Mmd gan: Towards deeper understanding of moment matching network. In Advances in Neural Information Processing Systems , volume 30, pages 2203–2213, 2017. [22] Yujia Li, Kevin Swersky, and Richard Zemel. Generative moment matching networks. In 
+
+International Conference on Machine Learning , volume 37, pages 1718–1727. PMLR, 2015. [23] Shanchuan Lin, Anran Wang, and Xiao Yang. Sdxl-lightning: Progressive adversarial diffusion distillation, 2024. URL https://arxiv.org/abs/2402.13929 .[24] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International Conference on Learning Representations , 2019. URL https://openreview.net/forum? id=Bkg6RiCqY7 .[25] Colin McDiarmid. On the method of bounded differences. In J. Siemons, editor, Surveys in Combinatorics, 1989 , volume 141 of London Mathematical Society Lecture Note Series , pages 148–188. Cambridge University Press, 1989. [26] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jiajun Wu, Jun-Yan Zhu, and Stefano Ermon. SDEdit: Guided image synthesis and editing with stochastic differential equations. In 
+
+International Conference on Learning Representations , 2022. URL https://openreview. net/forum?id=aBsCjcPu_tE .[27] K. B. Petersen and M. S. Pedersen. The matrix cookbook, nov 2012. URL http://www2. compute.dtu.dk/pubdb/pubs/3274-full.html . Version 20121115. [28] Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe Penna, and Robin Rombach. SDXL: Improving latent diffusion models for high-resolution image synthesis. In International Conference on Learning Representations , 2024. URL 
+
+https://openreview.net/forum?id=di52zR8xgf .[29] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervision. In International Conference on Machine Learning ,volume 139, pages 8748–8763. PMLR, 2021. [30] Tim Salimans and Jonathan Ho. Progressive distillation for fast sampling of diffusion models. In International Conference on Learning Representations , 2022. URL https://openreview. net/forum?id=TIdIXIpzhoI .[31] Benjamin Sanchez-Lengeling and Alán Aspuru-Guzik. Inverse molecular design using machine learning: Generative models for matter engineering. Science , 361(6400):360–365, 2018. 11 [32] Axel Sauer, Dominik Lorenz, Andreas Blattmann, and Robin Rombach. Adversarial diffusion distillation. In European Conference on Computer Vision , volume 86, pages 87–103. Springer, 2024. doi: 10.1007/978-3-031-73016-0_6. [33] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsuper-vised learning using nonequilibrium thermodynamics. In International Conference on Machine Learning , volume 37, pages 2256–2265. PMLR, 2015. [34] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. In 
+
+International Conference on Learning Representations , 2021. URL https://openreview. net/forum?id=St1giarCHLP .[35] Jiaming Song, Qinsheng Zhang, Hongxu Yin, Morteza Mardani, Ming-Yu Liu, Jan Kautz, Yongxin Chen, and Arash Vahdat. Loss-guided diffusion models for plug-and-play controllable generation. In International Conference on Machine Learning , volume 202, pages 32483–32498. PMLR, 2023. [36] Yang Song and Prafulla Dhariwal. Improved techniques for training consistency models. In 
+
+International Conference on Learning Representations , 2024. URL https://openreview. net/forum?id=WNzy9bRDvG .[37] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In 
+
+International Conference on Learning Representations , 2021. URL https://openreview. net/forum?id=PxTIG12RRHS .[38] Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. In 
+
+International Conference on Machine Learning , volume 202, pages 32211–32252. PMLR, 2023. [39] Chen Su, Zhengzhou Cai, Yuanhe Tian, Zhuochao Chang, Zihong Zheng, and Yan Song. Diffusion models for time series forecasting: A survey. arXiv preprint arXiv:2507.14507 , 2025. [40] H. J. Terry Suh, Max Simchowitz, Kaiqing Zhang, and Russ Tedrake. Do differentiable simulators give better policy gradients? In International Conference on Machine Learning ,volume 162, pages 20668–20696. PMLR, 2022. [41] Remi Tachet des Combes, Han Zhao, Yu-Xiang Wang, and Geoff Gordon. Domain adaptation with conditional distribution matching and generalized label shift. In Advances in Neural Information Processing Systems , volume 33, 2020. URL https://arxiv.org/abs/2003. 04475 .[42] Luhuan Wu, Brian L. Trippe, Christian A. Naesseth, David M. Blei, and John P. Cunningham. Practical and asymptotically exact conditional sampling in diffusion models. In Advances in Neural Information Processing Systems , 2023. [43] Chenshuang Zhang, Chaoning Zhang, Sheng Zheng, Mengchun Zhang, Maryam Qamar, Sung-Ho Bae, and In So Kweon. A survey on audio diffusion models: Text to speech synthesis and enhancement in generative ai, 2023. URL https://arxiv.org/abs/2303.13336 .[44] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 3836–3847, 2023. 12 A Synthetic Simulations: Experimental Details 
+
+This appendix provides the full experimental setup for the synthetic simulations described in Sec-tion 5.1. 
+
+A.1 MMD Loss: Population and Sample Forms 
+
+All synthetic experiments instantiate the abstract loss L(x) = ∥P (Y | X = x) − G (Y )∥ with the squared Maximum Mean Discrepancy [14]. The population loss is 
+
+L(x) = MMD 2 P(Y | X = x), G = E[k(Y, Y ′)] − 2 E[k(Y, ˜Y )] + E[k( ˜Y , ˜Y ′)] ,
+
+where Y, Y ′ ∼ P (Y | X = x) and ˜Y , ˜Y ′ ∼ G are independent pairs, and k is a characteristic positive-definite kernel. In practice we replace this with the biased V -statistic plug-in estimator. Given conditional samples 
+
+{yi}ni=1 and target samples {˜yj }mj=1 , the estimator is: 
+
+\MMD 2 {yi}, {˜yj } = 1
+
+n2
+
+X
+
+> i,i ′
+
+k(yi, y i′ ) − 2
+
+nm 
+
+X
+
+> i,j
+
+k(yi, ˜yj ) + 1
+
+m2
+
+X
+
+> j,j ′
+
+k(˜ yj , ˜yj′ ).
+
+The kernel k is the multi-bandwidth RBF 
+
+k(a, b ) = 
+
+> 5
+
+X
+
+> ℓ=1
+
+exp 
+
+
+
+− ∥a − b∥2
+
+σ · 2ℓ−3
+
+
+
+, (2) where σ is the mean pairwise squared distance of the merged sample. 
+
+A.2 L2 Distance Between GMMs 
+
+Because both P(Y | X = ˆ x∗) and G(Y ) are Gaussian Mixture Models in the synthetic setting, we evaluate solution quality with the exact L2 distance: 
+
+∥p − q∥2 
+
+> L2
+
+=
+
+Z
+
+(p(y) − q(y)) 2 dy = ∥p∥2 
+
+> L2
+
+− 2⟨p, q ⟩L2 + ∥q∥2 
+
+> L2
+
+,
+
+where each inner product ⟨p1, p 2⟩L2 between two GMMs decomposes into a sum of Gaussian– Gaussian inner products. Each such inner product admits the closed-form evaluation [27]: 
+
+⟨N (μ1, Σ1), N (μ2, Σ2)⟩L2 = N (μ1; μ2, Σ1 + Σ 2).
+
+This gives an exact evaluation of solution quality, used as our primary metric for comparing MLGD-F against LGD in all synthetic settings. We use L2 GMM only for evaluation .
+
+A.3 Joint Distribution Parameters 
+
+For all settings, the joint distribution P(X, Y ) is a Mixture of Gaussians with uni-form weights. Full parameter files are available at https://github.com/orineo1/ conditional-matching-paper/tree/main/simulations .
+
+2D setting (dim( X) = 1 , dim( Y ) = 1 ). A fixed Mixture of 11 Gaussians with shared diagonal covariance Σ = 0 .52 · I2. The ground-truth optimum is x∗ = −5, and G(Y ) = P(Y | X = −5) 
+
+is bimodal, obtained by retaining only components whose conditional weight exceeds 0.01 given 
+
+x = −5 and renormalizing. 
+
+5D setting (dim( X) = 4 , dim( Y ) = 1 ). A Mixture of 4 Gaussians in 5 dimensions. The conditional target G(Y ) = P(Y | X = x∗) has 2 modes after filtering components with conditional weight below 0.001 and renormalizing the remaining weights. 
+
+10D setting (dim( X) = 9 , dim( Y ) = 1 ). A Mixture of 4 Gaussians in 10 dimensions. The conditional target G(Y ) = P(Y | X = x∗) has 2 modes after filtering components with conditional weight below 0.001 and renormalizing the remaining weights. 13 A.4 Model Architectures and Training 
+
+All simulation settings utilize a common architecture: a fully connected MLP with sinusoidal time embeddings, optimized via AdamW [ 24 ] ( lr = 10 −4, weight decay = 10 −4) with a cosine annealing learning rate schedule. Detailed hyperparameters are provided in Tables 3–5. 
+
+Unconditional diffusion model. A DDPM [ 17 ] implementation trained on marginal samples 
+
+x ∼ P (X). We employ a cosine noise schedule ( s = 0 .008 ) with T = 100 steps. Sampling using DDIM [34] with η = 0 .
+
+Conditional diffusion model. A conditional DDPM trained to model the density P(Y | X = x).Conditioning is implemented via a linear projection of x which is element-wise added to the hidden states of the MLP alongside the time embeddings. During training, we apply classifier-free guidance [9] with a dropout probability of 0.2. Sampling using DDIM [34] with η = 0 .
+
+Conditional consistency model. An improved Consistency Training (iCT) model [ 36 ] is trained to approximate the conditional distribution P(Y | X = x). We utilize the iCT discretization curriculum 
+
+N (k) = min( s0 · 2⌊k/K ′⌋, s 1) + 1 , (3) with s0 = 10 and s1 = 1280 . The model is optimized using the Pseudo-Huber loss with time-difference weighting λ(t) = 1 /(tn+1 − tn). Conditioning on x is achieved by adding a linear projection of the features to the hidden states at each forward pass. Sampling follows the multistep iCT procedure with noise levels [150 , 50 , 20 , 10 , 5, 1] .Table 3: Model architectures and training hyperparameters for the 2D setting. 
+
+Model Blocks Units Epochs Batch size 
+
+Diffusion (unconditional) 3 128 20,000 1,024 Diffusion (conditional) 3 128 20,000 1,024 Consistency Model (CM) 3 128 20,000 1,024 Table 4: Model architectures and training hyperparameters for the 5D setting. 
+
+Model Blocks Units Epochs Batch size 
+
+Diffusion (unconditional) 6 512 40,000 4,096 Diffusion (conditional) 6 512 40,000 4,096 Consistency Model (CM) 6 512 40,000 4,096 Table 5: Model architectures and training hyperparameters for the 10D setting. 
+
+Model Blocks Units Epochs Batch size 
+
+Diffusion (unconditional) 8 512 20,000 4,096 Diffusion (conditional) 8 512 20,000 4,096 Consistency Model (CM) 8 512 40,000 4,096 
+
+A.5 Conditional Model Quality 
+
+To verify that each conditional model faithfully approximates P(Y | X = x), we run a held-out sanity check before the optimization stage. For Neval = 500 conditioning points x drawn i.i.d. from the analytic joint distribution P(X, Y ), we draw n = 500 samples from each trained model given that x, and compare them against 500 analytic samples from the true conditional via MMD. Results are summarized in Table 6. 14 Table 6: Conditional model quality measured by MMD against the analytic conditional P(Y | X =
+
+x), averaged over Neval = 500 held-out conditioning points. Lower is better ( ↓). 
+
+Setting Model MMD mean ↓ MMD std 
+
+2D Diffusion (conditional) 0.011 0.014 
+
+Consistency Model (CM) 0.163 0.214 
+
+5D Diffusion (conditional) 0.010 0.014 
+
+Consistency Model (CM) 0.182 0.299 
+
+10D Diffusion (conditional) 0.023 0.059 
+
+Consistency Model (CM) 0.145 0.197 
+
+The conditional diffusion model achieves substantially lower MMD than the consistency model in both settings. This gap is the primary error source discussed in Appendix E and corresponds to the 
+
+distillation fidelity error that acts as a fixed floor on MLGD-F’s solution quality. 
+
+A.6 Optimization Hyperparameters 
+
+Table 7: Optimization hyperparameters for the 2D setting. 
+
+Hyperparameter Value 
+
+Distributional loss MMD Diffusion steps T 100 Independent runs 25 Conditional samples ncond 250 MC perturbations nMC (LGD) 3MC perturbations nMC (MLGD-F) 3Table 8: Optimization hyperparameters for the 5D setting. 
+
+Hyperparameter Value 
+
+Distributional loss MMD Diffusion steps T 100 Independent runs 25 Conditional samples ncond 250 MC perturbations nMC (LGD) 5MC perturbations nMC (MLGD-F) 5Table 9: Optimization hyperparameters for the 10D setting. 
+
+Hyperparameter Value 
+
+Distributional loss MMD Diffusion steps T 100 Independent runs 25 Conditional samples ncond 250 MC perturbations nMC (LGD) 5MC perturbations nMC (MLGD-F) 515 A.7 Results 
+
+Table 10: Results on the 2D synthetic simulation (all 25 runs and top-10 by final loss). Values reported as mean ± std. 
+
+Subset Method L2 GMM L2 to x∗ Time (s) 
+
+All 25 LGD 0.2106 ± 0.3350 4.439 ± 10 .311 126 .93 ± 1.34 
+
+MLGD-F 0.0484 ± 0.0977 0.440 ± 0.725 14 .17 ± 0.47 
+
+Top-10 LGD 0.0079 ± 0.0105 0.146 ± 0.107 126 .58 ± 1.49 
+
+MLGD-F 0.0123 ± 0.0102 0.197 ± 0.109 14 .15 ± 0.47 
+
+MLGD-F achieves a 9× speedup over LGD ( 14 .15 s vs. 126 .58 s). Both methods recover near-optimal solutions in the top-10 setting with comparable L2 GMM and L2 to x∗. Over all 25 runs MLGD-F achieves a lower mean L2 GMM ( 0.048 vs. 0.211 ). Table 11: Results on the 5D synthetic simulation (all 25 runs and top-10 by final loss). Values reported as mean ± std. 
+
+Subset Method L2 GMM L2 to x∗ Time (s) 
+
+All 25 LGD 0.4097 ± 0.2771 146 .176 ± 296 .219 330 .57 ± 1.18 
+
+MLGD-F 0.4258 ± 0.4430 26 .497 ± 10 .723 22 .98 ± 0.13 
+
+Top-10 LGD 0.3688 ± 0.1745 29 .910 ± 5.706 330 .46 ± 0.82 
+
+MLGD-F 0.4649 ± 0.4687 23 .362 ± 7.111 23 .01 ± 0.13 
+
+MLGD-F achieves a 14 .4× speedup over LGD ( 23 .01 s vs. 330 .46 s) and a lower L2 to x∗ in the top-10 setting ( 23 .36 vs. 29 .91 ), though LGD achieves a lower L2 GMM in both subsets. The ECDF of the L2 GMM distance (Figure 4, center panel) shows the two distributions largely overlapping, with LGD’s curve shifted slightly to the left. Notably, the top-10 L2 GMM for MLGD-F is higher than its own all-25 average, which we attribute to the selection criterion: runs are ranked by final MMD loss, and the consistency model’s loss landscape occasionally assigns low loss to samples that are nonetheless poor in L2 GMM terms. Table 12: Results on the 10D synthetic simulation (all 25 runs and top-10 by final loss). Values reported as mean ± std. 
+
+Subset Method L2 GMM L2 to x∗ Time (s) 
+
+All 25 LGD 0.5981 ± 0.2601 14 .232 ± 11 .419 421 .62 ± 2.17 
+
+MLGD-F 0.4185 ± 0.2785 11 .921 ± 11 .494 28 .61 ± 0.25 
+
+Top-10 LGD 0.4385 ± 0.2516 14 .427 ± 11 .889 422 .81 ± 2.43 
+
+MLGD-F 0.2701 ± 0.1800 6.073 ± 4.036 28 .62 ± 0.25 
+
+MLGD-F achieves a 14 .8× speedup over LGD ( 28 .62 s vs. 422 .81 s) and outperforms it on both metrics in the top-10 setting: L2 GMM of 0.270 vs. 0.439 , and L2 to x∗ of 6.07 vs. 14 .43 . The ECDF of the L2 GMM distance (Figure 4 , right panel) shows MLGD-F’s distribution shifted to the left of LGD’s across most of the range, consistent with better results. 
+
+A.8 Discussion 
+
+The ECDF of L2 GMM across all 25 runs (Figure 4) summarises the dimension-dependent pattern: in 2D, MLGD-F achieves a lower mean L2 GMM while LGD shows higher spread (a mixture of better runs and worse runs); the two methods are comparable in 5D with LGD holding a slight edge on L2 GMM, and MLGD-F dominates in 10D. We conjecture this reflects two opposing error sources that scale differently with dimensionality, both identified formally in Appendix E. The 16 Figure 4: ECDF of the L2 GMM distance across 25 independent optimization runs for LGD and MLGD-F in the 2D, 5D, and 10D settings. A curve shifted to the left indicates better (lower) L2
+
+GMM. In 2D, MLGD-F’s distribution is shifted clearly to the left of LGD’s; in 5D the two largely overlap with LGD holding a slight edge; in 10D MLGD-F’s distribution is again shifted to the left, consistent with better average-case recovery at higher dimensionality. 
+
+distillation fidelity error εs — the gap between the distilled sampler fϕ and the true conditional — is largely dimension-independent and acts as a fixed floor on MLGD-F’s solution quality. The gradient variance introduced by backpropagating through the K⋆-step unrolled diffusion chain worsens with depth and dimension [ 40 ], and the single-step consistency model avoids this accumulation entirely. Notably, despite the consistency model’s lower conditional fidelity (Table 6), MLGD-F still matches or outperforms LGD in 10D, underscoring that gradient quality rather than sampler fidelity is the binding constraint at higher dimensionality — a point we return to in Appendix E. In low-to-intermediate dimensions the distillation error dominates, as seen in 5D, while in 10D the gradient variance term takes over and MLGD-F’s cleaner gradient graph becomes the decisive factor. The 5D setting is the approximate crossover between these two regimes. 
+
+A.9 Toy Example: Optimization Result and CDMS β-Sweep Setup. We consider a 2-component GMM with means μ1 = ( −3, 2) , μ2 = (3 , −2) , shared covariance Σ =  0.5 0.15 0.15 0.4
+
+, and equal weights. The ground-truth optimum is x∗ = −3, yielding a bimodal target G(Y ) = P(Y | X = −3) .
+
+Models. Three models are trained using the MLP architecture described in Section A.4 (3 blocks, 128 units): (i) an unconditional DDPM on the marginal P(X); (ii) a conditional DDPM modeling 
+
+P(Y | X = x), used by MLGD; and (iii) a conditional consistency model (iCT) used by MLGD-F. All models are trained for 3,000 epochs with batch size 1,024 .
+
+Optimization result. Figure 1 (top) shows the recovered ˆx∗ from both methods alongside P(Y |
+
+X = ˆ x∗) overlaid against the target G(Y ). Both methods recover a solution near x∗ and match the structure of G(Y ).
+
+Effect of guidance scale β. Figure 1 (bottom) illustrates the CDMS formulation by showing the transition from prior sampling to target optimization as β increases. The unconditional DDPM (3 blocks, 128 units, linear schedule T = 999 , trained for 20 ,000 epochs) is guided via the DPS formu-lation with step size β. We reduce the number of DDIM steps to 10, both for computational efficiency and following the practice of Song et al. [35] in Gaussian settings, using the DPS formulation with step size β. Rather than backpropagating through a learned conditional model, we use the analytical 
+
+L2-GMM loss as the guidance signal, enabling a clean comparison against the tempered posterior 
+
+Q(x; β) ∝ P (X) exp( −β L(x)) . At β = 0 the sampler recovers P(X); increasing β concentrates mass toward x∗.
+
+A.10 Code and Reproducibility 
+
+Full parameter configurations, training notebooks, and model checkpoints for all synthetic experiments are available at https://github.com/orineo1/conditional-matching-paper/ tree/main/simulations , including runnable notebooks to reproduce all results and pretrained model checkpoints for the diffusion and consistency models used in each setting. Model weights 17 for all diffusion and consistency models used in the synthetic experiments are available at https: //huggingface.co/Orineo/Inverse-Design-Conditional-Distribution-Matching/ tree/main/simulations/checkpoints .
+
+A.11 Compute 
+
+All experiments were run on an NVIDIA L4 GPU using PyTorch 2.10.0 with CUDA 12.8. Training times per setting are reported in Table 13. Table 13: Approximate training times on an NVIDIA L4 GPU. 
+
+Model 2D 5D 10D 
+
+Diffusion (unconditional) ∼11 min ∼3 h ∼4 hDiffusion (conditional) ∼12 min ∼3 h ∼4 hConsistency Model (CM) ∼3 min ∼8 min ∼9 min Per-seed optimization times are reported in Tables 10–12. 
+
+# B MNIST: Experimental Details 
+
+Full architectural and training details are given in the subsections below. 
+
+B.1 Wasserstein and Sliced Wasserstein Distances: Population and Sample Forms B.1.1 Wasserstein Distance (WD) 
+
+The Wasserstein distance [ 2] measures the minimum cost of transforming one probability distribution into another. For two probability distributions P and Q on Rd, the 1-Wasserstein distance W1 is defined as: 
+
+W1(P, Q ) = inf  
+
+> γ∈Γ( P,Q )
+
+E(x,y )∼γ [∥x − y∥1] (4) where Γ( P, Q ) denotes the set of all joint distributions with marginals P and Q.We include the 1D Wasserstein distance formulation here because the Sliced Wasserstein Distance (SWD), described in the next section, reduces the high-dimensional problem to multiple 1D Wasser-stein distance computations through random projections but in practice we will not use WD for higher dimensions in that work. For one-dimensional distributions P and Q on R, the 1-Wasserstein distance has a closed-form expression in terms of the cumulative distribution functions (CDFs): 
+
+W1(P, Q ) = 
+
+Z ∞−∞ 
+
+|FP (x) − FQ(x)| dx (5) where FP and FQ are the CDFs of P and Q, respectively. Given samples S1 = {s1, . . . , s m} from P and S2 = {t1, . . . , t n} from Q (assuming m = n for simplicity), let s(1) ≤ s(2) ≤ · · · ≤ s(m) and t(1) ≤ t(2) ≤ · · · ≤ t(n) denote the sorted samples. The 1-Wasserstein distance can be estimated as: 
+
+W1(S1, S 2) = 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+|s(i) − t(i)|. (6) 
+
+B.1.2 Sliced Wasserstein Distance (SWD) 
+
+We use the Sliced Wasserstein Distance (SWD) [ 2], which provides a computationally efficient approximation to the Wasserstein distance [2] in high dimensions. The SWD between distributions P and Q is defined as: SWD (P, Q ) = 
+
+Z
+
+> Sd−1
+
+W1(πθ #P, π θ #Q) dθ (7) 18 where Sd−1 is the unit sphere in Rd, πθ denotes projection onto direction θ, πθ #P and πθ #Q are the distributions of the projected points along that direction, and W1 is the 1-Wasserstein distance. In practice, we approximate this integral by averaging the Wasserstein distance over L random one-dimensional projections: SWD (P, Q ) ≈ 1
+
+L
+
+> L
+
+X
+
+> ℓ=1
+
+W1(πθℓ #P, π θℓ #Q) (8) where θ1, . . . , θ L are uniformly sampled from Sd−1. Notably, for one-dimensional data, SWD is equivalent to the 1-Wasserstein distance since the projection is the identity mapping, allowing us to use the same implementation for both metrics. in practice, when working with finite samples {xi}ni=1 and {yj }mj=1 , we compute the 1-Wasserstein distance between the empirical 1D projections by sorting the projected points. 
+
+B.2 Dataset Construction 
+
+We construct an augmented MNIST dataset that captures rotational ambiguity across digit classes. 
+
+B.2.1 Conditional Model 
+
+For the conditional training the pipeline proceeds in two stages. 
+
+Stage 1: Logical-angle entries. We start from the standard MNIST training split (60,000 images). For each base image, we always retain a copy at logical angle 0. We additionally include rotated copies at 90 , 180 , and 270 if a pretrained classifier assigns the rotated image to a digit class with confidence ≥ 0.9999 . This threshold ensures that only genuinely rotationally ambiguous digits (e.g., “0”, “1”, “8”, “6”/“9”) contribute additional logical-angle entries. The classifier used is the dataset-construction CNN described below, trained on the standard MNIST training split. 
+
+Stage 2: Uniform random rotation. Each logical-angle entry is then rotated by a uniform random angle θ ∼ Uniform[0 , 360) . The stored label angle is (logical _angle + θ) mod 360 . This produces a dataset of 82,483 samples with continuous, uniformly distributed rotation angles within each rotationally ambiguous class. 
+
+B.2.2 Unconditional Model 
+
+The unconditional diffusion model is trained on a separate dataset consisting of all 70,000 MNIST images (train + test splits), each independently rotated by a uniform random angle at every epoch access, with no classifier filtering. 
+
+B.3 Model Architectures Dataset-construction classifier. This classifier is used only during dataset creation to determine which rotated copies of each digit are rotationally ambiguous. It is a three-block CNN trained on the standard MNIST training split for 15 epochs with batch size 128, Adam optimizer (lr = 10 −3, weight decay = 10 −4), and learning-rate reduction on plateau (factor 0.5, patience 2). Training augmentation consists of random rotation ( ±10 ), random affine transforms (translation up to 10%, scale 0.9–1.1), and standard MNIST normalisation ( μ = 0 .1307 , σ = 0 .3081 ). Threshold for classification is 0.9999. The architecture is: • Block 1: Conv(1 →32, 3×3) → BN → ReLU → Conv(32 →32, 3×3) → BN → ReLU →
+
+MaxPool(2×2) → Dropout2D(0.25) • Block 2: Conv(32 →64, 3×3) → BN → ReLU → Conv(64 →64, 3×3) → BN → ReLU →
+
+MaxPool(2×2) → Dropout2D(0.25) • Block 3: Conv(64 →128, 3×3) → BN → ReLU → MaxPool(2×2) → Dropout2D(0.25) • FC: Linear(1152 →256) → BN → ReLU → Dropout(0.5) → Linear(256 →128) → BN →
+
+ReLU → Dropout(0.5) → Linear(128 →10) 19 Digit classifier (final results table). Since the recovered images x∗ may be arbitrarily rotated and are synthetically generated (and thus potentially lower in contrast than real MNIST digits), a classifier trained solely on standard upright MNIST would be unsuitable for evaluation. We therefore train a more robust variant designed to handle arbitrary orientations and mild image degradation. It shares the same three-block CNN backbone as the dataset-construction classifier, with three modifications for noise robustness: (i) an input Dropout2D(0.1) applied before the first convolution; (ii) a mid-block Dropout2D(0.1) inserted between the two convolutions in each of Blocks 1 and 2; and (iii) label smoothing (ϵ = 0 .1) in the cross-entropy loss during training. Training uses AdamW (lr = 10 −3, weight decay = 10 −4) for 10 epochs with batch size 128. Training augmentation consists of random rotation ( ±20 ), random affine transforms (translation up to 10%, scale 0.9–1.1), Gaussian noise ( σ = 0 .15 ), and standard MNIST normalisation ( μ = 0 .1307 , σ = 0 .3081 ). Threshold for classification is 0.7. 
+
+Unconditional diffusion model. We train an unconditional DDPM UNet on randomly rotated MNIST images. The architecture is a standard UNet2D with the following configuration: Table 14: Unconditional UNet architecture. 
+
+Parameter Value 
+
+Input/output channels 1Sample size 28 × 28 
+
+Layers per block 2Channel widths (32, 64, 128) Down blocks DownBlock2D, AttnDownBlock2D, AttnDownBlock2D Up blocks AttnUpBlock2D, AttnUpBlock2D, UpBlock2D Dropout 0.1 
+
+Conditional consistency model. The conditional model is an improved Consistency Training (iCT) model that predicts the rotation angle of an MNIST image as a circular (cos θ, sin θ) vector, conditioned on the image. The image conditioning encoder is a two-block CNN that maps 28 × 28 
+
+images to a 128 -dimensional embedding, which is added to the noisy angle representation at each forward pass. The full architecture is: • Condition encoder: Conv(1 →32, 3×3) → GroupNorm(8) → SiLU → Dropout2D(0.1) 
+
+→ Conv(32 →32, 3×3) → GroupNorm(8) → SiLU → MaxPool(2×2) → Conv(32 →64, 3×3) → GroupNorm(8) → SiLU → Dropout2D(0.15) → Conv(64 →64, 3×3) → Group-Norm(8) → SiLU → MaxPool(2×2) → Dropout2D(0.2) → Flatten → Dropout(0.3) →
+
+Linear(3136 →128) → SiLU • Input projection: Linear(2 →128) → LayerNorm • Time embedding: Sinusoidal embedding (dim=128) • MLP backbone: 5 hidden layers of width 128 with ReLU activations • Output: LayerNorm → Linear(128 →2), followed by iCT skip connection and ℓ2 normal-ization The output is normalized to the unit circle and decoded via ˆθ = atan2(sin , cos) mod 360 .20 B.4 Training Details 
+
+Table 15: Training hyperparameters for the MNIST models. 
+
+Hyperparameter Unconditional Conditional (iCT) 
+
+Optimizer AdamW AdamW Learning rate 10 −3 10 −4
+
+Weight decay 10 −4 10 −4
+
+LR schedule None Cosine annealing Batch size 256 256 Epochs 100 500 Noise schedule squaredcos_cap_v2 iCT curriculum ( s0=10 , s1=1280 )Training timesteps 1000 —
+
+ϵ (iCT) — 0.002 
+
+Loss MSE (noise) Smooth Huber The iCT model uses a discretization curriculum N (k) = min( s0 · 2⌊k/K ′⌋, s 1) + 1 that progressively increases the number of consistency training boundaries during training. Noise levels are sampled according to a log-normal proposal distribution with Pmean = −1.1 and Pstd = 2 .0. During training of the conditional model, light augmentation is applied to the conditioning images: Gaussian noise (σ = 0 .05 ) and random pixel dropout ( p = 0 .1). 
+
+B.5 MLGD-F Inference Hyperparameters 
+
+We report the hyperparameters used for all MNIST rotation experiments in Table 16. After optimiza-tion, all images are clamped to [0 , 1] .Table 16: MLGD-F hyperparameters for the MNIST rotation experiments. Guidance step size is 
+
+ζt = rt/(1 + r2 
+
+> t
+
+) + 5 t/ 1000 ; the unimodal experiment uses 2 · ζt.
+
+Hyperparameter Unimodal Bimodal Uniform 
+
+Distributional loss Sliced Wasserstein Distance (SWD) Number of projections (SWD) 50 Independent runs 15 iCT sampling steps [150 , 50 , 20 , 10 , 5, 1] 
+
+Conditional samples ncond 1500 1500 600 DDIM inference steps T 130 125 290 MC perturbations nMC 3 10 3Guidance step size 2 · ζt ζt ζt
+
+Target variance σ2 515 252 –
+
+B.6 Full Results Across All Seeds 
+
+Figures 5–7 show all 15 seeds for each target G, ordered by seed index. The top-5 seeds selected by final loss are shown in Figure 2 of the main text. 21 Figure 5: Bimodal target Gbimodal — all 15 seeds. Each panel shows the optimized digit x∗ with its seed index, final SWD loss, and classifier label (“None” indicates no digit exceeded the confidence threshold). Seeds 0–4 ( top row ), seeds 5–9 ( middle row ), and seeds 10–14 ( bottom row ). The optimizer consistently recovers rotationally symmetric digits such as “1”,“8”, “0”, “6”, and “9”, which remain visually valid under 180 rotation — consistent with the bimodal target placing equal mass at 0 and 180 .22 Figure 6: Uniform target Guniform — all 15 seeds. Seeds 0–4 ( top row ), seeds 5–9 ( middle row ), and seeds 10–14 ( bottom row ). The optimizer overwhelmingly recovers circular “0” digits across seeds, the only digit class that is plausibly valid at every rotation angle θ ∈ [0 , 360) .23 Figure 7: Unimodal target Gunimodal — all 15 seeds. Seeds 0–4 ( top row ), seeds 5–9 ( middle row ), and seeds 10–14 ( bottom row ). The optimizer recovers canonical upright digits such as “2”, “3”, and “7”, consistent with the unimodal target placing mass near 0 (upright orientation). 
+
+B.7 Code and Reproducibility 
+
+Full experimental code, training scripts, and inference scripts are available at https://github. com/orineo1/conditional-matching-paper/tree/main/MNIST . Pretrained model check-points (unconditional UNet and conditional iCT model) are available on Hugging Face at https: //huggingface.co/Orineo/Inverse-Design-Conditional-Distribution-Matching/ tree/main/MNIST .
+
+B.8 Compute 
+
+All MNIST generative models were trained on an NVIDIA T4 GPU using PyTorch with CUDA. Train-ing the unconditional UNet takes approximately 178 minutes (100 epochs); training the conditional iCT model takes approximately 162 minutes (500 epochs). MLGD-F optimization was run on an NVIDIA L40S GPU. Each seed takes approximately 20–55 seconds depending on the target G (see Table 1 for per-target times), and 15 seeds complete in under 15 minutes per target. 
+
+# C Stable Diffusion: Experimental Details and Analysis 
+
+C.1 Loss Function 
+
+We use the unbiased U-statistic MMD estimator applied to CLIP ViT-L/14 embeddings ( R768 ). Given conditional samples {yi}ni=1 and target samples {˜yj }mj=1 , the estimator is: 24 \MMD  {yi}, {˜yj } =   1
+
+> n(n−1)
+
+X
+
+> i̸=i′
+
+k(yi, y i′ ) − 2
+
+> nm
+
+X
+
+> i,j
+
+k(yi, ˜yj )+ 1
+
+> m(m−1)
+
+X 
+
+> j̸=j′
+
+k(˜ yj , ˜yj′ ) + ϵ 0.5, (9) where ϵ = 10 −8 ensures numerical stability and the absolute value handles the slightly-negative estimates that arise when n is small. The kernel k is a generalized RBF: 
+
+k(a, b ) = exp 
+
+
+
+−
+
+ ∥a − b∥2
+
+2σ2
+
+α
+
+,
+
+where σ is estimated via the median heuristic on the merged sample, 
+
+σ =
+
+q 12 median  {∥ xi − yj ∥2}i,j 
+
+,
+
+and α = 1 .0 in all experiments, recovering the standard Gaussian RBF. Gradients flow only through the generated samples {yi}; target samples {˜yj } are fully detached from the computation graph. 
+
+C.2 Target Distribution Construction 
+
+All target images are generated using SDXL-Turbo + ControlNet-Scribble with the source male portrait scribble as conditioning and controlnet_conditioning_scale = 0.5 with two infer-ence generation steps. CLIP ViT-L/14 embeddings are computed from the generated images to form the empirical target distribution in R768 . For each scenario, Ntarget = 2 ,000 images are drawn at evaluation time. 
+
+Balanced and skewed targets. Images are sampled from two gender-specific prompts at the target proportions ( 50% /50% or 25% /75% ): • Male :"a superrealistic portrait photograph of a man, studio lighting" 
+
+• Female :"a superrealistic portrait photograph of a woman, studio lighting" 
+
+Gender interpolation target. The target discretises a one-dimensional feminine-to-masculine axis in CLIP space using four anchor prompts at equal weight ( 25% each), spanning the full spectrum: 1. Woman : "superrealistic portrait photograph of a woman, extremely feminine features, studio lighting" 
+
+2. Woman with masculine features : "a superrealistic portrait photograph of a woman with masculine features, heavy brow ridge, studio lighting" 
+
+3. Man with feminine features : "a superrealistic portrait photograph of a man with extremely feminine features, soft delicate face, high cheekbones, studio lighting" 
+
+4. Man : "a superrealistic portrait photograph of a man, extremely masculine features, studio lighting" 
+
+This four-anchor discretisation approximates a continuous 1-D target on the gender-axis submanifold of CLIP space. 
+
+Age interpolation target. The target is a uniform distribution over male portrait ages 
+
+{40 , 41 , . . . , 79 }. For each integer age, images are generated with the prompt: 
+
+"a superrealistic portrait photograph of a {age}-year-old man, studio lighting, sharp focus, photographic" 
+
+yielding nper age = 50 images per age value and Ntarget = 2 ,000 images in total. 25 C.3 Optimization Hyperparameters 
+
+Table 17 summarises all hyperparameters. MLGD-F is initialized via SDEdit [ 26 ]: the source male portrait scribble is VAE-encoded, noised to the starting timestep tstart , and denoised with MLGD-F guidance from that point onward. All subsequent steps of Algorithm 1 are unchanged. The DDIM scheduler runs for T total steps; MLGD-F executes T − tstart guided denoising steps per run. At each step, ncond conditional samples are drawn via SDXL-Turbo + ControlNet-Scribble to estimate the distributional loss gradient, and ntarget images are used to represent the target distribution G.Table 17: MLGD-F hyperparameters for the Stable Diffusion experiments. 
+
+Hyperparameter Balanced Skewed Gender Interp. Age Interp. 
+
+Unconditional model ˆP(X) SDXL-Base-1.0 Conditional model ˆP(Y | X=x) SDXL-Turbo + ControlNet-Scribble Scheduler DDIM Guidance scale (CFG) 0.0 ControlNet scale 0.5 Inference steps (cond.) 2Distributional loss MMD MMD bandwidth scale 1.0 MMD kernel α 1.0 Loss scale 1.0 
+
+T (total DDIM steps) 250 250 250 250 
+
+tstart (SDEdit init step) 125 125 125 175 
+
+ncond 100 100 100 120 (3Xage) 
+
+ntarget 100 100 100 120 (3Xage) Base strength ζ 4.0 5.0 5.0 3.0
+
+Target classes 2 (M/F) 2 (M/F) 4 40 ages Target proportions 50/50% 25/75% 25% ea. uniform Seed 1 1 1 1
+
+C.4 Baseline Details Source scribble. The unmodified male portrait scribble extracted from one of the generated male portraits via lllyasviel/Annotators HED detector in scribble mode. This serves as the lower-bound reference for MMD improvement. 
+
+Average scribble. For each class we generated portraits per target class when condition on the source scribble. HED edge maps are extracted from one generated portrait per class us-ing lllyasviel/Annotators . The average scribble is a pixel-wise weighted mean of the per-class HED maps, with weights equal to the target proportions. For the balanced target: 
+
+0.5 · HED male + 0 .5 · HED female . For the skewed target: 0.25 · HED male + 0 .75 · HED female . For the interpolation targets, all four (or all age) HED maps are averaged at equal weight. This baseline fails by construction for multi-modal targets: pixel-wise blending of HED maps produces ghosted facial structures that lie outside the image manifold. 
+
+SDEdit Best. Unguided SDEdit is applied to the source scribble with the same noise strength (tstart = 125 , T = 250 ) and CFG = 0 .0. The number of candidates is chosen so that the total computation time matches the wall-clock time of MLGD-F, ensuring a fair time-budget comparison. Concretely, the time per candidate is measured on the first candidate, and 
+
+Ncandidates =
+
+ TMLGD-F 
+
+tcandidate 
+
+
+
+,
+
+where TMLGD-F ≈ 177 minutes for age interpolation and ≈ 241 –247 minutes for the rest. Each candidate is scored by proxy MMD on n = 250 images; the best-scoring candidate is re-evaluated on 
+
+N = 2 ,000 images. 26 C.5 Evaluation Protocol 
+
+For each method and scenario, N = 2 ,000 portrait images are generated from the candidate scribble using SDXL-Turbo + ControlNet-Scribble with the neutral prompt: 
+
+"a superrealistic professional photograph of" 
+
+This neutral prompt is used deliberately so that the conditional distribution P(Y | X = x∗) is driven by the scribble geometry alone, not by an explicit gender or age prompt. To ensure a fair comparison across methods, all N = 2 ,000 images for every method are generated using the same fixed sequence of random seeds : image i is generated with seed 42 + i for all methods alike. Consequently, the only source of variation between the outputs of different methods is the candidate scribble x∗ itself, not the stochastic sampling trajectory of the diffusion model. MMD is computed in CLIP ViT-L/14 embedding space against a freshly drawn target sample of 
+
+N = 2 ,000 images. For the discrete attribute targets (balanced and skewed), gender classification is additionally performed via two-way CLIP cosine softmax against the male and female text prompts. The male proportion p(male ) is reported with a 95% normal-approximation confidence interval: 
+
+ˆp ± 1.96 
+
+r ˆp(1 − ˆp)
+
+N .
+
+C.6 Code and Reproducibility 
+
+Full experimental code, optimization scripts, and baseline implementations are available at 
+
+https://github.com/orineo1/conditional-matching-paper/tree/main/SD_cond_SD_ controlnet . All pretrained models used (SDXL-Base, SDXL-Turbo, ControlNet-Scribble, CLIP ViT-L/14) are publicly available via their respective HuggingFace repositories. 
+
+C.7 Compute 
+
+MLGD-F optimization runs were executed on a single NVIDIA L40S GPU (48 GB) on a Linux cluster (CPython 3.12, PyTorch with CUDA), with each run taking approximately 177 minutes for the age interpolation and 241 –247 minutes for the rest. The Average and SDEdit Best baseline was evaluated on the same hardware; the time per candidate was measured empirically and the candidate budget was set to match MLGD-F’s wall-clock time exactly (Section C.4). The average scribble baseline requires no optimization and runs in under one minute. Final validation on 2,000 samples was performed on a single NVIDIA A100 (80 GB) . 
+
+C.8 What Does MLGD-F Actually Change in the Scribble? Where MLGD-F edits the scribble. Figure 8 contrasts the source scribble with the MLGD-F-optimized scribble, along with their pixel-wise | · | difference. The edits are spatially concentrated rather than diffuse: the largest modifications lie along the eye and eyebrow region and the lower hair outline. Most of the scribble is essentially unchanged; a minority of anatomically-meaningful contours account for the bulk of the edit magnitude. Yet even with the pixel-difference heatmap in hand, it remains unclear why these subtle edits suffice to shift the generated distribution toward a balanced male–female output. From a human perceptual standpoint, the changes are too small and too localized to constitute a legible gender signal. We hypothesize that MLGD-F has identified a structural sensitivity in the ControlNet–SDXL pipeline: a region of the conditioning space where small perturbations disproportionately influence the generative process, not because they are semantically meaningful to a human observer, but because the diffusion model’s internal representations are unexpectedly responsive to them. This points to a potential vulnerability in the underlying generative model — one that MLGD-F successfully exploits to achieve distributional control, but that also raises questions about the robustness and interpretability of ControlNet-based conditioning more broadly. 
+
+Why those regions: gradient saliency. To test whether these edits are mechanistically meaningful rather than incidental, we ask which scribble pixels the CLIP gender signal is gradient-sensitive 
+
+27 Figure 8: Where MLGD-F edits the scribble (balanced target). Left: Source scribble used to initialise the SDEdit trajectory. Middle: MLGD-F-optimized scribble targeting Gbal . Right: Signed difference (green = added, red = removed). The edits are not diffuse noise but concentrate on the hairline, eye and eyebrow region and hair outline. Quantitatively, 91 .3% of pixels are unchanged, while 2.8% are added and 5.9% are removed, where a pixel is considered changed if its Gaussian-smoothed signed difference ( σ = 2 .5) exceeds a threshold of τ = 0 .1.to, independent of what MLGD-F actually did. Define the per-pixel saliency as |∂s/∂x |, where 
+
+s(x) = cos(CLIP( I(x)) , t man ) − cos(CLIP( I(x)) , t woman ) is the CLIP gender score of the image 
+
+I(x) generated from scribble x, and tman , t woman are the text embeddings of “a photo of a man”/“a photo of a woman”. The gradient is obtained by backpropagating s from the generated image of the source scribble through the full differentiable pipeline (scribble → ControlNet-Scribble →
+
+VAE decoder → CLIP image encoder) and averaged over 20 random seeds to marginalise over sampler noise. Large saliency values indicate pixels whose local perturbation would most change the downstream gender score. We restrict the analysis to the line pixels of the source scribble, i.e. the non-background pixels of the input ( n = 33 ,828 ), since our question is whether, among the strokes that were actually drawn, the ones more predictive of the target attribute receive proportionally larger edits. Figure 9 shows the saliency map on the source scribble’s line support; the highest-saliency pixels concentrate on the hairline and the eye and eyebrow region, We quantify the alignment by binning line pixels by saliency magnitude and plotting the mean MLGD-F modification per bin (Figure 9). The relationship is monotone increasing with mild saturation at high saliency and Spearman ρ = 0 .56 :pixels of the source stroke that the loss is more sensitive to receive proportionally larger edits. To investigate whether the concentration of edits on existing strokes is a structural artefact of the latent geometry rather than a purely semantic signal, we encoded both the source and MLGD-F-optimized scribbles through the VAE and computed, at each spatial position of the 64 ×64 latent grid, the source latent norm (L2 norm across the four channels) and the edit magnitude (L2 norm of the latent difference). The two maps are positively correlated (Pearson r = 0 .55 ), suggesting that a substantial portion of the edit concentration is explained by the fact that stroke pixels produce non-zero latent activations while background pixels do not — edits are suppressed in the background simply because there is little latent signal to perturb there. This does not invalidate the saliency finding, but it does suggest that the spatial concentration of MLGD-F edits is at least partly a consequence of the latent geometry: the optimiser can only meaningfully move in directions where the latent is already active. 
+
+Takeaway. The two analyses together resolve the apparent paradox of small pixel edits producing a large distributional shift. Among the strokes of the source scribble, MLGD-F does not drift diffusely: it injects an aligned gradient signal that preferentially modifies the subset of strokes the downstream CLIP score is structurally sensitive to. This validates the inner estimator of Algorithm 2 as a mechanism rather than a black box: despite the long differentiable chain from scribble through ControlNet, VAE, and CLIP, the pulled-back gradient at each denoising step retains enough semantic structure to localise onto the anatomical features actually predictive of the target attribute. The regions identified — the eye, eyebrow, and hairline — are anatomically intuitive as gender-discriminative features. Yet from a human perceptual standpoint, the magnitude of the edits is strikingly small: changes that are nearly imperceptible to a human observer are sufficient to produce a substantial shift in the generated gender distribution. This disproportion between edit magnitude and distributional effect suggests a sensitivity in the underlying generative model that goes beyond what human perception would predict, and raises broader questions about the robustness of ControlNet-based 28 Figure 9: Why those regions: gradient saliency and its alignment with MLGD-F edits. Left: 
+
+Binned mean MLGD-F scribble change versus binned mean saliency, on line pixels only ( n = 33 ,828 ). The monotone relationship (Spearman ρ = 0 .56 ) shows that MLGD-F preferentially edits the source-scribble strokes that are most gradient-sensitive for the downstream gender score. Right: Gender saliency |∂s/∂x | on the source scribble’s line pixels, averaged over 20 seeds; s is the CLIP gender score backpropagated through the full scribble → ControlNet → VAE → CLIP pipeline. High-saliency regions concentrate on the hairline and eye and eyebrow region, conditioning to subtle input perturbations. The saliency analysis and latent correlation were computed on a single NVIDIA A100 GPU, with the saliency maps averaged over 20 random seeds. We report this analysis for the balanced target only; we expect the same mechanism in the skewed and continuum scenarios, but have not verified it quantitatively. 29 C.9 Qualitative Examples 
+
+Figures 10–16 show, side by side, the scribbles produced by each method for all four scenarios, along with representative portrait images generated from each scribble. 
+
+Figure 10: Balanced target Gbal = 0 .5 δmale + 0 .5 δfemale . Top row, left to right: source scribble, average scribble (Avg), best SDEdit scribble (SDEdit Best), and our method’s scribble (MLGD-F). 
+
+Rows 2–3, top to bottom: five sample target portraits used as guidance — male targets and female targets, reflecting the balanced 50/50 distribution. 30 Source 
+
+> Average scribble
+> SDEdit Best
+> MLGD-F (ours)
+
+Figure 11: Balanced target — conditional samples. Five representative portrait images generated from each method’s output scribble via SDXL-Turbo + ControlNet-Scribble with the neutral prompt, for the balanced target Gbal = 0 .5 δmale + 0 .5 δfemale . Each column is generated with an identical seed; differences across rows reflect the scribble x∗ alone. MLGD-F produces a more balanced mix of male and female portraits compared to the baselines; notably, even when the source image is male, the optimized scribble generates female portraits to balance the output distribution (see columns 1, 3, and 5). 
+
+Figure 12: Skewed target Gskew = 0 .25 δmale + 0 .75 δfemale . left to right: source scribble, average scribble (Avg), best SDEdit scribble (SDEdit Best), and our method’s scribble (MLGD-F). The target portraits are the same as in Figure 10 but with different proportions ( 25% − 75% ). 31 Source 
+
+> Average scribble
+> SDEdit Best
+> MLGD-F (ours)
+
+Figure 13: Skewed target — conditional samples. Five representative portrait images generated from each method’s output scribble, for the skewed target Gskew = 0 .25 δmale + 0 .75 δfemale .Each column is generated with an identical seed; differences across rows reflect the scribble x∗ alone. MLGD-F yields a predominantly female output distribution consistent with the 75% female target proportion. 32 Figure 14: Gender interpolation target GinterpGender = 14
+
+P4 
+
+> k=1
+
+δck , a four-anchor discretisation of the 1-D feminine-to-masculine continuum in CLIP space at equal weight ( 25% each). Top row, left to right: source scribble, average scribble (Avg), best SDEdit scribble (SDEdit Best), and our method’s scribble (MLGD-F). Rows 2–5, top to bottom: five sample target portraits for each anchor spanning the gender axis — woman; woman with masculine features; man with feminine features; man. 33 Source 
+
+> Average scribble
+> SDEdit Best
+> MLGD-F (ours)
+
+Figure 15: Gender interpolation target — conditional samples. Five representative portrait images generated from each method’s output scribble for the gender interpolation target GinterpGender =
+
+> 14
+
+P4 
+
+> k=1
+
+δck , which spans the feminine-to-masculine continuum in CLIP space. Each column shares the same diffusion seed across all rows; thus, any visual difference between rows is attributable solely to the candidate scribble x∗. MLGD-F yields a notably more diverse set of portraits across the four gender-axis anchors than the baselines. In particular, the second portrait from the left in the MLGD-F row illustrates how the optimized scribble shifts the conditional distribution toward the feminine-to-masculine continuum: the same seed that produces a conventionally masculine face under the source scribble here yields a softer, less masculine appearance, with a ponytail hairstyle and no facial stubble, reflecting the interpolation induced by MLGD-F’s output scribble. 34 Figure 16: Age interpolation target GinterpAge , supported on a one-dimensional age continuum over male portraits (ages 40–79, uniform distribution). Top row, left to right: source scribble, average scribble (Avg), best SDEdit scribble (SDEdit Best), and our method’s scribble (MLGD-F). Rows 2–3, top to bottom: five sample target portraits at the two extremes of the age continuum — 40 years old (youngest) and 79 years old (oldest). 35 Source 
+
+> Average scribble
+> SDEdit Best
+> MLGD-F (ours)
+
+Figure 17: Age interpolation target — conditional samples. Five representative portrait images generated from each method’s output scribble, for the age interpolation target GinterpAge (uniform over male ages 40–79). Each column is generated with an identical seed; differences across rows reflect the scribble x∗ alone. Since ControlNet conditioning is applied at scale 0.5 and the neutral prompt contains no explicit subject constraint, the first column showing a masked face is a valid output. The model may also produce at low rates also off-manifold outputs — such as a glass or a camera image (the latter triggered by the word photograph in the prompt) rather than a portrait, also for our scribble. 
+
+Figure 18: Age interpolation Sixteen representative portrait images generated by MLGD-F for a uniform age target over [40 , 80] , selected via projection onto the age axis (every ∼6th image out of 100 total). All images are generated with the same optimized scribble and a neutral prompt. 36 D Full MLGD-F Algorithm 
+
+Full details of the complete algorithm used in all experiments are given as Algorithm 3. In particular, the full version contains four implementation details that the simplified main-text Algorithms 1–2 abstract away: (i) nMC Monte-Carlo perturbations of ˆx0 at every outer step, used as a variance-reduction device for the inner gradient estimate; (ii) a log-sum-exp aggregation of the per-perturbation losses (rather than a plain mean) when forming the guidance gradient, which stabilises optimisation at small nMC ; (iii) the denoising step written in its general SDE form with drift f (x, t ) and diffusion coefficient g(t), which the main text collapses into an abstract DDIM_ STEP ; and (iv) explicit β-parameterisation of the guidance, so that ζt = β · ht with a noise-schedule factor ht and the scalar inverse temperature β is the single hyperparameter controlling the target Qβ (x) ∝ P (x) e−βL(x).The target sample SG is also drawn once at the start, outside the outer loop. All experimental runs in the paper use Algorithm 3; the main-text versions are pedagogical restatements of the outer and inner parts respectively. 
+
+Algorithm 3 MLGD-F Conditional Sampling (full detailed version)                                                                                                                                                             
+
+> Input: Pretrained score network sθfor P(X); pretrained few-step model fϕfor P(Y|X); target distribution G; drift function f(x, t ); diffusion coefficient g(t); noise schedule {¯αt}Tt=1 ; step-size schedule {ζt}(e.g. ζt=ζ′/∥∇L∥ as in [ 6], with ζ′proportional to β).
+> Parameters: Total timesteps T; step size ∆t= 1 /T ; inverse temperature β≥0(target is Qβ(x)∝ P (x)e−βL(x);β= 0
+> samples from P,β→ ∞ concentrates at arg min xL); MC samples nMC (number of perturbed ˆx0estimates used to stabilize the gradient); conditional samples ncond (samples drawn from P(Y|X)per candidate); target samples ntarget
+> (samples drawn from G); distributional loss L(e.g. MMD, SWD).
+> Output: Sample x0approximately drawn from Qβ
+> 1: SG← { ˜y1, . . . , ˜yntarget } ∼ G ▷Sample target distribution once 2: xT∼ N (0 , I )
+> 3: for i= 0 , . . . , T −1do
+> 4: t←1−i·∆t
+> 5: ˆx0←1√¯αt
+>  xt+ (1 −¯αt)sθ(xt, t )▷Tweedie estimate of x0
+> 6: {ˆx(i)0}nMC
+> i=1 ∼ N
+> 
+> ˆx0,g(t)
+> √1+ g(t)2I
+> 
+> ▷MC perturbations around ˆx0
+> 7: for i= 1 , . . . , n MC do
+> 8: S(i)
+> Y|X← { y(i)1, . . . , y (i)
+> ncond } ∼ P (Y|X=ˆ x(i)0)using fϕ▷Fast conditional samples 9: L(i)← L (S(i)
+> Y|X, S G)▷Distributional loss against target 10: end for
+> 11: ∇xtL ← −∇ xtlog
+> 1
+> nMC
+> PnMC
+> i=1 exp  −L (i)
+> 12: ∆xt← − f(xt, t )−g(t)2sθ(xt, t )∆t+g(t)√∆t ϵ ▷Standard denoising step 13: xt−1←xt+ ∆ xt−ζt∇xtL▷Denoising + guidance 14: end for
+> 15: return x0
+
+# E Analysis of the MLGD-F Estimator 
+
+This appendix analyses the plug-in loss estimator and the gradient estimator used inside the MLGD-F inner estimator (Algorithm 2; detailed form in Algorithm 3). The goal is to quantify how far the practical estimator is from the population quantity we would ideally optimize, and in particular to make explicit the two error sources introduced by the distilled conditional sampler fϕ: (i) the 
+
+sample-level error εs with which fϕ reproduces the true conditional, and (ii) the gradient error εg
+
+with which the Jacobian of fϕ in the conditioning input x matches the true reparameterising map (Proposition 2); a direct student-vs-teacher analogue is the subject of Proposition 3, which ties the bounds to the memory argument of Section 5.4: a Ks-step student replacing a K⋆-step teacher cuts reverse-mode graph depth by the ratio K⋆/K s at the cost of an additional student-teacher gradient discrepancy controlled by εg, dist , ε dist .
+
+Scope. Throughout this appendix the loss is the squared-MMD U-statistic with a fixed kernel k
+
+(Eq. (2) for synthetic experiments) at a fixed input x. Three implementation details used in some experiments are not covered by the formal statements below: (a) the SWD instantiation; (b) the sta-bilised square-root MMD of Eq. (9) used in the Stable Diffusion experiment, 
+
+q
+
+| \MMD 2 
+
+> U
+
+| + ϵ, whose 37 loss-concentration bound transfers from Proposition 1 via the global Lipschitzness of z 7 → p|z| + ϵ,but whose gradient is not differentiable at z = 0 and is therefore not covered by Proposition 2; and (c) data-dependent bandwidth selection (median heuristic), which makes k itself a function of the samples and breaks the bounded-difference structure exploited below. We also analyse the inner estimator in isolation: the propositions are not statements about the marginal of the full outer reverse-diffusion trajectory (cf. Remark 2). 
+
+E.1 Setup and notation 
+
+We reuse the paper’s notation: P(X, Y ) is the data joint, P(Y | X = x) the true conditional, 
+
+G(Y ) the target distribution, and L(x) = ∥P (Y | X = x) − G (Y )∥ the abstract distributional loss of Problem 2. Throughout this appendix we analyse the squared-MMD instantiation of L (i.e. 
+
+∥ · ∥ 2 = MMD 2) with a fixed kernel; the unbiased U-statistic of this squared MMD is the object of the propositions below. SWD and the stabilised square-root MMD of Eq. (9) used in the Stable Diffusion experiment are out of formal scope per the scope statement above. The distilled conditional sampler is a measurable map fϕ : X × Ω → Y with internal randomness 
+
+η ∼ π; let Pϕ(Y | X = x) denote the law of fϕ(x, η ). Throughout this appendix, k denotes a fixed kernel of the multi-bandwidth RBF form of Equation (2) with bandwidths {σℓ} treated as fixed (the data-dependent bandwidth heuristics used in the experiments are out of formal scope, cf. scope statement); every MMD and MMD 2 that follows is understood with respect to this one k. Such a kernel satisfies Assumption 1 with Kmax = L and Lk a bandwidth-dependent Lipschitz constant on its feature map. We write φk for the feature map of k into the RKHS Hk, and set 
+
+L(x) := MMD 2 P(Y | X = x), G, Lϕ(x) := MMD 2 Pϕ(Y | X = x), G.
+
+The formal estimator analysed below is the unbiased squared-MMD U-statistic (the experimental implementations differ: synthetic experiments use the biased V-statistic of Appendix A and the Stable Diffusion experiment uses the stabilised square-root form of Eq. (9) , both outside the formal scope per the scope statement above): 
+
+bLϕ(x) := \MMD 2
+
+> U
+
+ Scond (x), SG
+
+,
+
+where Scond (x) = {fϕ(x, η i)}ncond  
+
+> i=1
+
+are i.i.d. samples from Pϕ(Y | X = x) and SG = {˜yj }ntarget 
+
+> j=1
+
+are i.i.d. from G, drawn independently of Scond . The MLGD-F gradient estimator ∇x bLϕ(x), which supplies the black-box guidance term in Algorithm 1, is computed by automatic differentiation through fϕ.
+
+E.2 Assumptions Assumption 1 (Kernel regularity) . There exist constants Kmax , L k, H k < ∞ such that: (i) 0 ≤ k(a, b ) ≤ Kmax for all a, b ∈ Y ;(ii) the feature map φk : Y → H k is continuously differentiable, with operator-norm bound 
+
+∥dφ k(a)∥op ≤ Lk for every a ∈ Y (equivalently, φk is Lk-Lipschitz: ∥φk(a)−φk(b)∥Hk ≤
+
+Lk ∥a − b∥); (iii) dφ k is Hk-Lipschitz on Y: ∥dφ k(a) − dφ k(b)∥op ≤ Hk ∥a − b∥ for all a, b ∈ Y (equiva-lently, k is C2 with bounded mixed partial derivatives). The kernel is characteristic on Y. (The multi-bandwidth RBF of Eq. (2) satisfies all three clauses: (i) with Kmax = 5 since each summand is in [0 , 1] ; (ii) via ∥φk(a) − φk(b)∥2 
+
+> Hk
+
+= 2 P
+
+> ℓ
+
+(1 − exp( −∥ a −
+
+b∥2/2σ2 
+
+> ℓ
+
+)) ≤ ∥ a − b∥2 P 
+
+> ℓ
+
+σ−2 
+
+> ℓ
+
+, so L2 
+
+> k
+
+= P 
+
+> ℓ
+
+σ−2 
+
+> ℓ
+
+; (iii) by smoothness of the Gaussian, with Hk asimilar bandwidth-dependent constant. Conditional on fixed bandwidths {σℓ} the multi-bandwidth RBF satisfies all three clauses; the data-dependent bandwidth heuristics used in the experiments are out of formal scope (cf. scope statement at the top of the appendix). Clauses (ii)–(iii) are needed only for Proposition 2; Proposition 1 uses (i)–(ii).) 
+
+Assumption 2 (Output fidelity of fϕ under shared noise) . There exists εs ≥ 0 such that, for every 
+
+x ∈ X ,
+
+Eη fϕ(x, η ) − ftrue (x, η ) 2 ≤ ε2
+
+> s
+
+,
+
+where ftrue is the reparameterising map of Assumption 4 below. 38 Assumption 3 (Differentiability) . fϕ(x, η ) is almost surely differentiable in x with 
+
+Eη ∥∂xfϕ(x, η )∥2 ≤ C2 
+
+> f
+
+< ∞.
+
+Assumption 4 (Reparameterisable truth) . There exists a measurable map ftrue : X × Ω → Y , almost surely differentiable in x with Eη ∥∂xftrue (x, η )∥2 
+
+> F
+
+≤ C2 
+
+> f
+
+, such that ftrue (x, η ) ∼ P (Y | X = x)
+
+whenever η ∼ π.
+
+Assumption 5 (Jacobian fidelity) . There exists εg ≥ 0 such that, for every x ∈ X ,
+
+Eη ∂xfϕ(x, η ) − ∂xftrue (x, η ) 2 
+
+> F
+
+≤ ε2 
+
+> g
+
+,
+
+where ∥ · ∥ F is the Frobenius norm on Jacobians. Assumptions 1, 3, and 4 are standard regularity conditions; the multi-bandwidth RBF satisfies the kernel clauses with Kmax = 5 , L2 
+
+> k
+
+= P 
+
+> ℓ
+
+σ−2 
+
+> ℓ
+
+, and Hk a similar bandwidth-dependent constant, and bounded Jacobian moments are routinely met by the smooth UNet-based samplers we use. Assumption 2 (output fidelity, same-η coupling) and Assumption 5 (Jacobian fidelity) are idealised 
+
+conditions that current distillation-training theory does not directly imply; we discuss their training-time status in Section E.8 and report empirical verification on SDXL-Lightning vs. SDXL-Base in Section E.9. The proofs below also use the gradient–expectation interchange (Leibniz under the integral sign), which we adopt as an additional regularity hypothesis on fϕ, f true .
+
+E.3 Concentration of the plug-in loss estimator Proposition 1 (Plug-in loss concentration) . Under Assumptions 1 and 2, for every δ ∈ (0 , 1) , every 
+
+x ∈ X , and every ncond , n target ≥ 2 (so the unbiased U-statistic denominators are well-defined), with probability at least 1 − δ over the draws of Scond (x) and SG ,
+
+bLϕ(x) − L (x) ≤ Kmax 
+
+r
+
+8 log(2 /δ )
+
+ 1 
+
+> ncond
+
++ 1
+
+> ntarget
+
+
+
++ C2 εs,
+
+where C2 = 4√Kmax Lk. Equivalently, using √a + b ≤ √a + √b, | bLϕ − L| ≤
+
+2√2 Kmax 
+
+ p log(2 /δ )/n cond + plog(2 /δ )/n target 
+
+ + C2 εs.Proof. Write n := ncond and m := ntarget . By the triangle inequality, 
+
+bLϕ(x) − L (x) ≤ bLϕ(x) − L ϕ(x)
+
+| {z } 
+
+> T1(Monte Carlo)
+
++ Lϕ(x) − L (x)
+
+| {z } 
+
+> T2(distillation)
+
+, (10) and we bound T1, T 2 separately. 
+
+Step 1: Monte Carlo term. The unbiased two-sample U-statistic estimator \MMD 2 
+
+> U
+
+satisfies 
+
+E[ bLϕ(x)] = Lϕ(x) and expands as 
+
+bLϕ(x) = 1
+
+> n(n−1)
+
+X
+
+> i̸=j
+
+k(fϕ(x, η i), f ϕ(x, η j )) + 1
+
+> m(m−1)
+
+X
+
+> i̸=j
+
+k(˜ yi, ˜yj ) − 2
+
+> nm
+
+X
+
+> i,j
+
+k(fϕ(x, η i), ˜yj ).
+
+By Assumption 1(i) each kernel evaluation lies in [0 , K max ], so changing one of its arguments shifts that evaluation by at most Kmax . We compute the bounded-difference constants for McDiarmid’s inequality applied to bLϕ as a function of the n + m independent variables η1, . . . , η n, ˜y1, . . . , ˜ym.Replacing ηi (which sets Yi = fϕ(x, η i)) leaves the ˜y-only term unchanged and affects only: • the within-Y term, in which Yi appears in the 2( n − 1) ordered pairs (i, j ) and (j, i )
+
+for j̸ = i, each with coefficient 1 
+
+> n(n−1)
+
+and per-pair shift at most Kmax , contributing  
+
+> 2( n−1) ·Kmax
+> n(n−1)
+
+= 2Kmax  
+
+> n
+
+;• the cross term, in which Yi appears in m pairs (i, j ) each with coefficient 2 
+
+> nm
+
+and per-pair shift at most Kmax , contributing m·2Kmax  
+
+> nm
+
+= 2Kmax  
+
+> n
+
+.39 Summing, the bounded-difference constant for an ηi-change is cη = 4Kmax  
+
+> n
+
+. By the symmetric argument, c˜y = 4Kmax  
+
+> m
+
+. Hence Pni=1 c2 
+
+> η
+
++ Pmj=1 c2˜y = 16 K2max (1 /n + 1 /m ), and McDiarmid’s inequality [25] gives, for any t ≥ 0,
+
+P |T1| ≥ t ≤ 2 exp 
+
+
+
+− t2 
+
+> 8K2max (1 /n +1 /m )
+
+
+
+;
+
+equivalently, with probability at least 1 − δ,
+
+|T1| ≤ Kmax 
+
+p8 log(2 /δ ) (1 /n + 1 /m ) ≤ 2√2 Kmax 
+
+q log(2 /δ ) 
+
+> n
+
++
+
+q log(2 /δ )
+
+> m
+
+
+
+, (11) where the second inequality uses √a + b ≤ √a + √b.
+
+Step 2: Distillation term. For a distribution Q on Y write μQ := EY ∼Q [φk(Y )] ∈ H k for its kernel mean embedding. For any positive-definite kernel k and any two distributions Q1, Q2,
+
+MMD( Q1, Q2) = ∥μQ1 − μQ2 ∥Hk ,2 and ∥μQ∥Hk ≤ √Kmax for any Q. The reverse triangle inequality then gives 
+
+MMD( Pϕ, G) − MMD( P, G) ≤ ∥ μPϕ − μP ∥Hk . (12) Let (Y, ˜Y ) be any coupling of P and Pϕ. Jensen’s inequality in Hk and the Lipschitz feature map (Assumption 1(ii)) yield 
+
+∥μPϕ − μP ∥Hk = Eφk( ˜Y ) − φk(Y )
+
+> Hk
+
+≤ E∥φk( ˜Y ) − φk(Y )∥Hk ≤ Lk E∥ ˜Y − Y ∥.
+
+Taking the infimum over couplings gives ∥μPϕ − μP ∥Hk ≤ Lk W1(Pϕ, P) ≤ Lk W2(Pϕ, P) ≤
+
+Lk εs by Assumption 2. Substituting into (12) and using |a2 − b2| ≤ (a + b)|a − b| with a, b ≤
+
+2√Kmax (each MMD is at most twice the maximal embedding norm), 
+
+T2 ≤ 4pKmax · Lk εs =: C2 εs. (13) Combining (11), (13) and (10) gives the stated bound with probability at least 1 − δ.
+
+E.4 Bias and variance of the gradient estimator Proposition 2 (Gradient estimator) . Under Assumptions 1–5, with ncond , n target ≥ 2, and assuming the gradient–expectation interchange in Step 1 of the proof is valid (e.g., via local dominated differen-tiability of fϕ and ftrue in x), there exist constants Cg , C s, C v depending only on Kmax , L k, H k, C f
+
+such that 
+
+E∇x bLϕ(x) − ∇ xL(x) ≤ Cg εg + Cs εs,
+
+E ∇x bLϕ(x) − E[∇x bLϕ(x)] 2 ≤ Cv
+
+ 1
+
+ncond 
+
++ 1
+
+ntarget 
+
+
+
+.
+
+Explicit values of Cg , C s, C v are tracked through the proof; they are stated as generic constants because their exact magnitudes are not used downstream. Proof. Throughout, expectations are over η1, . . . , η ncond ∼ π i.i.d. and ˜y1, . . . , ˜yntarget ∼ G i.i.d., the two samples mutually independent. We bound the bias and the variance in turn, in five steps: 
+
+Step 1 establishes a dominating envelope and the gradient–expectation interchange used throughout. 
+
+Step 2 fixes notation (A, B, C, u, v ) and decomposes the population gradient gap ∇xLϕ − ∇ xL into three RKHS pairings. Step 3 bounds each of the four norms ∥u∥, ∥∇ xu∥, ∥v∥, ∥∇ xv∥ that appear in those pairings. Step 4 assembles the bias bound by Cauchy–Schwarz. Step 5 bounds the variance separately. 
+
+Notation for Steps 2–4. Write 
+
+A(x) := μP(·| x), B(x) := μPϕ(·| x), C := μG , u(x) := B(x) − A(x), v(x) := A(x) − C
+
+for the kernel mean embeddings of the true and student conditionals and of the target. For an Hk-valued function ψ(x) depending on x ∈ Rdim X , ∇xψ(x) denotes the linear map Rdim X → H k given by ξ 7 → P 
+
+> i
+
+ξi ∂xi ψ(x), and we write ∥∇ xψ∥Hk for its Hilbert–Schmidt norm (P 
+
+> i
+
+∥∂xi ψ∥2 
+
+> Hk
+
+)1/2.With this convention each pairing ⟨a, ∇xb⟩Hk is a vector in Rdim X , and Cauchy–Schwarz in Hk
+
+gives ∥⟨ a, ∇xb⟩Hk ∥2 ≤ ∥ a∥Hk ∥∇ xb∥Hk coordinate by coordinate. 
+
+> 2This RKHS-norm identity does not require characteristicness; the characteristic clause of Assumption 1 is used only for the identifiability part of Corollary 1.
+
+40 Step 1a: Dominating envelope. Each x-dependent summand of bLϕ(x) has the form h(x; η, η ′) := 
+
+k(fϕ(x, η ), f ϕ(x, η ′)) (“cond–cond” terms) or h′(x; η, ˜y) := k(fϕ(x, η ), ˜y) (“cond–target” terms); the term not involving fϕ is constant in x. For any fixed b ∈ Y the map a 7 → k(a, b ) =
+
+⟨φk(a), φ k(b)⟩Hk has Fréchet derivative dak(·, b ) : Rdim Y → R given by ξ 7 → ⟨ dφ k(a)ξ, φ k(b)⟩Hk .Assumption 1(ii) gives ∥dφ k(a)∥op ≤ Lk and Assumption 1(i) gives ∥φk(b)∥Hk = pk(b, b ) ≤√Kmax , so by Cauchy–Schwarz in Hk, ∥∇ ak(a, b )∥2 ≤ Lk
+
+√Kmax for all a, b ∈ Y . The chain rule then yields 
+
+∇xh(x; η, η ′) 2 ≤ Lk
+
+pKmax 
+
+ ∥∂xfϕ(x, η )∥F + ∥∂xfϕ(x, η ′)∥F
+
+, (14) and an analogous one-Jacobian bound for h′. By Cauchy–Schwarz and Assumption 3, 
+
+Eη ∥∂xfϕ(x, η )∥F ≤ (Eη ∥∂xfϕ∥2 
+
+> F
+
+)1/2 ≤ Cf ; hence (14) admits the π ⊗ π-integrable envelope 
+
+2Lk
+
+√Kmax Cf (the cond–target analogue admits the same envelope, treating the second argument as G-distributed). 
+
+Step 1b: Gradient–expectation interchange. We assume that the gradient–expectation interchange used below holds via the dominated-convergence form of Leibniz’s rule. The envelope of Step 1a, together with uniform local second-moment control of ∂xfϕ (routinely satisfied for the smooth UNet-based samplers we use), supplies the standard local-dominating random variable required; we adopt the conclusion as a regularity hypothesis on fϕ, f true rather than spelling out the construction: 
+
+E∇x bLϕ(x) = ∇x E bLϕ(x) = ∇xLϕ(x). (15) The same envelope applies to x 7 → μPϕ(·| x) = Eη [φk(fϕ(x, η ))] and to x 7 → μP(·| x) =
+
+Eη [φk(ftrue (x, η ))] (using Assumption 4 for the latter), so both kernel mean embeddings are Hk-Fréchet-differentiable in x.
+
+Step 2: Bias decomposition. By (15) , the bias equals a deterministic population gap, ∥E[∇x bLϕ] −∇xL∥ 2 = ∥∇ xLϕ − ∇ xL∥ 2. By the kernel-mean-embedding identity for MMD 2 (using the notation 
+
+A, B, C, u, v defined above), L(x) = ∥v(x)∥2 
+
+> Hk
+
+and Lϕ(x) = ∥u(x) + v(x)∥2 
+
+> Hk
+
+. Differentiating 
+
+ψ 7 → ∥ ψ∥2 
+
+> Hk
+
+in Hk gives ∇∥ ψ∥2 = 2 ⟨ψ, ∇ψ⟩Hk , hence 
+
+∇xLϕ − ∇ xL = 2 ⟨u + v, ∇x(u + v)⟩Hk − 2⟨v, ∇xv⟩Hk
+
+= 2 ⟨u, ∇xu⟩Hk + 2 ⟨u, ∇xv⟩Hk + 2 ⟨v, ∇xu⟩Hk . (16) Steps 3–4 bound each of the four norms on the right-hand side and combine them via Cauchy– Schwarz. 
+
+Step 3: Bound the four norms. We bound each of ∥u∥, ∥∇ xu∥, ∥v∥, ∥∇ xv∥ in turn. 
+
+(a) ∥u(x)∥Hk ≤ Lk εs. By Assumption 4, A(x) = Eη [φk(ftrue (x, η ))] and B(x) =
+
+Eη [φk(fϕ(x, η ))] for the same π-distributed η. Hence 
+
+u(x) = B(x) − A(x) = Eη
+
+φk(fϕ(x, η )) − φk(ftrue (x, η )) .
+
+Jensen’s inequality in Hk gives ∥u∥Hk ≤ Eη ∥φk(fϕ) − φk(ftrue )∥Hk , and φk being Lk-Lipschitz (Assumption 1(ii)) gives ∥φk(fϕ)−φk(ftrue )∥Hk ≤ Lk∥fϕ−ftrue ∥, so ∥u∥Hk ≤ Lk Eη ∥fϕ−ftrue ∥.By Cauchy–Schwarz, Eη ∥fϕ − ftrue ∥ ≤ (Eη ∥fϕ − ftrue ∥2)1/2, and by Assumption 2 the latter is at most εs. Combining, 
+
+∥u∥Hk ≤ Lk εs.
+
+(b) ∥∇ xu(x)∥Hk ≤ Lk εg + HkCf εs. We bound ∥∇ xu∥ by adding and subtracting 
+
+dφ k(fϕ) ∂xftrue and applying the Lipschitz-derivative constant Hk from Assumption 1(iii). By Step 1b’s Leibniz justification applied to u,
+
+∇xu(x) = Eη
+
+ dφ k(fϕ(x, η )) ∂xfϕ(x, η )
+
+| {z }   
+
+> linear map Rdim X→H k
+
+−dφ k(ftrue (x, η )) ∂xftrue (x, η ).
+
+Add and subtract dφ k(fϕ) ∂xftrue inside the expectation: 
+
+∇xu = Eη
+
+h
+
+dφ k(fϕ) ∂xfϕ − ∂xftrue 
+
+| {z }
+
+> ∆1(η)
+
++  dφ k(fϕ) − dφ k(ftrue ) ∂xftrue 
+
+| {z }
+
+> ∆2(η)
+
+i
+
+. (17) By Jensen’s inequality and the triangle inequality, ∥∇ xu∥Hk ≤ Eη ∥∆1(η)∥Hk + Eη ∥∆2(η)∥Hk .41 Bound on ∆1. For any linear map M : Rdim Y → H k and matrix J ∈ Rdim Y× dim X , the Hilbert– Schmidt operator norm satisfies ∥M J ∥Hk ≤ ∥ M ∥op ∥J∥F . Applying this with M = dφ k(fϕ)
+
+(operator norm ≤ Lk by Assumption 1(ii)) and J = ∂xfϕ − ∂xftrue ,
+
+∥∆1(η)∥Hk ≤ Lk ∥∂xfϕ(x, η ) − ∂xftrue (x, η )∥F .
+
+Taking Eη and applying Cauchy–Schwarz with Assumption 5, 
+
+Eη ∥∆1(η)∥Hk ≤ Lk
+
+ Eη ∥∂xfϕ − ∂xftrue ∥2
+
+> F
+
+1/2 ≤ Lk εg . (18) 
+
+Bound on ∆2. Apply the same Hilbert–Schmidt inequality with M = dφ k(fϕ) − dφ k(ftrue ) and 
+
+J = ∂xftrue :
+
+∥∆2(η)∥Hk ≤ ∥ dφ k(fϕ(x, η )) − dφ k(ftrue (x, η )) ∥op · ∥ ∂xftrue (x, η )∥F .
+
+By Assumption 1(iii), dφ k is Hk-Lipschitz, so ∥dφ k(fϕ) − dφ k(ftrue )∥op ≤ Hk ∥fϕ(x, η ) −
+
+ftrue (x, η )∥, giving 
+
+∥∆2(η)∥Hk ≤ Hk ∥fϕ − ftrue ∥ · ∥ ∂xftrue ∥F .
+
+Take Eη and apply Cauchy–Schwarz in L2(π) to the product, then use Assumption 2 (coupled output fidelity) and Assumption 4 ( Eη ∥∂xftrue ∥2 
+
+> F
+
+≤ C2 
+
+> f
+
+): 
+
+Eη ∥∆2(η)∥Hk ≤ Hk
+
+ Eη ∥fϕ − ftrue ∥21/2 ·  Eη ∥∂xftrue ∥2
+
+> F
+
+1/2 ≤ Hk Cf εs. (19) Combining (18)–(19), 
+
+∥∇ xu(x)∥Hk ≤ Lk εg + Hk Cf εs. (20) 
+
+(c) ∥v(x)∥Hk ≤ 2√Kmax . For any probability measure Q on Y, ∥μQ∥2 
+
+> Hk
+
+= EY,Y ′∼Q [k(Y, Y ′)] ≤
+
+Kmax by Assumption 1(i), so ∥μQ∥Hk ≤ √Kmax . Triangle inequality gives ∥v∥Hk = ∥A−C∥Hk ≤∥A∥Hk + ∥C∥Hk ≤ 2√Kmax .
+
+(d) ∥∇ xv(x)∥Hk ≤ Lk Cf . Repeat the chain-rule expansion of (b) for A alone, with only the 
+
+ftrue term. By the same Hilbert–Schmidt inequality ( ∥dφ k(ftrue ) ∂xftrue ∥Hk ≤ Lk ∥∂xftrue ∥F )and Cauchy–Schwarz with Assumption 4’s second-moment bound, 
+
+∥∇ xv∥Hk = ∥∇ xA∥Hk ≤ Lk (Eη ∥∂xftrue ∥2 
+
+> F
+
+)1/2 ≤ Lk Cf .
+
+(∇xC = 0 since G does not depend on x.) 
+
+Step 4: Assemble the bias bound. Apply Cauchy–Schwarz to each of the three pairings in (16) .Step 3 supplied two valid upper bounds on ∥u∥Hk : the assumption-driven bound ∥u∥ ≤ Lkεs
+
+from Step 3(a), and the universal bound ∥u∥ ≤ 2√Kmax (same triangle-inequality argument as Step 3(c) applied to u). 3 We use whichever of the two ∥u∥ bounds gives the tightest term-by-term Cauchy–Schwarz product. For the first pairing 2∥u∥∥∇ xu∥ both factors are distillation quantities; using ∥u∥ ≤ 2√Kmax and (20) keeps the bound first-order in εg , ε s:
+
+2 ∥u∥∥∇ xu∥ ≤ 2 (2 pKmax ) Lk εg + HkCf εs
+
+ = 4 Lk
+
+pKmax εg + 4 HkCf
+
+pKmax εs.
+
+For the second pairing 2∥u∥∥∇ xv∥ we use the tighter bound ∥u∥ ≤ Lkεs (Step 3(a)) combined with 
+
+∥∇ xv∥ ≤ LkCf (Step 3(d)): 
+
+2 ∥u∥∥∇ xv∥ ≤ 2 ( Lkεs)( LkCf ) = 2 L2
+
+> k
+
+Cf εs.
+
+For the third pairing 2∥v∥∥∇ xu∥ we use the universal bound ∥v∥ ≤ 2√Kmax (Step 3(c)) and (20): 
+
+2 ∥v∥∥∇ xu∥ ≤ 2 (2 pKmax ) Lk εg + HkCf εs
+
+ = 4 Lk
+
+pKmax εg + 4 HkCf
+
+pKmax εs.
+
+Summing the three pairings, 
+
+∥∇ xLϕ − ∇ xL∥ 2 ≤ Cg εg + Cs εs,
+
+with 
+
+Cg = 8 Lk
+
+pKmax , Cs = 2 L2
+
+> k
+
+Cf + 8 HkCf
+
+pKmax .
+
+No higher-order εsεg or ε2 
+
+> s
+
+remainder appears; the bound is first-order by construction. Both depend only on Kmax , L k, H k, C f .      
+
+> 3It would be incorrect to combine these into an upper bound on εsitself: two upper bounds on ∥u∥do not in general bound εsfrom above.
+
+42 Step 5: Variance. For an Rdim X -valued random vector Z, write Var( Z) := E∥Z − EZ∥22 through-out this step (this is what the variance bound in the proposition statement controls). Decompose 
+
+bLϕ(x) = Scc (x) − 2Sct (x) + Stt , where Scc , S ct are the cond–cond and cond–target U-statistics (only these depend on x) and Stt is the target–target U-statistic (constant in x). Since Scond ⊥ S G
+
+and (a − b)2 ≤ 2a2 + 2 b2,
+
+Var  ∇x bLϕ
+
+ ≤ 2 Var  ∇xScc 
+
+ + 8 Var  ∇xSct 
+
+. (21) By (14) the kernel of ∇xScc has uniformly bounded second moment ≤ 8L2
+
+> k
+
+Kmax C2 
+
+> f
+
+(use (a +
+
+b)2 ≤ 2a2 + 2 b2 and E∥∂xfϕ∥2 
+
+> F
+
+≤ C2 
+
+> f
+
+); the same bound holds for the cond–target kernel of 
+
+∇xSct . Standard variance bounds for finite-second-moment U -statistics (Hoeffding’s projection / Hoeffding-decomposition bound for one-sample order-2 U-stats [ 18 ]; two-sample analogue for cross U-stats) imply Var( ∇xScc ) ≤ c1 L2
+
+> k
+
+Kmax C2 
+
+> f
+
+/n cond and Var( ∇xSct ) ≤ c2 L2
+
+> k
+
+Kmax C2 
+
+> f
+
+(1 /n cond +1/n target ) for absolute constants c1, c 2. Substituting into (21) and combining, 
+
+Var( ∇x bLϕ) ≤ Cv
+
+ 1
+
+ncond 
+
++ 1
+
+ntarget 
+
+
+
+,
+
+with Cv = O L2
+
+> k
+
+Kmax C2
+
+> f
+
+. We do not pin down the absolute constant since only the rate is used. 
+
+Remark 1 (Generic distillation-through-autograd structure) . The argument used to bound ∥∇ xu∥Hk
+
+in Step 3(b) of the proof above generalises to any pair of reparameterisable samplers f⋆, f ϕ :
+
+X × Ω → Y sharing noise space (Ω , π ) and satisfying the same-η output and Jacobian couplings 
+
+Eη ∥fϕ − f⋆∥2 ≤ ε2dist and Eη ∥∂xfϕ − ∂xf⋆∥2 
+
+> F
+
+≤ ε2
+
+> g, dist
+
+, together with a bounded second-moment condition on the teacher Jacobian. The student-vs-teacher gradient discrepancy of any squared-MMD loss against a fixed target then satisfies ∥E[∇x bLϕ] − E[∇x bL⋆]∥ ≤ Cg εg, dist + Cs εdist , with the same Cg , C s as Proposition 2; this is what Proposition 3(part 3) below specialises to. The output coupling alone is not sufficient: the one-dimensional example f⋆(x) = x, fϕ(x) = 
+
+x + ε sin( x/ε 2) has ∥f⋆ − fϕ∥∞ = ε → 0 while |f ′
+
+> ⋆
+
+(x) − f ′
+
+> ϕ
+
+(x)| = (1 /ε )| cos( x/ε 2)| has amplitude 
+
+1/ε → ∞ . The output condition controls L2 closeness; the Jacobian condition controls Sobolev W 1,2
+
+closeness; the former does not imply the latter without additional smoothness on higher derivatives. No widely-deployed diffusion-distillation recipe (consistency models, progressive distillation, LCM, DMD, ADD) penalises Jacobian divergence during training, so εg, dist is not directly bounded by the training loss; Sobolev-style distillation [ 7 ] would supply it but is not part of any current pipeline. We address this empirically in Section E.9. 
+
+E.5 Memory–fidelity trade-off 
+
+For comparison, consider the same estimator using a K⋆-step teacher sampler f⋆ obtained by unrolling the reverse diffusion ( K⋆ ≥ 2; e.g. SDXL-Base, K⋆ = 20 ), and let fϕ be a Ks-step few-step student (Ks ≪ K⋆; e.g. SDXL-Lightning, Ks = 4 , or a single-step CM, Ks = 1 ). Denote the teacher’s induced conditional by P⋆, its plug-in loss estimator by bL⋆, and the corresponding gradient estimator by ∇x bL⋆(x).
+
+Proposition 3 (Memory–fidelity trade-off) . Memory. Under Assumption 3 for both fϕ and f⋆:1. Teacher (unrolled) gradient: reverse-mode evaluation of ∇x bL⋆(x) has per-sample chain depth Θ( K⋆) and total stored activations Θ( K⋆ · ncond ) (absent checkpointing). 2. Few-step student: reverse-mode evaluation of ∇x bLϕ(x) has per-sample chain depth Θ( Ks)
+
+and total stored activations Θ( Ks · ncond ). The memory ratio is therefore Θ( K⋆/K s).
+
+Gradient discrepancy. Fix x ∈ X and assume ncond , n target ≥ 2, so that the unbiased MMD U-statistics defining bLϕ and bL⋆ are well-defined. In addition to Assumption 1, suppose the follow-ing student-vs-teacher fidelity conditions hold under a shared-noise coupling (direct analogues of Assumptions 2 and 5 with f⋆ in place of ftrue ): 
+
+(S1) Eη ∥fϕ(x, η ) − f⋆(x, η )∥2 ≤ ε2dist for every x;
+
+(S2) Eη ∥∂xfϕ(x, η ) − ∂xf⋆(x, η )∥2 
+
+> F
+
+≤ ε2 
+
+> g, dist
+
+for every x;
+
+43 (S3) Eη ∥∂xf⋆(x, η )∥2 
+
+> F
+
+≤ C2 
+
+> f
+
+for every x (teacher analogue of Assumption 4). Assume moreover that the gradient–expectation interchange used in Proposition 2 is valid for both 
+
+fϕ and f⋆ (e.g., by local dominated differentiability in x). Then 
+
+E[∇x bLϕ] − E[∇x bL⋆] ≤ Cg εg, dist + Cs εdist ,
+
+with constants Cg , C s as in Proposition 2. The teacher-to-truth errors εd, ε g,d do not enter this bound 
+
+because the comparison is between the student and the teacher, not between either and the truth :closeness to truth would require those errors and is not claimed here. Proof. Parts (1) and (2): reverse-mode memory. Reverse-mode automatic differentiation of bL•(x)
+
+(for • ∈ { ⋆, ϕ }) propagates a gradient through each of the ncond evaluations f•(x, η i) and combines them at a final U-statistic reduction node. Each teacher forward f⋆(x, η i) unrolls K⋆ ≥ 2 DDIM steps, each of which invokes the diffusion UNet once on a latent of fixed dimension. Writing u(i) 
+
+> ℓ
+
+for the post-activation tensor at step ℓ of sample i, the dependency chain is u(i)1 → u(i)2 → · · · → u(i) 
+
+> K⋆
+
+= f⋆(x, η i), each edge contributing 
+
+Θ(1) to the per-sample critical path and Θ(1) stored activations per step. Hence the per-sample chain depth of ∇x bL⋆(x) is Θ( K⋆), and the total stored activations are Θ( K⋆ · ncond ) (the final reduction adds only Θ(1) per sample and is independent of K⋆). Absent gradient checkpointing this is unavoidable. For the few-step student, fϕ(x, η i) is a Ks-step forward call (typically Ks ∈ { 1, 2, 4}), so the per-sample chain depth is Θ( Ks) and the total stored activations are Θ( Ks · ncond ). The ratio is 
+
+Θ( K⋆/K s), as claimed. 
+
+Gradient discrepancy: Replay the proof of Proposition 2 verbatim, but with the population triple 
+
+(μG , μ P⋆(·| x), μ Pϕ(·| x)) in place of (μG , μ P(·| x), μ Pϕ(·| x)) and with f⋆ playing the role ftrue played there. Concretely, set 
+
+A′(x) := μP⋆(·| x), B′(x) := μPϕ(·| x), u′(x) := B′(x) − A′(x), v′(x) := A′(x) − C, 
+
+so that L⋆(x) = ∥v′(x)∥2 
+
+> Hk
+
+, Lϕ(x) = ∥u′(x) + v′(x)∥2 
+
+> Hk
+
+and the same algebraic decomposition (16) holds with primes. Steps 3(a)–(d) of Proposition 2’s proof go through unchanged with the substitutions ftrue → f⋆, εs → εdist , εg → εg, dist . The substitutions require: Assumption 1 (kernel regularity); Assumptions 3 on fϕ and (S3) above on f⋆ (bounded Jacobians); the same-η output coupling (S1) and Jacobian coupling (S2) of the proposition statement, which together replace Assumptions 2 and 5 for this comparison. Step 4 then yields 
+
+E[∇x bLϕ] − E[∇x bL⋆] ≤ Cg εg, dist + Cs εdist ,
+
+with the same Cg , C s as in Proposition 2. The teacher-to-truth errors εd and εg,d do not appear in this bound because the comparison is between the student and the teacher, not between either and the truth . The proof above never invokes any closeness of f⋆ to ftrue , so no truth-related quantity can enter. (The map Q 7 → ∇ x∥μQ − μG ∥2 is nonlinear in Q, so εd, ε g,d are not common offsets that “subtract out” between the two gradients; they are simply absent from a direct student-vs-teacher comparison. A bound on closeness-to-truth would require Proposition 2 applied to f⋆ separately, with its own teacher-to-truth εd, ε g,d .) Proposition 3 formalises the empirical observation of Section 5.4: replacing the teacher with the distilled sampler reduces activation memory by the step-count ratio K⋆/K s (measured as ≈ 15 × for SDXL-Base → SDXL-Turbo, K⋆ = 30 , K s = 2 ; ≈ 5× for SDXL-Base → SDXL-Lightning, K⋆ =20 , K s = 4 ), while introducing the additional student-teacher gradient discrepancy O(εg, dist + εdist ).
+
+E.6 Consequence for low-rank targets Corollary 1 (Identifiability under low-rank targets) . Suppose k is characteristic on Y. Then 
+
+L(x) = 0 ⇐⇒ P(Y | X = x) = G.
+
+44 In particular, if G is supported on a (low-rank) submanifold M ⊆ Y , any global minimiser x⋆ of L
+
+with L(x⋆) = 0 satisfies 
+
+supp( P(Y | X = x⋆)) = supp( G) ⊆ M ;
+
+the inclusion is an equality if additionally supp( G) = M. If, in addition, bLϕ → L uniformly on a compact X in the joint limit ncond , n target → ∞ and εs, ε g → 0, then any sequence of empirical minimisers bxn ∈ arg min x bLϕ(x) satisfies L(bxn) → min x L(x). Proposition 1 is pointwise; uniform convergence over a compact X requires an additional covering / equicontinuity argument under stronger assumptions (e.g. almost-sure bounded Jacobians or sub-Gaussian derivative tails), which we do not prove here. 
+
+Corollary 1 complements Propositions 1–2: characteristic-kernel MMD is identifying, so even when G has low-rank (submanifold) support any x⋆ achieving zero loss recovers G exactly. We state consistency for global minimizers only; non-convexity of L in x means stationary points of 
+
+bLϕ need not converge to minimizers of L, which is a generic obstacle shared with all non-convex gradient-based inverse design. 
+
+E.7 Qβ as ideal target; MLGD-F as an LGD-style approximate sampler Remark 2 (Qβ as ideal target; MLGD-F as an LGD-style approximate sampler) . Problem 1 defines the ideal target Qβ (x0) ∝ P (x0) e−βL(x0). For a reverse diffusion to sample from Qβ exactly, one would replace the unconditional score ∇xt log Pt(xt) by the score of the noised tilted distribution 
+
+Q(t) 
+
+> β
+
+(xt) = R qt(xt | x0) Qβ (x0) dx 0 = Pt(xt) · Ee−βL(x0) | xt
+
+, giving 
+
+∇xt log Q(t) 
+
+> β
+
+(xt) = ∇xt log Pt(xt) + ∇xt log Ex0∼p(·| xt)
+
+e−βL(x0). (22) The second term is the exact loss-guidance score; it is intractable because it requires an integral over the posterior p(x0 | xt) at every t. Following LGD/DPS [ 6, 35 ], MLGD-F substitutes the Tweedie–Jensen surrogate 
+
+∇xt log Ee−βL(x0) | xt
+
+ ≈ − β ∇xt L ˆx0(xt),
+
+where ˆx0(xt) is the Tweedie estimate. This substitution is exact only in special cases (small β,
+
+L affine in x0, or p(x0 | xt) concentrated). MLGD-F additionally Monte-Carlo averages L over 
+
+nMC Gaussian perturbations of ˆx0 (Algorithm 3), which tracks the posterior expectation more faithfully than a single Tweedie point but still treats p(x0 | xt) as Gaussian about the Tweedie mean. Consequently the trajectory of Algorithm 1 samples from a distribution close to but not equal to 
+
+Qβ ; the gap is affected by β, the timestep discretization, nMC , and the inner-sampler errors εs, ε g .Propositions 1–2 analyse only the inner loss/gradient estimator (one reverse-diffusion step), not the marginal of the full guided trajectory. Asymptotically exact alternatives — twisted sequential Monte Carlo [ 4, 42 ], MCMC-corrected guidance [ 10 ], and Feynman–Kac steering — recover exact Qβ
+
+samples at the cost of additional particles or accept/reject steps; we adopt the LGD heuristic for its plug-and-play compatibility with frozen pretrained samplers, and report empirical agreement with the analytical Qβ in the 1D MoG setting (Figure 1, bottom; Appendix A.9) as evidence the heuristic is reasonable in practice. The CDMO variant (Problem 2) makes a weaker claim that does not require exact Qβ -sampling: only that the trajectory finds inputs of low L.
+
+E.8 Status of the fidelity assumptions Output gap εs. The output gap εs of Assumption 2 is an idealised fidelity assumption. Directly-trained samplers : when fϕ is trained directly on data (e.g. improved Consistency Training on MNIST [ 36 ]), score-based diffusion convergence results [ 1, 3, 5] give related output-distribution guarantees but do not directly imply the uniform conditional pathwise bound required here, because they bound marginal sampling error, not the same-η coupling between two specific samplers. Distilled samplers (teacher refinement) : when fϕ is obtained by distilling a pretrained multi-step teacher f⋆ (e.g. SDXL-Turbo or SDXL-Lightning distilled from SDXL-Base), triangle inequality in the same-η pathwise norm gives εs ≤ εd + εdist , with εd := sup x(Eη ∥f⋆(x, η ) − ftrue (x, η )∥2)1/2 the teacher-to-truth error and εdist := sup x(Eη ∥fϕ(x, η ) − f⋆(x, η )∥2)1/2 the student-to-teacher distillation error. The latter is the same-η quantity the distillation training loss aims to minimise; the former remains an idealisation, since the teacher does not exactly match ftrue .45 Jacobian gap εg . Unlike εs, the Jacobian gap εg of Assumption 5 is not bounded by any current training convergence result. Distillation objectives minimise output L2 loss; consistency-training and score-matching minimise L2 losses on sample outputs or on the conditional score, not on the Jacobian ∂xfϕ of the generator in the conditioning input. Sobolev-style objectives [ 7 ] would supply Jacobian supervision directly but are absent from all widely-deployed recipes. Bounding εg in terms of training quantities is an open theoretical problem, independent of this paper. We can still measure a component of εg against a differentiable multi-step reference sampler fref 
+
+trained on the same data. Triangle inequality gives 
+
+εg ≤  Eη ∥∂xfref − ∂xftrue ∥2
+
+> F
+
+1/2
+
+| {z }  
+
+> εg,d :open
+
++  Eη ∥∂xfϕ − ∂xfref ∥2
+
+> F
+
+1/2
+
+| {z }  
+
+> εg, dist :measurable
+
+,
+
+where εg, dist is directly measurable by autograd under shared-noise coupling, while εg,d remains unmeasurable for the same reason the output-level εd (above) is not empirically verifiable: the truth’s Jacobian is unknown. The empirical check is one-sided . By triangle inequality, bεg, dist can falsify Assumption 5: a large measurement forces either εg or εg,d to be large. But a small bεg, dist does not prove εg is small, because fϕ and fref may share systematic biases and be jointly far from truth in the Jacobian without being far from each other. We therefore report bεg, dist as a diagnostic, not as a proof that εg is small. Despite this caveat, the bounds in Propositions 1–2 degrade gracefully in εg : if only εs is controlled and εg is unknown, Proposition 1 is unaffected and Proposition 2 becomes a bias bound in terms of 
+
+εg alone. 
+
+E.9 Empirical diagnostic of εg, dist on SDXL-Lightning vs. SDXL-Base 
+
+We measure ˆεg, dist using SDXL-Lightning [ 23 ] (4-step student fϕ) and SDXL-Base (20-step DDIM teacher f⋆) across N = 100 prompts spanning four visual style groups ( photo , cinematic ,
+
+dark fantasy , cartoon ), with noise ηi shared between student and teacher. Both models share the same UNet architecture; SDXL-Lightning is obtained by distilling SDXL-Base via a hybrid adversarial score-matching objective at native 1024 × 1024 resolution [ 23 ]. The student uses 
+
+EulerDiscreteScheduler (trailing spacing, w = 0 , CFG baked in), the teacher DDIMScheduler 
+
+(w = 7 .5). Because the latent observable y ∈ R65536 makes the exact Jacobian intractable, we estimate the VJP-norm gap via D = 10 random unit vectors vd ∼ N (0 , I ), ∥vd∥ = 1 , one reverse-mode pass each. Writing J(i,d ) 
+
+> •
+
+:= v⊤ 
+
+> d
+
+∂xf•(xi, η i) for the directional Jacobian (a row vector), the group-level gaps are 
+
+bεdist =
+
+q 1
+
+> N
+
+P 
+
+> i
+
+fϕ(xi, η i) − f⋆(xi, η i) 2, bεg, dist =
+
+q 1
+
+> N D
+
+P 
+
+> i,d
+
+J(i,d ) 
+
+> ϕ
+
+− J(i,d )
+
+> ⋆
+> 2
+
+.
+
+Since these quantities have different units, we normalise by the student’s own magnitude to obtain dimensionless relative errors 
+
+brs := bεdist 
+
+¯yϕ
+
+, brg := bεg, dist 
+
+¯Jϕ
+
+,
+
+with 
+
+¯yϕ := 
+
+q 1
+
+> N
+
+P 
+
+> i
+
+∥fϕ(xi, η i)∥2, ¯Jϕ := 
+
+r
+
+> 1
+> N
+
+P
+
+> i
+
+ 1
+
+> D
+
+P 
+
+> d
+
+∥v⊤ 
+
+> d
+
+∂xfϕ(xi, η i)∥
+
+2
+
+.
+
+brg ≈ brs indicates that distillation preserved Jacobian structure to the same relative precision as outputs; brg ≫ brs signals Jacobian degradation beyond output error — the failure mode flagged by Remark E.8. 
+
+Outlier identification. Within each group we flag prompt i as an outlier if its per-prompt ratio 
+
+ˆrg,i /ˆrs,i falls outside the Tukey fence [Q1 − 1.5 IQR , Q 3 + 1 .5 IQR] . Across all 100 prompts, 16 are flagged (3 photo , 5 cinematic , 4 dark fantasy , 4 cartoon ). These alone are responsible for the large brg and wide confidence intervals in Panel A of Tables 18. Removing them reduces brg
+
+from 25 .09 to 3.27 while leaving brs essentially unchanged ( 0.753 in both cases), confirming that the outliers reflect Jacobian instability rather than global output degradation. 46 Table 18: Empirical Jacobian and output gaps: SDXL-Lightning ( fϕ, 4-step, 1024 ×1024 ) vs. SDXL-Base ( f⋆, 20-step DDIM), N = 100 prompts, D = 10 VJP directions. brs is the relative output error and brg the relative Jacobian error; both are dimensionless. Outliers flagged per group by Tukey IQR fence on ˆrg /ˆrs; count removed shown in parentheses. 95% bootstrap confidence intervals in brackets. 
+
+Panel A: with outliers 
+
+Group brs [95% CI] brg [95% CI] brg /brs [95% CI] 
+
+photo 0.66 [0 .62 , 0.69] 1.75 [1 .24 , 2.38] 2.66 [1 .90 , 3.62] 
+
+cinematic 0.70 [0 .65 , 0.75] 31 .34 [4 .92 , 45 .25] 44 .62 [7 .12 , 65 .16] 
+
+dark fantasy 0.61 [0 .57 , 0.66] 6.42 [1 .68 , 12 .61] 10 .51 [2 .76 , 20 .43] 
+
+cartoon 0.91 [0 .87 , 0.96] 28 .35 [2 .92 , 54 .59] 31 .00 [3 .19 , 60 .12] 
+
+All 0.75 [0 .72 , 0.79] 25 .09 [4 .58 , 43 .40] 33 .31 [6 .16 , 58 .38] 
+
+Panel B: without outliers (Tukey IQR fence on ˆrg /ˆrs)
+
+Group brs [95% CI] brg [95% CI] brg /brs [95% CI] 
+
+photo (−3) 0.67 [0 .63 , 0.71] 1.60 [1 .15 , 2.19] 2.39 [1 .74 , 3.22] 
+
+cinematic (−5) 0.69 [0 .63 , 0.74] 2.45 [1 .59 , 2.94] 3.58 [2 .41 , 4.26] 
+
+dark fantasy (−4) 0.62 [0 .57 , 0.67] 1.81 [1 .24 , 2.93] 2.93 [2 .12 , 4.63] 
+
+cartoon (−4) 0.92 [0 .88 , 0.97] 3.75 [2 .24 , 5.06] 4.05 [2 .42 , 5.53] 
+
+All (−16 ) 0.75 [0 .71 , 0.79] 3.27 [2 .12 , 4.42] 4.34 [2 .87 , 5.84] 
+
+Running-RMS diagnostic. Figure 19 (bottom-left) shows the running RMS aggregate ˆrg /ˆrs
+
+computed on the first k prompts, sorted by ˆrg ascending, so each curve is non-decreasing by construction and its final value equals the full-group RMS aggregate. The left panel pools all 100 prompts together; the right panel splits by group. Across all prompts the aggregate remains close to 
+
+ˆrg /ˆrs ≈ 1–5 for the first 85 prompts, providing encouraging empirical support for Remark E.8. The aggregate spikes only at the tail, confirming that a small number of outlier prompts drive the overall RMS rather than a systematic failure. When splitting by visual style group (bottom-right), photo and 
+
+cinematic remain well-aligned for the bulk of their prompts; the tail jump in cinematic is driven by 5 mode-mismatch outliers. cartoon degrades more consistently. 
+
+Open questions. Several questions remain open. First, what prompt-level properties predict Jacobian instability: 16 outliers across 100 prompts show no obvious syntactic or semantic pattern, though one plausible explanation is mode mismatch — prompts that elicit visually different outputs from teacher and student may induce larger Jacobian discrepancies, since the two models effectively compute gradients around different local modes of the image distribution. Second, whether the strong alignment observed for photo /cinematic reflects an inductive bias of SDXL-Lightning towards photorealistic outputs, which would imply that the choice of distillation target distribution matters for downstream gradient-based use of the student. We leave these to future work. 
+
+Compute. Experiments were conducted on a single NVIDIA RTX PRO 6000 Blackwell GPU (96 GB VRAM). Each run evaluated N = 100 prompts using D = 10 VJP di-rections, with two reverse-mode passes per direction (one for the teacher, one for the student), amounting to roughly 3 hours of wall-clock time. The reproduction notebook is provided at https://github.com/orineo1/conditional-matching-paper/blob/main/ SD_cond_SD_controlnet/notebooks/eps_g_experiment.ipynb .
+
+E.10 Discussion 
+
+The propositions above clarify three conceptual points that are specific to the CDM setting and do not follow from generic stochastic-gradient theory: • The gradient oracle used inside MLGD-F is a compound estimator; its error decomposes cleanly into a finite-sample variance term, a sampler-output bias ( εs), and a sampler-Jacobian 47 Well-aligned prompt             
+
+> ˆrs= 0 .668 ˆrg= 1 .034 ˆrg/ˆrs= 1 .55
+> Outlier prompt
+> ˆrs= 0 .920 ˆrg= 182 .5ˆrg/ˆrs= 198 .4
+
+Figure 19: Empirical Jacobian fidelity of SDXL-Lightning relative to SDXL-Base. Top row : a well-aligned photo prompt ( left , ˆrg /ˆrs = 1 .55 ; “a young boy in a red jacket on an empty beach. . . ” )and an outlier cartoon prompt ( right , ˆrg /ˆrs = 198 .4; “a cartoon child flying a kite on a hill, bold outlines...” ), each showing SDXL-Base (teacher-left) and SDXL-Lightning (student-right) outputs from the same noise η. The normalised output gap ˆrs is similar for both ( 0.67 vs. 0.92 ), while the normalised Jacobian gap ˆrg differs by two orders of magnitude ( 1.03 vs. 182 .5), showing that Jacobian misalignment is not predicted by output misalignment alone. Bottom left : running RMS 
+
+ˆrg /ˆrs over all 100 prompts (sorted ascending); the aggregate stays moderate for most prompts and spikes only at the tail, confirming that a small number of outliers dominate. Bottom right : same plot by visual style group ( N = 25 each). photo and cinematic remain well-aligned throughout; 
+
+cartoon degrades more consistently, as stylised rendering targets lie out-of-distribution for the 4-step Lightning student. bias ( εg ). The U-statistic estimator is unbiased in the finite-sample sense, so finite sampling enters Proposition 2 only through variance, not through bias; the corresponding loss-side Monte Carlo term lives in Proposition 1. • The distillation error enters both the loss and its gradient linearly in εs, via the Lipschitz relation MMD( Pϕ, P) ≤ Lk W1(Pϕ, P) and the L2 coupling of Assumption 2. This is sharper than a TV-based bound and is specific to characteristic-kernel distributional losses: point-target inverse design ( ∥f (x) − y⋆∥) has no analogous distributional stability property. • The memory advantage of the distilled sampler comes at an analytically quantifiable student-teacher gradient discrepancy O(εg, dist + εdist ), supporting the interpretation of the 43 GB vs 
+
+375 GB comparison in Section 5.4 as quantitatively analysed (rather than merely empirical) by Proposition 3. Assumption 5 is the only assumption not routinely available from the consistency-model literature. A formal analysis of Jacobian-level distillation guarantees is a natural direction for future work. 
+
+The bound is qualitative, not numerical. Empirically, the Jacobian gap ˆrg exceeds the output gap ˆrs across all style groups (Table 18). Without outliers (Panel B), ˆrg /ˆrs ranges from 2.39 ×
+
+(photo ) to 4.05 × (cartoon ), with an overall ratio of 4.34 ×; outlier prompts can push this to 33 .31 ×
+
+(Panel A). Proposition 2’s bound is therefore qualitatively informative — it identifies the right two error sources and shows the gradient bias decomposes cleanly into them — but not quantitatively tight at current distillation quality. We view the propositions as a framework for measurement and 48 regime identification: they tell us which quantities to estimate and how they propagate, rather than supplying numerical guarantees on the algorithm. More broadly, this points to a gap in the theory of model distillation itself. Standard distillation analyses, and the training objectives that flow from them, control output fidelity : L2 or Wasserstein closeness between student and teacher. This is the right bound when the distilled model is used as a function evaluator . MLGD-F, by contrast, uses fϕ as an autograd oracle : its Jacobian is consumed, not just its values. Whenever a distilled or compressed model is deployed in a downstream 
+
+optimisation rather than a downstream evaluation (MLGD-F, bi-level optimisation with learned inner solvers, differentiable simulators, gradient-guided inverse design in general), output-fidelity distillation bounds are insufficient, and an εg -type Jacobian-fidelity guarantee is required. Current consistency-model training provides the former but not the latter. 
+
+# F Licenses 
+
+Table 19: Licenses for all assets used in this paper. 
+
+Asset License Version 
+
+SDXL-Base 1 CreativeML Open RAIL++-M 1.0 SDXL-Lightning 2 CreativeML Open RAIL++-M –SDXL-Turbo 3 SAI-NC Community License –ControlNet-Scribble 4 Openrail –HuggingFace Annotators 5 other (unspecified) –CLIP ViT-L/14 6 MIT ∗ –SDEdit 7 MIT –HuggingFace Diffusers 8 Apache 2.0 –PyTorch 9 BSD-3 –WandB 10 MIT –MNIST 11 CC BY-SA 3.0 –Our models 12 MIT –Our code 13 MIT – 
+
+> 1
+
+https://huggingface.co/stabilityai/ stable-diffusion-xl-base-1.0  
+
+> 2
+
+https://huggingface.co/ByteDance/SDXL-Lightning  
+
+> 3
+
+https://huggingface.co/stabilityai/sdxl-turbo  
+
+> 4
+
+https://huggingface.co/lllyasviel/ sd-controlnet-scribble  
+
+> 5
+
+https://huggingface.co/lllyasviel/Annotators . Auxiliary an-notator weights repository by the same author as ControlNet 4; license not explicitly stated.  
+
+> 6
+
+https://huggingface.co/openai/clip-vit-large-patch14  
+
+> 7
+
+https://github.com/ermongroup/SDEdit  
+
+> 8
+
+https://github.com/huggingface/diffusers  
+
+> 9
+
+https://github.com/pytorch/pytorch  
+
+> 10
+
+https://github.com/wandb/wandb  
+
+> 11
+
+https://huggingface.co/datasets/ylecun/mnist  
+
+> 12
+
+https://huggingface.co/Orineo/Inverse-Design-Conditional-Distribution-Matching/ tree/main/MNIST  
+
+> 13
+
+https://github.com/orineo1/conditional-matching-paper 
+
+49
