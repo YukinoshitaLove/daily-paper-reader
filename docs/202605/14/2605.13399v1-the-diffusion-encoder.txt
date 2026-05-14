@@ -1,0 +1,1425 @@
+Title: The Diffusion Encoder
+
+URL Source: https://arxiv.org/pdf/2605.13399v1
+
+Published Time: Thu, 14 May 2026 01:21:18 GMT
+
+Number of Pages: 27
+
+Markdown Content:
+# The Diffusion Encoder 
+
+Akhil Premkumar 
+
+Department of Physics University of California San Diego La Jolla, CA 92093 
+
+akhilprem@ucsd.edu 
+
+Sarah Lucioni 
+
+Independent Researcher 
+
+sklucioni@gmail.com 
+
+## Abstract 
+
+We construct a new kind of encoder, leveraging the expressive power of diffu-sion models. In a traditional variational autoencoder, the encoder and decoder jointly negotiate a latent representation of the input. This is made possible by the reparameterization trick, which simplifies training at the cost of restricting the encoder to a simple family of distributions. Replacing this encoder with a diffusion model requires rethinking how the decoder pressure can be transmitted back to the encoder, given that they tend to update their internal estimates of the latent in opposing directions. We solve this problem with an alternating training scheme, inspired by the expectation-maximization algorithm. Our method enables more reliable synchronization between encoder and decoder, while preserving the simple and efficient training objective of standard diffusion models. 
+
+## 1 Introduction 
+
+Can a diffusion model be used as an encoder? After all, diffusion models are highly expressive probabilistic models, which makes them a natural candidate for parameterizing complex distributions over latent variables. The challenge is that these models are typically applied to cases where the target distribution is fixed, whereas a latent distribution must necessarily evolve during training as the encoder and decoder negotiate an optimal representation of the input signal. In variational autoencoders (VAEs) [ 1], the encoder is a Gaussian distribution with a diagonal covariance. Although this choice limits representational flexibility, it enables joint training of the encoder and decoder through the reparameterization trick. That is, it is straightforward to express the latents in terms of the encoder parameters, which allows the latter to be directly coupled to the decoder pressure. The same is not true for a diffusion model, since the latents are generated through many more iterations over the underlying score network, which makes their functional dependence on the network parameters more complicated [ 2 ]. Hence, we need to resort to a training algorithm that alternates between encoder and decoder updates, similar to techniques commonly used in maximum entropy reinforcement learning [3, 4]. Sacrificing the convenience of joint training may still be worthwhile if it yields a more flexible latent representation. The limited expressiveness of a rigid encoder family can hinder the autoencoder’s effectiveness in the following ways: (1) the optimal encoder may not lie within the chosen family, (2) an overly smooth encoder may map semantically distinct inputs to overlapping neighborhoods in latent space, and (3) an inexpressive encoder can throttle the reconstruction fidelity of the decoder [ 5]. These effects are discussed in greater detail in Sec. 2. Part of the expressive power of a diffusion model comes from its iterative generative process, which allows the model to gradually build up complex internal correlations in the generated sample (see Sec. 3). Normalizing flows [ 6] and neural ODEs [ 7 ] also share this feature, but diffusion models benefit from a considerably simpler and more robust training objective (see Sec. 5). Flow matching models [ 8 ] also inherit this property. However, diffusion models remain differentiated by their firm grounding in information theory, specifically, their ability to efficiently estimate quantities like mutual 
+
+> Preprint.
+> arXiv:2605.13399v1 [cs.LG] 13 May 2026
+
+Figure 1: Input/reconstructed images (top/bottom) from a diffusion encoder + convolutional decoder. information and neural entropy [ 9–12 ], which are otherwise difficult to compute in high-dimensions. This is particularly relevant to autoencoders, which are, at their core, realizations of an information bottleneck [13–15]. In this paper, we develop a framework to leverage a diffusion model as an encoder. The key innovation is a training scheme that updates the encoder and decoder in alternation, while keeping them synchronized with one another (see Sec. 4). This procedure is directly inspired by the expectation-maximization algorithm [ 16 ], where the E-step updates a diffusion model with samples from the posterior, and the M-step updates the decoder. The posterior samples are generated from a short Langevin chain that explores the decoder landscape, while an affine drift term keeps the samples regularized. Lifting the regularization pressure from the encoder side subdues the tendency for the encoder and decoder to fall out of alignment with one another during their independent updates. The diffusion encoder takes on a more passive role in this arrangement, which means it can be trained with the standard, well-established denoising objective. Finally, it is important to be clear about the scope of this work. Our goal is not to surpass the state-of-the-art in encoder design; over a decade of refinement has made the Gaussian encoder a highly competitive baseline. Rather, we seek to motivate a new application of diffusion models that draws on their representational capacity and training simplicity [ 17 –19 ]. Therefore, the experiments in Sec. 6 serve to demonstrate proof of concept—showing that the proposed setup trains stably and produces coherent reconstructions—rather than optimizing reconstruction quality at scale. We will be transparent about the limitations of our framework as they arise, and suggest potential avenues for improvement throughout. We hope these ideas spur further research on the diffusion encoder. 
+
+## 2 Information Bottlenecks and Variational Autoencoders 
+
+We begin with an information-theoretic view of unsupervised representation learning, starting from the information bottleneck principle [ 13 , 14 ]. Consider two random variables X and Y that are correlated with one another (see Sec. F for notation). We want to predict Y given some value of X.This can be done by extracting from X only the information that is relevant to Y . Such information can be encoded in a third random variable Z, called the latent , which compresses from X the details pertinent to Y . The optimal assignment from X to Z is obtained by finding the encoder q(z|x) that solves (with γ > 0)
+
+min  
+
+> q(z|x)
+
+I(X; Z) − γ−1I(Z; Y ). (1) The mutual information (MI) between two random variables quantifies how much we learn about the value of one of them, given a measurement of the other (see App. A of [ 20 ] for a review). Minimizing 
+
+I(X; Z) while maximizing I(Z; Y ) squeezes into Z only the Y -specific content of X.Implementing Eq. (1) in practice requires estimating the MI terms, which is challenging when the random variables are high-dimensional. One workaround is to choose a simple form of the encoder, 
+
+qϕ(z|x) = N (z; μϕ(x), diag (σϕ(x)2)) , (2) and the objective 
+
+min  
+
+> ϕ,ψ
+
+EX,Y Eqϕ(z|x)[− log pψ (y|z)] + γEX DKL (qϕ(z|x) ∥ p(z)) =: min  
+
+> ϕ,ψ
+
+EX,Y LVI . (3) The first term is the reconstruction term, which also trains the decoder pψ (x|z). It follows from 
+
+min  
+
+> ϕ,ψ
+
+−I(Z; Y ) = −S(Y ) + min  
+
+> ϕ,ψ
+
+S(Y |Z) ≡ min  
+
+> ϕ,ψ
+
+EY ,Z [− log pψ (y|z)] , =: min  
+
+> ϕ,ψ
+
+Lrec (4) since the entropy of Y is fixed by the dataset, and is independent of the parameters (ϕ, ψ). If we choose Y = X, we recognize Eq. (3) as the negative of the evidence lower bound (ELBO) of a 2variational auto encoder [ 1] (see Sec. C). The second term in Eq. (3), called the regularization term, incentivizes the encoder to be as uninformative as possible, by pushing qϕ(z|x) to be as close to the prior p(z) ≡ N (0 , I ). It is straightforward to show that 
+
+Lreg := EX DKL (qϕ(z|x) ∥ p(z)) = I(Z; X) + DKL (qϕ(z)∥p(z)) . (5) Intuitively, the aggregate qϕ(z) := EX [qϕ(z|x)] is the distribution of all available ‘latent codes,’ and qϕ(z|x) is concentrated on the subset that encodes a given x. Minimizing Lreg is equivalent to (1) min I(Z; X), which forces Z to retain as little information about X as possible, and (2) 
+
+min DKL (qϕ(z)∥p(z)) , which makes qϕ(z) as close as possible to p(z), constraining ‘total channel capacity.’ Up to this additional KL term, Eq. (3) realizes the bottleneck from Eq. (1). The regularization term, Lreg , forces qϕ(z|x) → p(z) for every x. In the limit, the encoder ignores the input x entirely, leading to posterior collapse [ 21 , 22 ]. This can happen, for instance, when the decoder is very powerful; if the decoder can model X without any help from Z, there is little incentive for the encoder to produce informative latents, and the regularization pressure wins. In a conventional VAE, the KL between qϕ(z|x) and p(z) is easy to compute. The form of qϕ(z|x)
+
+in Eq. (2) produces a simple expression for this term, 
+
+DKL (qϕ(z|x) ∥ p(z)) = 12
+
+> DZ
+
+X
+
+> j=1
+
+(( μj
+
+> ϕ
+
+)2 + ( σj
+
+> ϕ
+
+)2 − log( σj
+
+> ϕ
+
+)2 − 1) , (6) where μj 
+
+> ϕ
+
+and σj 
+
+> ϕ
+
+are the jth components of μϕ and σϕ. During training, z’s are generated from the data using z = μϕ(x) + σϕ(x) ⊙ ϵ, where ϵ ∼ N (0 , I ). This is called the reparameterization trick, and it allows the gradients to flow through the sampling step, since each z is a function of ϕ. Despite these advantages, the Gaussian encoder from Eq. (2) has some major drawbacks. First, it is not, in general, the optimum of Eq. (3). Varying LVI w.r.t. qϕ(z|x), with Y = X, we find 
+
+0 = δLVI 
+
+δq ϕ(z|x) =⇒ q⋆
+
+> ϕ
+
+(z|x) ∝ p(z)e 1   
+
+> γlog pψ(x|z)
+
+. (7) So the optimal encoder is generically non-Gaussian. For γ = 1 , we recover the standard result that 
+
+q⋆
+
+> ϕ
+
+(z|x) = pψ (z|x), the true posterior. An ideal family of variational distributions qϕ(z|x) should be flexible enough to contain Eq. (7) as one solution. Second, the encoder parameters ϕ are shared across all inputs, so the encoder cannot optimize independently for each data point x. Therefore, even if there exists some ˆqϕ(z|x) within the chosen encoder family that is as close as possible to the ideal in Eq. (7), the learned encoder qϕ(z|x) may be different from ˆqϕ(z|x) for each individual x. The total inference gap can therefore be decomposed into an approximation gap , and the amortization gap ,the latter quantifying the inability of the encoder to attain per-instance optimum due to the shared parameter mapping x → ϕ. It is shown in [ 5 , 23 ] that the amortization gap is often the dominant component. Therefore, the encoder architecture must also support a mapping from x → qϕ(z|x)
+
+that is expressive enough to specialize to each input, while generalizing reliably to unseen data. A third, subtler limitation arises from the coupling between the encoder and decoder during training. Since the optimal encoder in Eq. (7) depends on pψ (x|z), the decoder can adjust itself to make 
+
+q⋆
+
+> ϕ
+
+(z|x) easier to represent within the chosen encoder family. Thus, the decoder effectively absorbs the encoder’s limitations rather than driving the encoder toward a better posterior approximation—co-adapting to a limited encoder ultimately stifles the decoder [5]. 
+
+A toy example It is instructive to consider a simple example that illustrates the above concerns. We consider sample generated by a process z ∼ N (0 , 1) , x |z ∼ N (z2, σ 2), where Z and X are one-dimensional random variables. The posterior is 
+
+p(z|x) ∝ exp 
+
+
+
+− (z2 − x)2
+
+2σ2 − z2
+
+2
+
+
+
+, (8) which is not a Gaussian in z. For large x, the posterior is bimodal, with symmetric peaks at z = ±√x.For small x, the posterior is concentrated near zero but is non-Gaussian (see Fig. 2). A Gaussian encoder cannot capture the true posterior at any x, which creates an approximation gap. Next, we consider a simple polynomial decoder dψ (z) = P3 
+
+> k=0
+
+ψkzk, with learnable coefficients 
+
+ψ ≡ { ψk}, and likelihood pψ (x|z) = N (x; dψ (z), σ 2) (cf. Sec. C.2). The true posterior corresponds 3x = z2           
+
+> x=dψ(z)
+> 202
+> 1
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> z
+> x
+> Joint density
+> p(z|x)
+> qφ(z|x)
+> 202
+> z
+> x
+> Posteriors
+> 0.0 0.2 0.4 0.6
+> x
+> p(x)
+> Marginal density
+> p(x)recon
+> p(x)data
+
+Figure 2: A toy model illustrating the limitations of a Gaussian encoder (cf. Eq. (8)). Left: Samples from the true joint density p(x, z ) (blue) and the learned one (red). Middle: The true posterior at two values of x, and the Gaussian encoder that best fits it. Right: The true marginal density and the one reconstructed by the VAE. The Gaussian encoder is unable to capture the true posterior at any x,which restricts the decoder to be a mostly linear function of z. See also Fig. 9. to ψ2 = 1 and ψk = 0 for all k̸ = 2 . However, if we try to approximate the posterior with a Gaussian family, the decoder coefficients ψ0 and ψ1 will be strongest since a linear decoder, dψ (z) = ψ0 +ψ1z,gives a Gaussian posterior. This is an example of the co-adaptation problem: even though the decoder can express the true solution, the limitations of the encoder prevent it from doing so. 
+
+## 3 Towards a Stochastic Encoder 
+
+A simple way of creating a more expressive encoder is to construct a chain of Gaussian encoders, each with its own mean and variance. That is, consider a chain of latent variables {z0, z1, . . . , zn}
+
+and the product q(zn|zn−1, x) · · · q(z1|z0, x)q(z0) where 
+
+q(zi+1 |zi, x) = N (zi+1 ; μϕ(zi, x), σ 2 
+
+> i
+
+), (9) and q(z0) = N (0 , I ). We have kept the variance σ2 
+
+> i
+
+of each kernel independent of zi or x
+
+for simplicity. To see how this setup creates correlations within zn, assume for a moment that 
+
+μϕ(zi, x)a ∝ zai + βzbi where a̸ = b. That is, in the course of producing a sample zi+1 , the kernel mixes into the ath component of zi a term proportional to its bth component. This establishes a correlation between different components, which can grow richer as we travel deeper along the chain. The resulting zn has richer statistics than those afforded by a single Gaussian encoder. We can stack together a large number of such kernels, provided that the transformation induced by each kernel is scaled appropriately, 
+
+q(zi+1 |zi, x) = N (zi+1 ; zi + fθ (zi, x, t i)∆ t, σ (ti)2∆t). (10) Here ti := i∆t, and n∆t =: T is a finite number. The noise variance scales as ∆t, so that the accumulated standard deviation of zn remains O(√T ) and stays finite for large n. Thus fθ and σ
+
+need not vanish in the continuum limit n → ∞ . The samples from the above kernel are 
+
+zi+1 = zi + fθ (zi, x, t i)∆ t + σ(ti)√∆tϵi, (11) where ϵi ∼ N (0 , I ). In the continuum limit, this becomes the stochastic differential equation (SDE) dZt = fθ (Zt, x, t )dt + σ(t)dBt. (12) where Bt is the Wiener process and Zt is a random variable, a sample of which is zt. Starting from a trivially distributed Z0, we can transform to a highly-structured distribution qθ (zT |x) by applying Eq. (12) over time T . The requirement that qθ (zT |x) remains close to the standard normal p(z) is enforced by penalizing deviations of Eq. (12) from the SDE dZt = feq (Zt, t )dt + σ(t)dBt. (13) where feq (Zt, t ) = − σ(t)2 
+
+> 2
+
+Zt, so p(z) is the equilibrium distribution of Eq. (13). The KL between the path measures Q and P generated by Eqs. (12) and (13) upper bounds the KL between the terminal distributions at T , which follows from the data processing inequality (cf. Theorem 1 in [24]): 
+
+DKL (Q∥P) ≥ DKL (qθ (zT |x)∥p(zT )) . (14) 4The KL on the left is 
+
+DKL (Q∥P) = EQ
+
+"Z T
+
+> 0
+
+dt 12σ(t)2 ∥fθ (zt, x, t ) − feq (zt, t )∥2
+
+#
+
+(15) This KL would replace the regularization term in the autoencoder objective in Eq. (3). During training the encoder generates a sample by, say, an Euler-Maruyama integration of Eq. (12): 
+
+zn = z0 + ∆ t
+
+> n−1
+
+X
+
+> i=0
+
+fθ (zi, x, t i) + √∆t
+
+> n−1
+
+X
+
+> i=0
+
+σ(ti)ϵi. (16) In principle, we can feed this into the decoder, which then applies pressure on fθ to shape zn to be maximally informative about x, while Eq. (15) tries to do the opposite. This is the SDE version of the reparameterization trick, and it is used in [ 2]. But this approach has a few drawbacks: (1) fθ
+
+determines zt via Eq. (16), and we evaluate the fθ in the loss Eq. (15) at those zt, so changing fθ
+
+changes where we evaluate fθ , making the loss landscape non-stationary, and (2) we must store n
+
+intermediate states z1, . . . , zn and the activations in fθ at each step, as well as the noise samples ϵi,so the memory scales linearly in n.The adjoint method [ 7, 25 ] is a principled solution to these issues. Instead of backpropagating through Eq. (16), they solve an adjoint equation backwards in time, which can be used to directly compute the loss gradient w.r.t. θ. This approach is not without its own difficulties, however, as gradient-based optimization on the resulting non-convex problem has been reported to be empirically unstable [ 26 ]. Adjoint matching [27 ] resolves this issue by recasting the training objective into a convex form, while also simplifying the backward evolution of the adjoint state. This method is also particularly well-suited to modeling tilted distributions like the one in Eq. (7). 
+
+Fitting a moving target A fundamental feature of the autoencoder setup is that qθ (zT ∥x) evolves during training. In a classic VAE, the reparameterization trick allows the latent to be expressed as a function of the encoder parameters, so the encoder and decoder can be trained jointly—the decoder influence backpropagates to the encoder parameters via 
+
+∇ϕLrec = ∇z Lrec 
+
+∂z
+
+∂ϕ , z = μϕ(x) + σϕ(x) ⊙ ϵ. (17) The analogue for a diffusion encoder would be to let the decoder influence the encoder parameters through Eq. (16), but this is computationally expensive and potentially unstable. On the other hand, adjoint methods are built on the assumption that the target distribution is fixed. During training, samples zT are generated with Eq. (16), which are then used to compute the initial values of the adjoint states at t = T . Notably, only the value of zT is used in this approach, and 
+
+fθ is never differentiated through the generative process itself. The parameters θ receive gradient information exclusively via the adjoint equation, which propagates corrections backward in time independent of how zT was generated. In the autoencoder context, the adjoint method can be adapted to train the stochastic encoder on a transient target qθ (zT |x), provided the distribution evolves slowly over the course of training. First, the encoder generates latents zT with the current θ. These zT are then used to update the encoder and decoder separately . This creates a synchronization problem: the encoder and decoder have opposing preferences for what the latent should be, as manifest from the competing terms in Eq. (1), and updating them in isolation allows this disagreement to compound. A more detailed account of this issue is given in Sec. A.1. The setup can still be made to work, albeit with delicate tuning of the training parameters, but our goal is a more robust approach that does not depend on such sensitivity. 
+
+## 4 Equilibrating to the Posterior 
+
+Alternating optimization schemes have a storied history in machine learning, with the expectation-maximization (EM) algorithm being one of the oldest and most well-established. We draw inspiration from this method to develop a stable training routine with the stochastic encoder from Sec. 3. Briefly, the EM algorithm [ 16 ] is a general method for maximum likelihood estimation in latent variable models. The goal is to maximize the marginal log likelihood pψ (x), which is exactly 
+
+log pψ (x) = Eq(z|x)[log pψ (x|z)] − DKL (q(z|x) ∥ p(z)) 
+
+| {z }
+
+> L(q;ψ)
+
++DKL (q(z|x)∥pψ (z|x)) . (18) 5Since the KL term is non-negative, L(q; ψ) is a lower bound on log pψ (x)—it is the ELBO (cf. Eq. (38)). EM finds a solution to the maximum likelihood problem by alternating between two updates, called the E-step and M-step. The expectation step, or E-step, sets q(z|x) = pψ (z|x) at the 
+
+current values of the parameter ψ. Then, the M-steps maximizes L(q; ψ) over ψ with q fixed. Since the KL term in L(q; ψ) is independent of ψ, this reduces to 
+
+max  
+
+> ψ
+
+L(q; ψ) = max Eq(z|x)[log pψ (x|z)] . (19) The bound is tight at the start of each M-step, since setting q to the true posterior makes log pψ (x) = 
+
+L(q; ψ). Therefore, any increase in L(q; ψ) guarantees a corresponding increase in log pψ (x),ensuring monotone convergence. We can adopt the same strategy for the stochastic encoder. We propose a novel scheme, where the encoder directly models the optimal solution from Eq. (7), 
+
+q⋆(z|x) ∝ p(z)e 1    
+
+> γlog pψ(x|z)
+
+∝ exp 
+
+
+
+− z2
+
+2 + 1
+
+γ log pψ (x|z)
+
+
+
+. (20) Notice that this is the equilibrium distribution of an SDE (with ψ fixed), dZτ =
+
+
+
+−Zτ + 1
+
+γ ∇ log pψ (X|Zτ )
+
+
+
+dτ + √2 dBτ . (21) With sufficient iteration, Eq. (21) converges to samples z⋆ ∼ q⋆(z|x), which can then be used to train a diffusion model that will serve as the stochastic encoder (see Fig. 3 and Sec. 5). This is the E-step. The Langevin evolution makes the latents generated from Eq. (21) consistent with the current decoder, even if they do not start out that way. More importantly, the encoder is no longer responsible for regularization—this is handled by the affine term in the drift—relegating it to a more passive role in which any tendency for misalignment is subdued. This addresses the synchronization problem. Next, the reconstruction term can be optimized on the same z⋆, which is the M-step. Iterating these two steps yields Algorithm 1. 
+
+Algorithm 1 Training the autoencoder 
+
+Require: Dataset X , number of Langevin steps nstep , step size ∆τ 
+
+> 1:
+
+repeat  
+
+> 2:
+
+Sample minibatch {x} ∼ X  
+
+> 3:
+
+// E-step: update posterior with equilibrium samples  
+
+> 4:
+
+Generate {z} ∼ qθ (zT |x) 
+
+> 5:
+
+for k = 1 , . . . , n step do  
+
+> 6:
+
+z ← z +
+
+h
+
+−z + 1 
+
+> γ
+
+∇z log pψ (x|z)
+
+i
+
+∆τ + √2∆ τ ϵ, ϵ ∼ N (0 , I ) 
+
+> 7:
+
+end for  
+
+> 8:
+
+Set z⋆ ← z // posterior samples  
+
+> 9:
+
+Update θ by minimizing the denoising loss with targets {z⋆} 
+
+> 10:
+
+// M-step: update decoder  
+
+> 11:
+
+Update ψ by minimizing EX EZ⋆|X [− log pψ (x|z⋆)]  
+
+> 12:
+
+until converged At first glance, the Langevin iteration appears expensive, since an SDE generally requires many steps to equilibrate. However, nstep need not be large if the initial latents are in the vicinity of their equilibrium values, which is the case if pψ evolves slowly enough across the entire training run. In other words, we should choose γ, ∆τ , and the learning rates such that Eq. (21) relaxes to pψ within 
+
+nstep iterations, starting from the freshly generated latents in step 4. The encoder can afford to lag behind a little, since the Langevin dynamics will pick up the slack as it updates zT → z⋆ in steps 5 to 8. This gives us more leeway in choosing γ and the learning rates, which would otherwise need to be tuned delicately to keep the encoder and decoder synchronized over the entire training run. Optionally, we can also decrease nsteps as training converges, since fewer Langevin steps are needed to equilibrate to a quasi-static decoder landscape (see Sec. A.2). On a practical note, we clip ∇z log pψ (x|z) to the interval (−1, 1) DZ to ensure that Eq. (21) does not take arbitrarily large steps. Since the clipped gradient preserves the sign of each component, it continues to push z towards regions of high posterior probability where clipping is no longer needed. The samples z⋆ used to train the encoder are drawn from the stationary distribution q⋆(z|x), which is largely unaffected by the clipping scheme. 6γ = 0.05 γ = 0.5 γ = 2.0 
+
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+
+Figure 3: t-SNE diagram of latents (MNIST, DZ = 20 ) learned by the diffusion encoder. Each figure shows the equilibrium distribution q⋆(z|x) of Eqs. (21) and (38), at a given temperature γ. As 
+
+γ increases, stochasticity dominates in Eq. (21), scrambling the latent clusters into the prior p(z).
+
+## 5 The Diffusion Encoder 
+
+The final component in our autoencoder setup is a flexible probabilistic model capable of capturing 
+
+q⋆(z|x) from its samples. We use a diffusion model for the purpose—the titular diffusion encoder .Diffusion models convert noise to data by learning to reverse a diffusion process that transforms data to noise. To use such a model in the paradigm described above, the transformation Z0 → ZT |x
+
+under Eq. (12) would be replaced by the generative stage of the diffusion model. This is the reversal of a forward process that converts ZT |x → Z0 via d ˜Zs = feq ( ˜Zs, T − s)ds + σ(T − s)d ˆBs, (22) where we have introduced the forward time variable s := T − t, so ˜Z0 ≡ ZT and ˜ZT ≡ Z0 (see Fig. 10). Over a large T , Eq. (22) reaches a stationary distribution, which we will also choose as the prior, q( ˜ zT ) ≡ p( ˜ zT ). The ideal reverse process is dZt = − feq (Zt, t ) − σ(t)2∇ log q(Zt, t |x) dt + σ(t)dBt. (23) Here q(Zt, t |x) ≡ q( ˜Zs, s |x) is obtained by applying Eq. (22) to ˜Z0|x for time s. To learn the reverse process we take fθ ≡ feq + σ2eθ to beget the neural-network parameterized SDE dZt = feq (Zt, t ) + σ(t)2eθ (Zt, T − t; x) dt + σ(t)dBt. (24) This is the entropy-matching parameterization, introduced in [ 12 ]. It makes the calculation of certain information-theoretic quantities more transparent, as we will see in a moment. For now, we note that we can switch to the score-matching parameterization by simply setting sθ = 2 feq /σ 2 + eθ . We train Eq. (24) to match Eq. (23) by minimizing the KL between their path measures [24], 
+
+LZ|X 
+
+> EM
+
+:= EX
+
+"Z T
+
+> 0
+
+ds σ2
+
+2 E ˜Zs, ˜Z0|x
+
+h
+
+∇ log p( ˜ zs) − ∇ log q( ˜ zs, s |x) + eθ ( ˜ zs, s ; x) 2i#
+
+(25) where, ∇ log p( ˜ z) = − ˜z (13) 
+
+= 2feq 
+
+σ2 . (26) The expectation is taken over the paths generated by Eq. (13), which are the same as those produced by Eq. (22) as it transforms ˜Z0|x → ˜ZT |x. In practice, we only have access to q(zT |x) ≡ q( ˜ z0|x)
+
+through its samples { ˜z0}. However, given a sufficient number of such samples, we can train a diffusion model without access to the true score ∇ log q(·| x). This is possible because minimizing Eq. (25) is equivalent to minimizing the denoising objective [28], 
+
+LZ|X 
+
+> DEM
+
+:= EX
+
+"Z T
+
+> 0
+
+ds σ2
+
+2 E ˜Zs, ˜Z0|x ∇ log p( ˜ zs) − ∇ log q( ˜ zs, s | ˜z0) + eθ ( ˜ zs, s ; x) 2
+
+#
+
+(27) 
+
+≈ T Es∼U (ε,T ]Ex∼pd(x)˜z0∼q( ˜ z0|x)˜zs∼q( ˜ zs,s | ˜z0)
+
+
+
+λ(s) σ(s)2
+
+2 ∇ log p( ˜ zs) − ∇ log q( ˜ zs, s | ˜z0) + eθ ( ˜ zs, s ; x) 2
+
+
+
+.
+
+(28) 70 20 40 60                         
+
+> Rate [Neural Entropy]
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> Distortion (MSE)
+> γ= 2 .0
+> γ= 1 .0
+> γ= 0 .5
+> γ= 0 .2
+> γ= 0 .1γ= 0 .07 γ= 0 .05
+> MNIST ( DZ= 20 )050 100 150 200
+> Rate [Neural Entropy]
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120 γ= 2 .0
+> γ= 1 .0
+> γ= 0 .5
+> γ= 0 .2
+> γ= 0 .1γ= 0 .07 γ= 0 .05
+> CIFAR-10 ( DZ= 128 )
+> dAE
+> VAE
+
+Figure 4: Rate-Distortion curves for a VAE and dAE (diffusion encoder + conv. decoder). In the second step, we have approximated the integral and expectations with a Monte Carlo average. More importantly, the unknown density q( ˜ zs, s |x) has been replaced by the transition kernel, which is the Gaussian [29] 
+
+q( ˜ zs, s | ˜z0) = N
+
+
+
+˜zs; p¯α(s) ˜ z0, (1 − ¯α(s)) I
+
+
+
+, ¯α(s) = exp 
+
+
+
+−
+
+Z s
+
+> 0
+
+d¯s β (¯ s)
+
+
+
+, (29) for the VP SDE with feq ( ˜ z, s ) = − β(s)2 ˜z and σ(T − s) = pβ(s). Thus, the unknown score in Eq. (25) is replaced with 
+
+∇ log q( ˜ zs, s | ˜z0) = − ϵ
+
+p1 − ¯α(s) , ϵ ∼ N (0 , I ). (30) Notice that the denominator vanishes at s = 0 , which is why the Monte Carlo estimate starts at s = ε,a small positive number. We have also introduced a factor λ(s) in going from Eq. (27) to Eq. (28), which re-weights the objective in a time-dependent way. The choice λ(s) = 2(1 − ¯α(s)) /β (s) yields the “variance dropped” training objective, which gives better empirical results [17, 24]. The Gaussian kernel in Eq. (29) also enables simulation-free sampling. That is, we can compute averages of the form R 
+
+> s
+
+E ˜Zs [· · · ] without solving Eq. (22) iteratively over each time step. Instead, we can use the kernel to sample any point in a full trajectory in a single jump, 
+
+˜zs = p¯α(s) ˜ z0 + p1 − ¯α(s)ϵ. (31) This is one of the key features that make diffusion model training so efficient. For comparison, the classical adjoint methods, as well as adjoint matching, lack this property (see Sec. D). Faster training of the encoder helps offset a portion of the latency due to the Langevin iterations in Algorithm 1. Finally, setting fθ ≡ feq + σ2eθ in Eq. (15), we see that the KL between the diffusion encoder output and the prior is upper bounded by the conditional neural entropy [12, 20], 
+
+SZ|X 
+
+> NN
+
+:= EX
+
+"Z T
+
+> 0
+
+ds σ2
+
+2 E ˜Zs, ˜Z0|x
+
+h
+
+∥eθ ( ˜ zs, s ; x)∥2i#
+
+≥ DKL (qθ (zT |x)∥p(zT )) . (32) Briefly, the neural entropy SZ|X 
+
+> NN
+
+measures the amount of information injected by the diffusion model to drive q(z0) to qθ (zT |x). It is the information that was captured and stored in the neural network during training. If SZ|X 
+
+> NN
+
+is small the encoder produces a ZT that is uninformative about X. This is a satisfying physical picture: ZT can carry no more information about X than the network has stored. 
+
+Architecture Given an input x, we generate a latent sample from qθ (zT |x) using the probability-flow ODE, with a Heun solver [ 29 , 30 ]. As the flow evolves z0 → zT , the network eθ extracts information from x and injects it into zt progressively. Therefore, the network architecture must 
+
+query x in a t-dependent way. This is a job for attention [31]. The details are given in Sec. E. 
+
+## 6 Experiments 
+
+We test our autoencoder on four different image datasets: MNIST, CIFAR-10, TinyImageNet, and CelebA-HQ, the last two scaled to 64 × 64 pixels [ 32 – 36 ]. Hyperparameter choices for these 8experiments are given in Table 1. Qualitative samples and their reconstructions are provided in Figs. 5 to 8. We were especially alert to training instabilities, which is precisely what Algorithm 1 is designed to counter (see Sec. A.1). Empirically, we observed no significant stability issues, even across varying hyperparameter regimes. Moreover, the loss profiles were smooth and nearly monotonic, consistent with an EM-like training scheme (see Fig. 7a). This indicates that the encoder and decoder evolved in lockstep rather than competing with one another. Such synchronization is noteworthy, given that even in a standard VAE, the encoder can lag behind the decoder, leading to posterior collapse [22]. Next, we evaluate our autoencoder using rate-distortion (RD) curves, which characterize the funda-mental tradeoff between compression and reconstruction accuracy [ 15 ]. For a VAE, rate refers to the regularization term from Eq. (6), and for the diffusion encoder, we use its neural entropy as a close proxy (cf. Eq. (32)). Distortion measures the fidelity of the output. We use a decoder with a standard MSE loss in our experiments, so distortion corresponds to the average squared distance between the input and its reconstruction (cf. Eq. (42)). In short, RD curves trace the equilibrium between the mutual information terms in the information bottleneck, Eq. (1), over a range of temperatures γ.Fig. 4 shows the RD curves for a VAE and dAE. The latter refers to our diffusion encoder + convolutional decoder setup. The VAE uses the same decoder, paired with a symmetric convolutional encoder (see Sec. E.6). RD curves positioned closer to the origin represent superior performance, as they achieve lower reconstruction error at a given rate. Therefore, it is clear from Fig. 4 that the classic VAE fares better than the dAE. However, it reveals that the dAE operates very close to the VAE’s RD frontier, despite having a fundamentally different approach to posterior approximation. The VAE encoder directly optimizes the quantities being plotted in Fig. 4, namely Lrec and Lreg from Eqs. (4) and (6). The diffusion encoder learns the optimal solution q⋆(z|x) from its samples. But the VAE encoder offers better performance, despite the fact that it is a Gaussian (Eq. (2)). To understand this better, we return to the toy model from Sec. 2, and train a diffusion encoder + polynomial decoder on its samples {x}. We find that the diffusion encoder picks up on the z → − z symmetry of the posterior, but still produces a nearly Gaussian qθ (z|x) even though it can capture the true p(z|x) (see Fig. 9). We wonder if an analogous statement is true in the general case, and whether that implies some form of universality of the Gaussian encoder. Of course, this is not the only explanation. First, neural entropy only upper-bounds the rate in the diffusion encoder case, so there might be a gap between the quantities we are using on the x-axis for the VAE and DAE RD curves. Second, there may be some additional source of error in modeling 
+
+q⋆(z|x) from its samples that adds to the distortion. Given the intricacy of the diffusion encoder, it is probable that multiple factors contribute to this discrepancy. We see this as fertile ground for continued research. 
+
+## 7 Conclusion 
+
+Can a diffusion model be used as an encoder? Yes, absolutely. Is there more work to be done before it is ready for primetime? Also yes. The main contribution of our paper is Algorithm 1, which enables (1) synchronized training of a decoupled encoder and decoder pair, and (2) training of the diffusion encoder with the standard denoising objective. A key enabler of our diffusion encoder is the architecture described in Sec. E, which progressively injects information from the input into the latent over the course of the denoising process. We do not claim this to be an optimal design, and expect that more careful architectural choices would yield further improvements. The primary weakness of Algorithm 1 is the sequential overhead introduced by the Langevin chains— patience is the price we pay for stability. Here again, there is room for improvement, by adaptive adjustment of nsteps as training settles, and/or the use of critically damped dynamics to reach the stationary distribution more rapidly. We elaborate on these ideas in Sec. A.2. Fortunately, for lower-dimensional X training times remain reasonable; this makes our setup a strong candidate for certain maximum entropy reinforcement learning problems [3, 4]. In closing, we note that our training scheme exhibits a certain resilience to posterior collapse, as noted in Sec. 6. This makes sense, since Algorithm 1 is explicitly designed to accommodate a certain amount of lag from the encoder, allowing the encoder to catch up with the decoder if it sprints ahead. Whether this structural robustness has broader applications beyond our current setting remains an intriguing open question. 9References 
+
+[1] Diederik P. Kingma and Max Welling. Auto-Encoding Variational Bayes. In Yoshua Bengio and Yann LeCun, editors, 2nd International Conference on Learning Representations, ICLR 2014, Banff, AB, Canada, April 14-16, 2014, Conference Track Proceedings , 2014. URL 
+
+http://arxiv.org/abs/1312.6114 . 1, 3 [2] Onur Celik, Zechu Li, Denis Blessing, Ge Li, Daniel Palenicek, Jan Peters, Georgia Chal-vatzaki, and Gerhard Neumann. DIME: Diffusion-Based Maximum Entropy Reinforcement Learning. In Aarti Singh, Maryam Fazel, Daniel Hsu, Simon Lacoste-Julien, Felix Berkenkamp, Tegan Maharaj, Kiri Wagstaff, and Jerry Zhu, editors, Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research ,pages 6958–6977. PMLR, 13–19 Jul 2025. URL https://proceedings.mlr.press/v267/ celik25a.html . 1, 5 [3] Tuomas Haarnoja, Aurick Zhou, Pieter Abbeel, and Sergey Levine. Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor. In Jennifer G. Dy and Andreas Krause, editors, Proceedings of the 35th International Conference on Machine Learning, ICML 2018, Stockholmsmässan, Stockholm, Sweden, July 10-15, 2018 , Proceedings of Machine Learning Research, pages 1856–1865. PMLR, 2018. URL http://proceedings. mlr.press/v80/haarnoja18b.html . 1, 9 [4] Qiyang Li and Sergey Levine. Q-Learning with Adjoint Matching. In The Fourteenth Inter-national Conference on Learning Representations , 2026. URL https://openreview.net/ forum?id=vd4eNAdtO6 . 1, 9 [5] Chris Cremer, Xuechen Li, and David Duvenaud. Inference Suboptimality in Variational Autoencoders. In Jennifer Dy and Andreas Krause, editors, Proceedings of the 35th International Conference on Machine Learning , volume 80 of Proceedings of Machine Learning Research ,pages 1078–1086. PMLR, 10–15 Jul 2018. URL https://proceedings.mlr.press/v80/ cremer18a.html . 1, 3 [6] Danilo Rezende and Shakir Mohamed. Variational Inference with Normalizing Flows. In Francis Bach and David Blei, editors, Proceedings of the 32nd International Conference on Machine Learning , volume 37 of Proceedings of Machine Learning Research , pages 1530– 1538, Lille, France, 07–09 Jul 2015. PMLR. URL https://proceedings.mlr.press/v37/ rezende15.html . 1 [7] Chen, Ricky T. Q. and Rubanova, Yulia and Bettencourt, Jesse and Duvenaud, David K. Neural ordinary differential equations. In S. Bengio, H. Wallach, H. Larochelle, K. Grauman, N. Cesa-Bianchi, and R. Garnett, editors, Advances in Neural Information Processing Systems , volume 31. Curran Associates, Inc., 2018. URL https://proceedings.neurips.cc/paper_files/ paper/2018/file/69386f6bb1dfed68692a24c8686939b9-Paper.pdf . 1, 5 [8] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matthew Le. Flow Matching for Generative Modeling. In The Eleventh International Conference on Learning Representations, ICLR 2023, Kigali, Rwanda, May 1-5, 2023 . OpenReview.net, 2023. URL 
+
+https://openreview.net/forum?id=PqvMRDCJT9t . 1 [9] Giulio Franzese, Mustapha Bounoua, and Pietro Michiardi. MINDE: Mutual information neural diffusion estimation. In Proceedings of the International Conference on Learning Representa-tions (ICLR) , pages 16685–16716, 2024. URL https://proceedings.iclr.cc/paper_ files/paper/2024/file/47f75e809409709c6d226ab5ca0c9703-Paper-Conference. pdf . 2 [10] Xianghao Kong, Rob Brekelmans, and Greg Ver Steeg. Information-Theoretic Diffusion. In The Eleventh International Conference on Learning Representations, ICLR 2023, Kigali, Rwanda, May 1-5, 2023 . OpenReview.net, 2023. URL https://openreview.net/forum? id=UvmDCdSPDOW .[11] Xianghao Kong, Ollie Liu, Han Li, Dani Yogatama, and Greg Ver Steeg. Interpretable Diffusion via Information Decomposition. In Proceedings of the Twelfth International Conference on Learning Representations (ICLR) , 2024. URL https://openreview.net/forum?id= X6tNkN6ate .10 [12] Akhil Premkumar. Neural Entropy. In The Thirty-ninth Annual Conference on Neural Informa-tion Processing Systems , 2025. URL https://openreview.net/forum?id=f6AYwCvynr .2, 7, 8 [13] Naftali Tishby, Fernando C. N. Pereira, and William Bialek. The Information Bottleneck Method. CoRR , physics/0004057, 2000. URL http://arxiv.org/abs/physics/0004057 .2[14] Ohad Shamir, Sivan Sabato, and Naftali Tishby. Learning and Generalization with the Information Bottleneck. Theoretical Computer Science , 411(29):2696–2711, 2010. doi: 10.1016/j.tcs.2010.04.006. Algorithmic Learning Theory (ALT 2008). 2 [15] Alexander Alemi, Ben Poole, Ian Fischer, Joshua Dillon, Rif A. Saurous, and Kevin Murphy. Fixing a Broken ELBO. In Jennifer Dy and Andreas Krause, editors, Proceedings of the 35th International Conference on Machine Learning , volume 80 of Proceedings of Machine Learning Research , pages 159–168. PMLR, 10–15 Jul 2018. URL https://proceedings. mlr.press/v80/alemi18a.html . 2, 9 [16] Arthur P. Dempster, Nan M. Laird, and Donald B. Rubin. Maximum Likelihood from Incomplete Data via the EM Algorithm. Journal of the Royal Statistical Society, Series B , 39(1):1–38, 1977. 2, 5 [17] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In Hugo Larochelle, Marc’Aurelio Ranzato, Raia Hadsell, Maria-Florina Balcan, and Hsuan-Tien Lin, editors, Advances in Neural Information Processing Systems 33: Annual Con-ference on Neural Information Processing Systems 2020, NeurIPS 2020, December 6-12, 2020, virtual , 2020. URL https://proceedings.neurips.cc/paper/2020/hash/ 4c5bcfec8584af0d967f1ab10179ca4b-Abstract.html . 2, 8 [18] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. In M. Ranzato, A. Beygelzimer, Y. Dauphin, P.S. Liang, and J. Wortman Vaughan, editors, 
+
+Advances in Neural Information Processing Systems , volume 34, pages 8780–8794. Curran Associates, Inc., 2021. URL https://proceedings.neurips.cc/paper_files/paper/ 2021/file/49ad23d1ec9fa4bd8d77d02681df5cfa-Paper.pdf .[19] Yang Song, Jascha Sohl-Dickstein, Diederik P. Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-Based Generative Modeling through Stochastic Differential Equations. In 
+
+9th International Conference on Learning Representations, ICLR 2021, Virtual Event, Aus-tria, May 3-7, 2021 . OpenReview.net, 2021. URL https://openreview.net/forum?id= PxTIG12RRHS . 2 [20] Akhil Premkumar. On the Separability of Information in Diffusion Models. In Forty-third International Conference on Machine Learning , 2026. URL https://openreview.net/ forum?id=Qc6OqkFAmO . 2, 8 [21] James Lucas, George Tucker, Roger B. Grosse, and Mohammad Norouzi. Don’t Blame the ELBO! A Linear VAE Perspective on Posterior Collapse. In Advances in Neural Information Processing Systems (NeurIPS) , volume 32, 2019. URL https://neurips.cc . 3 [22] Junxian He, Daniel Spokoyny, Graham Neubig, and Taylor Berg-Kirkpatrick. Lagging Inference Networks and Posterior Collapse in Variational Autoencoders. In International Conference on Learning Representations (ICLR) , 2019. URL https://openreview.net/forum?id= rylDfnCqF7 . 3, 9 [23] Yoon Kim, Sam Wiseman, Andrew Miller, David Sontag, and Alexander Rush. Semi-Amortized Variational Autoencoders. In Proceedings of the 35th International Conference on Machine Learning , volume 80 of Proceedings of Machine Learning Research , pages 2678–2687. PMLR, 2018. 3 [24] Yang Song, Conor Durkan, Iain Murray, and Stefano Ermon. Maximum Likelihood Training of Score-Based Diffusion Models. In Marc’Aurelio Ranzato, Alina Beygelz-imer, Yann N. Dauphin, Percy Liang, and Jennifer Wortman Vaughan, editors, Ad-vances in Neural Information Processing Systems 34: Annual Conference on Neural 
+
+11 Information Processing Systems 2021, NeurIPS 2021, December 6-14, 2021, virtual ,pages 1415–1428, 2021. URL https://proceedings.neurips.cc/paper/2021/hash/ 0a9fdbb17feb6ccb7ec405cfb85222c4-Abstract.html . 4, 7, 8 [25] Xuechen Li, Ting-Kam Leonard Wong, Ricky T. Q. Chen, and David K. Duvenaud. Scalable gradients and variational inference for stochastic differential equations. In Cheng Zhang, Francisco Ruiz, Thang Bui, Adji Bousso Dieng, and Dawen Liang, editors, Proceedings of The 2nd Symposium on Advances in Approximate Bayesian Inference , volume 118 of Proceedings of Machine Learning Research , pages 1–28. PMLR, 08 Dec 2020. URL https://proceedings. mlr.press/v118/li20a.html . 5, 23 [26] Carles Domingo-Enrich, Jiequn Han, Brandon Amos, Joan Bruna, and Ricky T. Q. Chen. Stochastic Optimal Control Matching. In Amir Globersons, Lester Mackey, Danielle Bel-grave, Angela Fan, Ulrich Paquet, Jakub M. Tomczak, and Cheng Zhang, editors, Ad-vances in Neural Information Processing Systems 38: Annual Conference on Neural In-formation Processing Systems 2024, NeurIPS 2024, Vancouver, BC, Canada, December 10 - 15, 2024 , 2024. URL http://papers.nips.cc/paper_files/paper/2024/hash/ cc32ec39a5073f61d38c338d963df30d-Abstract-Conference.html . 5, 23 [27] Carles Domingo-Enrich, Michal Drozdzal, Brian Karrer, and Ricky T. Q. Chen. Adjoint Matching: Fine-tuning Flow and Diffusion Generative Models with Memoryless Stochastic Optimal Control. In The Thirteenth International Conference on Learning Representations, ICLR 2025, Singapore, April 24-28, 2025 . OpenReview.net, 2025. URL https://openreview. net/forum?id=xQBRrtQM8u . 5, 22 [28] Pascal Vincent. A connection between score matching and denoising autoencoders. Neural computation , 23(7):1661–1674, 2011. doi: 10.1162/NECO_a_00142. 7 [29] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the De-sign Space of Diffusion-Based Generative Models. In Sanmi Koyejo, S. Mohamed, A. Agarwal, Danielle Belgrave, K. Cho, and A. Oh, editors, Advances in Neural In-formation Processing Systems 35: Annual Conference on Neural Information Process-ing Systems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - Decem-ber 9, 2022 , 2022. URL http://papers.nips.cc/paper_files/paper/2022/hash/ a98846e9d9cc01cfb87eb694d946ce6b-Abstract-Conference.html . 8 [30] Dimitra Maoutsa, Sebastian Reich, and Manfred Opper. Interacting particle solutions of Fokker– Planck equations through gradient–log–density estimation. Entropy , 22(8):802, 2020. URL 
+
+https://www.mdpi.com/1099-4300/22/8/802 . 8 [31] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in Neural Informa-tion Processing Systems , volume 30, 2017. 8, 23 [32] Yann LeCun, Léon Bottou, Yoshua Bengio, and Patrick Haffner. Gradient-based learning applied to document recognition. Proceedings of the IEEE , 86(11):2278–2324, 1998. doi: 10.1109/5.726791. 8 [33] Alex Krizhevsky. Learning multiple layers of features from tiny images. Tech-nical report, University of Toronto, 2009. https://www.cs.toronto.edu/~kriz/ learning-features-2009-TR.pdf .[34] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. ImageNet: A large-scale hierarchical image database. In 2009 IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 248–255, 2009. doi: 10.1109/CVPR.2009.5206848. [35] Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang. Deep learning face attributes in the wild. In Proceedings of International Conference on Computer Vision (ICCV) , December 2015. [36] Tero Karras, Timo Aila, Samuli Laine, and Jaakko Lehtinen. Progressive growing of gans for improved quality, stability, and variation. CoRR , abs/1710.10196, 2017. URL http: //arxiv.org/abs/1710.10196 . 8 12 [37] James Bradbury, Roy Frostig, Peter Hawkins, Matthew James Johnson, Chris Leary, Dougal Maclaurin, George Necula, Adam Paszke, Jake VanderPlas, Skye Wanderman-Milne, and Qiao Zhang. JAX: composable transformations of Python+NumPy programs, 2018. URL 
+
+http://github.com/jax-ml/jax . 16 [38] Diederik P. Kingma and Max Welling. An Introduction to Variational Autoencoders. CoRR ,abs/1906.02691, 2019. URL http://arxiv.org/abs/1906.02691 . 21 [39] Irina Higgins, Loic Matthey, Arka Pal, Christopher Burgess, Xavier Glorot, Matthew Botvinick, Shakir Mohamed, and Alexander Lerchner. beta-VAE: Learning Basic Visual Concepts with a Constrained Variational Framework. In International Conference on Learning Representations ,2017. URL https://openreview.net/forum?id=Sy2fzU9gl . 21 [40] Matthew Tancik, Pratul Srinivasan, Ben Mildenhall, Sara Fridovich-Keil, Nithin Raghavan, Utkarsh Singhal, Ravi Ramamoorthi, Jonathan Barron, and Ren Ng. Fourier features let networks learn high frequency functions in low dimensional domains. In Advances in Neural Information Processing Systems , volume 33, pages 7537–7547, 2020. 24 [41] William Peebles and Saining Xie. Scalable diffusion models with transformers. CoRR ,abs/2212.09748, 2022. doi: 10.48550/arxiv.2212.09748. URL https://doi.org/10.48550/ arXiv.2212.09748 . 25 13 Contents 
+
+1 Introduction 12 Information Bottlenecks and Variational Autoencoders 23 Towards a Stochastic Encoder 44 Equilibrating to the Posterior 55 The Diffusion Encoder 76 Experiments 87 Conclusion 9References 10 Contents 14 A Outtakes 15 
+
+A.1 Regularization on the Encoder side . . . . . . . . . . . . . . . . . . . . . . . . . . 15 A.2 Latency . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 
+
+B More Experiments 16 C Variational Autoencoders 21 
+
+C.1 ELBO . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 C.2 Model components . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 
+
+D Adjoint Matching 22 E Encoder Architecture 23 
+
+E.1 Attention . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 E.2 Input Embeddings . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 E.3 Weak Image Encoder . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 E.4 Cross-Attention Image Conditioning . . . . . . . . . . . . . . . . . . . . . . . . . 25 E.5 MLP Backbone with Adaptive Conditioning . . . . . . . . . . . . . . . . . . . . . 25 E.6 Decoder Architecture . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 E.7 Hyperparameter Summary . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 
+
+F Notation 26 
+
+14 A Outtakes 
+
+We present some approaches we tried in the course of this work, explaining the rationale behind those ideas, and why they were ultimately scrapped in favor of the method in the main text. This section is intended to save future researchers the effort of rediscovering these detours, and perhaps spark inspiration for more elegant solutions. 
+
+A.1 Regularization on the Encoder side 
+
+A notable feature of Algorithm 1 is that regularization happens through Langevin dynamics under Eq. (21). Equilibrating this SDE is also the highest latency step in the whole process. Another approach would be to use a regularization term analogous to Eq. (6), that throttles the information content of Z by directly constraining the encoder’s network parameters. For the diffusion encoder, this is accomplished through the conditional neural entropy (cf. Eq. (32)), 
+
+SZ|X 
+
+> NN
+
+:= EX
+
+"Z T
+
+> 0
+
+ds σ2
+
+2 E ˜Zs, ˜Z0|x
+
+h
+
+∥eθ ( ˜ zs, s ; x)∥2i#
+
+≥ DKL (qθ (zT |x)∥p(zT )) . (33) Combining SZ|X 
+
+> NN
+
+with the denoising objective (cf. Eq. (28)), we obtain 
+
+LDEnc := LZ|X 
+
+> DEM
+
++ γS Z|X 
+
+> NN
+
+. (34) By adjusting γ we can throttle the amount of information stored in the encoder network, which bounds the information compressed into ZT from X. Thus, the regularization responsibility shifts back to the encoder. Conveniently, the neural entropy can also be estimated by simulation-free sampling, just like the denoising loss. The encoder and decoder are still decoupled, so we need to train them with an alternating scheme. This is Algorithm 2. In each cycle, fresh latents are generated by the encoder. We update these to the current decoder parameters, by taking a step (or steps) in the direction of ∇z Lrec , where 
+
+Lrec (ψ, ˆz) := − log pψ (x| ˆz). Here again, we found that generating Bz latent samples per input x
+
+provided a better training signal to the encoder later, provided we average the updated latents over 
+
+Bz before training the encoder on them (see step 7). 
+
+Algorithm 2 Training the autoencoder with neural entropy 
+
+Require: Dataset X , latents per input Bz , latent step size ∆τ 
+
+> 1:
+
+repeat  
+
+> 2:
+
+Sample minibatch {x(j)}Bj=1 ∼ X  
+
+> 3:
+
+for j = 1 , . . . , B and k = 1 , . . . , B z do  
+
+> 4:
+
+Generate ˆz(j,k ) ∼ qθ (zT |x(j)) by running the PF-ODE with different initial seeds  
+
+> 5:
+
+end for  
+
+> 6:
+
+Update latents ˆz(j,k ) ← ˆz(j,k ) − ∆τ ∇ˆz Lrec 
+
+ ψ, ˆz(j,k ) 
+
+> 7:
+
+Compute mean latents ⟨ ˆz⟩(j) = 1
+
+> Bz
+
+PBz 
+
+> k=1
+
+ˆz(j,k ) 
+
+> 8:
+
+Update ψ by minimizing − 1
+
+> B·Bz
+
+P 
+
+> j,k
+
+log pψ (x(j)| ˆz(j,k )) 
+
+> 9:
+
+// Encoder update: fit diffusion encoder to mean latents  
+
+> 10:
+
+Update θ by minimizing L ˆZ|X 
+
+> DEM
+
++ γS ˆZ|X 
+
+> NN
+
+with targets {⟨ ˆz⟩(j), x(j)}Bj=1  
+
+> 11:
+
+until converged 
+
+Synchronization Algorithm 2 works reasonably well on smaller datasets like MNIST and CIFAR-10. However, it suffers from a synchronization problem, like the one described at the end of Sec. 3. In step 6, the latents are updated based on the current state of the decoder. But in step 10, the decoder changes, which means the new latents are no longer ‘in sync’ with the updated decoder parameters. We can make this explicit by adding some time subscripts: 
+
+ˆz(j)  
+
+> τ+∆ τ
+
+← ˆz(j) 
+
+> τ
+
+− ∆τ ∇ˆz Lrec 
+
+
+
+ψτ , ˆz(j)
+
+> τ
+
+
+
+, (35a) 
+
+ψτ +∆ τ ← ψτ − ηψ
+
+1
+
+B
+
+> B
+
+X
+
+> k=1
+
+∇ψ Lrec 
+
+
+
+ψτ , ˆz(j) 
+
+> τ+∆ τ
+
+
+
+, (35b) 15 where we have taken Bz = 1 for simplicity, and ηψ is the decoder learning rate. At the end of one cycle, ˆz(j)  
+
+> τ+∆ τ
+
+and ψτ +∆ τ are not perfectly consistent with one another. But this is asynchronicity is exacerbated by the fact that the neural entropy term in Eq. (34) dampens the ability of the diffusion encoder to learn { ˆz(j)  
+
+> τ+∆ τ
+
+} faithfully; its purpose is to resist the decoder’s preference for what the latents should be. Therefore, the latents generated at the start of the next cycle may be farther away from where the decoder expects them to be. This misalignment can rapidly compound and destabilize training. In practice, we find that Algorithm 2 often drives the training loss into a nan .Despite its shortcomings, Algorithm 2 was a crucial stepping stone to Algorithm 1. The crucial realization was that moving the regularization responsibility from the encoder side leads to much better consistency between the latents and decoder during training. 
+
+A.2 Latency 
+
+The biggest drawback with Algorithm 1 is the latency induced by sequential iteration of the posterior SDE, Eq. (21), each step of which involves taking a derivative of the decoder network. As mentioned there, nsteps does not have to be large for the Langevin chain to equilibrate, since the encoder places the initial latents close to their final destination. We typically set nsteps = 10 in our experiments (see Table 1). This parameter is what allows the setup to tolerate some slack between the encoder and decoder, as the latter races ahead in step 11. Even though there is no regularization pressure on the encoder side, the encoder lags because it was last updated with a z⋆ that may no longer reflect the decoder’s preference at the end of each cycle. The lag is largest early in training, when the decoder loss landscape is changing most rapidly. As the losses stabilize, the encoder catches up and tracks the decoder more closely. It also means we no longer need as many nsteps for the latents to settle to z⋆. In fact, it is possible to adaptively lower 
+
+nsteps as training progresses with little to no effect on synchronization. We did this experiment, but there was a catch: we used JAX as our ML framework [ 37 ], and it requires a separate JIT-compilation of the model for each nsteps setting. For smaller datasets, this offsets the latency improvements from adaptive nsteps , but cleverer ML engineers than us should be able to resolve this. Another possibility is to introduce a velocity variable into the Langevin dynamics, imbuing zτ with inertia. This smoothens the evolution of zτ , which (1) regulates it from making large jumps when it encounters regions with large ∇zτ log pψ (x|zτ ), and (2) leads to faster equilibration if the dynamics is tuned correctly. We did not try this ourselves, but we state the idea here for future development. 
+
+## B More Experiments 
+
+This section collects together a host of experiments that could not be inserted in the main paper due to space constraints. We include more comprehensive RD curves and reconstructions from several experiments. We trained on H200 GPUs with 141 GB of memory. While most models were trained using four GPUs in parallel, the wall-clock times reported in Table 1 reflect performance on a single GPU to provide a standardized baseline. We used JAX/Flax as our ML framework [ 37 ]. Code will be released upon publication. 16 0 20 40 60 
+
+Rate [Neural Entropy] 
+
+10 
+
+20 
+
+30 
+
+40 
+
+50        
+
+> Distortion (MSE)
+> γ= 2 .0
+> γ= 1 .0
+> γ= 0 .5
+> γ= 0 .2
+> γ= 0 .1γ= 0 .05
+
+MNIST (dAE)     
+
+> DZ= 10
+> DZ= 15
+> DZ= 20
+> DZ= 25
+
+0 50 100 150 200 
+
+Rate [Neural Entropy] 
+
+25 
+
+50 
+
+75 
+
+100 
+
+125         
+
+> γ= 2 .0
+> γ= 1 .0
+> γ= 0 .5
+> γ= 0 .2γ= 0 .1γ= 0 .05
+
+CIFAR-10 (dAE)           
+
+> DZ= 64
+> DZ= 96
+> DZ= 128
+> DZ= 256 Original
+> γ= 0.05
+> γ= 0.1
+> γ= 0.2
+> γ= 0.5
+> γ= 1.0
+> γ= 2.0
+
+(a) Reconstructions of MNIST samples with a dAE at different temperatures γ.Original       
+
+> γ= 0.05
+> γ= 0.1
+> γ= 0.2
+> γ= 0.5
+> γ= 1.0
+> γ= 2.0
+
+(b) Reconstructions of CIFAR-10 samples with a dAE at different temperatures γ.
+
+Figure 5: Rate-distortion curves and reconstructions with a diffusion encoder + convolutional decoder (dAE) for MNIST and CIFAR-10. RD curves for different latent dimensions DZ are shown. Reconstructions were generated with DZ = 20 for MNIST, and DZ = 128 for CIFAR-10. 17 0 10 20 30 40 50 
+
+Rate 
+
+0
+
+5
+
+10 
+
+15 
+
+20 
+
+> Distortion (MSE)
+
+γ = 2 .0
+
+γ = 1 .0
+
+γ = 0 .5
+
+γ = 0 .2
+
+γ = 0 .1γ = 0 .07 
+
+γ = 0 .05 
+
+MNIST (VAE) 
+
+DZ = 10 
+
+DZ = 15 
+
+DZ = 20 
+
+DZ = 25 (a) 0 25 50 75 100 125 
+
+Rate 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 γ = 2 .0
+
+γ = 1 .0
+
+γ = 0 .5
+
+γ = 0 .2
+
+γ = 0 .1
+
+γ = 0 .07 
+
+γ = 0 .05 
+
+CIFAR-10 (VAE) 
+
+DZ = 64 
+
+DZ = 96 
+
+DZ = 128 
+
+DZ = 256 (b) Original        
+
+> γ= 0.05
+> γ= 0.07
+> γ= 0.1
+> γ= 0.2
+> γ= 0.5
+> γ= 1.0
+> γ= 2.0
+
+(c) Reconstructions of MNIST samples with a VAE at different γ.Original        
+
+> γ= 0.05
+> γ= 0.07
+> γ= 0.1
+> γ= 0.2
+> γ= 0.5
+> γ= 1.0
+> γ= 2.0
+
+(d) Reconstructions of CIFAR-10 samples with a VAE at different γ.
+
+Figure 6: Rate-distortion curves and reconstructions with a VAE for MNIST and CIFAR-10. Reconstructions were generated with DZ = 20 for MNIST, and DZ = 128 for CIFAR-10. 18 0 20 40            
+
+> epochs
+> 400
+> 500
+> 600
+> 700
+> Training loss
+> γ= 0 .05
+> γ= 0 .1
+> 020 40
+> epochs
+> 150
+> 200
+> 250
+> 300
+> 350
+> Decoder loss
+> γ= 0 .05
+> γ= 0 .1
+> 020 40
+> epochs
+> 200
+> 250
+> 300
+> 350
+> 400 Encoder loss
+> γ= 0 .05
+> γ= 0 .1
+
+(a) (Left) Training loss of dAE on Tiny ImageNet, and its constituents, (Middle) the decoder loss (cf. Eq. (42)), and (Right) the encoder loss (cf. Eq. (28)). The smooth, nearly monotone convergence of the training loss is to be expected from the similarities between Algorithm 1 and expectation-maximization. See Secs. 4 and 6. 
+
+(b) Reconstructions of Tiny ImageNet with a dAE. Originals/reconstructions appear in odd/even rows. 
+
+Figure 7: Tiny ImageNet training and reconstructions with a diffusion encoder + convolutional decoder (dAE), and latent dimensions DZ = 512 .19 Figure 8: Reconstructions of CelebA-HQ (rescaled to 64 × 64 ) with a diffusion encoder + convolu-tional decoder (dAE). Originals/reconstructions appear in odd/even rows. x = z2          
+
+> x=dψ(z)
+> 202
+> 1
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> z
+> x
+> Joint density
+> p(z|x)
+> qθ(z|x)
+> 202
+> z
+> x
+> Posteriors
+> 0.0 0.2 0.4
+> x
+> p(x)
+> Marginal density
+> p(x)recon
+> p(x)data
+
+Figure 9: A dAE applied to the toy model from Sec. 2. Left: Samples from the true joint density 
+
+p(x, z ) (blue) and the learned one (red). Middle: The true posterior at two values of x, and the diffusion encoder that best fits it. Right: The true marginal density and the one reconstructed by the dAE. The dAE admits more of the quadratic term ψ2z2 from the polynomial decoder, which is why 
+
+dψ (z) is ‘more symmetric’ under z → − z compared to Fig. 2. The learned posteriors are also nearly symmetric, just like p(z|x), but they still have a roughly Gaussian silhouette. This is even though the diffusion encoder is fully capable of capturing p(z|x). See Sec. 6 for discussion. 20 C Variational Autoencoders 
+
+We review the variational autoencoder (VAE) framework here, for completeness. 
+
+C.1 ELBO 
+
+We derive the training objective for a VAE, following [ 38 ]. Given some data {x}Ni=1 , we would like to model the underlying probability distribution that produced these samples. We assume each observation x arises from an unobserved latent variable z via the generative process z ∼ p(z), and 
+
+x ∼ pψ (x|z). The marginal likelihood of x under this model is obtained by integrating over all possible values of z,
+
+log pψ (x) = log 
+
+Z
+
+dz pψ (x|z)p(z) = log 
+
+Z
+
+dz pψ (x, z).
+
+However, this integral is computationally infeasible. We instead derive a tractable lower bound by introducing a variational distribution qϕ(z|x). Multiplying and dividing the integrand with this object, we get 
+
+log pψ (x) = log 
+
+Z qϕ(z|x)
+
+qϕ(z|x) pψ (x, z) dz = log Eqϕ(z|x)
+
+ pψ (x, z)
+
+qϕ(z|x)
+
+
+
+,
+
+to which we can apply Jensen’s inequality and obtain 
+
+log Eqϕ(z|x)
+
+ pψ (x, z)
+
+qϕ(z|x)
+
+
+
+≥ Eqϕ(z|x)
+
+
+
+log pψ (x, z)
+
+qϕ(z|x)
+
+
+
+.
+
+This gives the Evidence Lower Bound (ELBO), 
+
+log pψ (x) ≥ Eqϕ(z|x) [log pψ (x, z) − log qϕ(z|x)] (36) 
+
+= Eqϕ(z|x) [log pψ (x|z) + log p(z) − log qϕ(z|x)] (37) 
+
+= Eqϕ(z|x)[log pψ (x|z)] 
+
+| {z }
+
+> Reconstruction term
+
+− DKL (qϕ(z|x) ∥ p(z)) 
+
+| {z }
+
+> Regularization term
+
+(38) Maximum likelihood estimation of the parameters ϕ and ψ follows from maximizing the r.h.s. Equivalently, we can minimize its negative, 
+
+(ϕ, ψ) = argmin ϕ,ψ
+
+Eqϕ(z|x)[− log pψ (x|z)] + γD KL (qϕ(z|x) ∥ p(z)) . (39) Note that we have introduced a γ > 0 to adjust the regularization term [ 39 ]; if γ is large, the KL term forces all qϕ(z|x) to collapse to the same distribution p(z), which is usually a Gaussian, and the VAE becomes unable to capture sufficient information from x for reconstruction. A smaller γ allows 
+
+qϕ(z|x) to deviate farther from p(z), trading off compression for reconstruction fidelity. Therefore, the parameter γ plays the role of a temperature—higher γ scrambles the encoder distribution, and lower values allow it to be more structured. 
+
+C.2 Model components 
+
+To implement the ELBO as a training loss, we choose the latent prior p(z), the encoder qϕ(z|x), and the decoder pψ (x|z) to be Gaussians. 
+
+Encoder The encoder is a network that maps an input, say x ∈ RDX , to μϕ(x) ∈ RDZ and 
+
+log σϕ(x)2 ∈ RDZ , which parameterize a Gaussian 
+
+qϕ(z|x) = N (z; μϕ(x), diag( σϕ(x)2)) .
+
+The latent prior is p(z) = N (0 , I ). The KL divergence between two diagonal Gaussians, p1(x) = 
+
+N (x; μ1, Σ1) and p2(x) = N (x; μ2, Σ2), has a closed-form expression 
+
+DKL (p1∥p2) = 12
+
+
+
+log |Σ2||Σ1| − d + tr {Σ−12 Σ1} + ( μ2 − μ1)⊤Σ−12 (μ2 − μ1)
+
+
+
+.
+
+21 With μ1 = μϕ, μ2 = 0 , Σ1 = diag( σ2
+
+> ϕ
+
+), and Σ2 = I, we get tr {Σ−12 Σ1} =
+
+> d
+
+X
+
+> j=1
+
+σ2
+
+> j
+
+(μ2 − μ1)⊤Σ−12 (μ2 − μ1) = μ⊤ 
+
+> ϕ
+
+Iμ ϕ =
+
+> d
+
+X
+
+> j=1
+
+μ2
+
+> j
+
+log |Σ2||Σ1| = − log 
+
+> D
+
+Y
+
+> i=1
+
+σ2 
+
+> j
+
+.
+
+Thus, the regularization term in the ELBO is 
+
+DKL (qϕ(z|x) ∥ p(z)) = 12
+
+> DZ
+
+X
+
+> j=1
+
+(( μj
+
+> ϕ
+
+)2 + ( σj
+
+> ϕ
+
+)2 − log( σj
+
+> ϕ
+
+)2 − 1) , (40) where μj 
+
+> ϕ
+
+and σj 
+
+> ϕ
+
+are the jth components of μϕ and σϕ. In practice, the encoder outputs log-variance 
+
+log σϕ(x)2, which we exponentiate to get σϕ(x)2.
+
+Decoder Assume the decoder defines a Gaussian distribution with fixed variance: 
+
+pψ (x|z) = N (x; dψ (z), σ 2I)
+
+Taking the log of this likelihood: 
+
+log pψ (x|z) = − 12σ2 ∥x − dψ (z)∥2 + const (41) Since the constant and σ2 can be absorbed into optimization, the reconstruction term becomes: 
+
+Eqϕ(z|x)[− log pψ (x|z)] ≈ Ez∼qϕ(z|x)[∥x − dψ (z)∥2]. (42) So the reconstruction loss is mean squared error (MSE). In each training cycle the z values are generated from the training data x using z = μϕ(x) + σϕ(x) ⊙ ϵ where ϵ ∼ N (0 , I ). This is called the reparameterization trick , and it allows the gradients to flow through the sampling step, since each 
+
+z is a function of ϕ.
+
+## D Adjoint Matching 
+
+We briefly review the adjoint matching method, introduced in [ 27 ], which improves on classic adjoint methods for training neural SDEs. We begin with a base generative process dZt = fb(Zt, t )dt + σ(t)dBt, Z0 ∼ q0 = N (0 , I ). (43) The goal is to fine-tune it by adding a learned control uθ (z, t ) such that the controlled process, dZt = [ fb(Zt, t ) + σ(t)uθ (Zt, t )] dt + σ(t)dBt, (44) generates samples from a tilted distribution at time T ,
+
+q(z) ∝ qbase (z)er(z) (45) where r is some reward. This is accomplished by minimizing the adjoint matching objective 
+
+LAM (uθ ; Z) := 12
+
+Z T
+
+> 0
+
+dt ∥uθ (zt, t ) + σ(t)˜ a(t; Z)∥2, Z ∼ q¯u, ¯u = stopgrad (uθ ),
+
+where ddt ˜a(t; Z) = −˜a(t; Z)⊤∇fb(Zt, t ),
+
+˜aT = −∇ r(ZT ).
+
+(46) Here Z denotes an entire path Z = ( Zt)t∈[0 ,T ] generated by the controlled process Eq. (44), with ¯u.
+
+LAM (uθ ; Z) is optimized with a gradient-based method, but Zt and ˜at should be computed without 22 gradients. Two key features in Eq. (46) are worth highlighting. First, the functional landscape of 
+
+LAM is convex, which leads to more stable training compared to the highly non-convex standard adjoint objective [ 25 ]. Second, the adjoint ODE does not involve ∇uθ , unlike the standard adjoint method. This makes the ODE cheaper to compute, which is why ˜a is called the lean adjoint .The relevance of this method becomes apparent when we note that the optimal encoder from Eq. (7) has precisely the same form as Eq. (45). Indeed, setting fb = feq , fθ = feq + σuθ , and r = 
+
+> 1
+> γ
+
+log pψ (x|zT ) (cf. Eq. (15)), 
+
+min E
+
+
+
+DKL (Q∥P) − 1
+
+γ log pψ (x|zT )
+
+
+
+→ min E
+
+"
+
+12
+
+Z T
+
+> 0
+
+dt∥uθ (zt, t ; x)∥2 − r(zT ; x)
+
+#
+
+. (47) The latter is precisely the starting point from which Eq. (46) is derived in [ 26 ]. Note that we have introduced x-dependence into the control in accordance with the discussion in Sec. 3. Once again, we see an encoder training objective that includes regularization pressure, just like Eq. (34). For this reason, adjoint-matching is poised to suffer from synchronization issues similar to those described in Sec. A.1—the encoder and decoder can fall out of alignment since they are pulling the latent in opposing directions in each decoupled update. Both adjoint matching and our diffusion encoder require the target ZT to be frozen. A key difference, compared to our diffusion encoder, is that we must store the entirety of each path Z to integrate the adjoint ODE, and optimize LAM . In practice, the paths are generated by an Euler-Maruyama solver (cf. Eq. (16)), with a finite number of steps. On the other hand, the diffusion loss is trained with forward noised samples rather than the adjoint, and these can be produced without solving the forward SDE (cf. Eq. (31)); this is simulation-free training. We also do not need to store the trajectories from the encoding step. 
+
+## E Encoder Architecture 
+
+At the heart of our diffusion encoder is a neural network eθ ( ˜ zs, s ; x) ≡ eθ (zt, T − t; x). It accepts three inputs: the noised latent ˜zs ∈ RDZ , a conditioning image x ∈ RH×W ×C , and the forward time 
+
+s ∈ (0 , T ]. Its output is an estimate of the entropy-matching vector, and has the same shape as ˜zs.The network eθ controls the evolution of the initial distribution q(z0) to the posterior q(zT |x) (cf. Eq. (24)). The value of eθ at each time slice parameterizes an x-dependent Gaussian kernel (see Sec. 3). Thus, the network effects a continuum of minuscule transformations that gradually encode information from x into zT . The encoder architecture must, therefore, include an effective mechanism to compress x into zt in a t-dependent way. This can be accomplished with attention [31]. 
+
+E.1 Attention 
+
+To review, cross-attention is the transformation 
+
+Y(Z) = Attention (Q, K, V) ≡ softmax 
+
+ QK ⊤
+
+√Dk
+
+
+
+V, (48) where Z ∈ RNQ×DZ and X ∈ RNK ×DX , with 
+
+Q = ZW Q ∈ RNQ×Dk , WQ ∈ RDZ ×Dk
+
+K = XW K ∈ RNK ×Dk , WK ∈ RDX ×Dk
+
+V = XW V ∈ RNK ×Dv , WV ∈ RDX ×Dv
+
+(49) Therefore, QK ⊤ has dimension NQ × NK , and the softmax is taken over the key (column) axis. Each row can be viewed as the conditional probability of the keys, given the query. Each of the NQ
+
+queries is assigned NK probabilities this way. These probabilities are then used to linearly combine the NK value vectors in V, each of Dv dimensions, to produce the final output of shape NQ × Dv.The weights W• are learnable parameters. In self-attention Z = X.In multi-head attention, there are H attention heads, which are combined as 
+
+Y(Z) = Concat [H1, . . . , HH ]WO , where Hh = Attention (Qh, Kh, Vh). (50) Each Hh has dimension NQ × Dv, so the concatenated matrix has dimension NQ × HD v. This is transformed by the linear matrix WO of dimension HD v × DZ to produce Y of dimension 23 NQ × DZ , which is the same as that of the original input matrix Z. Each position in X looks at all positions in Z, computes relevant probabilities, and pulls out a weighted combination of information from Z. In short, “ Z attends to X.” For our purposes, the key point is that attention is an input-dependent transformation. For example, by using zt to attend to x, we can extract different levels of information about x depending on where we are along the transformation z0 → zT . To make this precise, consider the problem of encoding an image of shape [H, W , C ] into a 1D feature vector with ‘feat’ number of components. First, we flatten the image so that [H, W , C ] → [HW , C ]. This will be X, so NK = HW , D X = C . Next, recall that the final output Y(Z) has the same shape as Z, so we choose the query Z to have the same dimensions as the desired feature vector. Therefore, NQ = 1 , D Z = feat . If we choose H = 4 heads in Eq. (50), then 4Dv = DZ =⇒ Dv = feat /4. With these choices, Z ∈ R1×feat and X ∈ RHW ×C ,and Eq. (49) is 
+
+Q = XW Q ∈ R1×Dk , WQ ∈ Rfeat ×Dk
+
+K = ZW K ∈ RHW ×Dk , WK ∈ RC ×Dk
+
+V = ZW V ∈ RHW ×feat /4, WV ∈ RC ×feat /4
+
+(51) We will choose Dk shortly. For now, notice that QK ⊤ ∈ R1×HW is a row vector. Then, 
+
+softmax[ QK ⊤/√Dv] can be interpreted as probabilities over HW pixels—it weighs how much each pixel influences ( 1/4 of) the final feature vector. The rows of V are HW ‘basis’ vectors built up from the image X itself—each of the HW pixels in the image is converted to a basis vector of length feat /4 by WV , and then mixed according to the HW probabilities from the softmax. Having multiple attention heads allows the same pixels to be mapped to different feature basis vectors. These basis vectors can also get mixed in different proportions since the softmax in a different head can produce a new set of probabilities for the same X and Z. So each feat /4 segment in Y can encode different information about the image. Finally, we turn to the WQ and WK matrices. In Eq. (48), WQW⊤ 
+
+> K
+
+induces a rank-Dk attention bottleneck on the logits. A similar bottleneck also exists in the value pathway, WhV WhO , where X is projected down to Dv and then back up to DZ .The calculation above is meant as an illustration. In practice, it is wasteful to attend to the input image x at its native resolution. Instead, we run the image through a shallow convolutional network to scale it from H × W × C → (H/4) × (W /4) × C ′ (see Sec. E.3). The query vector can be zt or an embedding of the time variable itself. 
+
+E.2 Input Embeddings 
+
+The time variable is lifted into a higher-dimensional feature space using random Fourier features, which are fixed at initialization and receive no gradient updates. This is particularly beneficial for low-dimensional inputs, which would otherwise be spectrally underrepresented in the network’s feature space [ 40 ]. Concretely, for a signal u and a frozen random matrix B drawn from N (0 , I ) and scaled by γ, the embedding is 
+
+ϕ(u; B) = sin(2 πu B⊤), cos(2 πu B⊤) ∈ R2M , (52) where M is the mapping size . For the time coordinate s, we use a dedicated matrix Bs ∈ RM ×1 with scale γs = 10 , giving a 2M -dimensional time embedding. Optionally, in cases where DZ is low, we also found it useful to embed the latent zt, with its own Bz ∈ RM ×DZ with scale γz = 10 . Both embeddings are then projected to width M via a learned linear layer followed by a SiLU activation. 
+
+E.3 Weak Image Encoder 
+
+The input image x is downsized with a shallow convolutional feature extractor, which we call the 
+
+weak encoder , before it is sent to the attention block. This stage serves to reduce the computational overhead of attending to the whole image x, without compressing away too much information from it. It consists of two strided convolutional layers, each with a 4 × 4 kernel, stride 2, and SAME padding, activated by SiLU: 
+
+xenc = WeakEncoder( x) ∈ RH/4×W /4×C ′
+
+. (53) The spatial grid is then flattened to produce a sequence of NK = H/4 × W /4 ‘patch’ tokens of dimension C ′,
+
+xflat = reshape( xenc ) ∈ RNK ×C′
+
+. (54) 24 This is the input X to the attention block in Eq. (48). By scaling down the spatial dimensions by a factor of 4 in each direction, we reduce the sequence length NK → NK /16 , shrinking the cost of the cross-attention operation by the same factor since it is linear in NK (cf. Eq. (51)). 
+
+Positional encodings and multi-scale tokens The raw sequence in Eq. (54) is permutation-invariant—patches at opposite corners of the image are distinguishable only by content, not by location. We therefore inject 2-D sinusoidal positional encodings into the fine-scale grid H/4 × W /4
+
+and concatenate a coarse-scale token sequence obtained by average pooling to H/8 × W /8 before the same positional encoding step. Both token sequences are passed through a shared linear projection before being concatenated, 
+
+xtokens = xfine + PE fine ; xcoarse + PE coarse 
+
+ ∈ R(NK +NK /4) ×Dtok , (55) where NK = ( H/4) 2 and NK /4 = ( H/8) 2 for square inputs. The dual-scale design provides both fine-grained texture detail and low-frequency layout information at a 25% overhead in token count. 
+
+E.4 Cross-Attention Image Conditioning 
+
+The projected time embedding es ∈ RM from Sec. E.2 serves as the single query vector for multi-head cross-attention against the image token sequence: 
+
+xattended = MultiHeadAttn  Q = es[: , None , :] , K = xflat , V = xflat 
+
+ ∈ RM , (56) with H = 4 heads and key/value dimension M . Setting the key–value dimension equal to M
+
+ensures no information bottleneck is introduced through the projection matrices WK and WV . The attended vector summarizes the patches that the current time state es finds relevant, conditioning the subsequent score network on that selection. The global conditioning vector is then assembled from the time embedding and the attended image summary 
+
+c = Dense  SiLU([ es; xattended ])  ∈ RM , (57) where [ · ; · ] denotes concatenation across the feature axis. In the simplest design, this vector c
+
+is computed once and reused at every residual block in the backbone described below. A more expressive alternative—performing cross-attention at every block using the current hidden state as the query—is described at the end of the next section. 
+
+E.5 MLP Backbone with Adaptive Conditioning 
+
+The backbone is a depth-L residual MLP with hidden widths given by the sequence features =[d1, . . . , d L]. Each block i = 1 , . . . , L applies the following operations to the current hidden state h:1. Projection. h ← Dense( di)( h).2. Layer normalization. h ← LayerNorm( h), standardizing each sample to zero mean and unit variance. 3. Adaptive modulation (FiLM/AdaLN). The conditioning vector c(i) is projected to a scale–shift pair (ρi, β i) ∈ Rdi × Rdi via a single linear layer, and applied as 
+
+h ← h ⊙ (1 + ρi) + βi. (58) Multiplying by (1 + ρi) rather than ρi alone initializes the modulation near the identity, which improves the stability of the training. This is the Adaptive Layer Normalization (AdaLN) design used in DiT [41]. 4. Activation. h ← SiLU( h).5. Residual connection. If hin and h share the same width, h ← h + hin ; otherwise, a learned linear projection aligns the dimensions before addition. After the final block, a linear read-out projects h to RDZ , producing the score network output eθ .
+
+Per-block cross-attention When c is fixed across all blocks as in Eq. (57), the image context is computed from the initial latent embedding and reused at every depth. As the hidden state h evolves through successive nonlinear transformations, this fixed summary grows increasingly misaligned with the current representation. To address this, the improved architecture performs cross-attention at every residual block, using the current hidden state as the query: 
+
+x(i)attended = MultiHeadAttn (i) h(i), xtokens 
+
+, c(i) = Dense (i) [es; x(i)attended ], (59) so that the scale and shift parameters of every FiLM modulation are derived from an image context that is semantically coherent with h(i). Each block maintains its own Q/K/V/O projection weights. 25 E.6 Decoder Architecture 
+
+The decoder maps a latent vector z back to image space through a sequence of convolutional upsampling stages. The latent is first projected by a dense layer to a small spatial grid, which is then progressively upsampled using transposed convolutions, each followed by a residual refinement block. Optionally, self-attention blocks with layer normalization can be inserted at low-resolution feature maps to capture long-range spatial dependencies during upsampling. A final transposed convolutional layer maps the feature map to the output image dimensions, with a sigmoid activation to constrain pixel values to [0 , 1] .
+
+E.7 Hyperparameter Summary 
+
+Table 1 collects the architectural hyperparameters used in the experiments reported in Sec. 6. Table 1: Encoder architecture/training hyperparameters. Hyperparameter MNIST CIFAR-10 Tiny ImageNet/CelebA Latent dimension DZ 20 128 512 Mapping size M 128 256 512 MLP widths ( features ) [512, 256] [512, 512, 256, 256] [512, 512, 512, 256, 256] Weak encoder channels [32, 64] [64, 128] [128, 256] Attention heads H 4 8 8Fourier scale γz 10 10 10 Fourier scale γs 10 10 10 
+
+z Fourier embedding ( zembed ) False False False 
+
+βmin 0.1 0.1 0.1 
+
+βmax 16 12 12 Training steps per z⋆ (nstep ) 10 10 10 Lantents per image ( Bz ) 4 4 4Encoder learning rate 0.001 0.001 0.0002 Batch size 256 128 128 Epochs 50 50 50 Time to train (1x H200) ≈ 15 mins ≈ 45 mins ≈ 325 mins 
+
+## F Notation 
+
+The natural logarithm is denoted by log . Scalars are written in plain letters, while boldface symbols such as X, Y , Z denote higher-dimensional random variables. Lowercase x ∈ RDX is a realization of X. We use z ∈ RDZ to denote the latents, and x to denote the inputs to the encoder. For image inputs, DX is replaced with H × W × C .We use the time variable s for the forward diffusion process, which runs from left ( s = 0 ) to right (s = T ) in Fig. 10. ˆBs and Bt denote the Brownian motions associated with the forward and reverse/controlled SDEs, respectively. ∇ is the gradient with respect the latent coordinates, and ∂t, ∂ s
+
+are partial time derivatives. The density p( ˜ zs, s ) is the same as p(zt, t ). That is, the symbol p is overloaded so we do not have to write p(·, s ) = p(·, T − t) everywhere. Diffusion takes an infinite time to equilibrate, but we always take T to be large compared to the intrinsic time scale of the diffusion process. We use the symbol 
+
+S := − R p log p for differential entropy. 26 q(z0)
+
+or 
+
+q( ˜ zT )
+
+z
+
+Forward SDE   
+
+> d˜Zs=feq ds+σdˆBs
+
+Reverse SDE   
+
+> dZt=−(feq −σ2∇log q)dt+σdBt
+
+q(zT |x)
+
+or 
+
+q( ˜ z0|x)
+
+z
+
+s
+
+T 0
+
+s
+
+t
+
+0 T
+
+t
+
+Figure 10: A schematic of the forward and reverse diffusion processes. 27

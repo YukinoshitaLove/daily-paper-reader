@@ -1,0 +1,1840 @@
+Title: Couple to Control: Joint Initial Noise Design in Diffusion Models
+
+URL Source: https://arxiv.org/pdf/2605.11311v1
+
+Published Time: Wed, 13 May 2026 00:30:46 GMT
+
+Number of Pages: 26
+
+Markdown Content:
+# Couple to Control: Joint Initial Noise Design in Diffusion Models 
+
+Jing Jia 
+
+Department of Computer Science Rutgers University Piscataway, NJ 08854 
+
+jing.jia@rutgers.edu 
+
+Liyue Shen 
+
+Department of EECS University of Michigan Ann Arbor, MI 48109 
+
+liyues@umich.edu 
+
+Guanyang Wang 
+
+Department of Statistics Rutgers University Piscataway, NJ 08854 
+
+guanyang.wang@rutgers.edu 
+
+# Abstract 
+
+Diffusion models typically generate image batches from independent Gaussian ini-tial noises. We argue that this independence assumption is only one choice within a broader class of valid joint noise designs. Instead, one can specify a coupling of the initial noises: each noise remains marginally standard Gaussian, so the pretrained diffusion model receives the same single-sample input distribution, while the de-pendence across samples is chosen by design. This reframes initial-noise control from selecting or optimizing individual seeds to designing the dependence structure of a multi-sample gallery. This view gives a general framework for initial-noise design, covering several existing methods as special cases and leading naturally to new coupled-noise constructions. Coupled noise can improve generation on its own without adding sampling cost, and it is flexible enough to serve as a struc-tured initialization for optimization-based pipelines when additional computation is available. Empirically, repulsive Gaussian coupling improves gallery diversity on SD1.5, SDXL, and SD3 while largely preserving prompt alignment and image quality. It matches or outperforms recent test-time noise-optimization baselines on several diversity metrics at the same sampling cost as independent generation. Subspace couplings also support fixed-object background generation, producing diverse, natural backgrounds compared with specialized inpainting baselines, with a tunable trade-off in foreground fidelity. .
+
+# 1 Introduction 
+
+Modern diffusion models have achieved remarkable photorealism, but their practical value increas-ingly depends on two goals: quality , producing realistic and prompt-faithful images, and control ,following user-specified structure across generated outputs. The quality objective has been extensively studied and engineered. Guidance mechanisms such as classifier guidance (Dhariwal and Nichol, 2021), classifier-free guidance (Ho and Salimans, 2022), and CLIP guidance (Radford et al., 2021) provide effective ways to steer samples toward high-quality, semantically aligned outputs. Control is more subtle, however, since it can reflect different user intentions. In a standard text-to-image (T2I) generation task, a user may provide a single prompt and want a diverse set of plausible images; in this case, the desired control is over the diversity of the generated gallery. In other settings, such as e-commerce or product editing, the user may instead want to preserve a specific object while varying its surrounding context. Here, the desired control is to keep the product faithful to the input image while generating natural backgrounds that blend smoothly with the preserved object. 
+
+> Preprint.
+> arXiv:2605.11311v1 [cs.LG] 11 May 2026
+
+A natural way for controlling the output of a diffusion model is to control its initial noise. Recent studies suggest that initial noise affects generated images in structured and partly predictable ways. Xu et al. (2025) show that different initial noises can systematically affect output quality, layout, and object position. Ban et al. (2025) identify “trigger patches” in initial noise that help predict object locations in generated images. Song et al. (2025) report a highly linear relationship between perturbations to the initial noise and changes in the output. Jia et al. (2026) show that opposite noise pairs yield significantly negatively correlated outputs. In parallel, a growing body of inference-time methods optimizes or selects initial noises to improve alignment, aesthetics, diversity, or inverse problem performance. These works show that initial noise is not just a source of randomness; it is an effective test-time control variable. However, existing methods treat the noises in a generated batch as separate objects. Each noise may be selected, ranked, or optimized independently. This leaves open a basic question: before any per-sample optimization is performed, can we design the dependence structure among the initial noises themselves? We answer this question through a coupling framework for initial-noise design. A coupling specifies a joint distribution over a batch of random variables while preserving their marginals. In the diffusion setting, this means constructing a batch of noises (Z1, . . . , Z K ) such that each Zi remains standard Gaussian, but the noises need not be independent. The pretrained diffusion model therefore receives the same single-sample input distribution as usual, while the user can choose how samples are related. This view turns coupling into a flexible control layer underneath existing initial-noise methods. It naturally supports three modes of use. First, coupled noise can be used directly as a plug-in that replaces independent noise at the start of sampling, with no change to the pretrained model, prompt, sampler, guidance rule, or denoising trajectory. Second, coupled noise can serve as an initialization for direct noise optimization since our framework allows the same optimizer to start from a structured coupling instead of from independent initialization. Third, one may perform amortized optimization of the coupling , where the coupling is represented by a matrix in a Gaussian parameterization and optimized under marginal-preserving constraints. Once learned, such a coupling can be reused for new prompts by simply sampling from it, adding no extra denoising or test-time optimization cost. Our framework naturally generalizes the antithetic sampling method of (Jia et al., 2026), which corresponds to our specific case for K = 2 and (Z1, Z 2) = ( Z, −Z). This broader perspective allows us to scale to arbitrary K and unlocks new usages, yielding (i) it extends to arbitrary K, introducing a K-sample repulsive coupling that is minimax optimal for worst-pair correlation; (ii) it enables new applications via subspace and learned couplings for structured generative tasks (e.g., fixed-object backgrounds); and (iii) it naturally fits into noise optimization pipelines as an initialization step, which is unaddressed by Jia et al. (2026). Our contributions are as follows. First, we introduce coupled initial-noise design as a marginal-preserving batch-level control layer for diffusion generation. Unlike standard seed selection or noise optimization, which acts on realized noises, our framework designs the joint distribution from which the noises are drawn. This makes coupling compatible with three common use cases: zero-cost sampling, structured initialization for test-time noise optimization, and amortized learning of reusable coupling matrices. Second, we study Gaussian couplings in this framework. We identify useful special cases, including identical, independent, antithetic, and repulsive couplings; give a minimax characterization of the repulsive coupling; and develop a matrix parameterization for constructing and learning couplings under marginal-preserving constraints. Third, we show that this design choice has practical value. On diverse text-to-image generation with SD1.5, SDXL, and SD3, repulsive coupling matches or exceeds recent test-time optimization baselines on several diversity metrics with no extra denoising or test-time optimization cost, while largely preserving prompt alignment and image quality. When combined with contrastive noise optimization, it often gives further gains. For fixed-object background generation, subspace coupling supports a different form of structured control, preserving the object while varying the background. 
+
+# 2 Related Work 
+
+Initial noise: As the input to a diffusion model, initial noise has been studied both as a lens for understanding the input–output mechanism and as a lever for improving generation. Besides the mechanism studies mentioned in Section 1, optimizing initial noise has recently attracted interest for 2its potential to support inference-time scaling (Ma et al., 2025). These techniques have been shown to improve performance across many applications, including text-image alignment, aesthetics, diversity, and inverse problem solving; see (Guo et al., 2024; Eyring et al., 2024; Qi et al., 2024; Ben-Hamu et al., 2024; Tang et al., 2025; Zhou et al., 2025; Chihaoui et al., 2024; Wang et al., 2024; Wan et al., 2025; Jia et al., 2026). 
+
+Coupling constructs random variables on the same probability space with prescribed marginal distributions, while allowing them to be dependent. It has played an important role in probability and statistics, especially in the study of Markov chains (Harris, 1955). Couplings are among the most fundamental tools for analyzing convergence rates of Markov chains (Levin and Peres, 2017). They are also used as algorithmic devices for designing sampling methods (Propp and Wilson, 1996; Neal, 2017), diagnosing MCMC convergence (Johnson, 1998; Biswas et al., 2019), and constructing unbiased estimators (Glynn and Rhee, 2014; Jacob et al., 2020; Deligiannidis et al., 2024). See Lindvall (2002) for coupling as a proof technique and Atchadé and Jacob (2024) for coupling-based algorithms. 
+
+# 3 Coupled Initial Noise 
+
+3.1 Coupling of random variables 
+
+Given probability distributions p1, . . . , p k on the same measurable space (E, E), a coupling is a probability distribution γ on the product space Ek such that, if (X1, . . . , X k) ∼ γ, then each marginal satisfies Xi ∼ pi for all i = 1 , . . . , k . In other words, a coupling describes a joint distribution whose marginals are fixed to be p1, p 2, . . . , p k. The set of all such couplings is denoted by Γ( p1, . . . , p k). As a simple example, one can couple two Bernoulli random variables Ber (0 .2) and 
+
+Ber (0 .8) as follows. First sample U ∼ Unif[0 , 1] , and then set X = 1{U ≤ 0.2}, Y = 1{U ≤ 0.8}.
+
+Given k standard Gaussian random variables in Rd, a coupling constructs a batch of k random variables (Z1, . . . , Z k) such that each Zi remains standard Gaussian, while allowing dependence across different indices. Figure 1 provides visualizations for the case k = 2 and d = 1 .−2 0 2                    
+
+> Z1
+> −3
+> −2
+> −1
+> 0
+> 1
+> 2
+> 3
+> Z2
+> (a)
+> −2 02
+> Z1
+> (b)
+> −2 02
+> Z1
+> (c)
+> −2 02
+> Z1
+> (d)
+> −2 02
+> Z1
+> (e)
+> Antithetic
+> ρ= − 1 ρ= − 0.5
+> Independent
+> ρ= 0 ρ= + 0.5
+> Identical
+> ρ= 1
+> Z1∼ℕ(0, 1) Z2∼ℕ(0, 1)
+
+Figure 1: Five couplings of Z1, Z 2 ∼ N(0 , 1) , illustrated via 20 ,000 joint samples. Each panel shows the joint scatter of (Z1, Z 2) with the marginal density of Z1 (green, top) and Z2 (amber, right); the dashed line marks Y = X. (a) Antithetic (ρ = −1): Z2 = −Z1, achieving maximal negative correlation. (b) ρ = −0.5: an intermediate negatively correlated Gaussian coupling. (c) Independent 
+
+(ρ = 0 ): Z1 and Z2 are drawn independently. (d) ρ = +0 .5: an intermediate positively correlated coupling. (e) Identical ( ρ = 1 ): Z1 = Z2, all mass collapses onto the diagonal Z1 = Z2.
+
+3.2 Coupled Gaussian Noise 
+
+Rather than sampling the initial noises independently, we view the whole batch (Z1, . . . , Z k) as a jointly sampled random vector, while requiring each marginal to remain standard Gaussian. Thus, each sample is generated from the usual initial-noise distribution, but the dependence structure across the batch can be chosen by design. This perspective is especially natural in practical image-generation systems, where a single prompt often produces a small set of candidate images rather than one sample. Since sampling is stochastic, different initial noise vectors can lead to different outputs for the same prompt, allowing users or automatic ranking modules to select a preferred candidate. We study different couplings of the Gaussian initial noises. A few couplings useful for our paper are: • Identical coupling : Z ∼ N(0 , I d) and Z1 = Z2 = . . . = Zk = Z.3• Independent coupling : (Z1, . . . , Z k) are independent draws with Zi ∼ N(0 , I d). This serves as the standard baseline with no dependence across samples. • Antithetic coupling : For k = 2 , set (Z1, Z 2) = ( Z, −Z) where Z ∼ N(0 , I d). More generally, one can construct collections with strong negative correlations. This coupling induces strong negative dependence and is classically used for variance reduction; in diffusion generation, it can also encourage more diverse paired outputs. • Repulsive coupling : Algorithm 1 generates negatively correlated Gaussian samples satisfying 
+
+Cov( zi, z j ) = − 1 
+
+> k−1
+
+Id, see Lemma A.1 for a formal statement and proof. It induces the same correlation between every pair of samples, and reduces to the antithetic coupling when k = 2 .
+
+Algorithm 1 Repulsive Coupled Initial Noise Sampling 
+
+Require: Gallery size k ≥ 2, noise dimension d
+
+Ensure: K initial noises that are all marginally standard Gaussian  
+
+> 1:
+
+Sample independent base noises u1, . . . , u K
+
+> i.i.d.
+
+∼ N(0 , I d). 
+
+> 2:
+
+Compute the batch mean ¯u ← k−1 Pkj=1 uj . 
+
+> 3:
+
+Construct repulsively coupled initial noises 
+
+zi ←
+
+r kk − 1 (ui − ¯u), i = 1 , . . . , k.  
+
+> 4:
+
+return (z1, . . . , z k)
+
+The identical, independent, and repulsive couplings all belong to the equicorrelated Gaussian family 
+
+Cov( zi, z j ) = 
+
+Id, i = j, cI d, i̸ = j, 
+
+with c = 1 , 0, −1/(k − 1) respectively. The following proposition shows equicorrelated coupling exists whenever c ∈ [−1/(k − 1) , 1] .
+
+Proposition 3.1 (Equicorrelated Gaussian coupling and its minimax property) . Let k ≥ 2 and d ≥ 1.For a scalar c ∈ R, there exists a Gaussian coupling of K standard Gaussian vectors in Rd satisfying 
+
+Cov( zi, z j ) = 
+
+Id, i = j, cI d, i̸ = j, 
+
+if and only if −1/(k − 1) ≤ c ≤ 1. Moreover, the endpoint c = −1/(k − 1) is the most repulsive possible coupling in the following minimax sense. Let Γk denote the set of all couplings of k standard Gaussian vectors in Rd. Then 
+
+inf 
+
+> γ∈Γk
+
+max 
+
+> 1≤i<j ≤k
+
+1
+
+d Eγ ⟨zi, z j ⟩ = − 1
+
+k − 1 .
+
+The equicorrelated Gaussian coupling with c = −1/(k − 1) attains this value. 
+
+Proposition 3.1 shows that the repulsive coupling is the most spread-out joint design for k initial noises in the minimax pairwise-correlation sense. This property makes it especially useful for the diverse generation experiments studied later. Indeed, the repulsive coupling minimizes a broad class of feature-similarity objectives called RBF similarity; see Appendix A.3 for the statement and proof. We also study what coupling can and cannot change, and compare its effects with i.i.d. noise. 
+
+Proposition 3.2 (What coupling can and cannot change) . Fix a prompt p and a deterministic generator G. Let (Z1, . . . , Z K ) be any coupling such that Zi ∼ N(0 , I d) for each i, and define 
+
+Xi = G(p, Z i). Then each Xi has the same marginal distribution as the output generated from an independent standard Gaussian noise Z ∼ N(0 , I d). Consequently, for any integrable single-image score q, E
+
+h
+
+K−1 PKi=1 q(p, X i)
+
+i
+
+= EZ∼N(0 ,I d) [q(p, G (p, Z ))] .
+
+Thus, changing the coupling cannot change the expected value of an averaged single-image metric, such as average image quality or average prompt alignment, as long as the generator and prompt 4are fixed. It can, however, change any metric that depends on two or more samples jointly, such as pairwise distance, similarity, diversity, or other gallery-level objectives. To understand the direction of this gallery-level effect, we give a quantitative result in Theorem A.3. Informally, effect of coupling ≈ X
+
+> i<j
+
+Rij Eiid 
+
+tr  ∇2 
+
+> ij
+
+Hp
+
+ ,
+
+where Hp is the metric of interest. The formal statement and proof is deferred to the appendix. The proof interpolates between independent and coupled Gaussians along Rt = (1 − t)IK + tR and applies Gaussian integration by parts. 
+
+Local linear interpretation. The effect of repulsive coupling can also be seen from a first-order approximation of the generator. Fix a prompt p, and let Gp denote the mapping from the initial noise to the generated image. Around a typical noise value, write Gp(z) ≈ ap + Jpz, where Jp is the local Jacobian. Suppose Zi and Zj are marginally standard Gaussian and satisfy Cov( Zi, Z j ) = cI. Then 
+
+E∥Gp(Zi) − Gp(Zj )∥22 ≈ E∥Jp(Zi − Zj )∥22 = 2(1 − c)∥Jp∥22.
+
+Thus, among couplings with the same Gaussian marginals, making c more negative increases the expected pairwise separation. Independent sampling corresponds to c = 0 , while the repulsive equicorrelated coupling uses c = −1/(K − 1) , giving E∥Gp(Zi) − Gp(Zj )∥22 ≈ 2 KK−1 ∥Jp∥22. This is a factor of K/ (K − 1) larger than the corresponding local prediction under independent sampling. 
+
+3.3 Parametrizing Gaussian Couplings 
+
+The constructions above are particular choices within a broader design space of couplings. Rather than specifying the dependence structure by hand, we can parametrize a large class of valid noise couplings and then optimize over the resulting parameters. The following theorem gives a matrix parametrization for Gaussian couplings. 
+
+Theorem 3.3 (Matrix parametrization of Gaussian noise couplings) . Let u1, . . . , u r
+
+> i.i.d.
+
+∼ N(0 , I d),and let A ∈ RM ×r be a matrix with unit Euclidean norm on each row, i.e., Prℓ=1 A2 
+
+> mℓ
+
+= 1 for each 
+
+m. Writing Z = [ z1, . . . , z M ]⊤ U = [ u1, . . . , u r ]⊤, and set Z = AU . Then each zm ∼ N(0 , I d).Hence (z1, . . . , z M ) defines a valid coupling of M standard Gaussian noise vectors in Rd. Moreover, for every pair i, j ,
+
+Cov( zi, z j ) = 
+
+> r
+
+X
+
+> ℓ=1
+
+Aiℓ Ajℓ 
+
+!
+
+Id.
+
+Conversely, suppose (z1, . . . , z M ) is a centered jointly Gaussian coupling such that each zm ∼
+
+N(0 , I d) and Cov( zi, z j ) = ρij Id. Let R = ( ρij )Mi,j =1 . If rank( R) ≤ r, then there exists a matrix 
+
+A ∈ RM ×r with unit-norm rows such that R = AA ⊤. With this choice of A, the construction above has the same joint distribution as (z1, . . . , z M ).
+
+When d = 1 and r = M , Theorem 3.3 has a direct geometric interpretation. Every Gaussian coupling of M standard normal random variables can be obtained by drawing u ∼ N(0 , I M ) and setting 
+
+z = Au , where A ∈ RM ×M has unit Euclidean norm on each row. Thus, choosing such a Gaussian coupling is equivalent to choosing M unit vectors. The independent coupling corresponds to A = IM ,while the repulsive coupling corresponds to A =
+
+q MM −1
+
+ IM − 1 
+
+> M
+
+11 ⊤ .
+
+An image is often very high-dimensional. For example, a 256 × 256 × 3 image has roughly 
+
+200 ,000 coordinates. In principle, designing a coupling of M initial noises in dimension d amounts to specifying a joint distribution on RM d whose M marginals are all N(0 , I d). A full Gaussian parametrization would therefore require an M d × M d matrix, which is computationally infeasible at typical image dimensions. In practice, we focus on structured families that are much lower-dimensional than a full M d × M d matrix. We describe two useful parametrizations below. 
+
+Same sample-level dependence: First, one can use a coupling that shares the same sample-level dependence across all coordinates, i.e., Cov( zi, z j ) = cij Id. This is the class covered by Theorem 3.3 with r = M = K and N = d. In this case, the coupling is specified by a much smaller K × K
+
+sample-level matrix, rather than a full (Kd ) × (Kd ) pixel-level matrix. 5Coupling on a subspace: We can also couple the noises selectively on a subspace of interest, while using a simple default coupling on its complement. Let V ⊂ Rd be a subspace with orthogonal projection PV , and let PV ⊥ = I − PV . The subspace V may represent a color channel, a low-dimensional image statistic, a semantic direction, or a region associated with an object. We write 
+
+zi = PV zi + PV ⊥ zi.
+
+On V , the coupling can be chosen to reflect the intended control: identical coupling for preservation, repulsive coupling for diversity, or a learnable coupling matrix A for optimization. On V ⊥, we keep a simple fixed coupling, for example an equicorrelated coupling or, in particular, the independent coupling. Since the two components lie in orthogonal subspaces and both have standard Gaussian marginals on their respective subspaces, each full noise vector still satisfies zi ∼ N(0 , I d). This parametrization lets us optimize the dependence structure only in the coordinates that are most relevant to the target behavior, while keeping a simple fixed coupling on the remaining directions. 
+
+3.4 Coupling-Based Noise Design and Optimization 
+
+We next describe three ways to use these initial-noise couplings. Concrete examples and experiments are provided in Sections 4 and 5. • Using coupled noise directly: A carefully designed coupling can replace independent noises and improve several applications at no additional cost. For example, Jia et al. (2026) shows that antithetic coupling can yield 10 –100 × efficiency gains when estimating downstream statistics. Our experiments also suggest that repulsive coupling alone can roughly match the diversity achieved by optimization-based methods such as Kim et al. (2026), while being much faster. • Coupled initialization for direct noise optimization: A direct way to optimize a gallery-level reward is to optimize the realized initial noises themselves. Let Γ denote the set of all couplings of K standard Gaussian random variables. Given a prompt p, a reward function R, and an initial coupling γ ∈ Γ, we first draw z(0) 1: K ∼ γ. One can then solve 
+
+z⋆ 
+
+> 1: K
+
+∈ arg max 
+
+> z1,...,z K
+
+Rp
+
+ G(p, z 1), . . . , G (p, z K ), (1) possibly with additional regularization on the noises. In this use case, the coupling only specifies the initialization of the optimization procedure. Existing inference-time noise optimization methods (Guo et al., 2024; Eyring et al., 2024; Qi et al., 2024; Kim et al., 2026) naturally fit within this framework by using the independent coupling. The coupling viewpoint then adds an additional design choice: the same test-time optimizer can instead be initialized from a structured coupling without changing the rest of the algorithm. • Amortized optimization of the coupling matrix: Instead of directly optimizing the noises, we can seek a coupling γ⋆ ∈ Γ that maximizes the expected distribution-level reward: 
+
+γ⋆ ∈ arg max  
+
+> γ∈Γ
+
+Ep∼P Ez1: K ∼γ
+
+Rp
+
+ G(p, z 1), . . . , G (p, z K ) . (2) Unlike direct noise optimization that operates on sample level , this objective does not optimize a particular realization of the initial noises. Instead, it optimizes the joint distribution from which the initial noises are sampled. Therefore, once γ⋆ is learned, it can be reused for new prompts by simply sampling z1: K ∼ γ⋆. The matrix parametrization in Theorem 3.3 provides a tractable way to implement this idea. Appendix B.1 shows that amortized optimization recovers the repulsive coupling for gallery diversity. Appendix B.2 gives a second example, where the coupling matrix is learned for a brightness-clustered gallery objective. This objective asks for a structured split into two darker and two brighter samples, rather than generic diversity. The learned coupling improves the brightness split over both independent and repulsive couplings, suggesting that amortized coupling learning can capture simple gallery-level structure beyond diversity. 
+
+# 4 Applications 
+
+For all applications in this section, we treat the generator as a deterministic map. Conditional on the initial noise z and possibly a prompt p, the output is fixed; hence all randomness comes from the initialization. This setting covers deterministic diffusion samplers such as DDIM, probability-flow ODE samplers, and flow-matching models (Song et al., 2021; Lipman et al., 2023). 64.1 Diverse Generation 
+
+An important use case of coupled initial noise is diverse generation. Given a prompt p, a generator G,and a desired gallery size K, the goal is to generate K images that are diverse within the batch, while each image still maintains fidelity, visual quality, and prompt alignment. As discussed in Section 1, independently sampled noises can produce redundant outputs (Ban et al., 2025). Our idea is to use the most spread-out initial-noise batch to encourage diverse outputs. Therefore, we sample (z1, . . . , z K ) from the repulsive Gaussian coupling in Algorithm 1, so that each zi ∼ N(0 , I d),while for i̸ = j, Cov( zi, z j ) = − 1 
+
+> K−1
+
+Id. We then generate the gallery by xi = G(p, z i) for each i.Since each marginal noise remains standard Gaussian, each image is generated from the usual input distribution of the pretrained diffusion model. The only change is the dependence structure across the batch. Thus, repulsive coupling can increase gallery-level variation without modifying the prompt, model, sampler, guidance rule, or denoising procedure. This gives a training-free and optimization-free method for diverse generation. It can also be combined with test-time diversity optimization methods by using the repulsive coupling as the initialization instead of independent Gaussian noise. We evaluate both uses in Section 5.1. 
+
+4.2 Background Generation with a Fixed Object 
+
+Another useful application is controlled background generation while preserving a specified fore-ground object. This task also illustrates a second use of coupled initial noise: the coupling supplies a structured initialization that can be directly combined with noise optimization, rather than replacing optimization altogether. Given an input image x⋆, a foreground mask m ∈ { 0, 1}H×W , and option-ally a prompt p, the goal is to produce a gallery with diverse backgrounds while keeping the masked foreground faithful to x⋆ (see Figure 5 for illustration). This setting involves three desiderata: 1. the foreground object should be preserved, 2. the background should vary across the gallery, and 3. the resulting images should remain natural, without visible artifacts at the object-background boundary. Coupling the foreground noise identically does not by itself guarantee exact foreground preservation after denoising. We therefore view the task as an inpainting problem: the foreground is the known region to be preserved, while the background is the region to be resampled. Starting from the coupled initialization z(0)  
+
+> i
+
+, we refine only the foreground component by optimizing the initial noise, following the diffusion inverse-problem strategy of Wang et al. (2024); Jia et al. (2026). 
+
+min 
+
+> z1,...,z k
+> K
+
+X
+
+> i=1
+
+|m ⊙  G(p, z i) − x⋆ |22, such that (1 − M ) ⊙ zi = (1 − M ) ⊙ z(0)  
+
+> i
+
+, (3) where ⊙ denotes elementwise multiplication. The constraint keeps the repulsively coupled back-ground noise fixed, so the optimization only improves foreground fidelity. This procedure is training-free and can be applied to both unconditional diffusion models and text-conditioned models. For latent diffusion models, the image-space mask is downsampled to the latent resolution when constructing M , while the fidelity loss is evaluated in image space. 
+
+# 5 Experiments 
+
+5.1 Diverse Text-to-Image Generation 
+
+Our setup follows Kim et al. (2025). We evaluate 2,000 prompts sampled from COCO captions using Stable Diffusion v1.5 (SD1.5), Stable Diffusion XL (SDXL), and Stable Diffusion 3 (SD3). For each model and prompt, we generate three images under four sampling settings: independent noise, independent noise with Contrastive Noise Optimization (CNO) (Kim et al., 2025), coupled noise, and coupled noise with CNO. We measure diversity using average pairwise L2 distance in pixel space, Mean Pairwise Similarity (MSS), and Vendi score Friedman and Dieng (2023), and evaluate prompt alignment and perceptual quality using CLIP score (Radford et al., 2021) and PickScore (Kirstain et al., 2023). Results are reported in Table 1, and qualitative comparisons are shown in Figure 2,3. To establish statistical significance, we also include standard deviations and p-values for all diversity metrics. Appendix B.1 provides details and additional experiments, including ablation studies on both the gallery size and the correlation strength, an amortized optimization experiment, 7and a compute-cost comparison. Repulsive coupling has essentially the same wall-clock generation cost as i.i.d. sampling for a K = 3 gallery, while CNO adds a modest optimization overhead in our setting (see Table 4) with only three optimization steps. We summarize the main findings below. First, coupled noise improves diversity compared with independent noise. Table 1 shows that coupled sampling improves the diversity metrics across all models. For example, on SD3, coupled noise improves L2 from 0.1417 to 0.1667 , reduces MSS from 0.3007 to 0.2827 , and improves Vendi from 
+
+2.7256 to 2.7532 . Importantly, these diversity gains do not come at the cost of prompt alignment or perceptual quality. Differences across the L2, MSS, and Vendi metrics are highly statistically significant ( p-value < 10 −7 for all metric × model combinations). CLIP score and PickScore remain nearly unchanged across independent and coupled sampling. This supports the view that noise coupling mainly changes the joint distribution of a multi-sample gallery, increasing variation across samples while largely preserving the marginal quality and text alignment of each sample. Second, coupled noise provides a cost-free alternative to optimization-based methods. Unlike CNO, which requires test-time optimization, coupled noise preserves the same sampling cost as independent generation. Despite requiring no extra cost, coupled noise often matches or outperforms i.i.d. + CNO on diversity metrics. For example, on SD1.5, coupled noise achieves better L2, MSS, and Vendi than i.i.d. + CNO. This suggests that much of the diversity gain can be obtained by modifying the joint sampling distribution, without adding an expensive optimization loop. Third, coupled noise is complementary to CNO. Combining coupled noise with CNO often yields the strongest performance. On SDXL, coupled + CNO achieves the best L2, MSS, and Vendi among all methods, with a highly significant L2 improvement over i.i.d. + CNO ( p < 10 −290 ); MSS and Vendi also improve, although the improvements are more modest. On SD3, coupled + CNO improves L2 from 0.1612 to 0.1844 , reduces MSS from 0.2804 to 0.2675 , and improves Vendi from 2.7554 to 
+
+2.7749 , with all three changes statistically significant ( p < 10 −16 ). As a result, coupled noise can provide additional gains on top of CNO with minimal changes to prompt alignment and quality. 
+
+Figure 2: Independent versus coupled noises with the same prompt “A classic motorcycle in a parking space along the street.” The coupled-noise samples exhibit greater visual diversity across pose, viewpoint, object scale, and scene layout while remaining consistent with the prompt. Finally, we examine whether amortized coupling optimization can either improve upon the analytic repulsive coupling or recover it from data. We parameterize a Gaussian coupling using the row-normalized matrix form in Theorem 3.3, and optimize this matrix under several diversity-based objectives. Across random initializations, the learned sample-level correlation matrix consistently approaches the repulsive coupling. This suggests that, for diversity-oriented gallery generation, the minimax repulsive coupling is not only a convenient analytic construction, but also the solution favored by amortized optimization. Experiment details are provided in Appendix B.1. 
+
+5.2 Fixed-Object Background Generation 
+
+Unlike the diverse-generation experiments, this experiment uses coupling as a structured initialization for a constrained noise-optimization procedure: the background noise remains repulsively coupled to promote variation, while the foreground component is identically coupled and then optimized. We use 100 bedroom images from the LSUN bedroom dataset (Yu et al., 2015), with bed masks pro-duced by YOLOv8 (Jocher et al., 2023) as foreground objects (see the first row of Figure 5). For each image, we generate a gallery of K images and evaluate four aspects: background diversity, measured by pairwise LPIPS (Zhang et al., 2018) and L2 on the background region; foreground preservation, measured by RMSE on the masked region; boundary smoothness, measured by Boundary-TV in a narrow band around the mask; and global naturalness, measured by BRISQUE (Mittal et al., 2012). 8Table 1: Comparison of diversity and quality metrics across different diffusion models. We report standard deviations in parentheses for diversity metrics. Model Method Opt. Diversity metrics Quality metrics L2 ↑ MSS ↓ Vendi ↑ CLIP ↑ PickScore ↑                                                                                    
+
+> SD1.5 i.i.d. ✗0.126 (0.04) 0.150 (0.07) 2.913 (0.07) 0.662 21.407 i.i.d.+CNO ✓0.136 (0.04) 0.148 (0.07) 2.916 (0.07) 0.661 21.402 coupled ✗0.156 (0.04) 0.141 (0.07) 2.921 (0.07) 0.662 21.391 coupled+CNO ✓0.163 (0.05) 0.144 (0.07) 2.920 (0.07) 0.660 21.399 SDXL i.i.d. ✗0.087 (0.02) 0.208 (0.08) 2.853 (0.10) 0.670 22.474 i.i.d.+CNO ✓0.106 (0.03) 0.187 (0.07) 2.879 (0.09) 0.668 22.419 coupled ✗0.105 (0.03) 0.198 (0.08) 2.866 (0.09) 0.669 22.459 coupled+CNO ✓0.122 (0.03) 0.184 (0.08) 2.881 (0.09) 0.668 22.412 SD3 i.i.d. ✗0.142 (0.05) 0.301 (0.10) 2.726 (0.15) 0.664 22.524 i.i.d.+CNO ✓0.161 (0.05) 0.280 (0.09) 2.755 (0.15) 0.664 22.505 coupled ✗0.167 (0.06) 0.283 (0.09) 2.753 (0.14) 0.664 22.529 coupled+CNO ✓0.184 (0.06) 0.267 (0.09) 2.775 (0.14) 0.664 22.515
+
+Table 2: Fixed-object background generation with SD 1.5. We report mean (standard deviation). LPIPS-B and L2-B measure background diversity; RMSE-F measures foreground preservation; Boundary-TV measures local roughness near the boundary; BRISQUE measures global naturalness. Method LPIPS-B ↑ L2-B ↑ RMSE-F ↓ Boundary-TV ↓ BRISQUE ↓                                
+
+> DDIM inv. 0 (0) 0 (0) 0.09 (0.03) 0.015 (0.006) 45.40 (10.95) Object-inv. + random BG 0.47 (0.16) 0.05 (0.01) 0.14 (0.03) 0.023 (0.011) 18.16 (8.80) SDEdit 0.31 (0.12) 0.02 (0.01) 0.01 (0.00) 0.025 (0.007) 35.99 (9.67) SD inpaint 0.42 (0.14) 0.05 (0.01) 0.05 (0.03) 0.022 (0.007) 34.07 (7.27) Ours 0.45 (0.16) 0.05 (0.01) 0.09 (0.03) 0.012 (0.005) 17.52 (9.57)
+
+We evaluate fixed-object background generation with Stable Diffusion 1.5, using K = 8 samples and 10 optimization steps for our method. We compare against two latent-space baselines: DDIM inversion of the full image (DDIM inv.) and DDIM-inverted noise inside the foreground mask with random background noise (Object-inv.). We also compare against SDEdit (Meng et al., 2022) and Stable Diffusion inpainting (Rombach et al., 2022). Results are summarized in Table 2. DDIM inv. reconstructs the input from its inverted noise and therefore has no background diversity. Object-inv. gives high background diversity and low BRISQUE, but its foreground error and boundary roughness are much worse, showing that fixing only the object latent is insufficient. SDEdit preserves the foreground by construction (RMSE 0.01 ), but yields limited background diversity (L2-B 
+
+0.02 ) and worse BRISQUE ( 35 .99 ). Stable Diffusion inpainting is a strong task-specific baseline. Compared with it, our method uses no task-specific inpainting model and no additional training, while reducing Boundary-TV from 0.022 to 0.012 and lowering BRISQUE from 34 .07 to 17 .52 ,with better background diversity. The cost is a moderate increase in foreground RMSE ( 0.09 versus 
+
+0.05 ). Appendix B.3 provides experiment details, additional results on the effect of the number of optimization steps, and results on unconditional diffusion models; in particular, increasing the number of optimization steps further reduces foreground RMSE while preserving the naturalness advantage. 
+
+# 6 Discussion 
+
+Our results show that the joint distribution of initial noises is a useful control variable for diffusion generation. Coupled sampling can increase diversity, improve user-specified gallery objectives, and support fixed-object background generation. The method also supports flexible modes of use: it can be applied directly as a sampling plug-in, used to initialize noise optimization, or optimized amortized at the coupling level. Several limitations and open directions remain. The coupling approach is mainly a batch-level control method, rather than to improve the quality of a single image. Our learned couplings are currently limited to low-dimensional matrices and relatively simple gallery objectives, so richer semantic control may require more expressive parameterizations. Finally, our experiments focus on image diffusion models; whether coupled initial-noise design is useful for other modalities, such as video, audio, 3D generation, or scientific generative models, remains an open question. 9Acknowledgement 
+
+Jing Jia and Guanyang Wang acknowledge support from the National Science Foundation through grants DMS–2210849 and FET-2403007. Liyue Shen acknowledges funding support by National Science Foundation (NSF) via grant IIS-2435746, Defense Advanced Research Projects Agency (DARPA) under contract No. HR00112520042, as well as the University of Michigan MIDAS PODS Grant Award. 
+
+# References 
+
+Atchadé, Y. F. and P. E. Jacob (2024). Unbiased Markov Chain Monte Carlo: what, why, and how. 
+
+arXiv preprint arXiv:2406.06851 .Ban, Y., R. Wang, T. Zhou, B. Gong, C.-J. Hsieh, and M. Cheng (2025). The crystal ball hypothesis in diffusion models: Anticipating object positions from initial noise. In The Thirteenth International Conference on Learning Representations .Ben-Hamu, H., O. Puny, I. Gat, B. Karrer, U. Singer, and Y. Lipman (2024). D-flow: Differentiating through flows for controlled generation. In International Conference on Machine Learning , pp. 3462–3483. PMLR. Biswas, N., P. E. Jacob, and P. Vanetti (2019). Estimating convergence of markov chains with l-lag couplings. Advances in neural information processing systems 32 .Chihaoui, H., A. Lemkhenter, and P. Favaro (2024). Blind image restoration via fast diffusion inversion. Advances in Neural Information Processing Systems 37 , 34513–34532. Deligiannidis, G., P. E. Jacob, E. M. Khribch, and G. Wang (2024). On importance sampling and inde-pendent metropolis-hastings with an unbounded weight function. arXiv preprint arXiv:2411.09514 .Dhariwal, P. and A. Nichol (2021). Diffusion models beat gans on image synthesis. Advances in neural information processing systems 34 , 8780–8794. Eyring, L., S. Karthik, K. Roth, A. Dosovitskiy, and Z. Akata (2024). ReNO: Enhancing one-step text-to-image models through reward-based noise optimization. Advances in Neural Information Processing Systems 37 , 125487–125519. Friedman, D. and A. B. Dieng (2023). The vendi score: A diversity evaluation metric for machine learning. Transactions on Machine Learning Research .Glynn, P. W. and C.-h. Rhee (2014). Exact estimation for markov chain equilibrium expectations. 
+
+Journal of Applied Probability 51 (A), 377–389. Guo, X., J. Liu, M. Cui, J. Li, H. Yang, and D. Huang (2024). Initno: Boosting text-to-image diffusion models via initial noise optimization. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 9380–9389. Harris, T. (1955). On chains of infinite order. Pacific J. Math. 5 , 707–724. Ho, J. and T. Salimans (2022). Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 .Jacob, P. E., J. O’leary, and Y. F. Atchadé (2020). Unbiased markov chain monte carlo methods with couplings. Journal of the Royal Statistical Society Series B: Statistical Methodology 82 (3), 543–600. Jia, J., S. Liu, B. Song, W. Yuan, L. Shen, and G. Wang (2026). Antithetic noise in diffusion models. In The Fourteenth International Conference on Learning Representations .Jia, J., W. Yuan, S. Liu, L. Shen, and G. Wang (2026). Weak diffusion priors can still achieve strong inverse-problem performance. arXiv preprint arXiv:2601.22443 .Jocher, G., J. Qiu, and A. Chaurasia (2023, January). Ultralytics YOLO. 10 Johnson, V. E. (1998). A coupling-regeneration scheme for diagnosing convergence in markov chain monte carlo algorithms. Journal of the American Statistical Association 93 (441), 238–248. Kim, B., S. Um, and J. C. Ye (2025). Diverse text-to-image generation via contrastive noise optimization. arXiv preprint arXiv:2510.03813 .Kim, B., S. Um, and J. C. Ye (2026). Diverse text-to-image generation via contrastive noise optimization. In The Fourteenth International Conference on Learning Representations .Kirstain, Y., A. Polyak, U. Singer, S. Matiana, J. Penna, and O. Levy (2023). Pick-a-pic: An open dataset of user preferences for text-to-image generation. Advances in neural information processing systems 36 , 36652–36663. Levin, D. A. and Y. Peres (2017). Markov chains and mixing times , Volume 107. American Mathematical Soc. Lindvall, T. (2002). Lectures on the coupling method . Courier Corporation. Lipman, Y., R. T. Q. Chen, H. Ben-Hamu, M. Nickel, and M. Le (2023). Flow matching for generative modeling. In The Eleventh International Conference on Learning Representations .Ma, N., S. Tong, H. Jia, H. Hu, Y.-C. Su, M. Zhang, X. Yang, Y. Li, T. Jaakkola, X. Jia, et al. (2025). Scaling inference time compute for diffusion models. In Proceedings of the Computer Vision and Pattern Recognition Conference , pp. 2523–2534. Meng, C., Y. He, Y. Song, J. Song, J. Wu, J.-Y. Zhu, and S. Ermon (2022). SDEdit: Guided image synthesis and editing with stochastic differential equations. In International Conference on Learning Representations .Mittal, A., A. K. Moorthy, and A. C. Bovik (2012). No-reference image quality assessment in the spatial domain. IEEE Transactions on image processing 21 (12), 4695–4708. Neal, R. M. (2017). Circularly-coupled markov chain sampling. arXiv preprint arXiv:1711.04399 .Pizzi, E., S. D. Roy, S. N. Ravindra, P. Goyal, and M. Douze (2022). A self-supervised descriptor for image copy detection. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 14532–14542. Propp, J. G. and D. B. Wilson (1996). Exact sampling with coupled markov chains and applications to statistical mechanics. Random Structures & Algorithms 9 (1-2), 223–252. Qi, Z., L. Bai, H. Xiong, and Z. Xie (2024). Not all noises are created equally: Diffusion noise selection and optimization. arXiv preprint arXiv:2407.14041 .Radford, A., J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal, G. Sastry, A. Askell, P. Mishkin, J. Clark, et al. (2021). Learning transferable visual models from natural language supervision. In 
+
+International Conference on Machine Learning , pp. 8748–8763. PmLR. Rombach, R., A. Blattmann, D. Lorenz, P. Esser, and B. Ommer (2022). High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 10684–10695. Song, B., Z. Zhang, Z. Luo, J. Hu, W. Yuan, J. Jia, Z. Tang, G. Wang, and L. Shen (2025). CCS: Controllable and constrained sampling with diffusion models via initial noise perturbation. In The Thirty-ninth Annual Conference on Neural Information Processing Systems .Song, J., C. Meng, and S. Ermon (2021). Denoising diffusion implicit models. In International Conference on Learning Representations .Tang, Z., J. Peng, J. Tang, M. Hong, F. Wang, and T.-H. Chang (2025). Inference-time alignment of diffusion models with direct noise optimization. In Forty-second International Conference on Machine Learning .Wan, Y., R. Devera, W. Zhang, and J. Sun (2025). Fmplug: Plug-in foundation flow-matching priors for inverse problems. arXiv preprint arXiv:2508.00721 .11 Wang, H., X. Zhang, T. Li, Y. Wan, T. Chen, and J. Sun (2024). Dmplug: A plug-in method for solving inverse problems with diffusion models. Advances in Neural Information Processing Systems 37 , 117881–117916. Xu, K., L. Zhang, and J. Shi (2025). Good seed makes a good crop: Discovering secret seeds in text-to-image diffusion models. In 2025 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pp. 3024–3034. IEEE. Yu, F., A. Seff, Y. Zhang, S. Song, T. Funkhouser, and J. Xiao (2015). LSUN: Construction of a large-scale image dataset using deep learning with humans in the loop. arXiv preprint arXiv:1506.03365 .Zhang, R., P. Isola, A. A. Efros, E. Shechtman, and O. Wang (2018). The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 586–595. Zhou, Z., S. Shao, L. Bai, S. Zhang, Z. Xu, B. Han, and Z. Xie (2025). Golden noise for diffusion models: A learning framework. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pp. 17688–17697. 
+
+# A Mathematical Details and Proofs 
+
+Throughout this appendix, K denotes the gallery size and d denotes the dimension of each initial-noise vector. We write Id for the d × d identity matrix and 1K for the all-ones vector in RK . All Gaussian random vectors are allowed to be degenerate when the covariance matrix is positive semidefinite but not positive definite. 
+
+A.1 Repulsive Gaussian coupling 
+
+We first verify the Gaussian coupling used in Algorithm 1. 
+
+Lemma A.1 (Repulsive Gaussian coupling) . Let U1, . . . , U K
+
+> i.i.d.
+
+∼ N(0 , I d), define 
+
+¯U := 1
+
+K
+
+> K
+
+X
+
+> j=1
+
+Uj , Zi := 
+
+r KK − 1 (Ui − ¯U ), i = 1 , . . . , K. 
+
+Then each Zi ∼ N(0 , I d). Moreover, for i̸ = j,
+
+Cov( Zi, Z j ) = − 1
+
+K − 1 Id.
+
+In addition, KX
+
+> i=1
+
+Zi = 0 almost surely .
+
+Proof. Since Zi is a linear transformation of jointly Gaussian random vectors, (Z1, . . . , Z K ) is jointly Gaussian. Also, 
+
+E[Zi] = 0 .
+
+For the marginal covariance, note that 
+
+Cov( Ui, ¯U ) = 1
+
+K Id, Cov( ¯U , ¯U ) = 1
+
+K Id.
+
+Therefore, 
+
+Cov( Ui − ¯U ) = Cov( Ui) − 2 Cov( Ui, ¯U ) + Cov( ¯U )= Id − 2
+
+K Id + 1
+
+K Id = K − 1
+
+K Id.
+
+Multiplying by the factor K/ (K − 1) gives 
+
+Cov( Zi) = Id.
+
+12 Thus Zi ∼ N(0 , I d).For i̸ = j,
+
+Cov( Ui, U j ) = 0 , Cov( Ui, ¯U ) = Cov( Uj , ¯U ) = 1
+
+K Id.
+
+Hence 
+
+Cov( Ui − ¯U , U j − ¯U ) = Cov( Ui, U j ) − Cov( Ui, ¯U ) − Cov( ¯U , U j ) + Cov( ¯U , ¯U )= 0 − 1
+
+K Id − 1
+
+K Id + 1
+
+K Id = − 1
+
+K Id.
+
+After multiplying by K/ (K − 1) , we obtain 
+
+Cov( Zi, Z j ) = − 1
+
+K − 1 Id.
+
+Finally, KX
+
+> i=1
+
+Zi =
+
+r KK − 1
+
+> K
+
+X
+
+> i=1
+
+(Ui − ¯U ) = 
+
+r KK − 1
+
+> K
+
+X
+
+> i=1
+
+Ui − K ¯U
+
+!
+
+= 0 .
+
+This proves the result. 
+
+A.2 Proof of Proposition 3.1 
+
+We prove Proposition 3.1 from the main paper. 
+
+Proof. First consider the existence statement. If the stated equicorrelated Gaussian coupling exists, then its block covariance matrix has the form 
+
+Σc = Rc ⊗ Id,
+
+where 
+
+Rc =
+
+
+
+1 c · · · cc 1 · · · c
+
+... ... . . . ...
+
+c c · · · 1
+
+ = (1 − c)IK + c 1K 1⊤ 
+
+> K
+
+.
+
+A centered Gaussian vector with covariance Σc exists if and only if Σc is positive semidefinite. Since 
+
+Σc = Rc ⊗ Id, this is equivalent to Rc being positive semidefinite. The eigenvalues of Rc are explicit. For any v ∈ RK satisfying 1⊤ 
+
+> K
+
+v = 0 ,
+
+Rcv = (1 − c)v. 
+
+Hence 1 − c is an eigenvalue with multiplicity K − 1. Also, 
+
+Rc1K =  1 + ( K − 1) c1K .
+
+Thus the remaining eigenvalue is 1 + ( K − 1) c. Therefore Rc is positive semidefinite if and only if 
+
+1 − c ≥ 0 and 1 + ( K − 1) c ≥ 0.
+
+Equivalently, 
+
+− 1
+
+K − 1 ≤ c ≤ 1.
+
+This proves the existence part. We prove the minimax property. Let γ ∈ ΓK be any coupling of K standard Gaussian vectors 
+
+Z1, . . . , Z K ∈ Rd. Since each marginal is N(0 , I d),
+
+E∥Zi∥22 = d, i = 1 , . . . , K. 
+
+By nonnegativity of squared norm, 
+
+0 ≤ E
+
+> K
+
+X
+
+> i=1
+
+Zi
+
+> 22
+
+.
+
+13 Expanding the right-hand side gives 
+
+0 ≤
+
+> K
+
+X
+
+> i=1
+
+E∥Zi∥22 + 2 X
+
+> 1≤i<j ≤K
+
+E⟨Zi, Z j ⟩
+
+= Kd + 2 X
+
+> 1≤i<j ≤K
+
+E⟨Zi, Z j ⟩.
+
+Hence 2
+
+K(K − 1) 
+
+X
+
+> 1≤i<j ≤K
+
+1
+
+d E⟨Zi, Z j ⟩ ≥ − 1
+
+K − 1 .
+
+The maximum of a finite set is at least its average, so 
+
+max 
+
+> 1≤i<j ≤K
+
+1
+
+d E⟨Zi, Z j ⟩ ≥ − 1
+
+K − 1 .
+
+Since this lower bound holds for every coupling γ ∈ ΓK ,
+
+inf 
+
+> γ∈ΓK
+
+max 
+
+> 1≤i<j ≤K
+
+1
+
+d Eγ ⟨Zi, Z j ⟩ ≥ − 1
+
+K − 1 .
+
+It remains to show that the lower bound is attainable. By the first part of the proposition, the equicorrelated Gaussian coupling with c = −1/(K − 1) exists. For this coupling, 
+
+1
+
+d E⟨Zi, Z j ⟩ = − 1
+
+K − 1 , i̸ = j. 
+
+Therefore, 
+
+max 
+
+> 1≤i<j ≤K
+
+1
+
+d E⟨Zi, Z j ⟩ = − 1
+
+K − 1 .
+
+This proves the minimax claim and completes the proof. 
+
+A.3 Optimality of repulsive coupling Proposition A.2 (Optimality of repulsive coupling for linear-feature diversity) . Let k ≥ 2, d ≥ 1,
+
+m ≥ 1, and let J ∈ Rm×d be fixed. Let Γk denote the set of all couplings of k standard Gaussian vectors in Rd. For γ ∈ Γk, write 
+
+(z1, . . . , z k) ∼ γ, yi = Jz i ∈ Rm.
+
+Define the average squared feature separation 
+
+DJ (γ) := 2
+
+k(k − 1) 
+
+X
+
+> 1≤i<j ≤k
+
+Eγ ∥yi − yj ∥22.
+
+Then 
+
+DJ (γ) ≤ 2kk − 1 ∥J∥2 
+
+> F
+
+for every γ ∈ Γk.
+
+Moreover, equality holds if and only if 
+
+> k
+
+X
+
+> i=1
+
+Jz i = 0 γ-a.s. In particular, the repulsive Gaussian coupling 
+
+zi =
+
+r kk − 1 (ui − ¯u), ¯u = 1
+
+k
+
+> k
+
+X
+
+> j=1
+
+uj , u1, . . . , u k
+
+> i.i.d.
+
+∼ N (0 , I d),
+
+attains this upper bound. 
+
+14 Now let ΓG 
+
+> k
+
+⊂ Γk denote the set of possibly degenerate jointly Gaussian couplings with standard Gaussian marginals. For τ > 0, define the average RBF feature similarity 
+
+SJ,τ (γ) := 2
+
+k(k − 1) 
+
+X
+
+> 1≤i<j ≤k
+
+Eγ exp 
+
+
+
+− ∥yi − yj ∥22
+
+2τ 2
+
+
+
+.
+
+Then, for every γ ∈ ΓG 
+
+> k
+
+,
+
+SJ,τ (γ) ≥ det 
+
+
+
+Im + 2k
+
+(k − 1) τ 2 JJ ⊤
+
+−1/2
+
+.
+
+The repulsive Gaussian coupling attains equality. Consequently, among all jointly Gaussian couplings with standard Gaussian marginals, the repulsive Gaussian coupling minimizes the expected average RBF similarity in any fixed linear feature space z 7 → Jz . The same minimizer also applies to any nonnegative weighted sum, or nonnegative weighted integral, of such RBF similarities over bandwidths τ .Proof. We first prove the statement for squared feature separation. For deterministic vectors 
+
+y1, . . . , y k ∈ Rm, the following identity holds: 
+
+X
+
+> 1≤i<j ≤k
+
+∥yi − yj ∥22 = k
+
+> k
+
+X
+
+> i=1
+
+∥yi∥22 −
+
+> k
+
+X
+
+> i=1
+
+yi
+
+> 22
+
+.
+
+Applying this identity with yi = Jz i and taking expectation under γ, we get 
+
+X
+
+> 1≤i<j ≤k
+
+Eγ ∥Jz i − Jz j ∥22 = k
+
+> k
+
+X
+
+> i=1
+
+Eγ ∥Jz i∥22 − Eγ
+
+> k
+
+X
+
+> i=1
+
+Jz i
+
+> 22
+
+.
+
+Since each marginal satisfies zi ∼ N (0 , I d),
+
+Eγ ∥Jz i∥22 = tr( JJ ⊤) = ∥J∥2 
+
+> F
+
+.
+
+Therefore 
+
+DJ (γ) = 2kk − 1 ∥J∥2 
+
+> F
+
+− 2
+
+k(k − 1) Eγ
+
+> k
+
+X
+
+> i=1
+
+Jz i
+
+> 22
+
+.
+
+The second term is nonnegative, so 
+
+DJ (γ) ≤ 2kk − 1 ∥J∥2 
+
+> F
+
+.
+
+Equality holds if and only if 
+
+Eγ
+
+> k
+
+X
+
+> i=1
+
+Jz i
+
+> 22
+
+= 0 ,
+
+which is equivalent to kX
+
+> i=1
+
+Jz i = 0 γ-a.s. For the repulsive Gaussian coupling, 
+
+> k
+
+X
+
+> i=1
+
+zi =
+
+r kk − 1
+
+> k
+
+X
+
+> i=1
+
+(ui − ¯u) = 0 a.s. Hence P 
+
+> i
+
+Jz i = 0 almost surely, and the repulsive Gaussian coupling attains the upper bound. We now prove the RBF similarity claim. Fix γ ∈ ΓG 
+
+> k
+
+. For each pair i < j , define 
+
+Vij := Cov( yi − yj ) = Cov( Jz i − Jz j ).
+
+15 Since γ is jointly Gaussian, yi − yj is a centered Gaussian vector in Rm with covariance Vij . Hence 
+
+Eγ exp 
+
+
+
+− ∥yi − yj ∥22
+
+2τ 2
+
+
+
+= det 
+
+
+
+Im + 1
+
+τ 2 Vij 
+
+−1/2
+
+.
+
+Define 
+
+gτ (V ) := det 
+
+
+
+Im + 1
+
+τ 2 V
+
+−1/2
+
+for positive semidefinite V ∈ Rm×m. The function gτ is convex on the positive semidefinite cone. Indeed, 
+
+V 7 → − 12 log det 
+
+
+
+Im + 1
+
+τ 2 V
+
+
+
+is convex, and the exponential function is convex and nondecreasing. Also, gτ is decreasing in the positive semidefinite order: if 0 ⪯ A ⪯ B, then 
+
+det 
+
+
+
+Im + 1
+
+τ 2 A
+
+
+
+≤ det 
+
+
+
+Im + 1
+
+τ 2 B
+
+
+
+,
+
+and therefore gτ (A) ≥ gτ (B).Let 
+
+¯V := 2
+
+k(k − 1) 
+
+X
+
+> 1≤i<j ≤k
+
+Vij .
+
+Using the matrix form of the pairwise-difference identity, 
+
+X
+
+> 1≤i<j ≤k
+
+(yi − yj )( yi − yj )⊤ = k
+
+> k
+
+X
+
+> i=1
+
+yiy⊤ 
+
+> i
+
+−
+
+> k
+
+X
+
+> i=1
+
+yi
+
+! kX
+
+> i=1
+
+yi
+
+!⊤
+
+.
+
+Taking expectations gives 
+
+X
+
+> 1≤i<j ≤k
+
+Vij = k
+
+> k
+
+X
+
+> i=1
+
+Cov( yi) − Cov 
+
+> k
+
+X
+
+> i=1
+
+yi
+
+!
+
+.
+
+Since Cov( yi) = JJ ⊤ for every i,
+
+¯V = 2kk − 1 JJ ⊤ − 2
+
+k(k − 1) Cov 
+
+> k
+
+X
+
+> i=1
+
+yi
+
+!
+
+.
+
+Thus 
+
+¯V ⪯ V⋆, V⋆ := 2kk − 1 JJ ⊤.
+
+By Jensen’s inequality and the convexity of gτ ,
+
+SJ,τ (γ) = 2
+
+k(k − 1) 
+
+X
+
+> 1≤i<j ≤k
+
+gτ (Vij ) ≥ gτ ( ¯V ).
+
+Since gτ is decreasing in the positive semidefinite order and ¯V ⪯ V⋆,
+
+gτ ( ¯V ) ≥ gτ (V⋆).
+
+Combining the two inequalities yields 
+
+SJ,τ (γ) ≥ gτ (V⋆) = det 
+
+
+
+Im + 2k
+
+(k − 1) τ 2 JJ ⊤
+
+−1/2
+
+.
+
+It remains to check that the repulsive Gaussian coupling attains equality. Under this coupling, 
+
+Cov( zi, z j ) = − 1
+
+k − 1 Id for i̸ = j. 
+
+16 Therefore, for every pair i < j ,
+
+Cov( zi − zj ) = Id + Id − Cov( zi, z j ) − Cov( zj , z i) = 2kk − 1 Id.
+
+Hence 
+
+Vij = Cov( Jz i − Jz j ) = 2kk − 1 JJ ⊤ = V⋆
+
+for every i < j . Thus 
+
+SJ,τ (γ) = gτ (V⋆) = det 
+
+
+
+Im + 2k
+
+(k − 1) τ 2 JJ ⊤
+
+−1/2
+
+.
+
+So the lower bound is tight, and it is attained by the repulsive Gaussian coupling. Finally, since the same repulsive Gaussian coupling attains the lower bound for every bandwidth 
+
+τ > 0, any nonnegative weighted sum or nonnegative weighted integral over such RBF similarities is minimized by the same coupling. This completes the proof. 
+
+A.4 Proof of Proposition 3.2 
+
+Proof. Let Z ∼ N(0 , I d) be an independent standard Gaussian noise. Since Zi ∼ N(0 , I d) for each 
+
+i, we have 
+
+Zid
+
+= Z. 
+
+Because G is deterministic, the map z 7 → G(p, z ) is fixed once the prompt p is fixed. Hence applying this same map to two random variables with the same distribution gives random variables with the same distribution: 
+
+Xi = G(p, Z i) d
+
+= G(p, Z ).
+
+Thus each Xi has the same marginal distribution as the output generated from an independent standard Gaussian initial noise. Now let q be any integrable single-image score. Since Xid
+
+= G(p, Z ), we have 
+
+Eq(p, X i) = EZ∼N(0 ,I d)
+
+q(p, G (p, Z )) , i = 1 , . . . , K. 
+
+By linearity of expectation, 
+
+E
+
+"
+
+K−1
+
+> K
+
+X
+
+> i=1
+
+q(p, X i)
+
+#
+
+= K−1
+
+> K
+
+X
+
+> i=1
+
+Eq(p, X i)
+
+= K−1
+
+> K
+
+X
+
+> i=1
+
+EZ∼N(0 ,I d)
+
+q(p, G (p, Z )) 
+
+= EZ∼N(0 ,I d)
+
+q(p, G (p, Z )) .
+
+This proves the claim. 
+
+A.5 Proof of Theorem 3.3 
+
+We prove Theorem 3.3 from the main paper. 
+
+Proof. We first prove the forward direction. Let 
+
+u1, . . . , u r
+
+> i.i.d.
+
+∼ N(0 , I d),
+
+and let A ∈ RM ×r have unit-norm rows: 
+
+> r
+
+X
+
+> ℓ=1
+
+A2 
+
+> mℓ
+
+= 1 , m = 1 , . . . , M. 
+
+Define 
+
+zm =
+
+> r
+
+X
+
+> ℓ=1
+
+Amℓ uℓ, m = 1 , . . . , M. 
+
+17 Since each zm is a linear combination of independent Gaussian random vectors, (z1, . . . , z M ) is jointly Gaussian. Also, 
+
+E[zm] = 0 .
+
+For the marginal covariance, 
+
+Cov( zm) = Cov 
+
+> r
+
+X
+
+> ℓ=1
+
+Amℓ uℓ
+
+!
+
+=
+
+> r
+
+X
+
+> ℓ=1
+
+A2 
+
+> mℓ
+
+Cov( uℓ)=
+
+> r
+
+X
+
+> ℓ=1
+
+A2
+
+> mℓ
+
+!
+
+Id = Id.
+
+Hence 
+
+zm ∼ N(0 , I d), m = 1 , . . . , M. 
+
+Thus, the construction gives a valid coupling of M standard Gaussian noise vectors. For the cross-covariance, using the independence of u1, . . . , u r ,
+
+Cov( zi, z j ) = Cov 
+
+> r
+
+X
+
+> ℓ=1
+
+Aiℓ uℓ,
+
+> r
+
+X
+
+> s=1
+
+Ajs us
+
+!
+
+=
+
+> r
+
+X
+
+> ℓ=1
+
+Aiℓ Ajℓ Id
+
+=
+
+> r
+
+X
+
+> ℓ=1
+
+Aiℓ Ajℓ 
+
+!
+
+Id.
+
+Equivalently, 
+
+Cov( zi, z j ) = ( AA ⊤)ij Id.
+
+We now prove the converse. Suppose (z1, . . . , z M ) is a centered jointly Gaussian coupling such that each zm ∼ N(0 , I d) and 
+
+Cov( zi, z j ) = ρij Id.
+
+Let R = ( ρij )Mi,j =1 . Since R is the sample-level covariance matrix of a jointly Gaussian vector, R is positive semidefinite. Also, because each marginal covariance is Id,
+
+Rii = ρii = 1 , i = 1 , . . . , M. 
+
+Assume rank( R) ≤ r. Let s = rank( R). Since R is positive semidefinite, there exists B ∈ RM ×s
+
+such that 
+
+R = BB ⊤.
+
+If s < r , pad B with r − s zero columns and define 
+
+A = [ B 0] ∈ RM ×r .
+
+If s = r, set A = B. Then 
+
+AA ⊤ = R. 
+
+Moreover, for every row, 
+
+∥Ai, :∥22 = ( AA ⊤)ii = Rii = 1 .
+
+Thus A has unit-norm rows. Now, construct new Gaussian noise vectors by drawing 
+
+u1, . . . , u r
+
+> i.i.d.
+
+∼ N(0 , I d)
+
+and setting 
+
+˜zm =
+
+> r
+
+X
+
+> ℓ=1
+
+Amℓ uℓ.
+
+18 By the forward direction, 
+
+Cov(˜ zi, ˜zj ) = ( AA ⊤)ij Id = Rij Id = ρij Id.
+
+The constructed vector (˜ z1, . . . , ˜zM ) is centered Gaussian and has the same block covariance matrix as (z1, . . . , z M ). Since centered Gaussian laws are determined by their covariance matrices, 
+
+(˜ z1, . . . , ˜zM ) d
+
+= ( z1, . . . , z M ).
+
+This proves the converse and completes the proof. 
+
+A.6 First-order effect of a coupling Theorem A.3 (First-order effect of a Gaussian coupling) . Fix a prompt p, a gallery size K, and a smooth gallery-level objective 
+
+Hp : RKd → R, Hp(z1, . . . , z K ).
+
+Let R ∈ RK×K be a positive semidefinite correlation matrix with Rii = 1 , and let 
+
+B := R − IK .
+
+For t ∈ [0 , 1] , define 
+
+Rt := IK + tB = (1 − t)IK + tR, 
+
+and let 
+
+(Z(t)1 , . . . , Z (t) 
+
+> K
+
+) ∼ N(0 , R t ⊗ Id).
+
+Define 
+
+Ψ( t) := E
+
+h
+
+Hp(Z(t)1 , . . . , Z (t) 
+
+> K
+
+)
+
+i
+
+.
+
+For 1 ≤ i < j ≤ K, write 
+
+Dij Hp(z1, . . . , z K ) := tr  ∇2 
+
+> ij
+
+Hp(z1, . . . , z K ) =
+
+> d
+
+X
+
+> ℓ=1
+
+∂2Hp
+
+∂z i,ℓ ∂z j,ℓ 
+
+.
+
+Assume the derivatives below are integrable. Then 
+
+Ψ(1) − Ψ(0) = 
+
+Z 10
+
+X
+
+> 1≤i<j ≤K
+
+Bij Et
+
+h
+
+Dij Hp(Z(t)1 , . . . , Z (t) 
+
+> K
+
+)
+
+i
+
+dt, 
+
+where Et denotes expectation under the Gaussian law with covariance Rt ⊗ Id. Consequently, the first-order expansion around the independent coupling is 
+
+ER[Hp(Z1, . . . , Z K )] = Eiid [Hp(Z1, . . . , Z K )] + X
+
+> 1≤i<j ≤K
+
+Bij Eiid [Dij Hp(Z1, . . . , Z K )] + Rem( B),
+
+where 
+
+Rem( B) = 
+
+Z 10
+
+(1 − t) X
+
+> 1≤i<j ≤K
+
+X
+
+> 1≤k<ℓ ≤K
+
+Bij Bkℓ 
+
+· Et
+
+h
+
+Dkℓ Dij Hp(Z(t)1 , . . . , Z (t) 
+
+> K
+
+)
+
+i
+
+dt. 
+
+In particular, if 
+
+Et
+
+h
+
+Dkℓ Dij Hp(Z(t)1 , . . . , Z (t) 
+
+> K
+
+)
+
+i
+
+≤ M
+
+for all t ∈ [0 , 1] and all index pairs, then 
+
+| Rem( B)| ≤ M
+
+2
+
+ X
+
+> 1≤i<j ≤K
+
+|Bij |
+
+
+
+> 2
+
+.
+
+19 Proof. Let 
+
+Σt := Rt ⊗ Id.
+
+Since Rt = (1 − t)IK + tR , the matrix Rt is positive semidefinite for all t ∈ [0 , 1] . Hence Σt is a valid covariance matrix. We use the standard Gaussian differentiation identity: if Xt ∼ N(0 , Σt) and f is smooth enough, then ddt E[f (Xt)] = 12
+
+X
+
+> a,b
+
+d(Σ t)ab 
+
+dt E
+
+ ∂2f (Xt)
+
+∂x a∂x b
+
+
+
+.
+
+Apply this identity to 
+
+f (z1, . . . , z K ) = Hp(z1, . . . , z K ).
+
+For coordinates zi,r and zj,s ,
+
+ddt Cov( Z(t) 
+
+> i,r
+
+, Z (t) 
+
+> j,s
+
+) = Bij 1{r = s}.
+
+The diagonal terms vanish because Bii = 0 . For every pair i < j , the off-diagonal covariance appears twice in the full covariance matrix, once as (i, j ) and once as (j, i ). These two terms cancel the factor 
+
+1/2. Therefore 
+
+Ψ′(t) = X
+
+> 1≤i<j ≤K
+
+Bij Et
+
+" dX
+
+> r=1
+
+∂2Hp
+
+∂z i,r ∂z j,r 
+
+(Z(t)1 , . . . , Z (t) 
+
+> K
+
+)
+
+#
+
+.
+
+That is, 
+
+Ψ′(t) = X
+
+> 1≤i<j ≤K
+
+Bij Et
+
+h
+
+Dij Hp(Z(t)1 , . . . , Z (t) 
+
+> K
+
+)
+
+i
+
+.
+
+Integrating from t = 0 to t = 1 gives the exact interpolation identity. For the Taylor expansion, write 
+
+Ψ(1) = Ψ(0) + Ψ ′(0) + 
+
+Z 10
+
+(1 − t)Ψ ′′ (t) dt. 
+
+The expression for Ψ′(0) gives the first-order term under independent noise. Applying the same Gaussian differentiation identity once more to Dij Hp gives 
+
+Ψ′′ (t) = X
+
+> 1≤i<j ≤K
+
+X
+
+> 1≤k<ℓ ≤K
+
+Bij Bkℓ Et
+
+h
+
+Dkℓ Dij Hp(Z(t)1 , . . . , Z (t) 
+
+> K
+
+)
+
+i
+
+.
+
+Substituting this into Taylor’s formula gives the stated remainder. The bound follows by taking absolute values and using the assumed uniform bound M .
+
+# B Details and additional experiments 
+
+All experiments were conducted on eight NVIDIA L40S GPUs. Section B.1.1 provides the experi-mental configurations. Section B.1.5 describes how amortized coupling optimization is applied in this setting. 
+
+B.1 Diversity generation B.1.1 Experiments configs 
+
+We evaluate diverse text-to-image generation on Stable Diffusion 1.5 (SD1.5), Stable Diffusion XL (SDXL), and Stable Diffusion 3 (SD3). For each prompt, we generate a gallery of K = 3 images and compare four methods: i.i.d. Gaussian initial noise, i.i.d. noise followed by Contrastive Noise Optimization Kim et al. (2025) (CNO), repulsively coupled Gaussian noise, and repulsively coupled Gaussian noise followed by CNO. The coupled methods preserve the standard Gaussian marginal distribution of each initial noise and only change the dependence structure within the gallery. For CNO, we follow the model-specific hyperparameters of the original CNO paper, summarized in Table 3. Unlike the original CNO evaluation, which uses a batch size 5 for SD1.5 and SD3, and 20 Table 3: CNO and sampling hyperparameters for diverse generation. Model CFG scale CNO steps Learning rate Pooling window Sampling steps SD1.5 6.0 3 0.01 16 50 SDXL 6.0 3 0.01 16 50 SD3 7.0 3 0.001 32 28 Table 4: Compute cost for diverse generation. Time is measured per prompt for one K = 3 gallery. Relative time is normalized by i.i.d. sampling for each model. Model Method Time / prompt Relative time SD1.5 i.i.d. 8.42s 1.00 ×
+
+i.i.d. + CNO 8.92s 1.06 ×
+
+coupled 8.42s 1.00 ×
+
+coupled + CNO 8.92s 1.06 ×
+
+SDXL i.i.d. 18.27s 1.00 ×
+
+i.i.d. + CNO 19.06s 1.04 ×
+
+coupled 18.27s 1.00 ×
+
+coupled + CNO 19.06s 1.04 ×
+
+SD3 i.i.d. 64.73s 1.00 ×
+
+i.i.d. + CNO 71.88s 1.11 ×
+
+coupled 64.73s 1.00 ×
+
+coupled + CNO 71.88s 1.11 ×
+
+batch size 3 for SDXL, we use a fixed gallery size K = 3 for all models to keep the comparison with coupled-noise initialization uniform. We evaluate diversity using average pairwise L2 distance, MSS, and Vendi score. L2 is computed directly in pixel space as the mean pairwise per-pixel squared distance. MSS and Vendi are computed from SSCD image features Pizzi et al. (2022): MSS is the mean off-diagonal cosine similarity within each gallery, while Vendi is computed from the eigenvalue entropy of the SSCD feature similarity matrix. 
+
+B.1.2 Compute Cost Comparison 
+
+We compare the generation cost of the four sampling settings in Table 4. The reported time is the average wall-clock time to generate one K = 3 gallery for a single prompt. Since repulsive coupling only applies a linear transformation to the initial Gaussian noises, its cost is effectively the same as i.i.d. sampling. CNO introduces an optimization overhead because it optimizes the noises before the final diffusion sampling pass; in our setting, this overhead is modest since only 3 optimization steps are used. 
+
+B.1.3 Ablation study on the Gallary Size 
+
+We additionally study how the effect of repulsive coupling changes with the gallery size K. We run an SD1.5 ablation on 500 COCO prompts and compare i.i.d. Gaussian noise with repulsively coupled Gaussian noise for K ∈ { 2, 3, 4, 5}. Results are shown in Table 5. Repulsive coupling improves all three diversity metrics for every value of K: it increases pixel-space L2, decreases MSS, and increases Vendi. The L2 gain is largest for K = 2 and decreases as K grows, from a 49 .7% relative improvement at K = 2 to a 13 .0% improvement at K = 5 . Even for larger galleries, the coupled initialization continues to improve SSCD-based diversity, as reflected by lower MSS and higher Vendi across all settings. 
+
+B.1.4 Ablation study on the correlation strength 
+
+We additionally study how the strength of the equicorrelated coupling affects diversity for a fixed gallery size. We run an SD1.5 ablation on 100 COCO prompts with gallery size K = 3 , and vary the 21 Table 5: Ablation on gallery size for SD1.5 diverse generation over 500 COCO prompts. We compare i.i.d. Gaussian noise and repulsively coupled Gaussian noise without CNO. 
+
+K Method L2 ↑ MSS ↓ Vendi ↑
+
+2 i.i.d. 0.1276 0.1550 1.9679 coupled 0.1911 0.1414 1.9721 
+
+3 i.i.d. 0.1267 0.1504 2.9136 coupled 0.1567 0.1370 2.9255 
+
+4 i.i.d. 0.1260 0.1502 3.8372 coupled 0.1458 0.1426 3.8519 
+
+5 i.i.d. 0.1257 0.1497 4.7419 coupled 0.1421 0.1439 4.7592 
+
+Table 6: Ablation on equicorrelation strength for SD1.5 diverse generation over 100 COCO prompts with gallery size K = 3 . We vary the off-diagonal correlation c in the Gaussian coupling. Correlation c L2 ↑ MSS ↓ Vendi ↑
+
+0 0.1283 0.1542 2.9066 
+
+−0.125 0.1353 0.1429 2.9176 
+
+−0.25 0.1428 0.1447 2.9204 
+
+−0.375 0.1497 0.1332 2.9300 
+
+−0.5 0.1574 0.1346 2.9281 off-diagonal correlation c in the equicorrelated Gaussian coupling from independent sampling, c = 0 ,to the maximally repulsive valid value, c = −1/(K − 1) = −1/2. We evaluate 
+
+c ∈ { 0, −0.125 , −0.25 , −0.375 , −0.5}.
+
+Results are shown in Table 6. Increasing the amount of negative correlation consistently improves pixel-space L2, from 0.1283 at c = 0 to 0.1574 at c = −0.5. SSCD-based diversity also improves: MSS decreases and Vendi increases for all negative-correlation settings compared with independent sampling. The best MSS and Vendi occur at c = −0.375 , while the c = −0.5 result is extremely close. The results show that stronger repulsion generally improves diversity, with the theoretical boundary c = −1/(K − 1) performing best or near-best across the reported metrics. 
+
+B.1.5 Learning the optimal coupling 
+
+We also experimented with learned couplings optimized directly for image-space diversity. For this experiment, we parameterize a batch coupling matrix A ∈ RK×K following 3.3, sample independent basis noises ϵ1, . . . , ϵ K , and form coupled initial noises 
+
+zi =
+
+> K
+
+X
+
+> j=1
+
+Aij ϵj .
+
+Each row of A is constrained to have unit norm, so every zi remains marginally standard Gaussian. We initialize A either as the identity coupling, and update it by projected gradient steps on the row-normalized sphere. The optimization uses Stable Diffusion 1.5 and treats the final generated images as the forward signal. Since differentiating through the full denoising trajectory is expensive, we use a skip-gradient estimator: we first run the deterministic sampler from the coupled initial noises to obtain final latents 
+
+zfinal  
+
+> i
+
+, then use 
+
+˜zi = stopgrad( zfinal  
+
+> i
+
+) + zi − stopgrad( zi)
+
+before VAE decoding. We tested gallery sizes K = 4 and K = 5 using pairwise SSIM and LPIPS as the optimization objective. In all cases, the learned coupling quickly approaches the analytic repulsive 22 Table 7: Brightness-clustered generation. Model Method Gap ↑ Contrast ↑ Margin ↑
+
+SD1.5 i.i.d. 0.0448 0.0673 0.0336 equicorr. 0.0494 0.0746 0.0384 learned 0.0702 0.0873 0.0462 
+
+SDXL i.i.d. 0.0355 0.0524 0.0256 equicorr. 0.0364 0.0543 0.0271 learned 0.0461 0.0604 0.0286 
+
+SD3 i.i.d. 0.0478 0.0715 0.0353 equicorr. 0.0508 0.0761 0.0380 learned 0.0652 0.0845 0.0412 
+
+structure. For example, for K = 4 , the best learned sample-level correlation matrix using SSIM is 
+
+C = AA ⊤ =
+
+
+
+1.000 −0.339 −0.332 −0.333 
+
+−0.339 1.000 −0.335 −0.335 
+
+−0.332 −0.335 1.000 −0.326 
+
+−0.333 −0.335 −0.326 1.000 
+
+ .
+
+This is very close to the repulsive coupling, whose off-diagonal entries are −1/(K − 1) = −1/3.This provides an empirical check that, when the learning objective directly rewards image-space diversity, amortized optimization recovers essentially the same repulsive dependence structure as the analytic construction. 
+
+B.2 Brightness-Clustered Generation 
+
+Noise coupling can also be learned to induce structured, user-specified relationships among generated samples. We consider a brightness-clustered generation task in which a four-image gallery is encouraged to split into two brighter and two darker samples. We follow the amortized optimization framework (2) and learn a coupling matrix A that maps independent Gaussian basis noises ϵ1, . . . , ϵ 4
+
+into coupled initial noises zi = P4 
+
+> j=1
+
+Aij ϵj . Given generated images xi = G(p, z i), let bi denote the average brightness of image i, computed from the value channel. We optimize A using the objective 
+
+b1 + b2
+
+2 − b3 + b4
+
+2 + λ |b1 − b2| + |b3 − b4|
+
+2 , (4) where the first term encourages a bright–dark split between the two image pairs, and the second term weakly encourages non-collapse within each pair. After learning A, generation is performed without any per-prompt optimization: we sample independent basis noises, apply the learned coupling, and run the pretrained diffusion sampler normally. In our experiment, we choose λ = 0 .35 . The coupling matrix A is learned on 600 COCO prompts using SD1.5 and then applied amortized, without per-prompt optimization, to held-out prompts across SD1.5, SDXL, and SD3. We compare independent noise, repulsive equicorrelated noise with correlation −1/3, and the learned coupling. We report three metrics: the pair gap |(b1 + b2)/2 − (b3 + b4)/2| the contrast objective from Eq. (4) ,and sorted margin b(3) − b(2) , where b(1) ≤ b(2) ≤ b(3) ≤ b(4) are the sorted brightness values. This metric measures the gap between the darker and brighter halves of the gallery. The learned brightness coupling produces a clear block structure in the noise correlations. The two samples intended to form the bright cluster are positively correlated, and the two samples intended to form the dark cluster are also positively correlated, while samples across the two clusters are strongly negatively correlated. In one learned solution, the induced correlation matrix C = AA ⊤ is 
+
+C =
+
+
+
+1.00 0.47 −0.76 −0.74 0.47 1.00 −0.75 −0.77 
+
+−0.76 −0.75 1.00 0.55 
+
+−0.74 −0.77 0.55 1.00 
+
+ .
+
+23 This structure matches the target relationship: samples (1,2) share noise components and therefore tend to move together in brightness, samples (3,4) do the same, and the two groups are coupled in opposite directions to encourage a bright–dark split across the gallery. Table 7 shows that the learned coupling gives a cleaner brightness split than both independent and repulsive noise across all models. This suggests that coupling optimization can learn user-desired gallery structure, rather than only increasing generic diversity. Moreover, although the coupling is learned using SD1.5, it generalizes to other model families such as SDXL and SD3. Once learned, the coupling can be reused amortized without additional cost. Figure 4 provides visualizations. 
+
+B.3 Background generation with fixed object B.3.1 Experiment Details 
+
+We evaluate fixed-object background generation on 100 LSUN bedroom images, using YOLOv8 segmentation masks for the bed foreground. Failed detections or generations are excluded, leaving 92 valid images for the Stable Diffusion 1.5 experiment. All metrics are computed with the same foreground mask used for generation. Boundary-TV is computed in a 5-pixel dilation-minus-erosion band around the mask boundary. We use runwayml/stable-diffusion-v1-5 with prompt “a bedroom”, DDIM inversion/sampling with 20 steps, and classifier-free guidance scale 1. We generate K = 8 samples per image. Our method uses DDIM-inverted foreground noise, repulsively coupled background noise, Adam opti-mization with learning rate 0.01 , and checkpointed optimization steps at 10, 20, 30, 50, and 100 iterations. The optimization uses the same masked foreground MSE objective and resets the back-ground latent after each Adam step. SDEdit is implemented with a DDIM scheduler, 20 denoising steps, guidance scale 1, strengths {0.2, 0.4, 0.6, 0.8}, and foreground pasting before evaluation. In our experiments, strengths of 0.2, 0.4, and 0.6 produced very low diversity, so the table reports results at strength 0.8. Stable Diffusion inpainting uses 20 steps, guidance scale 1, strength 1, and the inverted foreground mask as the editable region. 
+
+B.3.2 Effect of optimization steps 
+
+Table 8 reports how the number of optimization steps affects each evaluation axis for SD1.5 fixed-object background generation. The results show a controllable trade-off between background diversity and foreground fidelity, governed by a single hyperparameter. As the number of optimization steps increases from 10 to 100, foreground preservation improves monotonically: RMSE-F decreases from 0.086 to 0.048 , indicating that additional optimization progressively pulls the masked region closer to the input object. At the same time, background diversity decreases: LPIPS-B drops from 0.453 to 0.373 and L2-B from 0.045 to 0.029 . This is consistent with the structure of the objective in (3) , which only constrains the foreground; longer optimization tightens this constraint and indirectly reduces variation in the surrounding pixels through the coupling between foreground and background in the denoising trajectory. Boundary-TV remains essentially flat across all settings 0.012 –0.013 , confirming that the smooth object–background transition is a property of the coupling-based initialization rather than of the optimization budget. Global naturalness, measured by BRISQUE, degrades mildly with more steps (from 17 .52 to 23 .02 ). Across all optimization budgets, our method achieves substantially lower BRISQUE and Boundary-TV than both SDEdit and SD inpaint, indicating that the coupled-noise approach consistently produces more natural images that blend smoothly with the preserved object. With sufficient optimization steps, foreground fidelity also surpasses that of SD inpaint. SDEdit retains the strongest foreground preservation by construction, but it is dominated on every other axis we measure (background diversity, boundary smoothness, and global naturalness). 
+
+B.3.3 Unconditional diffusion models 
+
+We evaluate the unconditional fixed-object task on 100 LSUN bedroom images with YOLOv8 bed masks as foreground objects. We use the pretrained pixel-space diffusion model google/ddpm-bedroom-256 and generate a gallery of K = 4 images for each input. Our method uses DDIM 24 Table 8: Effect of optimization steps for SD1.5 fixed-object background generation. We report mean (standard deviation). LPIPS-B and L2-B measure background diversity; RMSE-F measures fore-ground preservation; Boundary-TV measures local roughness near the object boundary; BRISQUE measures global image naturalness. Steps LPIPS-B ↑ L2-B ↑ RMSE-F ↓ Boundary-TV ↓ BRISQUE ↓
+
+10 0.453 (0.160) 0.045 (0.013) 0.086 (0.025) 0.012 (0.004) 17.52 (9.57) 20 0.433 (0.166) 0.040 (0.014) 0.072 (0.021) 0.012 (0.004) 18.12 (10.84) 30 0.418 (0.171) 0.037 (0.014) 0.065 (0.019) 0.012 (0.004) 19.11 (11.05) 50 0.399 (0.174) 0.033 (0.015) 0.057 (0.016) 0.012 (0.004) 20.24 (10.63) 100 0.373 (0.177) 0.029 (0.016) 0.048 (0.014) 0.013 (0.004) 23.02 (11.15) Table 9: Unconditional fixed-object background generation. We report mean (standard deviation). LPIPS-B and L2- B measure background diversity; RMSE-F measures foreground preservation; Boundary-TV measures local roughness near the object boundary; BRISQUE measures global image naturalness. Method LPIPS-B ↑ L2-B ↑ RMSE-F ↓ Boundary-TV ↓ BRISQUE ↓                         
+
+> DDIM inv. ––0.20 (0.06) 0.015 (0.006) 32.98 (7.82) Object-inv. + random BG 0.39 (0.16) 0.22 (0.09) 0.32 (0.08) 0.017 (0.011) 38.37 (11.00) SDEdit 0.39 (0.12) 0.14 (0.04) 0.03 (0.01) 0.041 (0.010) 24.45 (8.35) Ours 0.40 (0.15) 0.25 (0.10) 0.05 (0.02) 0.039 (0.014) 31.46 (11.91)
+
+inversion to initialize the foreground noise, repulsively coupled background noise for diversity, and 100 optimization steps to improve foreground fidelity while keeping the background noise fixed. We compare against DDIM inversion, Object-inv. + random BG, and SDEdit. DDIM inversion reconstructs from the inverted noise and therefore has no meaningful background diversity. Object-inv. + random BG uses the inverted foreground noise with random background noise. Object-inv. + random BG produces diverse backgrounds, but has poor foreground preservation, with RMSE-F 0.32. This shows that fixing only the object noise is insufficient after denoising. SDEdit-80 achieves the best foreground preservation and BRISQUE, with RMSE-F 0.03 and BRISQUE 24.45, but has lower background diversity than ours, especially in L2-B, 0.14 versus 0.25. Our method achieves the strongest background diversity, with LPIPS-B 0.40 and L2-B 0.25, while keeping foreground RMSE much lower than Object-inv. + random BG, 0.05 versus 0.32. 
+
+# C Visualizations 
+
+Figure 3: Independent versus coupled noises with the same prompt “Assortment of doughnuts and other snack items on a serving tray.” generated from SDXL. 25 Figure 4: Examples of brightness-clustered generation with Stable Diffusion 1.5. The learned coupling produces four-image galleries with a clear bright (img 1, 2) and dark (img 3,4) split while preserving image quality and prompt alignment. 
+
+Figure 5: Fixed-object background generation on an LSUN bedroom image. The first row shows the input image, YOLOv8 bed detection, masked foreground, and segmentation mask. The remaining rows show our method after 10, 30, and 100 optimization steps. Across optimization budgets, the bed is preserved while the surrounding room layout, wall texture, lighting, and decor vary substantially. Increasing the number of optimization steps improves foreground fidelity while maintaining diverse and natural backgrounds. 26
