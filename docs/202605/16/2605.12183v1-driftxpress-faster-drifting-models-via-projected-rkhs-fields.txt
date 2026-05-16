@@ -1,0 +1,2666 @@
+Title: DriftXpress: Faster Drifting Models via Projected RKHS Fields
+
+URL Source: https://arxiv.org/pdf/2605.12183v1
+
+Published Time: Wed, 13 May 2026 01:25:06 GMT
+
+Number of Pages: 38
+
+Markdown Content:
+# DriftXpress: Faster Drifting Models via Projected RKHS Fields ∗
+
+Ali Falahati † Elliot Creager ‡ Gautam Kamath § Shubhankar Mohapatra ¶
+
+May 13, 2026 
+
+Abstract 
+
+Drifting Models have emerged as a new paradigm for one-step generative modeling, achieving strong image quality without iterative inference. The premise is to replace the iterative denoising process in diffusion models with a single evaluation of a generator. However, this creates a different trade-off: drifting reduces inference cost by moving much of the computation into training. We introduce DriftXpress , an accelerated formulation of drifting models based on projected RKHS fields. DriftXpress approximates the drifting kernel in a low-rank feature space. This preserves the attraction-repulsion structure of the original drifting field while reducing the cost of field evaluation. Across image-generation benchmarks, DriftXpress achieves comparable FID to standard drifting while reducing wall-clock training cost. These results show that the training-inference trade-off of drifting models can be pushed further without giving up their one-step inference advantage. 
+
+§ Code: github.com/Mortrest/DriftXpress 
+
+# 1 Introduction 
+
+One-step generative models are appealing because they reduce sampling to a single forward pass. However, achieving this with high fidelity has proven difficult. Diffusion and flow-based genera-tors [ SDWMG15 , HJA20 , SSDK +21 , LCBH +23 , LGL23 , ABVE23 ] obtain strong sample quality by distributing generation across many iterative refinement steps, each individually simple. Collaps-ing these steps into one, whether by distillation [ SH22 , LTH +23 , YGZ +24 , ZZW +24 ] or by direct single-step training [ SDCS23 , FHLA24 , GDB +25 , GPL +25 , BAVE24 ], typically requires either a pretrained multi-step teacher or approximations of the underlying ODE or SDE trajectories. Gen-erative Adversarial Networks (GANs) [ GPAM +14 ] are natively one-step, but rely on adversarial optimization and inherit its well-known instabilities [MGN18, AB17, SGZ +16]. Drifting Models [ DLL +26 ] provide an alternative route to one-step generation by learning an attraction–repulsion field in feature space: generated samples are pulled toward the data distribution and pushed away from the current model distribution. Their premise is to replace diffusion-style iterative inference with a single generator evaluation. While drifting models are effective in practice, 
+
+> ∗
+
+EC, GK, and SM are listed in alphabetical order. 
+
+> †
+
+Cheriton School of Computer Science, University of Waterloo and Vector Institute. afalahat@uwaterloo.ca .
+
+> ‡
+
+Department of Electrical and Computer Engineering, University of Waterloo and Vector Institute. 
+
+creager@uwaterloo.ca. 
+
+> §
+
+Cheriton School of Computer Science, University of Waterloo and Vector Institute. g@csail.mit.edu . Supported by a Canada CIFAR AI Chair, an NSERC Discovery Grant, and an Ontario Early Researcher Award. 
+
+> ¶
+
+A*STAR Centre for Frontier AI Research, Singapore. shubhankar_mohapatra@a-star.edu.sg. Supported by an NRF postdoctoral award. 
+
+1
+
+> arXiv:2605.12183v1 [cs.LG] 12 May 2026
+
+matching or surpassing strong one-step and multi-step baselines, they introduce a different trade-off: inference is cheap, but training is expensive because the model must repeatedly estimate a data-dependent vector field. This paper asks whether that trade-off can be pushed further: 
+
+“Can we reduce the training cost of drifting models while preserving their one-step inference advantage?” 
+
+Addressing this challenge is critical, as once inference is reduced to a single step, training becomes the primary computational bottleneck. We observe that in standard drifting, this bottleneck arises from estimating the field via kernel evaluations between generated and training samples. Since the field depends on these evaluations, we focus on reducing the cost of field estimation by replacing exact kernel interactions with projected kernel evaluations while preserving the field’s form. The reproducing kernel Hilbert space (RKHS) perspective provides the foundation for kernel methods. RKHSs are widely used because positive-definite kernels enable nonlinear estimators to be studied through linear geometry in function space, which underlies a broad class of methods, including support vector machines and kernel principal component analysis [ CV95 , SSM98 ]. The Nyström method is a standard tool for scaling such kernel-based algorithms [ DM05 ]. Rather than working with the full kernel matrix or operator, it approximates the kernel interaction structure using a subset of landmark columns, yielding a low-rank surrogate that preserves the kernel formulation while reducing computational cost [WS01]. Motivated by this view, we introduce DriftXpress, a projected RKHS formulation of drifting models (Figure 1). Instead of recomputing exact attraction against the training support at every step, DriftXpress approximates these kernel interactions using a Nyström feature map built from landmark points selected before training. This turns repeated training-support interactions into fast query-landmark evaluations and cached summary multiplications, while preserving the attraction– repulsion form of the drifting field. Empirically, this yields two sources of acceleration: cheaper field evaluation per step and faster wall-clock convergence, since projected attraction uses a summary of the full positive support rather than only mini-batch interactions. Our contributions are threefold. First, we recast drifting fields in the RKHS induced by the drifting kernel, enabling low-rank landmark-based evaluation. Second, we introduce DriftXpress, which replaces repeated exact attraction with cached summaries of training data and composes these summaries across shards for larger datasets. Third, we show that DriftXpress preserves comparable sample quality while substantially reducing training cost. 
+
+# 2 Background: Drifting Models 
+
+Drifting Models [ DLL +26 ] provide a one-step perspective on generative modeling by constructing a transport rule from noise to the data distribution. We briefly review the Drifting Model framework. 
+
+Pushforward at training time. Let fθ : RC → RD be a generator network, p be the data distribution, and pε be a noise distribution on RC . For a noise input ε ∼ pε, the generator output is x = fθ(ε) ∈ RD. The output x follows the pushforward distribution q = ( fθ)#pε, that is, the distribution obtained by mapping samples from pε through fθ. As training iterates, the sequence of models {fθi } induces a sequence of model distributions qi = ( fθi )#pε that converge towards p.
+
+Drifting field. The evolution of samples at iteration i is governed by Vp,q i : RD → RD:
+
+xi+1 = xi + Vp,q i (xi). (1) 2Figure 1: Overview of DriftXpress. (A) Drifting trains a generator by estimating an attraction– repulsion field from finite mini-batches. (B) DriftXpress replaces repeated exact attraction with a Nyström landmark projection. (C–D) Swissroll and checkerboard training trajectories show faster convergence to structured targets than standard drifting. (E) DriftXpress yields smoother vector fields that better follow the target geometry. For a generic model distribution q, the field satisfies the anti-symmetry property Vp,q = −Vq,p ,which guarantees that Vp,q (x) = 0 for all x when p = q.
+
+Attraction-repulsion instantiation. The drifting field decomposes into attraction toward data and repulsion from generated samples: 
+
+Vp,q (x) = V+ 
+
+> p
+
+(x) − V− 
+
+> q
+
+(x), (2) where y+ ∼ p denotes a data sample and y− ∼ q denotes a generated sample. The two components are 
+
+V+ 
+
+> p
+
+(x) = 1
+
+Zp(x) Ey+∼p
+
+k(x, y+)( y+ − x), V− 
+
+> q
+
+(x) = 1
+
+Zq(x) Ey−∼q
+
+k(x, y−)( y− − x), (3) with normalization factors 
+
+Zp(x) = Ey+∼p
+
+k(x, y+), Zq(x) = Ey−∼q
+
+k(x, y−), (4) where the default kernel k is the Laplace kernel. 
+
+Training objective. The training loss drives fθ toward the drifted target via a stop-gradient: 
+
+L = Eε
+
+h
+
+fθ(ε) − stopgrad  fθ(ε) + Vp,q (fθ(ε))  2i
+
+. (5) In practice, the field is evaluated in the feature space of a frozen encoder, and the expectations in 
+
+Vp,q are estimated empirically during training. The main computational bottleneck is therefore not 3the loss itself, but the repeated evaluation of Vp,q through normalized kernel interactions between generated samples and training samples. DriftXpress targets this bottleneck by replacing exact kernel evaluations with projected evaluations that can reuse precomputed statistics from the training data. 
+
+# 3 DriftXpress: RKHS Projected Drifting Fields 
+
+We introduce DriftXpress, a projected RKHS formulation of drifting fields. The field is written as a difference of normalized kernel-weighted averages, and scalability comes from replacing exact kernel sections with projections onto a landmark-induced subspace. We implement this projection with the Nyström approximation, which expresses the kernel through evaluations against a small landmark set and yields the compact summaries used by DriftXpress. 
+
+3.1 RKHS Projection via Nyström Landmarks 
+
+Let Hk denote the RKHS associated with the kernel k, and let 
+
+HU := span {k(u1, ·), . . . , k (ur, ·)} ⊂ H k
+
+be the landmark-induced subspace associated with a set of landmarks U = {u1, . . . , ur} ⊂ RD.Landmarks are selected from the training samples. We sample landmarks uniformly at random within each class. The resulting landmarks are fixed before training and define the subspace HU.We study alternative landmark-selection rules in Section 4.5. DriftXpress approximates each kernel section k(x, ·) by its projection onto HU. In practice, this projection is implemented through the Nyström feature map. Define the landmark kernel matrix 
+
+KU U ∈ Rr×r with entries 
+
+[KU U ]ab = k(ua, ub).
+
+For any point z ∈ RD, define 
+
+KzU = k(z, u1), . . . , k (z, ur) ∈ R1×r.
+
+The Nyström feature map is 1
+
+φ(z) := 
+
+
+
+KzU K−1/2
+
+> U U
+
+⊤
+
+∈ Rr. (6) For any two points z, z′ ∈ RD, the Nyström features approximate their kernel similarity through the landmark-based low-rank kernel 
+
+kU(z, z′) := φ(z)⊤φ(z′) ≈ k(z, z′). (7) Thus, instead of evaluating the full kernel k, DriftXpress works with the low-rank kernel kU associated with the landmark subspace HU.
+
+3.2 RKHS Projected Approximation of the Drifting Field 
+
+The attractive component of the drifting field can be written in terms of a normalized kernel-weighted mean map: 
+
+μp(x) := 
+
+PN + 
+
+> j=1
+
+k(x, y+ 
+
+> j
+
+) y+
+
+> j
+
+PN + 
+
+> j=1
+
+k(x, y+ 
+
+> j
+
+) , V+ 
+
+> p
+
+(x) = μp(x) − x. (8)      
+
+> 1For numerical stability, K−1/2
+> U U is replaced by (KU U +λI)−1/2
+
+4DriftXpress replaces k by the projected kernel kU, yielding 
+
+μU 
+
+> p
+
+(x) := 
+
+PN + 
+
+> j=1
+
+φ(x)⊤φ(y+ 
+
+> j
+
+) y+
+
+> j
+
+PN + 
+
+> j=1
+
+φ(x)⊤φ(y+ 
+
+> j
+
+) , V+
+
+> p, U
+
+(x) = μU 
+
+> p
+
+(x) − x. (9) Since φ(x)⊤ does not depend on j, we can factor it out and precompute the following summaries :
+
+Ap :=  
+
+> N+
+
+X
+
+> j=1
+
+φ(y+ 
+
+> j
+
+) y+⊤ 
+
+> j
+
+∈ Rr×D, bp :=  
+
+> N+
+
+X
+
+> j=1
+
+φ(y+ 
+
+> j
+
+) ∈ Rr. (10) This gives the compact expression 
+
+μU 
+
+> p
+
+(x) = A⊤ 
+
+> p
+
+φ(x)
+
+φ(x)⊤bp + ε . (11) The denominator is stabilized in implementation by adding a positive offset ε > 0 before division. For the repulsive component, DriftXpress keeps the original exact kernel-weighted mean: 
+
+μq(x) := 
+
+PN − 
+
+> j=1
+
+k(x, y− 
+
+> j
+
+)y−
+
+> j
+
+PN − 
+
+> j=1
+
+k(x, y− 
+
+> j
+
+) + ε , V− 
+
+> q
+
+(x) = μq(x) − x. (12) Here {y− 
+
+> j
+
+}N − 
+
+> j=1
+
+denotes the generated samples from the current model distribution. In practice, this set is the generated batch at the current training step, with self-interactions removed when the query point is also part of the repulsive support. Therefore, the DriftXpress drifting field uses projected attraction and exact repulsion: 
+
+VU
+
+> p,q
+
+(x) := μU 
+
+> p
+
+(x) − μq(x) = A⊤ 
+
+> p
+
+φ(x)
+
+φ(x)⊤bp + ε
+
+| {z } 
+
+> μU
+> p(x)
+
+−
+
+PN − 
+
+> j=1
+
+k(x, y− 
+
+> j
+
+)y−
+
+> j
+
+PN − 
+
+> j=1
+
+k(x, y− 
+
+> j
+
+) + ε
+
+| {z } 
+
+> μq(x)
+
+. (13) As in the exact formulation, the x terms in V+
+
+> p, U
+
+(x) = μU 
+
+> p
+
+(x) − x and V− 
+
+> q
+
+(x) = μq(x) − x cancel exactly, so the implemented field is determined by a projected attractive field and an exact repulsive field. DriftXpress replaces the attraction term it with reusable summaries Ap and bp. These summaries can now also be computed on the entire dataset prior to training, and, as we will see in Section 4, they help DriftXpress achieve a holistic view of the data, resulting in a much faster convergence rate. The repulsive term is computed on the current generated batch, so it cannot be precomputed before training, unlike the attractive training-data summaries. Since approximating it would not remove the main offline-reusable bottleneck, we keep this term exact. 
+
+3.3 Compositional Summaries 
+
+The formulation above assumes that the support can be represented by a single set of Nyström summaries. At sufficiently large scale, this may become infeasible: even if the per-step batch size is small, the full support may not fit into a single summary tensor. To address this, we use the compositionality of the projected field by partitioning the support into S shards and maintaining a separate Nyström summary for each shard. 5Let shard s ∈ { 1, . . . , S } have a landmark set U(s) and feature map φ(s)(x). We partition the positive training samples across shards. Let I(s) 
+
+> p
+
+denote the indices of positive samples assigned to shard s. The shard-local attractive summaries are 
+
+A(s) 
+
+> p
+
+:= X
+
+> j∈I (s)
+> p
+
+φ(s)(y+ 
+
+> j
+
+)y+⊤ 
+
+> j
+
+, b(s) 
+
+> p
+
+:= X
+
+> j∈I (s)
+> p
+
+φ(s)(y+ 
+
+> j
+
+). (14) The projected attractive mean is obtained by summing shard contributions: 
+
+μp, comp (x) = 
+
+PSs=1 A(s)⊤ 
+
+> p
+
+φ(s)(x)
+
+PSs=1 φ(s)(x)⊤b(s) 
+
+> p
+
++ ε . (15) This additive form is the key reason for the possibility of sharding. Each shard contributes only a numerator and denominator term, and these terms can be accumulated sequentially without materializing the full positive summary on the device at once. Therefore, the compositional DriftXpress field is 
+
+Vcomp  
+
+> p,q
+
+(x) := μp, comp (x) − μq(x). (16) A key advantage of this formulation is that both the numerator and denominator decompose additively across shards. Therefore, the field can be evaluated without materializing all summaries on the device at once: shard contributions can be accumulated sequentially, so memory scales with the largest shard rather than the full support. 
+
+Theorem 3.1 (Compositionality of attractive summaries) . Let ¯φ(x) := φ(1) (x); . . . ; φ(S)(x)
+
+denote the concatenation of the shard feature maps, and let 
+
+¯Ap := 
+
+
+
+A(1) 
+
+> p
+
+...
+
+A(S)
+
+> p
+
+ , ¯bp := 
+
+
+
+b(1) 
+
+> p
+
+...
+
+b(S)
+
+> p
+
+ ,
+
+denote the concatenations of the S shard feature maps and attractive summaries, respectively. Then the compositional attractive mean satisfies 
+
+μp, comp (x) = ¯A⊤ 
+
+> p
+
+¯φ(x)¯φ(x)⊤ ¯bp + ε .
+
+Consequently, given the same repulsive mean μq(x), the compositional field Vcomp  
+
+> p,q
+
+(x) = μp, comp (x) −
+
+μq(x) is identical to the field obtained using a single concatenated attractive summary. 
+
+We next provide the approximation guarantee that connects landmark quality to field quality. The key point is that the error in the projected drifting field is controlled by how well the projected kernel approximates the exact kernel interactions. Full statements and proofs are deferred to App. D. 
+
+Theorem 3.2 (Local distortion of the projected attractive field) . Let {y+ 
+
+> j
+
+}N + 
+
+> j=1
+
+⊂ RD satisfy 
+
+∥y+ 
+
+> j
+
+∥ ≤ R, and let k be a nonnegative kernel. Let kU be the projected kernel induced by landmarks 
+
+U. For a query x, define the kernel residual vector 
+
+rU(x) :=  k(x, y+1 ) − kU(x, y+1 ), . . . , k (x, y+  
+
+> N+
+
+) − kU(x, y+  
+
+> N+
+
+)⊤ ∈ RN +
+
+,
+
+and the exact positive normalizer dp(x) := 1 
+
+> N+
+
+PN + 
+
+> j=1
+
+k(x, y+ 
+
+> j
+
+). Assume dp(x) > 0. If ∥rU(x)∥2 ≤   
+
+> √N+dp(x)2
+
+, then 
+
+V+
+
+> p, U
+
+(x) − V+ 
+
+> p
+
+(x) ≤ 4R
+
+√N + dp(x) ∥rU(x)∥2.
+
+6Table 1: Quality and efficiency statistics for standard drifting and DriftXpress. Best FID is the lowest FID during training; speedup is measured relative to standard drifting on the same dataset. DriftXpress notably improves throughput compared to standard drifting.                                                                                                                
+
+> Dataset Method Landmarks / class Best FID ↓Iter. Speed ↑Throughput ↑VRAM (GB) ↓Speedup ↑
+> SVHN Standard Drift -2.94 ±0.21 0.21 it/s 2,307 img/s 59.4
+> SVHN DriftXpress (Non-Sharded) 500 3.11 ±0.12 1.38 it/s 15,402 img/s 73.1 6.68 ×
+> SVHN DriftXpress (Sharded) 500 3.15 ±0.14 1.31 it/s 14,713 img/s 62.9 6.38 ×
+> CIFAR10 Standard Drift -5.64 ±0.16 0.18 it/s 2,463 img/s 71.5
+> CIFAR10 DriftXpress (Non-Sharded) 500 5.52 ±0.06 1.20 it/s 16,342 img/s 74.6 6.63 ×
+> CIFAR10 DriftXpress (Sharded) 500 5.14 ±0.11 1.10 it/s 14,985 img/s 72.3 6.08 ×
+> CIFAR100 Standard Drift -6.24 ±0.11 0.23 it/s 2,703 img/s 63.4
+> CIFAR100 DriftXpress (Non-Sharded) 70 9.65 ±0.10 0.87 it/s 10,143 img/s 74.5 3.75 ×
+> CIFAR100 DriftXpress (Sharded) 200 6.15 ±0.09 0.66 it/s 7,979 img/s 71.1 2.95 ×
+> ImageNet Standard Drift -8.83 ±0.13 0.15 it/s 2,058 img/s 65.7
+> ImageNet DriftXpress (Non-Sharded) >20 ---OOM -ImageNet DriftXpress (Sharded) 150 9.21 ±0.16 0.40 it/s 5,453 img/s 78.1 2.64 ×
+
+Table 2: Landmark selection ablation on CIFAR10. Best FID over 10k training steps and average selection time for different landmark selection methods. Most density-aware methods perform competitively, while k-center performs substantially worse.                                                                                    
+
+> Method Global Per-class Best FID ↓(1280) Best FID ↓(5120) Time (s) ↓Best FID ↓(128/class) Best FID ↓(512/class) Time (s) ↓
+> Random 11.80 ±0.71 11.34 ±2.24 0.02 11.82 ±0.60 9.60 ±0.95 0.06
+> k-means 11.26 ±0.89 9.37 ±0.37 7.39 12.91 ±0.25 10.52 ±0.13 2.70 Facility location 12.26 ±1.43 9.49 ±0.84 32.70 11.83 ±1.11 10.57 ±0.67 1.21 Weighted k-center –––11.94 ±1.09 10.31 ±1.40 17.91 k-center 28.65 ±2.69 23.78 ±2.40 170.52 23.87 ±1.11 13.91 ±1.01 17.79
+
+Corollary 3.3 (On-support distortion) . Let K, KU ∈ RN +×N +
+
+be the exact and projected Gram matrices on {y+ 
+
+> j
+
+}N +
+
+> j=1
+
+, with entries [K]ij = k(y+ 
+
+> i
+
+, y+ 
+
+> j
+
+) and [KU]ij = kU(y+ 
+
+> i
+
+, y+ 
+
+> j
+
+). Define κmin := min 1≤i≤N + 1 
+
+> N+
+
+PN + 
+
+> j=1
+
+k(y+ 
+
+> i
+
+, y+ 
+
+> j
+
+). If ∥K − KU∥2,∞ ≤   
+
+> √N+κmin
+> 2
+
+, then 
+
+1
+
+N + 
+
+> N+
+
+X
+
+> i=1
+
+V+
+
+> p, U
+
+(y+ 
+
+> i
+
+) − V+ 
+
+> p
+
+(y+ 
+
+> i
+
+) 2 ≤ 16 R2
+
+N +2 κ2min 
+
+∥K − KU∥2 
+
+> F
+
+.
+
+Theorem 3.2 and Corollary 3.3 show that the error introduced by projecting the attractive field is controlled by two quantities: the landmark kernel residual ∥rU(x)∥2 and the local kernel mass 
+
+dp(x). In particular, the local distortion scales as ∥rU(x)∥2/d p(x). This also quantifies when q = p,DriftXpress evaluates to μU 
+
+> p
+
+(x) − μp(x) rather than zero, and the theorem bounds exactly this deviation. Thus, the projected field is accurate when the landmark kernel approximates the exact kernel well for queries sufficiently similar to the data. The corollary also explains why landmark selection matters. On the training support, the average squared field distortion is controlled by the Gram approximation error ∥K − KU∥2 
+
+> F
+
+. Landmark selection methods that represent high-density regions, such as global k-means and facility location, should therefore yield better field estimates than methods that optimize worst-case geometric spread. This matches the results in Table 2. 
+
+# 4 Experiments 
+
+We evaluate DriftXpress along four axes. First, we compare its quality and efficiency against standard drifting across several image datasets. Second, we study wall-clock convergence to determine whether 70.0 0.5 1.0 1.5 2.0 2.5 3.0          
+
+> Elapsed time (hours)
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> FID
+> SVHN
+> Standard Drift
+> DriftXpress
+> 01234
+> Elapsed time (hours)
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> FID
+> CIFAR10
+> Standard Drift
+> DriftXpress
+> 0246810
+> Elapsed time (hours)
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> 22.5
+> FID
+> CIFAR100
+> Standard Drift
+> DriftXpress
+
+Figure 2: FID over wall-clock training time. FID trajectories for standard drifting and DriftXpress on SVHN, CIFAR10, and CIFAR100. DriftXpress reaches low-FID regimes faster in wall-clock time. 
+
+Figure 3: Early training snapshots on CIFAR10. Columns t = 1 , . . . , 7 denote matched training snapshot indices, with larger t corresponding to later training steps. Both methods are sampled at the same training snapshots. DriftXpress reaches recognizable image structure substantially earlier, illustrating its faster training dynamics compared to Standard Drifting. the projected field improves not only per-step speed, but also the rate at which FID decreases during training. Third, we isolate the effect of batch size on DriftXpress and the standard method. Finally, we ablate the landmark construction with respect to both the landmark selection strategy and the landmark ratio. The appendix provides additional experiments and implementation details. Specifically, we ablate exact versus projected repulsion (App. C.3), verify that DriftXpress maintains one-step inference efficiency (App. C.4), profile runtime and preprocessing gains (App. C.5), and evaluate the empirical and theoretical fidelity of the projected field (App. C.6). 
+
+4.1 Experimental setup 
+
+We compare DriftXpress against standard drifting by isolating the field estimator, keeping the generator architecture and objective identical. We evaluate sample quality primarily using Best FID, along with iteration speed, image throughput, wall-clock runtime, peak GPU memory usage, and relative speedup. All experiments employ a 38 .3M-parameter UNet generator [ RFB15 ] and a frozen DINOv3 ViT-B/16 [ SVS +25 ] feature encoder (required only during training). Results are reported as mean 
+
+± standard deviation across three seeds. The main benchmarks and ablations are run on 8 NVIDIA H100 GPUs and 1 NVIDIA H100 GPU, respectively. Rather than targeting computationally expensive state-of-the-art reproduction [ DLL +26 ], our controlled comparisons specifically evaluate 8whether RKHS-projected field estimation improves efficiency and scalability under a fixed protocol. 
+
+4.2 Main Benchmark Results 
+
+We evaluate DriftXpress’s training efficiency against standard drifting under a fixed 8-hour budget and global batch size of 12 ,000 (1500 /GPU). Table 1 details sample quality and efficiency across diverse datasets: SVHN [ NWC +11 ], CIFAR10/100 [ KH +09 ], and ImageNet [ DDS +09 ] (statistics in Table 3). We observe three key findings: First, DriftXpress substantially increases throughput while preserving sample quality comparable to that of standard drifting. On SVHN, DriftXpress accelerates throughput by 6.68 × (from 2,307 to 
+
+15 ,402 images per second) while maintaining a comparable best FID of 3.11 ± 0.12 versus 2.94 ± 0.21 .Similarly, on CIFAR10, we observe a 6.63 × throughput speedup, along with a slight improvement in the best FID ( 5.52 ± 0.06 versus 5.64 ± 0.16 ). For datasets with larger class counts, the sharded variant of DriftXpress continues to deliver strong gains: yielding a 2.95 × speedup on CIFAR100 (FID 6.15 ± 0.09 vs. 6.24 ± 0.11 ) and a 2.64 × speedup on ImageNet (FID 9.21 ± 0.16 vs. 8.83 ± 0.13 ). These performance gains demonstrate that modifying the training-time field estimator can drastically reduce computational overhead without altering the underlying drifting objective. While standard drifting computes exhaustive pairwise kernel interactions against sampled positive mini-batches at every step, DriftXpress evaluates the attractive field in a low-rank feature space using precomputed summaries of the entire training set. By replacing exact pairwise evaluations with these cached projections, DriftXpress efficiently exposes each generated batch to the full training support and allows for more optimization steps within the fixed wall-clock budget. We provide an online and offline cost breakdown in App. C.5. Second, sharding is critical for ensuring that projected summaries remain memory-feasible at larger class counts. Because DriftXpress stores class-wise landmark summaries for the positive training support, unsharded memory costs scale rapidly with both class count and landmark budget. We address this by defining one shard per class ( 10 shards for SVHN/CIFAR10, 100 for CIFAR100, and 1000 for ImageNet). During training, the numerator and denominator of the attractive field are accumulated shard-wise. This prevents materializing a full, unsharded positive summary, thereby reducing the size of the active summary block used in each projection step while keeping all shards resident on the GPU. Third, we observe that the sharding approach introduces a direct trade-off between memory and throughput. Without sharding, CIFAR100 runs out of memory for landmark budgets exceeding 
+
+70 per class, and ImageNet consistently exceeds the capacity of an 80 GB GPU across all tested configurations. Sharding resolves these bottlenecks by evaluating class-wise summaries sequentially (see App. B.2). However, when memory permits both variants, the unsharded approach is inherently faster as it evaluates a single projected summary. For instance, sharding on SVHN reduces peak VRAM from 73 .1GB to 62 .9GB, but drops throughput from 15 ,402 to 14 ,713 images/sec. We observe similar trends on CIFAR10 ( 74 .6GB to 72 .3GB; 16 ,342 → 14 ,985 images/sec) and CIFAR100 (74 .5GB to 71 .1GB; 10 ,143 → 7,979 images/sec). We conclude that while DriftXpress requires more overall memory than standard drifting to store landmarks and projected summaries, sharding provides a flexible mechanism to strictly bound this overhead. 
+
+4.3 Wall-Clock Convergence 
+
+Figure 2 plots FID against elapsed training time for SVHN, CIFAR10 (both unsharded), and CIFAR100 (sharded). Across all three datasets, DriftXpress (green) improves the early- and mid-training FID trajectories relative to standard drifting (orange). This trend is also visible qualitatively 90 2.5k 5k 7.5k 10k 12.5k 15k              
+
+> Training step
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> FID
+> FID Curves
+> 012345
+> Wall-clock time (hours)
+> 128
+> 256
+> 512
+> 1024
+> 1500
+> 128
+> 256
+> 512
+> 1024
+> 1500
+> Run
+> 1.59h
+> 1.77h
+> 2.07h
+> 2.77h
+> 3.46h
+> 1.98h
+> 2.13h
+> 2.70h
+> 3.71h
+> 4.79h
+> Runtime Per Run
+> Method DriftXpress Standard Drifting Batch size 128 256 512 1024 1500
+
+Figure 4: CIFAR10 batch-size sweep. (left): FID trajectories for DriftXpress and standard drifting across batch sizes 128 –1500 . (right): wall-clock runtime for each run. DriftXpress outperforms standard drifting across all batch sizes. For larger batch sizes, the primary benefit is runtime, whereas for small batches, the advantage is faster convergence and improved training trajectories. in Figure 3: at the same training snapshots, DriftXpress produces recognizable image structure much earlier than standard drifting. This is because the projected kernel summary uses a larger effective support set than the mini-batches used by standard drifting, yielding a smoother and more stable field estimate. Consequently, DriftXpress reaches low-FID regimes substantially faster in wall-clock time. The effect is most pronounced on SVHN and CIFAR10, while CIFAR100 has a more gradual trajectory due to its higher dataset complexity and use of the sharded variant. Overall, these trajectories support the main efficiency claim: the projected field not only reduces per-step cost, but also improves the rate at which drifting reaches competitive sample quality under a fixed compute budget. 
+
+4.4 Batch-Size Sweep 
+
+Figure 4 compares DriftXpress (solid lines) to standard drifting (dashed lines) across batch sizes from 128 to 1500 . The left panel tracks CIFAR10 FID trajectories over 15 ,000 steps, while the right panel reports end-to-end wall-clock runtimes. DriftXpress consistently outperforms standard drifting, with the specific advantage varying by regime. In large-batch regimes (typical of GPUs with larger memory), the primary benefit is computational efficiency. Because large batches naturally stabilize field estimation, both methods yield comparable trajectories, but DriftXpress is significantly faster: runtime drops by 25 .3% (0.94 
+
+hours) at batch size 1024 (in blue), and by 27 .7% (1.33 hours) at 1500 (in purple). This widening efficiency gap accounts for the major speedups observed in Table 1. Since the runtime delta grows from 0.39 hours at batch size 128 to 1.33 hours at 1500 , extrapolating to our main benchmark’s global batch size of 12 ,000 is consistent with the observed 6.68 × maximum speedup. Conversely, in memory-constrained small-batch regimes, the primary advantage is faster convergence. For batch sizes of 128 (in red) and 256 (in orange), DriftXpress yields strictly better FID trajectories alongside moderate runtime reductions of 19 .7% and 17 .0% . This superior convergence occurs because DriftXpress evaluates its attractive field against precomputed global summaries of the entire training set, maintaining a stable view of the landscape rather than relying on the limited, noisy positives of a small mini-batch. 10 0 5k 10k 15k 20k                  
+
+> Training step
+> 10
+> 20
+> 30
+> 40
+> 50
+> FID
+> 16 32 64 128 256 512 1024 2048
+> Landmarks / class
+> 2.0
+> 2.1
+> 2.2
+> 2.3
+> 2.4
+> 2.5
+> 2.6
+> 2.7
+> Runtime (hours)
+> 2.11 2.13 2.15
+> 2.21
+> 2.26
+> 2.31
+> 2.43
+> 2.59
+> Landmarks / class 16 32 64 128 256 512 1024 2048
+
+Figure 5: Landmark ratio ablation. (left) Training FID for different numbers of landmarks per class. (right) total training time. While higher landmark ratios improve FID, diminishing returns in sample quality against increasing runtimes suggest an optimal balance between 0.02 and 0.1.
+
+4.5 Landmark Selection Strategies 
+
+Table 2 compares landmark selection strategies on CIFAR10, evaluated over 10 k training steps with a batch size of 1024 . We report the best FID scores for four primary methods: random sampling, 
+
+k-means, k-center, and facility location (see App. C.2 for details). We evaluate these strategies across two variants: global (selected from the full training set) and per-class (selected equally within each class). These are tested at matched budgets of 1280 total landmarks ( 128 per class) and 5120 
+
+total landmarks ( 512 per class). Weighted k-center is evaluated per-class exclusively, as a global version would confound density weighting with class imbalance. We observe that most methods perform similarly (FID between 9 − 12 ) with the notable exception of k-center, which significantly underperforms (FID between 14 − 29 ). The overall best FID is achieved by global k-means, scoring 11 .26 ± 0.89 and 9.37 ± 0.37 at the low and high budgets, respectively, while maintaining moderate computational cost. Facility location is competitive under the higher 5120 -budget ( 9.49 ± 0.84 globally) but is computationally expensive. Meanwhile, random selection is substantially cheaper yet remains highly competitive, particularly in the per-class setting, where it achieves an FID of 9.60 ± 0.95 with 512 landmarks per class. This aligns with prior Nyström approximation findings by [ KMT09 ], who demonstrated that uniform sampling without replacement provides effective approximations with minimal time and memory overhead. Because random selection offers the best balance of computational speed and competitive sample quality, we adopt random per-class landmarks as the default for all main experiments. 
+
+4.6 Landmark Ratio 
+
+Figure 5 evaluates the effect of landmark ratio in DriftXpress on CIFAR10 using random per-class landmark selection. Since CIFAR10 has 5000 training samples per class, varying the number of landmarks per class from 16 to 2048 corresponds to landmark ratios from 0.0032 to 0.4096 . The left panel reports FID trajectories over 20 k training steps and the right panel reports the corresponding end-to-end wall-clock runtime. We observe a clear quality-runtime trade-off. At the lowest ratio (0.0032 ), training is fast ( 2.11 hours) but unstable, ending with a poor FID of 48 .57 . Conversely, the highest ratio ( 0.4096 ) yields a strong 7.57 FID but increases the runtime to 2.59 hours. This reflects the increased computational cost of query-landmark features and projected barycenters required for 11 a larger, more accurate Nyström approximation. However, quality gains show diminishing returns. Increasing the ratio to the 0.0256 –0.1024 range significantly improves FID, but further increases yield only marginal benefits given the computational overhead. Once the basis captures the distribution’s dominant geometry, extra landmarks inflate the runtime. Consequently, the optimal trade-off lies between ratios of 0.0256 and 0.1024 (128 –512 landmarks per class). 
+
+# 5 Conclusion 
+
+Drifting models replace iterative sampling with one-step generation, shifting computational burden to training. The main cost is field estimation: standard drifting repeatedly computes kernel interactions between generated samples and the support defining the attraction–repulsion field. DriftXpress addresses this by projecting attraction onto an RKHS subspace, thereby replacing repeated interactions with cached summaries. This provides a twofold speedup. First, wall-clock convergence improves because each projected step uses a full-dataset cached summary rather than mini-batch positive samples, yielding a smoother field that reaches low-FID regions faster. Second, it reduces the per-step field-estimation cost by replacing exact dataset attraction with query-landmark kernels and low-rank summary-multiplication. Across SVHN, CIFAR10, CIFAR100, and ImageNet, DriftXpress achieves comparable sample quality to standard drifting while substantially reducing training time. The method has several limitations. Projecting attraction while keeping repulsion exact improves stability, but breaks exact anti-symmetry and leaves a quadratic batch-size dependence in the repulsive term. Our theory bounds the resulting projected-attraction error through the landmark kernel residual and local kernel mass, but safely approximating repulsion remains open. DriftXpress also assumes a fixed feature encoder, since changing the encoder would invalidate the cached summaries. These limitations point to generated-sample-aware repulsion approximations and more memory-efficient projected summaries as next steps. 
+
+# Acknowledgments 
+
+The authors thank Mingyang Deng for helpful discussions and clarifications regarding the original Drifting Models paper. Resources were provided, in part, by the Province of Ontario, the Government of Canada through CIFAR, and companies sponsoring the Vector Institute. 
+
+# References 
+
+[AB17] Martín Arjovsky and Léon Bottou. Towards principled methods for training generative adversarial networks. In 5th International Conference on Learning Representations, ICLR 2017, Toulon, France, April 24-26, 2017, Conference Track Proceedings , 2017. [ABVE23] Michael S Albergo, Nicholas M Boffi, and Eric Vanden-Eijnden. Stochastic interpolants: A unifying framework for flows and diffusions. In International Conference on Machine Learning , 2023. [BAVE24] Nicholas M Boffi, Michael S Albergo, and Eric Vanden-Eijnden. Flow map matching with stochastic interpolants: A mathematical framework for consistency models. arXiv preprint arXiv:2406.07507 , 2024. [Che95] Yizong Cheng. Mean shift, mode seeking, and clustering. IEEE transactions on pattern analysis and machine intelligence , 17(8):790–799, 1995. 12 [CLSR25] Antoine Chatalic, Marco Letizia, Nicolas Schreuder, and Lorenzo Rosasco. Ascalable nystrom-based kernel two-sample test with permutations. arXiv preprint arXiv:2502.13570 , 2025. [CM02] Dorin Comaniciu and Peter Meer. Mean shift: A robust approach toward feature space analysis. IEEE Transactions on pattern analysis and machine intelligence ,24(5):603–619, 2002. [CSG16] Kacper Chwialkowski, Heiko Strathmann, and Arthur Gretton. A kernel test of goodness of fit. In International conference on machine learning , pages 2606–2615. PMLR, 2016. [CV95] Corinna Cortes and Vladimir Vapnik. Support-vector networks. Machine Learning ,20(3):273–297, 1995. [CWL26] Jiarui Cao, Zixuan Wei, and Yuxin Liu. Gradient flow drifting: Generative model-ing via wasserstein gradient flows of kde-approximated divergences. arXiv preprint arXiv:2603.10592 , 2026. [DDS +09] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition , pages 248–255. Ieee, 2009. [DLL +26] Mingyang Deng, He Li, Tianhong Li, Yilun Du, and Kaiming He. Generative modeling via drifting. arXiv preprint arXiv:2602.04770 , 2026. [DM05] Petros Drineas and Michael W. Mahoney. On the nyström method for approximating a gram matrix for improved kernel-based learning. Journal of Machine Learning Research , 6:2153–2175, 2005. [DRG15] Gintare Karolina Dziugaite, Daniel M Roy, and Zoubin Ghahramani. Training gener-ative neural networks via maximum mean discrepancy optimization. arXiv preprint arXiv:1505.03906 , 2015. [DSDB16] Laurent Dinh, Jascha Sohl-Dickstein, and Samy Bengio. Density estimation using real nvp. arXiv preprint arXiv:1605.08803 , 2016. [ERO21] Patrick Esser, Robin Rombach, and Bjorn Ommer. Taming transformers for high-resolution image synthesis. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 12873–12883, 2021. [FHLA24] Kevin Frans, Danijar Hafner, Sergey Levine, and Pieter Abbeel. One step diffusion via shortcut models. arXiv preprint arXiv:2410.12557 , 2024. [FHM26] Leonard Franz, Sebastian Hoffmann, and Georg Martius. Drifting fields are not conservative. arXiv preprint arXiv:2604.06333 , 2026. [GBR +12] Arthur Gretton, Karsten M Borgwardt, Malte J Rasch, Bernhard Schölkopf, and Alexander Smola. A kernel two-sample test. The journal of machine learning research ,13(1):723–773, 2012. [GDB +25] Zhengyang Geng, Mingyang Deng, Xingjian Bai, J Zico Kolter, and Kaiming He. Mean flows for one-step generative modeling. arXiv preprint arXiv:2505.13447 , 2025. 13 [GPAM +14] Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil Ozair, Aaron Courville, and Yoshua Bengio. Generative adversarial nets. In 
+
+Advances in Neural Information Processing Systems , volume 27, 2014. [GPL +25] Zhen Geng, Ashwini Pokle, Yan Luo, J Zico Kolter, and Nebojsa Jojic. Improved mean flows for one-step generation. arXiv preprint arXiv:2504.00000 , 2025. [HJA20] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In Advances in Neural Information Processing Systems , volume 33, pages 6840–6851, 2020. [HRU +17] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. Gans trained by a two time-scale update rule converge to a local nash equilibrium. Advances in neural information processing systems , 30, 2017. [KH +09] Alex Krizhevsky, Geoffrey Hinton, et al. Learning multiple layers of features from tiny images. 2009. [KMT09] Sanjiv Kumar, Mehryar Mohri, and Ameet Talwalkar. Sampling techniques for the nystrom method. In Artificial intelligence and statistics , pages 304–311. PMLR, 2009. [KPB +26] Arkadii Kazanskii, Tatiana Petrova, Konstantin Bagrianskii, Aleksandr Puzikov, and Radu State. Attraction, repulsion, and friction: Introducing dmf, a friction-augmented drifting model. arXiv preprint arXiv:2604.18194 , 2026. [KSS24] Florian Kalinke, Zoltán Szabó, and Bharath K Sriperumbudur. Nystr \" om kernel stein discrepancy. arXiv preprint arXiv:2406.08401 , 2024. [KW13] Diederik P Kingma and Max Welling. Auto-encoding variational bayes. arXiv preprint arXiv:1312.6114 , 2013. [LCBH +23] Yaron Lipman, Ricky T Q Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. In International Conference on Learning Representations , 2023. [Lee26] Hak Geun Lee. Identifiability and stability of generative drifting with companion-elliptic kernel families. arXiv preprint arXiv:2604.24196 , 2026. [LGL23] Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate and transfer data with rectified flow. In International Conference on Learning Representations , 2023. [LLJ16] Qiang Liu, Jason Lee, and Michael Jordan. A kernelized stein discrepancy for goodness-of-fit tests. In International conference on machine learning , pages 276–284. PMLR, 2016. [LSZ15] Yujia Li, Kevin Swersky, and Rich Zemel. Generative moment matching networks. In 
+
+International conference on machine learning , pages 1718–1727. PMLR, 2015. [LTH +23] Simian Luo, Yiqin Tan, Longbo Huang, Jian Li, and Hang Zhao. A comprehensive survey on knowledge distillation of diffusion models. arXiv preprint arXiv:2304.04262 ,2023. 14 [MFSS17] Krikamol Muandet, Kenji Fukumizu, Bharath Sriperumbudur, and Bernhard Schölkopf. 
+
+Kernel Mean Embedding of Distributions: A Review and Beyond , volume 10. 2017. [MGN18] Lars Mescheder, Andreas Geiger, and Sebastian Nowozin. Which training methods for gans do actually converge? In International conference on machine learning , pages 3481–3490. PMLR, 2018. [Nad64] Elizbar A Nadaraya. On estimating regression. Theory of Probability & Its Applications ,9(1):141–142, 1964. [NWC +11] Yuval Netzer, Tao Wang, Adam Coates, Alessandro Bissacco, Baolin Wu, Andrew Y Ng, et al. Reading digits in natural images with unsupervised feature learning. In NIPS workshop on deep learning and unsupervised feature learning , volume 2011, page 4. Granada, 2011. [RBL +22] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684– 10695, 2022. [RFB15] Olaf Ronneberger, Philipp Fischer, and Thomas Brox. U-net: Convolutional networks for biomedical image segmentation. In International Conference on Medical image computing and computer-assisted intervention , pages 234–241. Springer, 2015. [RM15] Danilo Rezende and Shakir Mohamed. Variational inference with normalizing flows. In International conference on machine learning , pages 1530–1538. PMLR, 2015. [SDCS23] Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. 2023. [SDWMG15] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsupervised learning using nonequilibrium thermodynamics. In International Confer-ence on Machine Learning , pages 2256–2265, 2015. [SGF +10] Bharath K Sriperumbudur, Arthur Gretton, Kenji Fukumizu, Bernhard Schölkopf, and Gert RG Lanckriet. Hilbert space embeddings and metrics on probability measures. 
+
+The Journal of Machine Learning Research , 11:1517–1561, 2010. [SGSS07] Alex Smola, Arthur Gretton, Le Song, and Bernhard Scholkopf. A hilbert space embedding for distributions. Algorithmic Learning Theory , pages 13–31, 2007. [SGZ +16] Tim Salimans, Ian J. Goodfellow, Wojciech Zaremba, Vicki Cheung, Alec Radford, and Xi Chen. Improved techniques for training gans. In Advances in Neural Information Processing Systems 29: Annual Conference on Neural Information Processing Systems 2016, December 5-10, 2016, Barcelona, Spain , pages 2226–2234, 2016. [SH22] Tim Salimans and Jonathan Ho. Progressive distillation for fast sampling of diffusion models. International Conference on Learning Representations , 2022. [SSDK +21] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In International Conference on Learning Representations , 2021. 15 [SSM98] Bernhard Schölkopf, Alexander J. Smola, and Klaus-Robert Müller. Nonlinear compo-nent analysis as a kernel eigenvalue problem. Neural Computation , 10(5):1299–1319, 1998. [SVS +25] Oriane Siméoni, Huy V Vo, Maximilian Seitzer, Federico Baldassarre, Maxime Oquab, Cijo Jose, Vasil Khalidov, Marc Szafraniec, Seungeun Yi, Michaël Ramamonjisoa, et al. Dinov3. arXiv preprint arXiv:2508.10104 , 2025. [TO26] Erkan Turan and Maks Ovsjanikov. Generative drifting is secretly score matching: a spectral and variational perspective. arXiv preprint arXiv:2603.09936 , 2026. [Wat64] Geoffrey S Watson. Smooth regression analysis. Sankhy¯ a: The Indian Journal of Statistics, Series A , pages 359–372, 1964. [WS01] Christopher K. I. Williams and Matthias Seeger. Using the nyström method to speed up kernel machines. In Todd K. Leen, Thomas G. Dietterich, and Volker Tresp, editors, 
+
+Advances in Neural Information Processing Systems 13 , pages 682–688. MIT Press, 2001. [YGZ +24] Tianwei Yin, Michaël Gharbi, Richard Zhang, Eli Shechtman, Frédo Durand, William T Freeman, and Taesung Park. One-step diffusion with distribution matching distillation. In Computer Vision and Pattern Recognition , 2024. [ZES25] Linqi Zhou, Stefano Ermon, and Jiaming Song. Inductive moment matching. arXiv preprint arXiv:2503.07565 , 2025. [ZZW +24] Mingyuan Zhou, Huangjie Zheng, Zhendong Wang, Mingzhang Yin, and Hai Huang. Score identity distillation: Exponentially fast distillation of pretrained diffusion models for one-step generation. In Forty-first International Conference on Machine Learning ,2024. 16 Appendix Contents 
+
+A Related Work 17 B Algorithm 19 
+
+B.1 Complexity Analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 B.2 Memory and Sharding . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 
+
+C Additional Experiments 23 
+
+C.1 Experimental Setup . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 C.2 Landmark Selection Algorithms . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 C.3 Exact and Projected Repulsion . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 C.4 Inference-time comparison . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 C.5 DriftXpress Cost Profile . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 C.6 Field Approximation Fidelity . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 
+
+D Proofs 33 
+
+# A Related Work 
+
+Diffusion and flow-based generative models. Diffusion models and score-based generative models learn to transform noise into data by reversing a gradual noising process or by solving a reverse-time stochastic differential equation [ SDWMG15 , HJA20 , SSDK +21 ]. Flow-based generative models and stochastic interpolants instead learn deterministic or stochastic transport dynamics between simple and data distributions, often through ordinary differential equations or velocity fields [ LCBH +23 , LGL23 , ABVE23 ]. These methods have achieved strong sample quality, but their generation procedure requires many function evaluations. At inference time, generation is therefore tied to an iterative solver that repeatedly updates a sample along a learned trajectory. 
+
+One-step and few-step generation. A large body of work has aimed to reduce the sampling cost of diffusion and flow-based models. Distillation-based methods compress a pretrained multi-step teacher into a generator that uses fewer sampling steps [ SH22 , YGZ +24 , ZZW +24 ]. Consistency models train mappings that are consistent along the probability-flow trajectory and can generate in one or a few steps, either by distillation or standalone training [ SDCS23 ]. More recent approaches train one-step or few-step models from scratch by modifying the underlying flow or diffusion objective, for example, through shortcut models, mean flows, flow map matching, or moment-matching self-distillation [ FHLA24 , GDB +25 , BAVE24 , ZES25 ]. These methods remain closely tied to diffusion or flow trajectories: they either distill a pretrained trajectory, enforce consistency along one, or learn a modified velocity/flow representation. 
+
+Generative adversarial networks. Generative adversarial networks (GANs) train a generator and discriminator through a minimax objective [ GPAM +14 ]. Like GANs, Drifting Models use a generator that maps noise to samples in a single forward pass. However, the training signal is fundamentally different. GANs learn through adversarial discrimination, which can introduce optimization instability, mode collapse, and sensitivity to training dynamics [ SGZ +16 , AB17 , MGN18 ]. Drifting Models avoid an adversarial discriminator and instead define an attraction–repulsion field whose equilibrium is reached when the generated and data distributions match [DLL +26]. 17 Variational autoencoders and normalizing flows. Variational autoencoders (VAEs) optimize an evidence lower bound with an encoder-decoder architecture and a latent prior [ KW13 ]. They provide efficient ancestral sampling from the prior, but their objective and inductive biases differ from drift-based training. Modern generative systems also often use autoencoding models as latent tokenizers or compression modules for diffusion or autoregressive models rather than as standalone high-fidelity generators [ ERO21 , RBL +22 ]. Normalizing flows learn invertible transformations and optimize exact likelihood through change-of-variables formulas [ RM15 , DSDB16 ]. They admit exact sampling and likelihood evaluation, but require architectural invertibility and tractable Jacobian determinants. 
+
+Moment matching and kernel generative models. Kernel moment-matching methods compare distributions through discrepancies between kernel mean embeddings. Maximum Mean Discrepancy (MMD) measures the largest difference in expectations over the unit ball of an RKHS [ GBR +12 ], and generative moment matching networks use MMD as a training objective for feedforward generators [ DRG15 , LSZ15 ]. More recent work has revisited moment matching for fast generative modeling, including one-step and few-step models [ ZES25 ]. DriftXpress is related in its use of kernels and positive/negative samples, but the role of the kernel is different. Moment-matching methods usually define a scalar discrepancy between distributions. Drifting Models instead define a local vector field that moves each generated sample through attraction toward positive samples and repulsion from negative samples. 
+
+Kernel smoothing and mean-shift structure. The normalized attraction term in Drifting Models is closely related to classical kernel smoothing. In particular, the map 
+
+μp(x) = 
+
+P 
+
+> j
+
+k(x, y+ 
+
+> j
+
+)y+
+
+> j
+
+P 
+
+> j
+
+k(x, y+ 
+
+> j
+
+)
+
+has the form of a Nadaraya–Watson kernel regression estimator, which predicts a locally weighted average using normalized kernel weights [ Nad64 , Wat64 ]. In the drifting setting, the response values are the data features themselves, so this estimator defines a local barycenter that pulls a generated sample toward nearby data. This also connects drifting to mean shift, where kernel-weighted local means induce updates that move points toward modes of a kernel density estimate [Che95, CM02]. The distinction is that Drifting Models do not perform pure density-mode seeking: they combine attraction toward the data distribution with repulsion from the generated distribution, yielding a signed attraction–repulsion field. 
+
+RKHS embeddings, Nyström approximation, and scalable kernel discrepancies. RKHS methods provide a classical way to study nonlinear learning problems through linear geometry in function space. This perspective underlies support vector machines, kernel PCA, kernel mean embed-dings, MMD, and related nonparametric estimators [ CV95 , SSM98 , SGSS07 , GBR +12 , MFSS17 ]. Kernel mean embeddings represent probability distributions as RKHS elements and support two-sample testing, independence testing, conditional mean embeddings, and distributional learn-ing [ SGSS07 , SGF +10 , MFSS17 ]. Since exact kernel methods often require large pairwise kernel matrices, a long line of work studies scalable approximations. The Nyström method approximates a kernel matrix or operator using a subset of landmark columns [ WS01 , DM05 ], and related ideas have been used to accelerate kernel discrepancy methods such as MMD and Kernel Stein Discrep-ancy [ GBR +12 , CLSR25 , LLJ16 , CSG16 , KSS24 ]. DriftXpress is closest in spirit to these scalable kernel methods, but differs in its object of approximation: rather than accelerating a kernel classifier, 18 eigendecomposition, or scalar discrepancy, it projects drifting kernel sections onto a landmark-induced RKHS subspace. This yields finite-dimensional features that allow the attractive field to be written using precomputed summaries over the training set, preserving the normalized kernel-field form of Drifting Models while reducing repeated exact interactions with all positive samples. 
+
+Recent work on Drifting Models. Drifting Models [ DLL +26 ] have already prompted several follow-up studies that analyze, reinterpret, or extend the drifting field. A first line of work studies the mathematical structure of the field itself. [ TO26 ] shows that, under a Gaussian kernel, the drift operator can be written as a score difference between smoothed distributions, connecting drifting to score matching, spectral convergence, and Wasserstein gradient-flow interpretations. Similarly, [ CWL26 ] proves an equivalence between drifting and the Wasserstein gradient flow of a KDE-approximated forward KL divergence, and further relates MMD-based generators to the same broader family of KDE-approximated divergence flows. [FHM26 ] study whether drifting corresponds to optimizing a scalar potential, showing that drift fields are generally non-conservative due to the position-dependent normalization, while Gaussian kernels form a special conservative case. Complementary theoretical work studies identifiability and stability: [ Lee26 ] analyzes companion-elliptic kernel families, including the Laplace kernel, and [ KPB +26 ] introduces a friction-augmented variant that addresses local instability in simplified drifting dynamics. 
+
+# B Algorithm 
+
+We provide the algorithms for DriftXpress preprocessing and training in Algorithms 1 and 2respectively. 
+
+Algorithm 1 DriftXpress: Preprocessing 
+
+Require: Training data {y+ 
+
+> j
+
+}N +
+
+> j=1
+
+, landmark budget r, kernel k, regularizer λ
+
+Ensure: Landmarks U, Nyström transform W ∈ Rr×r, attractive summaries Ap ∈ Rr×D, bp ∈ Rr 
+
+> 1:
+
+// Landmark selection  
+
+> 2:
+
+Sample landmarks U = {u1, . . . , ur} from {y+ 
+
+> j
+
+}N + 
+
+> j=1
+
+{e.g., random per-class sampling}  
+
+> 3:
+
+// Nyström transform  
+
+> 4:
+
+Compute landmark Gram matrix [KU U ]ab ← k(ua, ub) for a, b ∈ [r] 
+
+> 5:
+
+Compute W ← (KU U + λI)−1/2 {Stored once; used throughout training}  
+
+> 6:
+
+// Precompute attractive summaries over the full training set  
+
+> 7:
+
+Initialize Ap ← 0r×D, bp ← 0r 
+
+> 8:
+
+for j = 1 , . . . , N + do  
+
+> 9:
+
+Ky+  
+
+> jU
+
+← [k(y+ 
+
+> j
+
+, u1), . . . , k (y+ 
+
+> j
+
+, ur)] ∈ R1×r 
+
+> 10:
+
+φ(y+ 
+
+> j
+
+) ← W⊤K⊤  
+
+> y+
+> jU
+
+∈ Rr 
+
+> 11:
+
+Ap ← Ap + φ(y+ 
+
+> j
+
+) y+⊤ 
+
+> j
+> 12:
+
+bp ← bp + φ(y+ 
+
+> j
+
+) 
+
+> 13:
+
+end for  
+
+> 14: 15:
+
+return U, W, Ap, bp
+
+19 Algorithm 2 DriftXpress: Training 
+
+Require: Generator fθ, noise distribution pε, precomputed U, W, Ap, bp, kernel k, positive nor-malization offset ε > 0, learning rate η, training steps T
+
+Ensure: Trained generator fθ 
+
+> 1:
+
+for i = 1 , . . . , T do  
+
+> 2:
+
+// Sample generated batch  
+
+> 3:
+
+Sample {εb}Bb=1 ∼ pε 
+
+> 4:
+
+xb ← fθ(εb) for b ∈ [B] {Generated samples from the current model distribution}  
+
+> 5:
+
+// Compute projected attraction from cached training-data summaries  
+
+> 6:
+
+for b = 1 , . . . , B do  
+
+> 7:
+
+KxbU ← [k(xb, u1), . . . , k (xb, ur)] ∈ R1×r 
+
+> 8:
+
+φb ← W⊤K⊤ 
+
+> xbU
+
+∈ Rr 
+
+> 9:
+
+μUp (xb) ← A⊤ 
+
+> p
+
+φb
+
+φ⊤ 
+
+> b
+
+bp + ε {Projected attractive mean in RD} 
+
+> 10:
+
+end for  
+
+> 11:
+
+// Compute exact repulsion over the current generated batch  
+
+> 12:
+
+for b = 1 , . . . , B do  
+
+> 13:
+
+K− 
+
+> bℓ
+
+← k(xb, xℓ) for ℓ ∈ [B] 
+
+> 14:
+
+K− 
+
+> bb
+
+← 0 {Remove self-interaction}  
+
+> 15:
+
+μq(xb) ←
+
+PBℓ=1 K−
+
+> bℓ
+
+xℓ
+
+PBℓ=1 K− 
+
+> bℓ
+
++ ε {Exact repulsive mean}  
+
+> 16:
+
+end for  
+
+> 17:
+
+// Assemble the DriftXpress field  
+
+> 18:
+
+for b = 1 , . . . , B do  
+
+> 19:
+
+VU
+
+> p,q
+
+(xb) ← μUp (xb) − μq(xb) 
+
+> 20:
+
+end for  
+
+> 21:
+
+// Compute loss and update  
+
+> 22:
+
+L ← 1
+
+B
+
+PBb=1 fθ(εb) − stopgrad  xb + VU
+
+> p,q
+
+(xb) 22 
+
+> 23:
+
+θ ← θ − η∇θL 
+
+> 24:
+
+end for  
+
+> 25: 26:
+
+return θ
+
+B.1 Complexity Analysis 
+
+We analyze the cost of estimating the drifting field. Let B be the number of generated query samples per step, N + the number of training samples used for attraction, N − the number of generated samples used for repulsion, D the feature dimension, and r the number of landmarks. 
+
+Standard Drift. Standard drifting computes both attraction and repulsion through exact kernel evaluations. For each query xb, the attractive component requires the weights 
+
+k(xb, y+ 
+
+> j
+
+), j = 1 , . . . , N +,
+
+and the repulsive component requires the weights 
+
+k(xb, y− 
+
+> ℓ
+
+), ℓ = 1 , . . . , N −.
+
+20 Thus, for B query samples, standard drifting must form BN + attraction kernels and BN − repulsion kernels at every training step. Since each kernel evaluation requires computing a distance in 
+
+D-dimensional feature space, the per-step field-estimation cost is 
+
+O BN +D + BN −D ,
+
+with memory 
+
+O BN + + BN −
+
+DriftXpress. DriftXpress replaces the exact attractive-side kernel evaluations with a Nyström approximation. Given landmarks 
+
+U = {u1, . . . , ur} ⊂ RD,
+
+we form 
+
+[KU U ]ab = k(ua, ub), W = ( KU U + λI)−1/2.
+
+This preprocessing costs 
+
+O(r2D + r3),
+
+where r2D forms the landmark Gram matrix and r3 computes the inverse square root. For any point 
+
+z, the Nyström feature is 
+
+φ(z) = KzU W, KzU = [ k(z, u1), . . . , k (z, ur)] .
+
+Computing one feature costs O(rD + r2).The attractive summaries are precomputed once: 
+
+Ap = 
+
+> N+
+
+X
+
+> j=1
+
+φ(y+ 
+
+> j
+
+)y+⊤ 
+
+> j
+
+∈ Rr×D, bp = 
+
+> N+
+
+X
+
+> j=1
+
+φ(y+ 
+
+> j
+
+) ∈ Rr.
+
+The one-time attractive-side preprocessing cost is 
+
+O r2D + r3 + N +(rD + r2) .
+
+At training time, for B generated queries, DriftXpress computes their projected features and evaluates 
+
+μU 
+
+> p
+
+(x) = φ(x)⊤Ap
+
+φ(x)⊤bp
+
+.
+
+This costs 
+
+O B(rD + r2)
+
+for the projected attractive component. The repulsive component is unchanged and is computed exactly: 
+
+μq(x) = 
+
+PN − 
+
+> ℓ=1
+
+k(x, y− 
+
+> ℓ
+
+)y−
+
+> ℓ
+
+PN − 
+
+> ℓ=1
+
+k(x, y− 
+
+> ℓ
+
+) .
+
+Thus exact repulsion costs 
+
+O(BN −D)
+
+21 per step. Overall, DriftXpress has per-step field-estimation cost 
+
+O B(rD + r2) + BN −D ,
+
+compared with 
+
+O BN +D + BN −D
+
+for standard drifting. Therefore, DriftXpress removes the repeated dependence on the training support size N + and replaces it with dependence on the landmark dimension r, while preserving exact repulsion. The gain is largest when r ≪ N + and attraction is a substantial part of the field-estimation cost. 
+
+B.2 Memory and Sharding 
+
+Treating the number of feature groups and temperatures as constants, standard drifting materializes exact attraction and repulsion weights of sizes B × N + and B × N −. Its dominant batchwise memory is therefore 
+
+O(BN + + BN −).
+
+DriftXpress replaces the exact attractive kernel with a Nyström cache. With r landmarks, the attractive summaries store 
+
+Ap ∈ Rr×D, W ∈ Rr×r,
+
+and each step materializes query features of size B × r. Thus the dominant memory is 
+
+O(rD + r2 + Br + BN −),
+
+or more precisely O(T (rD + r2) + Br + BN −) when the number of temperatures T is not treated as constant. For large landmark banks, we split the attractive cache into S shards with rs landmarks per shard, where r = PSs=1 rs. Sharding is possible because the attractive numerator and denominator decompose additively across shards. The total resident attractive cache becomes 
+
+O
+
+> S
+
+X
+
+> s=1
+
+(rsD + r2 
+
+> s
+
+)
+
+!
+
+= O rD +
+
+> S
+
+X
+
+> s=1
+
+r2
+
+> s
+
+!
+
+.
+
+Under sequential shard evaluation, the active query-feature workspace is reduced from O(Br ) to 
+
+O
+
+
+
+max  
+
+> s∈[S]
+
+Br s
+
+
+
+.
+
+Therefore, when all shards remain resident on GPU, the peak memory is 
+
+O rD +
+
+> S
+
+X
+
+> s=1
+
+r2 
+
+> s
+
++ max  
+
+> s∈[S]
+
+Br s + BN −
+
+!
+
+,
+
+up to common output and accumulator buffers. If shards are streamed one at a time from CPU or off-rank storage, the peak memory can instead be reduced to 
+
+O
+
+
+
+max 
+
+> s∈[S]
+
+(rsD + r2 
+
+> s
+
++ Br s) + BN −
+
+
+
+.
+
+22 Sharding therefore trades throughput for memory. It does not reduce the total linear summary storage rD when all shards remain resident, but it reduces the quadratic Nyström term from r2 to P 
+
+> s
+
+r2 
+
+> s
+
+and avoids materializing the full B × r query-feature workspace at once. For balanced shards, this changes the quadratic term from O(r2) to O(r2/S ). In the class-wise setting, with C classes and 
+
+m landmarks per class, the unsharded quadratic term scales as O(C2m2), while class-wise sharding reduces it to O(Cm 2). The cost is sequential accumulation over shards, which lowers throughput relative to the unsharded variant whenever both fit in memory. 
+
+# C Additional Experiments 
+
+C.1 Experimental Setup 
+
+We use the same generator, feature encoder, optimizer, and evaluation protocol for all reported runs unless otherwise stated. The goal of the experimental protocol is to isolate the effect of the field estimator: standard drifting and DriftXpress use the same generator architecture, the same drifting objective, the same frozen feature encoder, and the same optimization hyperparameters. The only difference is that standard drifting estimates attraction with exact kernel interactions, whereas DriftXpress replaces the attractive component with a Nyström-projected RKHS field and cached positive summaries. 
+
+Datasets. We evaluate on SVHN, CIFAR10, CIFAR100, and ImageNet. CIFAR10 and CIFAR100 contain 50 ,000 training images, with 10 and 100 classes, respectively. SVHN contains 73 ,257 training images and 10 imbalanced classes. ImageNet contains 1,281 ,167 training images and 1,000 imbalanced classes. All datasets are used with their standard training splits for training and reference statistics. 
+
+Generator architecture. Every reported run uses the same U-Net generator. The generator has base channel width 128 , channel multipliers (1 , 2, 2, 2) , two residual blocks per resolution, self-attention at spatial resolution 16 × 16 , dropout 0.1, and four attention heads. For RGB datasets, this architecture has 38 .3M trainable parameters. Since DriftXpress changes only the training-time field estimator, the generator architecture and one-step inference procedure are identical to standard drifting. 
+
+Feature encoder. The drifting field is computed in the representation space of a frozen DINOv3 feature encoder. We use input resolution 112 × 112 and pooled spatial size 4. The encoder has 85 .6Mfrozen parameters. The encoder is used only during training to define the feature-space drifting objective. It is not used at inference time, where generation requires only a single forward pass through the trained U-Net generator. 
+
+Optimization. All methods are trained with AdamW using learning rate 2 × 10 −4, β1 = 0 .9,
+
+β2 = 0 .999 , and zero weight decay. We use EMA with decay 0.9999 , gradient clipping at norm 2.0,fused optimizer updates, and bfloat16 autocast. Both the generator and the frozen feature encoder are compiled in the reported runs. 
+
+Drifting field configuration. Standard drifting computes both attraction and repulsion using exact kernel-weighted barycenters. In contrast, DriftXpress uses a Nyström approximation only for the attractive component and keeps the repulsive component exact. Landmarks are selected from 23 the training data before training begins. Unless otherwise stated, we use random per-class landmark selection. 
+
+Sharding. For datasets with many classes or large landmark banks, we use the sharded variant of DriftXpress. Sharding partitions the positive summaries by class and accumulates the attractive numerator and denominator sequentially across shards. In the main benchmarks, we use one shard per class: 10 shards for SVHN and CIFAR10, 100 shards for CIFAR100, and 1000 shards for ImageNet. This reduces the active memory required for projected attraction while preserving the same additive attractive field. 
+
+Compute. Main benchmark experiments are run on 8 NVIDIA H100 GPUs. Ablations and profiling experiments are run on a single NVIDIA H100 GPU unless otherwise specified. The main benchmark uses a fixed wall-clock budget of 8 hours and a global batch size of 12 ,000 , corresponding to 1500 samples per GPU. We report iteration speed, image throughput, wall-clock runtime, peak GPU memory, and relative speedup against standard drifting under the same dataset and training protocol. 
+
+Random seeds and error bars. All main quantitative results are reported as mean ± standard deviation across three independent seeds. The seeds affect model initialization, data ordering, noise sampling, and landmark selection when random landmarks are used. For each run, we track FID throughout training and report Best FID , defined as the lowest FID achieved during the run. 
+
+Kernel and temperature. All drifting fields use the Laplace kernel in the frozen feature space. For feature vectors x, y ∈ RD, we define 
+
+kτ (x, y ) = exp 
+
+
+
+− ∥x − y∥2
+
+τ
+
+
+
+,
+
+where τ > 0 is the kernel temperature. We use τ = 0 .05 for all reported experiments. The same kernel and temperature are used for standard drifting and DriftXpress. 
+
+FID evaluation. We evaluate sample quality using Fréchet Inception Distance (FID) [ HRU +17 ]. FID is computed with the standard Inception-v3 feature extractor. For each evaluation checkpoint, we generate samples with the one-step generator, extract Inception features for generated and real images, fit Gaussian statistics to both feature sets, and report the resulting FID. We use the same FID code, preprocessing, reference set, number of generated samples, and evaluation schedule for standard drifting and DriftXpress. For CIFAR10, CIFAR100, and SVHN, FID is computed using a fixed 50 ,000 -image real reference set from the corresponding dataset and 50 ,000 generated samples. The reported Best FID is the lowest FID observed over the evaluation checkpoints of a training run. For ImageNet, FID is computed against the 50 ,000 images from the ILSVRC2012 validation split as the real reference distribution. We generate 50 ,000 samples from the trained generator. For class-conditional ImageNet generation, labels are sampled uniformly over the 1000 classes, corresponding to 50 generated images per class. 
+
+C.2 Landmark Selection Algorithms 
+
+We compare four landmark-selection strategies: random sampling, k-means, k-center, and facility location. These methods differ in whether they prioritize simplicity, density-aware representativeness, 24 Table 3: Dataset statistics.                     
+
+> Dataset Training samples Classes Class Balance Samples per class CIFAR10 50 ,000 10 Balanced 5,000
+> CIFAR100 50 ,000 100 Balanced 500
+> SVHN 73 ,257 10 Imbalanced 4,659 –13 ,861
+> ImageNet 1,281 ,167 1,000 Imbalanced 732 –1,300
+
+worst-case geometric coverage, or average-case similarity coverage. The main paper reports the resulting FID and landmark-selection time for CIFAR10, where global k-means gives the strongest performance among the tested methods. 
+
+Random sampling. Random sampling selects M landmarks uniformly without replacement: 
+
+U ∼ Unif {U ⊆ Y : |U| = M }.
+
+It is computationally cheap and unbiased with respect to the empirical distribution, but it does not optimize coverage or reduce redundancy. 
+
+k-means. k-means first solves 
+
+min 
+
+> c1,..., cM
+> N
+
+X
+
+> i=1
+
+min   
+
+> m∈[M]
+
+∥yi − cm∥22,
+
+and then selects the nearest real feature to each centroid: 
+
+um = arg min  
+
+> yi∈Y
+
+∥yi − cm∥2.
+
+This gives a medoid-like landmark set with U ⊆ Y . Because the objective is density-weighted, 
+
+k-means places more landmarks in high-mass regions of the feature distribution. This is well aligned with DriftXpress, where the field is determined by normalized kernel averages rather than worst-case coverage. 
+
+k-center. k-center approximates the minimax covering objective 
+
+min   
+
+> U⊆Y ,|U|=M
+
+max  
+
+> yi∈Y
+
+min  
+
+> u∈U
+
+∥yi − u∥2.
+
+The greedy farthest-point rule adds 
+
+ut+1 = arg max  
+
+> yi∈Y
+
+min 
+
+> u∈Ut
+
+∥yi − u∥2.
+
+This prioritizes worst-case geometric spread. While useful for covering radius, it can overallocate landmarks to isolated or low-density points. For DriftXpress, this is not necessarily desirable because the projected field depends on typical kernel-weighted neighborhoods, not only on the worst-covered feature. 25 Table 4: Ablation of exact versus projected repulsion. Exact repulsion is the default DriftXpress implementation. Projecting the repulsive term causes severe collapse, showing that repulsion is substantially more sensitive to approximation error than attraction.                                    
+
+> Dataset Repulsion estimator Best FID ↓
+> SVHN Exact 3.11 ±0.12
+> SVHN Nyström 347 .6±21 .4
+> CIFAR10 Exact 5.52 ±0.06
+> CIFAR10 Nyström 368 .3±18 .7
+> CIFAR100 Exact 6.15 ±0.09
+> CIFAR100 Nyström 382 .9±16 .2
+> ImageNet Exact 9.21 ±0.16
+> ImageNet Nyström 394 .5±13 .8
+
+Facility location. Facility location maximizes a similarity-based coverage objective: 
+
+F (U) = 
+
+> N
+
+X
+
+> i=1
+
+max  
+
+> u∈U
+
+s(yi, u), |U| = M, 
+
+where s(·, ·) is a nonnegative similarity. In our implementation, we use an exponential Euclidean-distance similarity 
+
+s(x, u ) = exp 
+
+
+
+− ∥x − u∥2
+
+τ
+
+
+
+,
+
+where τ is the temperature-scaled bandwidth. Given a candidate set C and an evaluation set E, the facility-location objective is 
+
+F (S) = X
+
+> x∈E
+
+max  
+
+> u∈S
+
+s(x, u ).
+
+The greedy update is 
+
+ut = arg max 
+
+> u∈C\St−1
+
+X
+
+> x∈E
+
+
+
+s(x, u ) − max 
+
+> v∈St−1
+
+s(x, v )
+
+
+
+> +
+
+,
+
+and we set St = St−1 ∪ { ut}. Here, the gain measures the additional coverage obtained by adding u
+
+beyond the best landmark already selected. Unlike k-center, facility location optimizes average-case similarity coverage. It is therefore more density-aware, but usually more expensive because marginal gains require similarities to many training points. 
+
+C.3 Exact and Projected Repulsion 
+
+DriftXpress approximates the attractive component with a projected RKHS field, but keeps the repulsive component exact. We ablate this design choice by also replacing the repulsive term with the same Nyström approximation used for attraction. Table 4 reports the resulting FID. The result is clear: the method is highly sensitive to the repulsive component. While projecting the attractive term preserves quality and improves speed, a direct reuse of training data landmarks for repulsion caused severe collapse in our experiments. This suggests that repulsion is more sensitive to approximation error and that safely approximating it may require landmarks adapted to 26 Table 5: Inference-time benchmark. We report latency in milliseconds per generated sample from the final trained checkpoint. The inference times are similar as there both methods use the same one-step image generation. 
+
+Dataset Method Inference time (ms/sample) ↓
+
+CIFAR10 Standard drifting 0.177512 ± 0.000062 
+
+CIFAR10 DriftXpress 0.177348 ± 0.000055 
+
+CIFAR100 Standard drifting 0.177442 ± 0.000124 
+
+CIFAR100 DriftXpress 0.177417 ± 0.000119 
+
+SVHN Standard drifting 0.177393 ± 0.000004 
+
+SVHN DriftXpress 0.177426 ± 0.000018 
+
+ImageNet Standard drifting 0.177264 ± 0.000027 
+
+ImageNet DriftXpress 0.177285 ± 0.000022 
+
+Table 6: Per-iteration field-estimation profile on CIFAR10 using random per-class landmark selection. Entries report mean ± standard deviation over three seeds. Lower total field-estimation and full-iteration times are bolded.                                                                        
+
+> Component Standard drifting DriftXpress (sharded) DriftXpress (unsharded) Exact attraction kernels k(xb,y+
+> j)157 .8±11 .7ms ––Nyström query kernels K(xb,U)–40 .1±0.1ms 33 .7±0.0ms Projected attraction KB˜Ap, K B˜bp–20 .8±0.0ms 15 .4±0.0ms Remaining field reduction / repulsion / aggregation 111 .6±0.1ms 24 .4±0.1ms 24 .0±0.1ms Total field estimation 269 .4±11 .8ms 85 .3±0.2ms 73 .2±0.2ms Full training iteration 760 .3±12 .1ms 576 .6±0.9ms 564 .5±0.1ms
+
+the generated distribution. The attractive term mainly pulls generated samples toward the data manifold, and its approximation can be stabilized by precomputing a large training-data summary. The repulsive term, however, controls local diversity among generated samples. Small errors in this term can remove or distort the forces that separate nearby generated samples, causing them to concentrate in a small region of feature space. This ablation motivates our default design: DriftXpress applies the Nyström approximation only to attraction and keeps repulsion exact. This removes the main training-data bottleneck from the inner loop while preserving the stabilizing effect of exact generated-sample repulsion. 
+
+C.4 Inference-time comparison 
+
+Table 5 compares the inference-time latency of standard drifting and DriftXpress. The two methods have essentially identical latency across all datasets, with all measurements around 0.177 ms per generated sample. This is expected: DriftXpress changes the field-estimation procedure used during training, but it does not change the generator architecture or the one-step sampling procedure used at inference time. This confirms the intended trade-off. DriftXpress reduces the wall-clock cost of training while preserving the inference-time advantage of drifting models. Once training is complete, both standard drifting and DriftXpress generate samples with the same single generator evaluation. 27 Table 7: One-time DriftXpress preprocessing cost using random per-class landmark selection. Entries report mean ± standard deviation over three seeds. The largest component for each dataset is bolded.                                                     
+
+> Dataset Feature extraction Landmark selection KU U build + K−1/2
+> U U Summary construction Total CIFAR10 19.7 ±0.4 s 2.4 ±0.1 s 7.4 ±0.1 s 4.6 ±0.0 s 37.5 ±0.5 s CIFAR100 19.6 ±0.2 s 2.5 ±0.0 s 25.2 ±0.2 s 6.6 ±0.1 s 59.6 ±0.3 s SVHN 28.1 ±2.6 s 3.7 ±0.6 s 19.1 ±0.1 s 9.9 ±1.8 s 63.0 ±5.0 s
+
+C.5 DriftXpress Cost Profile 
+
+We profile the online and offline costs of DriftXpress separately. For the online profile, we use the CIFAR10 configuration matching the main benchmark setting. Landmarks are selected by random per-class sampling, and all times are averaged over three seeds. We report both class-sharded and unsharded DriftXpress. For the offline profile, we measure the one-time preprocessing pipeline on SVHN, CIFAR10, CIFAR100, and ImageNet. 
+
+C.5.1 Online Cost Profile 
+
+Table 6 reports the per-iteration profile. Standard drifting spends 269 .4 ± 11 .8 ms on field estimation. DriftXpress reduces this to 85 .3 ± 0.2 ms in the sharded configuration and 73 .2 ± 0.2 ms in the unsharded configuration, corresponding to reductions of 68 .3% and 72 .8% , respectively. End-to-end iteration time decreases from 760 .3 ± 12 .1 ms for standard drifting to 576 .6 ± 0.9 ms for sharded DriftXpress and 564 .5 ± 0.1 ms for unsharded DriftXpress, corresponding to full-iteration reductions of 24 .2% and 25 .8% .The profile also identifies where the savings occur. Standard drifting spends 157 .8 ± 11 .7 ms on exact attraction kernels and 111 .6 ± 0.1 ms on repulsion, field normalization, and aggregation. DriftXpress removes the exact attraction block and replaces it with Nyström query kernels plus projected attraction. These two blocks cost 40 .1±0.1 ms and 20 .8±0.0 ms in the sharded variant, and 
+
+33 .7 ± 0.0 ms and 15 .4 ± 0.0 ms in the unsharded variant. The remaining repulsion and aggregation cost is 24 .4 ± 0.1 ms for sharded DriftXpress and 24 .0 ± 0.1 ms for unsharded DriftXpress. The unsharded variant is faster because it avoids per-shard projection and accumulation overhead. The sharded variant is still useful when the full summary does not fit in memory or when classwise partitioning is needed for larger settings. Total field estimation measures only the cost of computing the drifting field: attraction, repulsion, normalization, and aggregation. Full training iteration measures the entire optimization step, including field estimation as well as the generator forward pass, feature computation, loss evaluation, backpropagation, and optimizer update. 
+
+C.5.2 Computational steps in Table 6 
+
+Let {xb}Bb=1 denote the generated query batch, let {y+ 
+
+> j
+
+}N + 
+
+> j=1
+
+denote the positive reference samples used for attraction, and let {y− 
+
+> ℓ
+
+}N − 
+
+> ℓ=1
+
+denote the generated samples used for repulsion. All quantities are evaluated in the pre-trained feature representation space that serves as the input domain of the drifting kernel. 28 Exact attraction kernels k(xb, y+ 
+
+> j
+
+). In standard drifting, the attractive component forms the pairwise kernel matrix 
+
+K+ 
+
+> bj
+
+= k(xb, y+ 
+
+> j
+
+), b = 1 , . . . , B, j = 1 , . . . , N +.
+
+These weights define the exact attractive barycenter 
+
+μp(xb) = 
+
+PN + 
+
+> j=1
+
+K+ 
+
+> bj
+
+y+
+
+> j
+
+PN + 
+
+> j=1
+
+K+
+
+> bj
+
+.
+
+This row measures the time spent forming the exact attractive kernel weights between the generated batch and the positive reference samples. This is the repeated training-data interaction that DriftXpress removes from the online loop. 
+
+Nyström query kernels K(xb, U). DriftXpress replaces the exact attractive kernel matrix with query-landmark kernels. Given landmarks U = {u1, . . . , ur}, it forms 
+
+KBU [b, a ] = k(xb, ua), b = 1 , . . . , B, a = 1 , . . . , r. 
+
+With the precomputed transform 
+
+W = ( KU U + λI)−1/2,
+
+the query features are 
+
+ΦB = KBU W ∈ RB×r, [ΦB ]b, : = φ(xb)⊤.
+
+This row measures the online cost of computing the Nyström features for the generated queries. 
+
+Projected attraction KB ˜Ap, K B ˜bp. The positive summaries are precomputed offline as 
+
+Ap = 
+
+> N+
+
+X
+
+> j=1
+
+φ(y+ 
+
+> j
+
+)y+⊤ 
+
+> j
+
+∈ Rr×D, bp = 
+
+> N+
+
+X
+
+> j=1
+
+φ(y+ 
+
+> j
+
+) ∈ Rr.
+
+Equivalently, after folding the Nyström transform into the summaries, we denote the stored tensors by ˜Ap and ˜bp. The projected attractive numerator and denominator for the full batch are computed as 
+
+NU 
+
+> p
+
+= ΦB Ap ∈ RB×D, dU 
+
+> p
+
+= ΦB bp ∈ RB .
+
+For each query, 
+
+μU 
+
+> p
+
+(xb) = [NU 
+
+> p
+
+]b, :
+
+[dU 
+
+> p
+
+]b
+
+.
+
+This row measures the low-rank matrix products used to recover the attractive barycenter from the precomputed summaries. 29 Remaining field reduction / repulsion / aggregation. This row collects the remaining online field computation after the attraction-specific block has been evaluated. For standard drifting, it includes the coupled dense exact-field reduction after forming exact attraction kernels, together with the repulsive computation and field aggregation. For DriftXpress, attraction has already been summarized by the projected blocks above, so this row consists of exact batch repulsion and lightweight aggregation. The exact repulsive component forms the generated-sample kernel matrix 
+
+K− 
+
+> bℓ
+
+= k(xb, y− 
+
+> ℓ
+
+), b = 1 , . . . , B, ℓ = 1 , . . . , N −.
+
+In practice, when the query batch and repulsive support are the same generated batch, the diagonal self-interactions are masked before normalization. The exact repulsive barycenter is 
+
+μq(xb) = 
+
+PN − 
+
+> ℓ=1
+
+K−
+
+> bℓ
+
+y−
+
+> ℓ
+
+PN − 
+
+> ℓ=1
+
+K−
+
+> bℓ
+
+.
+
+The final field is then assembled as 
+
+Vp,q (xb) = μp(xb) − μq(xb)
+
+for standard drifting, and as 
+
+VDX  
+
+> p,q
+
+(xb) = μU 
+
+> p
+
+(xb) − μq(xb)
+
+for DriftXpress. When multiple temperatures, feature groups, or resolutions are used, this step also includes per-group normalization and aggregation, e.g. 
+
+V(xb) = X
+
+> g∈G
+
+αg
+
+Vg(xb)
+
+∥Vg(xb)∥ + ε .
+
+Thus, this row should not be interpreted as an isolated timing of the negative barycenter alone. It measures the remaining field-reduction, exact-repulsion, normalization, and aggregation work after the method-specific attraction computation has been accounted for. 
+
+Total field estimation. This is the total time spent computing the drifting field used to construct the training target. For standard drifting, it includes exact attraction and the remaining field-reduction, repulsion, and aggregation block: 
+
+T std field = T exact attr + T std rem .
+
+For DriftXpress, it includes Nyström query kernels, projected attraction, and the remaining exact-repulsion and aggregation block: 
+
+T DX field = Tquery -Nys + T proj attr + T DX rem .
+
+This quantity isolates the cost of estimating the drifting field itself: attraction, repulsion, normaliza-tion, and aggregation. 
+
+Full training iteration. This is the end-to-end time for one optimization step. It includes field estimation as well as all other training-loop components: 
+
+Titer = Tencoder + Tfield + Tloss /backward + Toptimizer .
+
+Thus, total field estimation measures only the drifting-field computation, while full training iteration measures the complete optimization step, including encoder forward passes, construction of the drifted target, generator loss evaluation, backpropagation, and optimizer update. This is why a large reduction in field-estimation time translates into a smaller, but still substantial, reduction in end-to-end iteration time. 30 C.5.3 Offline CostProfile 
+
+Table 7 reports one-time preprocessing costs with random per-class landmarks. On CIFAR10, total preprocessing takes 37 .5 ± 0.5 s. Feature extraction is the largest component at 19 .7 ± 0.4 s, followed by the combined KU U construction and K−1/2 
+
+> U U
+
+factorization stage at 7.4 ± 0.1 s. On CIFAR100, total preprocessing increases to 59 .6 ± 0.3 s, with the KU U stage becoming the largest component at 25 .2 ± 0.2 s. On SVHN, preprocessing takes 63 .0 ± 5.0 s, dominated by feature extraction at 
+
+28 .1 ± 2.6 s and the KU U stage at 19 .1 ± 0.1 s. Random landmark selection is cheap across these datasets, taking only 2.4–3.7 s. 
+
+Takeaway. DriftXpress moves the training-data interactions to a one-time preprocessing stage, after which attraction is evaluated through Nyström query kernels and low-rank matrix products. With random per-class landmarks, preprocessing takes under one minute on CIFAR10 and CI-FAR100 and about one minute on SVHN. The main offline costs are feature extraction and KU U 
+
+construction/factorization, while landmark selection is negligible. These measurements are from a single-GPU profile. In multi-GPU training, the benefit of removing exact training-data interactions from the inner loop can be larger, since each device evaluates the drifting field for its local generated batch. Standard drifting repeats attraction against the training support on every device and every step, whereas DriftXpress reuses the same precomputed summaries and only evaluates query-landmark kernels plus low-rank products locally. Thus, the one-time preprocessing cost is amortized across devices and training steps, while the per-iteration savings scale with the number of generated batches evaluated during training. 
+
+C.6 Field Approximation Fidelity 
+
+We next isolate the quality of the projected field approximation, independent of generator training. On CIFAR10, we compare the exact attractive field V + 
+
+> p
+
+(x) with the projected attractive field V + 
+
+> p,U
+
+(x)
+
+induced by different landmark budgets. We use random per-class landmark selection with 25 , 50 ,
+
+100 , 250 , 500 , 1000 , and 2000 landmarks per class. Since CIFAR10 has 5000 training samples per class, these budgets correspond to 0.5% , 1% , 2% , 5% , 10% , 20% , and 40% of each class support, respectively. For each budget, we report three fidelity metrics. Cosine similarity measures directional agreement between the exact and projected drift vectors: 
+
+1
+
+B
+
+> B
+
+X
+
+> b=1
+
+⟨V + 
+
+> p
+
+(xb), V + 
+
+> p,U
+
+(xb)⟩∥V + 
+
+> p
+
+(xb)∥2 ∥V + 
+
+> p,U
+
+(xb)∥2
+
+.
+
+Relative ℓ2 error measures the size of the approximation error normalized by the size of the exact field: ∥V + 
+
+> p,U
+
+(X) − V + 
+
+> p
+
+(X)∥F
+
+∥V + 
+
+> p
+
+(X)∥F
+
+.
+
+Target MSE measures the mean squared error between the exact drift target and the projected drift target, where tb = xb + V + 
+
+> p
+
+(xb) and tb,U = xb + V + 
+
+> p,U
+
+(xb):
+
+1
+
+BD 
+
+> B
+
+X
+
+> b=1
+
+∥tb,U − tb∥22.
+
+Thus, cosine similarity evaluates whether the projected field points in the right direction, relative ℓ2
+
+error evaluates the normalized field-distortion magnitude, and target MSE evaluates the error in the actual regression target used by the drifting loss. 31 Table 8: Field approximation fidelity on CIFAR10.                                                                                
+
+> Landmarks / class Total landmarks Cosine similarity ↑Relative ℓ2error ↓Target MSE ↓
+> 25 250 0.7426 ±0.0002 0.8042 ±0.0019 0.6468 ±0.0031
+> 50 500 0.8166 ±0.0010 0.6820 ±0.0043 0.4651 ±0.0058
+> 100 1000 0.8785 ±0.0006 0.5674 ±0.0035 0.3219 ±0.0039
+> 250 2500 0.9408 ±0.0005 0.4235 ±0.0039 0.1794 ±0.0033
+> 500 5000 0.9683 ±0.0003 0.3250 ±0.0067 0.1057 ±0.0044
+> 1000 10000 0.9840 ±0.0007 0.2456 ±0.0182 0.0607 ±0.0088
+> 2000 20000 0.9930 ±0.0007 0.1758 ±0.0273 0.0317 ±0.0096
+
+Table 8 shows that increasing the landmark budget consistently improves the fidelity of the projected field. With only 25 landmarks per class, the projected field has cosine similarity 0.7426 ±
+
+0.0002 and relative ℓ2 error 0.8042 ± 0.0019 , indicating that the landmark basis is too small to accurately reproduce the exact field. At 500 landmarks per class, corresponding to 10% of each class support, cosine similarity increases to 0.9683 ± 0.0003 and relative ℓ2 error drops to 0.3250 ± 0.0067 .At the largest budget, 2000 landmarks per class, the projected field is very close to the exact field, reaching cosine similarity 0.9930 ± 0.0007 , relative ℓ2 error 0.1758 ± 0.0273 , and target MSE 
+
+0.0317 ± 0.0096 .This trend directly matches the approximation guarantees in Theorem 3.2 and Corollary 3.3. Theorem 3.2 shows that the query-wise distortion of the projected attractive field is controlled by the landmark kernel residual ∥rU (x)∥2 normalized by the local kernel mass dp(x). Corollary 3.3 gives the corresponding on-support statement: the average squared field distortion is controlled by the Gram approximation error ∥K − KU ∥2 
+
+> F
+
+. Increasing the number of landmarks improves the Nyström approximation of the training-support kernel matrix, reducing ∥K − KU ∥2 
+
+> F
+
+and therefore reducing the field error predicted by the theory. The empirical decrease in relative ℓ2 error and target MSE in Table 8 is consistent with this prediction. It also explains why DriftXpress can preserve sample quality in the main benchmark: once the landmark basis captures the dominant geometry of the training distribution, the projected attractive field closely matches the exact attractive field while being much cheaper to evaluate during training. Figure 6 compares class-conditional samples from DriftXpress and standard drifting on CIFAR10. Figure 7 provides the same comparison for 10 randomly selected CIFAR100 classes. These qualitative results are intended to complement the FID scores in Section 4: while DriftXpress changes the estimator used during training, it does not change the generator architecture, the one-step sampling procedure, or the target image domain. All profiled models correspond to the same checkpoints reported in Table 1. Across both datasets, the samples produced by DriftXpress are visually comparable to those produced by standard drifting. The class identity is generally preserved, and we do not observe an obvious qualitative degradation from replacing exact attraction with projected summaries. This supports the main empirical claim that the computational gains of DriftXpress do not come from a visibly weaker generator, but from reducing the cost of estimating the attractive component of the drifting field. The CIFAR100 comparison is particularly useful because the larger number of classes makes the attraction summaries more demanding; nevertheless, the projected field still produces samples that are qualitatively close to the standard drifting baseline. 32 D Proofs 
+
+Theorem D.1 (Compositionality of Nyström attractive summaries) . Let 
+
+¯φ(x) := φ(1) (x); . . . ; φ(S)(x)
+
+denote the concatenation of the shard feature maps, and define the concatenated attractive summaries 
+
+¯Ap := 
+
+
+
+A(1) 
+
+> p
+
+...
+
+A(S)
+
+> p
+
+ , ¯bp := 
+
+
+
+b(1) 
+
+> p
+
+...
+
+b(S)
+
+> p
+
+ .
+
+Then the compositional attractive mean satisfies 
+
+μp, comp (x) = ¯φ(x)⊤ ¯Ap
+
+¯φ(x)⊤ ¯bp
+
+.
+
+Consequently, when the same exact repulsive mean μq(x) is used, the compositional field 
+
+Vcomp  
+
+> p,q
+
+(x) := μp, comp (x) − μq(x)
+
+is exactly equal to the field obtained from a single concatenated attractive summary and the same exact repulsive term. Proof. By the definition of block concatenation, 
+
+¯φ(x)⊤ ¯Ap =
+
+> S
+
+X
+
+> s=1
+
+φ(s)(x)⊤A(s) 
+
+> p
+
+, ¯φ(x)⊤ ¯bp =
+
+> S
+
+X
+
+> s=1
+
+φ(s)(x)⊤b(s) 
+
+> p
+
+.
+
+Substituting these identities into the single-summary attractive mean gives 
+
+¯φ(x)⊤ ¯Ap
+
+¯φ(x)⊤ ¯bp
+
+=
+
+PSs=1 φ(s)(x)⊤A(s)
+
+> p
+
+PSs=1 φ(s)(x)⊤b(s)
+
+> p
+
+= μp, comp (x).
+
+The repulsive mean μq(x) is computed exactly over the current generated batch and is unchanged by the sharding of the positive summaries. Therefore, 
+
+Vcomp  
+
+> p,q
+
+(x) = μp, comp (x) − μq(x)
+
+is exactly the field obtained by evaluating the concatenated attractive summary and subtracting the same exact repulsive mean. 
+
+Theorem D.2 (Distortion of the projected attractive field) . Let {y+ 
+
+> j
+
+}N + 
+
+> j=1
+
+⊂ RD satisfy 
+
+∥y+ 
+
+> j
+
+∥ ≤ R, j = 1 , . . . , N +,
+
+and let k be a nonnegative kernel. Let kU be any projected kernel induced by a landmark set U, for example the Nyström kernel from Section 3. For any query x ∈ RD, define 
+
+μp(x) :=  
+
+> 1
+> N+
+
+PN + 
+
+> j=1
+
+k(x, y+ 
+
+> j
+
+)y+ 
+
+> j
+> 1
+> N+
+
+PN + 
+
+> j=1
+
+k(x, y+ 
+
+> j
+
+) , μU 
+
+> p
+
+(x) :=  
+
+> 1
+> N+
+
+PN + 
+
+> j=1
+
+kU(x, y+ 
+
+> j
+
+)y+ 
+
+> j
+> 1
+> N+
+
+PN + 
+
+> j=1
+
+kU(x, y+ 
+
+> j
+
+) ,
+
+33 and 
+
+V+ 
+
+> p
+
+(x) := μp(x) − x, V+
+
+> p, U
+
+(x) := μU 
+
+> p
+
+(x) − x.
+
+Define the query-wise kernel residual vector 
+
+rU(x) :=  k(x, y+1 ) − kU(x, y+1 ), . . . , k (x, y+  
+
+> N+
+
+) − kU(x, y+  
+
+> N+
+
+)⊤ ∈ RN +
+
+,
+
+and the exact positive normalizer 
+
+dp(x) := 1
+
+N + 
+
+> N+
+
+X
+
+> j=1
+
+k(x, y+ 
+
+> j
+
+).
+
+Assume dp(x) > 0. If 
+
+∥rU(x)∥2 ≤√N + dp(x)2 , (17) 
+
+then 
+
+V+
+
+> p, U
+
+(x) − V+ 
+
+> p
+
+(x) ≤ 4R
+
+√N + dp(x) ∥rU(x)∥2. (18) 
+
+Moreover, for the asymmetric DriftXpress field that uses projected attraction and exact repulsion, 
+
+VU
+
+> p,p
+
+(x) = μU 
+
+> p
+
+(x) − μp(x),
+
+and therefore the same bound controls the equilibrium residual ∥VU
+
+> p,p
+
+(x)∥.Proof. Fix a query x. Define 
+
+np(x) := 1
+
+N + 
+
+> N+
+
+X
+
+> j=1
+
+k(x, y+ 
+
+> j
+
+)y+ 
+
+> j
+
+, dp(x) := 1
+
+N + 
+
+> N+
+
+X
+
+> j=1
+
+k(x, y+ 
+
+> j
+
+),
+
+and similarly 
+
+np, U(x) := 1
+
+N + 
+
+> N+
+
+X
+
+> j=1
+
+kU(x, y+ 
+
+> j
+
+)y+ 
+
+> j
+
+, dp, U(x) := 1
+
+N + 
+
+> N+
+
+X
+
+> j=1
+
+kU(x, y+ 
+
+> j
+
+).
+
+Then 
+
+μp(x) = np(x)
+
+dp(x) , μU 
+
+> p
+
+(x) = np, U(x)
+
+dp, U(x) .
+
+Since the x terms cancel, 
+
+V+
+
+> p, U
+
+(x) − V+ 
+
+> p
+
+(x) = μU 
+
+> p
+
+(x) − μp(x) = np, U(x)
+
+dp, U(x) − np(x)
+
+dp(x) .
+
+By definition of rU(x),
+
+np, U(x) − np(x) = − 1
+
+N + 
+
+> N+
+
+X
+
+> j=1
+
+[rU(x)] j y+ 
+
+> j
+
+,
+
+and 
+
+dp, U(x) − dp(x) = − 1
+
+N + 
+
+> N+
+
+X
+
+> j=1
+
+[rU(x)] j .
+
+34 Using ∥y+ 
+
+> j
+
+∥ ≤ R,
+
+∥np, U(x) − np(x)∥ ≤ RN + ∥rU(x)∥1 ≤ R
+
+√N + ∥rU(x)∥2,
+
+and 
+
+|dp, U(x) − dp(x)| ≤ 1
+
+N + ∥rU(x)∥1 ≤ 1
+
+√N + ∥rU(x)∥2.
+
+Now add and subtract np(x)/d p, U(x):
+
+np, U(x)
+
+dp, U(x) − np(x)
+
+dp(x) ≤∥np, U(x) − np(x)∥ + np(x) 
+
+> dp(x)
+
+|dp, U(x) − dp(x)|
+
+dp, U(x) .
+
+Since k is nonnegative and dp(x) > 0, np(x)/d p(x) is a convex combination of {y+ 
+
+> j
+
+}N +
+
+> j=1
+
+. Therefore, 
+
+np(x)
+
+dp(x) ≤ R. 
+
+Moreover, 
+
+dp, U(x) ≥ dp(x) − | dp, U(x) − dp(x)| ≥ dp(x) − 1
+
+√N + ∥rU(x)∥2.
+
+Under (17), 
+
+dp, U(x) ≥ dp(x)2 .
+
+Substituting these bounds gives 
+
+np, U(x)
+
+dp, U(x) − np(x)
+
+dp(x) ≤  
+
+> R√N+
+
+∥rU(x)∥2 + R 1√N + ∥rU(x)∥2
+
+dp(x)/2 = 4R
+
+√N + dp(x) ∥rU(x)∥2.
+
+This proves (18). For the final claim, when the model distribution matches the positive distribution, the implemented asymmetric field uses projected attraction and exact repulsion: 
+
+VU
+
+> p,p
+
+(x) = μU 
+
+> p
+
+(x) − μp(x).
+
+Thus, 
+
+∥VU
+
+> p,p
+
+(x)∥ = ∥μU 
+
+> p
+
+(x) − μp(x)∥,
+
+which is exactly the quantity bounded above. 
+
+Corollary D.3 (On-support distortion) . Let K, KU ∈ RN +×N +
+
+be the exact and projected Gram matrices on {y+ 
+
+> j
+
+}N +
+
+> j=1
+
+, with entries 
+
+[K]ij = k(y+ 
+
+> i
+
+, y+ 
+
+> j
+
+), [KU]ij = kU(y+ 
+
+> i
+
+, y+ 
+
+> j
+
+).
+
+Define 
+
+κmin := min  
+
+> 1≤i≤N+
+
+1
+
+N + 
+
+> N+
+
+X
+
+> j=1
+
+k(y+ 
+
+> i
+
+, y+ 
+
+> j
+
+),
+
+and assume 
+
+∥K − KU∥2,∞ := max   
+
+> 1≤i≤N+
+
+∥(K − KU)i, :∥2 ≤√N + κmin 
+
+2 .
+
+Then 
+
+1
+
+N + 
+
+> N+
+
+X
+
+> i=1
+
+V+
+
+> p, U
+
+(y+ 
+
+> i
+
+) − V+ 
+
+> p
+
+(y+ 
+
+> i
+
+) 2 ≤ 16 R2
+
+N +2 κ2min 
+
+∥K − KU∥2 
+
+> F
+
+.
+
+35 Proof. Apply Theorem D.2 with x = y+ 
+
+> i
+
+. Then the residual vector r(y+ 
+
+> i
+
+) is exactly the ith row of 
+
+K − KU, and d(y+ 
+
+> i
+
+) ≥ κmin . Thus, for every i,
+
+V+
+
+> p, U
+
+(y+ 
+
+> i
+
+) − V+ 
+
+> p
+
+(y+ 
+
+> i
+
+) ≤ 4R
+
+√N + κmin 
+
+∥(K − KU)i, :∥2.
+
+Square and average over i, then use  
+
+> N+
+
+X
+
+> i=1
+
+∥(K − KU)i, :∥22 = ∥K − KU∥2 
+
+> F
+
+.
+
+36 Airplane Automobile Bird Cat Deer Dog Frog Horse Ship Truck 
+
+CIFAR10 Generated Samples  
+
+> DriftXpress Standard Drift
+
+Figure 6: CIFAR10 samples generated by DriftXpress and standard drifting. For each class, the top row shows samples from DriftXpress and the bottom row shows samples from standard drifting. Both methods produce visually comparable samples across all CIFAR10 categories. 37 Seal Rabbit Bear Lamp Hamster Orange Palm Tree Elephant Pickup Truck Lion 
+
+CIFAR100 Generated Samples  
+
+> DriftXpress Standard Drift
+
+Figure 7: CIFAR100 samples generated by DriftXpress and standard drifting. We show 10 randomly selected CIFAR100 classes. For each class, the top row shows samples from DriftXpress and the bottom row shows samples from standard drifting. Both methods produce visually comparable samples across the selected CIFAR100 categories. 38
