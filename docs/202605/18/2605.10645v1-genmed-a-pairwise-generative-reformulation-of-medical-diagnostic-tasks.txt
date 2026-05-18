@@ -1,0 +1,943 @@
+Title: GenMed: A Pairwise Generative Reformulation of Medical Diagnostic Tasks
+
+URL Source: https://arxiv.org/pdf/2605.10645v1
+
+Published Time: Tue, 12 May 2026 03:13:06 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+> 1
+
+# GenMed: A Pairwise Generative Reformulation of Medical Diagnostic Tasks 
+
+Hantao Zhang ∗, Weidong Guo ∗, Yuhe Liu ∗, Jiancheng Yang, Sathvik Bhagavan, Danli Shi, Mingda Xu, Pascal Fua B, Fellow, IEEE 
+
+Abstract —Data-driven medical AI is traditionally formulated as a discriminative mapping from input X to output Y via a learned function f , which does not generalize well across hetero-geneous data and modalities encountered in real-world clinical settings. In this work, we propose a fundamentally different, gen-erative paradigm. We model the joint distribution P (X, Y ) using diffusion models and reframe inference as a test-time output optimization problem. By guiding the generative process to match observed inputs, our framework enables flexible, gradient-based conditioning at inference time without architectural changes or retraining, effectively supporting arbitrary and previously unseen combinations of observations. Extensive experiments demonstrate strong performance across standard and cross-modality medical image segmentation, few-shot segmentation with only 2 or 4 training samples, degraded-input segmentation, shape completion from sparse and partial observations, and zero-shot application to demonstrate generality. To support these evaluations, we curated and released a large-scale text–shape dataset derived from MedShapeNet. Our results highlight the versatility of generative joint modeling as a foundation for reusable, task-agnostic medical AI systems. 
+
+Index Terms —GenAI, test-time optimization, segmentation, medical shape completion 
+
+I. I NTRODUCTION 
+
+Data-driven AI now permeates nearly all aspects of health-care [1], [2], spanning the entire clinical pipeline—from diagnosis [3] to treatment [4] and prognosis [5]. Within the diagnostic workflow, a crucial step is the delineation of organ contours and their refinement into accurate anatomical shapes, which is essential for downstream diagnosis and surgical plan-ning [6]. In the actual clinical workflow, this process typically implicitly involves both segmentation and shape completion tasks [7]–[9]. Segmentation provides an initial estimate of or-gan or tumor regions [8], [10], while shape completion refines the results by correcting over- and under-segmentation errors to produce accurate shape representations. A classic example is the segmentation and reconstruction of small anatomical structures in medicine, such as the reconstruction of pulmonary segments [11]. Most current AI approaches to implementing clinical diagnostic pipelines rely on modeling conditional probabilities P (Y |X) of an output Y given an input X. For example, in medical image segmentation, X denotes an input 
+
+Hantao Zhang, Sathvik Bhagavan, Mingda Xu, and Pascal Fua are with the CVLab, ´ Ecole Polytechnique F´ ed´ erale de Lausanne (EPFL), Switzerland. Weidong Guo is with Fudan University, Shanghai, China. Yuhe Liu is with Beihang University, Beijing, China. Jiancheng Yang is with ELLIS Institute Finland, Finland, and also with Aalto University, Finland. Danli Shi is with The Hong Kong Polytechnic University, Hong Kong SAR, China. ∗Equal Con-tribution. BCorresponding Author: Pascal Fua (E-mail: pascal.fua@epfl.ch). 
+
+image and Y the corresponding segmentation mask. Similarly, when performing shape completion, X denotes the partial shape and Y the completed one. P (Y |X) is usually learned from training data and then used at inference time. This is true of both discriminative methods using traditional feed-forward networks such as nnU-Net [12] and more recent generative 
+
+ones that rely on conditional diffusion models, such as [13]. While this is highly effective in narrow, well-controlled settings, this places a heavy burden on the training pro-cess. In complex real-world situations, models must handle heterogeneous data across centers, modalities, and tasks, as exemplified by the multi-X setting of [14]. Recent prompt-based approaches [15], [16] improve flexibility by condition-ing on structured prompts or auxiliary inputs. However, this requires large-scale datasets and extensive augmentation. As a result, proper generalization to unseen prompt formats or novel observation modalities is never guaranteed at inference time. In this work, we advocate a fundamentally different strat-egy. Instead of explicitly learning the conditional distribution 
+
+P (Y |X), we use a generative diffusion framework [17], [18] to model the joint distribution P (X, Y ). At inference time, given an input X∗ we then guide the generative process toward a plausible pair (X′, Y ′) such that X′ ≈ X∗. In our experiments, we show that this approach delivers reliable results even when X∗ lies outside the training distribution of X, such as when using a model trained on CT data to process MRI data without re-training. We will refer to this generative method as GenMed . Because training only involves the unconditional modeling of the distributions of (X, Y )
+
+pairs, while inference relies on gradient-based guidance for search, GenMed eliminates the need for a dedicated input-conditioning encoder and naturally supports arbitrary combi-nations of observations at test time. In effect, we can train once and then test with any conditioning signal without fine-tuning. While jointly modeling multiple variables is common in diffusion models, existing approaches to doing it take a tack that is different from ours. Some model both images and their corresponding masks to learn better representations in an unsupervised manner [19], while others adopt a multi-task learning perspective to model joint distributions [20]. However, none of them explicitly reformulates the relationship between input and output variables (X, Y ) within a single task. More importantly, they remain within the input-conditional diffusion paradigm, which implicitly assumes that X∗ lies within the training distribution of X. In medical settings, however, due to device failures, signal interference, and other 
+
+> arXiv:2605.10645v1 [cs.CV] 11 May 2026 2
+
+unpredictable sources of error, X∗ is often out-of-distribution relative to the training data X and we will see that our method has a distinct advantage in that scenario. Moreover, modeling P (X, Y ) rather than P (Y | X) makes it possible to leverage richer information during training under limited data conditions, which aligns well with practical clinical needs. We introduced an early version of GenMed in a conference paper [21], but only for segmentation and using a compar-atively weak approach to guidance. In this extended journal version, we propose a much improved approach to guidance and broaden the scope of our method to include tasks that, unlike segmentation, require a latent vector representation. We chose to focus on these two tasks because they jointly constitute the backbone of numerous diagnostic applications, such as assessing bronchiectasis [22], that is, structural anoma-lies such as airway narrowing and dilation, or determining tumor invasion depth in rectal cancer staging [8]. While segmentation is inherently prone to errors due to the limited resolution of medical imaging, these tasks require an accurate structural representation. Thus, shape completion serves as an essential refinement step that turns raw segmentation masks into consistent anatomical shapes [9].  
+
+> •
+
+We apply a model trained on 3D volume segmentation to low-resolution volumes and even single 2D slices at test time, without retraining or specialized augmentation, effectively leveraging the intrinsic image priors learned from the original data.  
+
+> •
+
+We demonstrate that a single model trained only on complete shapes can perform shape completion from diverse observations, including single-plane, multi-plane, tri-plane, and noisy or partial inputs.  
+
+> •
+
+We combine our segmentation and shape-completion algorithms into a unified pipeline that generates fine-grained shapes directly from raw medical images, demon-strating the benefit of leveraging the GenMed paradigm to support the medical diagnosis workflow. II. R ELATED WORKS 
+
+Diagnostic applications often rely on segmentation algo-rithms to extract the rough 3D shape of organs, followed by shape completion to remove artefacts and precisely model geometric relationships between organs [9]. GenMed is in-tended to perform both these tasks using the same gener-ative framework, which involves the modeling of the joint distribution P (X, Y ) instead of the conditional distribution 
+
+P (Y | X), where X represents an input and Y the desired output. In this Section, we briefly review current approaches to medical image segmentation and shape completion. We also discuss existing approaches to generative modeling of joint distributions and to guiding such approaches. 
+
+A. Medical Image Segmentation 
+
+Medical Segmentation often involves discriminative predic-tion of the ground truth label for each pixel using forward model architectures such as U-Net [23] and nnU-Net [12]. In recent years, many different methods have been proposed to better capture fine-grained details and improve robustness to domain shifts. These include attention mechanisms [24], multi-scale feature extraction [25], and adversarial training [26]. Despite these efforts, substantial challenges remain, partic-ularly for complex anatomical structures with only limited annotations [27], multi-modal cross-domain settings [28], and corrupted or degraded imaging conditions [29]. Some approaches, such as [13], [30], [31] add generation in the form of masks generated by image-guided diffusion. How-ever, the underlying paradigm remains fundamentally discrim-inative. Such methods depend heavily on the input format for feature extraction and decision-making, which in turn requires large-scale datasets for effective generalization. To help with this some large-scale datasets such as TotalSegmentator (TS) dataset [32] and MedTrinity [33] have been built. However, this approach faces practical limitations: a large number of anatomical structures to annotate, the diversity of imaging modalities, and privacy constraints make it difficult to achieve truly comprehensive data coverage, which in turn hampers the training of highly robust models. To reduce annotation cost, labeling strategies, such as SAROS [34], adopt sparse labeling. Another approach is to focus on constructing spe-cialized, domain-specific datasets for a particular body region or modality, e.g., abdominal datasets [35] or rectal cancer datasets [8]. However, more often than not, such datasets are unavailable, and segmentation performance degrades in complex cross-domain input scenarios [36]. Using atlases [28], [37], [38] mitigates these difficulties but faces limitations of its own, including limited scalability, difficulty in capturing fine-grained structures, and reliance on labor-intensive, domain-specific atlas construction. We will demonstrate that GenMed 
+
+alleviates all these problems. 
+
+B. Shape Completion 
+
+3D shape generation is typically built upon various repre-sentations, such as dense voxelized SDFs on regular grids [39], [40] and octree-based adaptive latent representations [41]. Regardless of the underlying representation, recent shape-completion approaches share a common paradigm: the incom-plete shape is treated as a prompt and incorporated into the training process of the diffusion model [42], [43]. However, as in the segmentation case, this relies heavily on the specific format of the prompt [39] and requires large-scale datasets for effective learning [44], [45]. In medical settings, obtaining the necessary large-scale, well-curated, and clean datasets is particularly difficult [11], [46]. Although recent efforts such as MedShapeNet [9] have produced large-scale shape datasets for the medical domain, the inherent difficulty of collecting and curating medical data makes it challenging to achieve per-category sample sizes comparable to natural image datasets such as ShapeNet [47]—a gap that limits the generalizability of trained models to new, unseen cases. Furthermore, due to the unique characteristics of certain anatomical structures, including fine-grained geometry and high structural complex-ity [48], [49], the corresponding datasets [9] often contain outlier noise points, corrupted shape artifacts, and incomplete annotations. These data quality issues further increase training difficulty and hinder model adaptation to new cases. Therefore, 3Missing Frames Few Slices    
+
+> 64x64xK (K<<64)
+> Image (64x64x64) Mask to Predict
+> Predic ted Mask
+> Predic ted Mask (64x64x64)
+
+# ??
+
+3D Image Segmentation 
+
+Degrade d Image Segmentation 
+
+> Diffusion Model Diffusion Model
+
+(𝑿 𝑻 , 𝒀 𝑻 )(𝑿 𝒕 , 𝒀 𝒕 )(𝑿 𝒕 −𝟏 , 𝒀 𝒕 −𝟏 )𝑷 (𝒀 |𝑿 )𝑷 (𝑿 , 𝒀 )𝑿 ∗(𝑿 𝟎 , 𝒀 𝟎 ), 𝑿 𝟎 ≈ 𝑿 ∗ 
+
+> Training Inference
+
+𝑷 (𝒀 |𝑿 ) Training Inference 
+
+Formulation 1. Discriminative Model Formulation 2. Generative Model (𝑿 𝟎 , 𝒀 𝟎 )𝑿 𝒀   
+
+> Low Resolution
+> ………………
+> Encoder Decoder CLS
+
+3D Shape Completion  
+
+> Partial Shape
+> One -plane
+> Cross -section
+> Triplane
+> Cross -section
+> Random Combinations
+> Complete Shape
+> Multi -plane
+> Cross -section
+> brain
+> liver
+> kidney
+> spleen
+
+3D Shape Completion  
+
+> Partial Shape
+> One -plane
+> Cross -section
+> Triplane
+> Cross -section
+> Random Combinations
+> Complete Shape
+> Multi -plane
+> Cross -section
+> brain
+> liver
+> kidney
+> spleen
+
+Figure 1: A single generative model for diverse medical tasks. We address tasks closely related to medical diagnosis: (1) 
+
+3D image segmentation , including standard segmentation on complete 3D medical images, as well as clinically common yet challenging scenarios such as zero-shot cross-modality segmentation, few-shot segmentation with only 2 or 4 training samples, and degraded-input segmentation on images with downsampling or missing slices; (2) Shape completion from partial voxel cues (e.g., single-, multi-, or orthogonal-plane cross-sections). Unlike the discriminative paradigm, which only estimates the conditional distribution P (Y | X), our generative formulation models the joint distribution P (X, Y ) and performs constraint-guided sampling to enforce input conditions during inference. effective adaptation strategies for shape completion on novel cases remain under-explored and warrant further investigation. 
+
+C. Generative Modeling 
+
+Generative models based on diffusion [50] and flow-matching [51] schemes have become popular for such tasks, and a range of classifier-free guidance (CFG) variants have been proposed to improve their controllability. Schedule-based 
+
+variants replace the constant guidance weight with a time-dependent schedule; Wang et al. [52] show that monotonically increasing schedules (Linear, power-cosine, exponential) out-perform the constant baseline by suppressing excessive guid-ance during early denoising steps. Update-rule variants instead modify the CFG direction itself: APG [53] down-weights the parallel component of the update to mitigate oversaturation; Rectified-CFG++ [54] uses a predictor–corrector integrator to keep flow trajectories on the conditional transport path; and CFG-Zero ⋆ [55] corrects under-fitted velocity estimates via an optimized scale and a zero-init first ODE step. All are training-free, drop-in replacements for vanilla CFG. A parallel line of work focuses on guiding the model’s path at inference time. Early approaches [56], [57] modulate the reverse diffusion process to enable conditional generation. Subsequent works extended this idea to finer-grained control across diverse applications, including 3D shape design [58], autonomous driving [59], [60], and molecular generation [61]. While these methods differ in their specific strategies – for instance, D-Flow [62] optimizes the initial noise over the entire generation trajectory using a differentiable ODE solver, whereas others [60], [63] treat guidance as a per-step search problem on intermediate states and exploit the gradient of a guidance loss to steer the denoising process – they share a common principle: leveraging gradient-based optimization, tailored and adapted to the specific task at hand. Despite these differences, all such approaches steer output generation given a fixed input conditioning signal, leaving the model’s input– output contract unchanged. Our work moves away from such rigid input-conditioned discriminative modeling. By adopting a pair-based paradigm and reformulating the problem as a generative task, our method operates entirely at test time by steering the search process of a diffusion model [64], without updating any model parameters. In contrast to prior diffusion-based approaches that model the joint distributions of input-output pairs [19], we do not merely leverage such pairs for representation learning to obtain better feature extraction. Instead, we steer the model’s behavior at test time. We will show that this increases robustness and adaptability. III. M ETHOD 
+
+GenMed is predicated on treating both the traditional input 
+
+and output of a discriminative model as the joint variables modeled by a single generative model. This enables a fun-damental form of generalization, which we will demonstrate in the experiment section. At test time, steering can be used 4Joint Probability Space  
+
+> Denoised Latent
+
+# Training 
+
+# Inference 𝑷 (𝑳 𝑿 , 𝑳 𝒀 )𝒁 = (𝒁 𝑿 , 𝒁 𝒀 )𝑳 𝒕 −𝟏   
+
+> GT Data Pair 𝑳 𝑿 ,𝒕 −𝟏 𝑳 𝒀 ,𝒕 −𝟏
+> backprop
+
+𝑳 𝒕 −𝟏 
+
+> 𝒈𝒕
+
+# 𝑳 𝒕 𝑳 𝑿 ,𝒕 𝑳 𝒀 ,𝒕 𝑳 𝒕 −𝟏 𝑳 𝒊𝒏 = 𝑳 𝒕 𝑳 𝒐𝒖𝒕 = 𝑳 𝒕 −𝟏 𝑳 𝑻   
+
+> Initial Gaussian Latent
+
+𝑳 𝑿 ,𝑻 𝑳 𝒀 ,𝑻 𝑳 𝑿 ,𝑻 𝑳 𝒀 ,𝑻  
+
+> loss
+> GT Noisy Latent
+> Gu idance
+> Decoded Pair
+
+𝒁 𝒁 𝑿 𝒁 𝒀 𝒁 𝑿 𝒁 𝒀 𝑳 𝑿 ,𝒕 −𝟏 
+
+> 𝒈𝒕
+
+𝑳 𝒀 ,𝒕 −𝟏 
+
+> 𝒈𝒕
+
+𝑳 𝑿 ,𝒕 −𝟏 
+
+> 𝒈𝒕
+
+𝑳 𝒀 ,𝒕 −𝟏 
+
+> 𝒈𝒕
+> Observed Part
+
+𝑫 𝑿  
+
+> ∗
+> Encoder
+> Encoder Decode r
+
+# 𝓛 =−
+
+> Diffusion Model Diffusion Model
+> Partial Shapes
+
+𝒁 𝑿 𝒁 𝒀 𝒁 𝑿 𝒁 𝒀 𝑳 𝒀 ,𝒕 −𝟏 𝑳 𝑿 ,𝒕 −𝟏 
+
+> Update
+
+𝑫 𝑿 
+
+> ∗
+
+𝒁 𝑿 
+
+Figure 2: GenMed Architecture. During training, GenMed learns to denoise samples from the joint distribution P (X, Y ) in either explicit or latent space. At inference, the known condition X∗ is used to explicitly or implicitly guide the sampling process, ensuring that the generated outputs X0 adhere to the constraint X0 ≈ X∗.not merely to refine outputs, but to repurpose the model for distinct tasks within a unified framework. We first present our approach when X and Y are variables of immediate interest. For example, X can be an image and Y a segmentation mask. We then extend it to the case where X and Y are entangled components of a latent vector that, taken together, can be decoded into the variable of direct interest Z, such as a 3D shape. These two scenarios amount to operating either in an explicit space or in a latent space, both key paradigms in medical image analysis. 
+
+A. Replacing Conditional by Pairwise Diffusion 
+
+Formally, given a task where the input is X, our goal is to predict the corresponding output Y , which may represent a segmentation mask. Instead of modeling the conditional distribution P (Y |X), we model the joint one P (X, Y ) by training a diffusion model to generate consistent (X, Y ) pairs. At inference time, we use the known value of X∗ to guide the diffusion process to produce a pair (X′, Y ′) such that 
+
+X′ ≈ X∗ and Y ′ is therefore consistent with X. We now formalize the diffusion scheme we use to model the joint distribution P (X, Y ) and introduce two separate ways to provide the guidance. 
+
+1) Unguided Diffusion: To generate a clean pair (X0, Y 0)
+
+from Gaussian random variables (XT , Y T ) ∼ N (0 , I ), we follow the standard DDPM framework [17]. A noise-prediction network is trained on the forward process 
+
+Xt = √¯αt X0 + √1 − ¯αt ϵ, ϵ ∼ N (0 , I ), (1) where ¯αt = Qts=1 αs follows a predefined noise schedule. Based on this trained network, we define a reverse-step oper-ator SΘ that maps a noisier state to a less noisy one: 
+
+(Xt−1, Y t−1) = SΘ(Xt, Y t) , (2) for t in [T, 1] . Given a decreasing sequence of time steps T =
+
+tN > t N −1 > · · · > t 1 > t 0 = 0 , we iteratively apply Eq. 2 from t = N down to t = 1 . We denote the result of the full denoising sequence as 
+
+(X0, Y 0) = DΘ(XT , Y T ) . (3) In the remainder of the paper, we will take Dx 
+
+> Θ
+
+to be the part of DΘ that returns X0 only, so that we can write X0 =
+
+Dx
+
+> Θ
+
+(XT , Y T ). We define Sx 
+
+> Θ
+
+similarly. 
+
+2) Naive Guidance: In our original conference paper [21], we proposed providing guidance by replacing Xt in Eq. 2 by a noisy version X∗ 
+
+> t
+
+of the target X∗, where X∗ 
+
+> t
+
+= √¯αt X∗ +√1 − ¯αt ϵ. The update equations we perform at each step of the denoising process become 
+
+(Xt−1, Y t−1) = SΘ(X∗ 
+
+> t
+
+, Y t). (4) This works as X∗ 
+
+> t
+
+provides a useful search direction toward the final target, but we found experimentally that simply replacing Xt by X∗ 
+
+> t
+
+distorts the diffusion process too much and sometimes results in suboptimal performance. 
+
+3) Improved Guidance: To steer the diffusion process to-wards producing an X0 output that is close to the desired X∗
+
+without undue distortions, we designed a softer approach to guidance. We introduce a loss function 
+
+LΘ( Xt, Y t) = ∥S x
+
+> Θ
+
+(Xt, Y t) − X∗
+
+> t−1
+
+∥2 , (5) We then rewrite the updates of Eq. 4 as 
+
+˜Xt = Xt − η ∇Xt LΘ(Xt, Y t) ,
+
+˜Yt = Yt − η ∇Yt LΘ(Xt, Y t) , (6) 
+
+(Xt−1, Y t−1) = SΘ( ˜Xt, ˜Yt) .
+
+Unlike naive guidance, which applies explicit guidance solely to Xt while neglecting Yt and thereby introduces a semantic gap between the paired outputs, our approach updates both Xt
+
+and Yt simultaneously, mitigating this inconsistency. Since X5
+
+and Y are processed as separate channels by the network that implements the SΘ denoising function of Eq. 2, even though we only supervise on Xt−1, it still back propagates through the shared representation and updates the parts of the model that affect Yt. An interesting observation is that, when operating in the explicit space, the proposed improved guidance is fully compatible with the naive guidance discussed in Sec. III-A2. In this case, the update of Xt in Eq. 6 can be simplified by directly replacing it with X∗ 
+
+> t
+
+from Eq. 4. Therefore, the complete update rule can be written as follows: 
+
+LΘ(Xt, Y t) = Sx
+
+> Θ
+
+(X∗ 
+
+> t
+
+, Y t) − X∗ 
+
+> t−1
+> 2
+
+,
+
+˜Xt = X∗ 
+
+> t
+
+, ˜Yt = Yt − η∇Yt LΘ(Xt, Y t), (7) 
+
+(Xt−1, Y t−1) = SΘ( ˜Xt, ˜Yt).
+
+B. Pairwise Diffusion for Latent Models 
+
+When working with a latent vector model, the diffusion process operates on the encoded latent vectors rather than on the real-world objects directly. Let Z denote a real-world object, such as a 3D mesh. An encoder Enc maps Z to a latent vector L, and a decoder Dec maps the latent vector back to a reconstructed object D:
+
+L = Enc( Z) , (8) 
+
+D = Dec( L) ,
+
+with D ≈ Z once Enc and Dec are properly trained. We write 
+
+Dec x for the part of Dec that returns only the X component. To frame this in the pairwise setting, Z (e.g., a 3D mesh) can be partitioned into a pair (ZX , Z Y ) in the real-world (explicit) space, where ZX is the observed shape fragment of the damaged part at the time of repair, and ZY is the portion to be completed.We denote by LX and LY the latent counterparts of ZX and ZY , which take the role of the vectors X and 
+
+Y from Section III-A. When we wish to add guidance as in Section III-A3, two difficulties arise: 1) While the X and Y components can be partitioned in the explicit space, it is in general, extremely difficult to do this in latent space, i.e., partition the latent vector to match both components. As a result, LX and LY cannot be straightforwardly localized or manipulated separately, and neither can be decoded on its own. 2) The decoder is trained only on clean latents and has never seen noisy ones. Hence the naive formulation 
+
+Dt = Dec( Lt) , (9) which attempts to decode an intermediate noisy latent, falls outside the decoder’s training distribution. In prac-tice, we found this formulation to be unstable and to yield poor results. We must therefore defer decoding until the end of the denoising trajectory and apply guidance only on the final reconstruction. Concretely, we let the denoising process run to completion and define the loss directly on the final decoded output: 
+
+LΘ(LX,t , L Y,t ) = ∥Dec x(DΘ(LX,t , L Y,t )) − D∗ 
+
+> X
+
+∥2 , (10) where D∗ = Z∗ denotes the full target object and D∗ 
+
+> X
+
+its restriction to the X part. The update steps are then performed as in Eq. 6. IV. E XPERIMENTS 
+
+We now validate the two versions of our approach presented in the method section:  
+
+> •
+
+the one that operates in the explicit space where the input and output variables X and Y are of immediate interest as described in Section III-A,  
+
+> •
+
+the other operates in the latent space with latent variables that must be decoded to represent real physical objects, as described in Section III-B. We use medical image segmentation to test the first and shape-completion to test the second. Because these two tasks are complementary, we then integrate their implementation into a unified pipeline that generates fine-grained geometrically correct shapes directly from raw medical images, thus demon-strating the ability of GenMed to support a complete medical diagnosis workflow. 
+
+A. Pairwise Diffusion for Image Segmentation 
+
+Since segmentation requires fine-grained, pixel-level preci-sion to recover intricate details, it naturally relies on explicit spatial representations, which makes it a good proving ground for GenMed , and more specifically for our original guidance approach of Section III-A2 and for the more sophisticated one of Section III-A3. We will refer to them as GenMed-Naive and 
+
+GenMed-Full , respectively. Here, the target X is an image vol-ume while Y denotes the corresponding segmentation mask. To test for robustness to imaging artifacts, X can be either the original or a degraded version of it. 
+
+Baselines. We compare our method against three classes of baselines. For each one, we select the most representative methods.  
+
+> •
+
+Discriminative Methods. We chose the widely used con-volutional nnU-Net [12] and the transformer-based Swi-nUNETR [65], both of which still deliver state-of-the-art performance [66], [67].  
+
+> •
+
+Registration Atlas. Atlas-based segmentation algorithms have evolved from early traditional approaches [38] to more recent deep learning-based methods [68], [69]. We chose the newest publicly available atlas-based method, CMMAS [28]. Its search paradigm is conceptually related to ours, which makes the comparison natural.  
+
+> •
+
+Input-Cond Diffusion. We use MedSegDiffv2 [13], aclassical input conditioning diffusion-based segmentation approach. Although not the latest, it remains one of the most widely used and well-evaluated diffusion-based seg-mentation baselines in medical image segmentation [70], [71], validated across 20 tasks spanning diverse imaging modalities. For a fair comparison, we augment the data in the same way to train all models. In contrast, we do not compare to approaches that focus on large-scale pre-training [72] or semi-supervised learning [73] because they introduce additional factors beyond 6
+
+Table I: Segmentation under Standard Settings. 
+
+Methods Myo LV LA RA RV Average Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑
+
+TS training set → TS test set 
+
+(a) nnU-Net [12] 80.22 83.67 78.06 75.16 88.32 82.24 83.21 73.43 88.48 81.62 83.66 79.22 SwinUNETR [65] 80.36 83.71 67.69 58.31 87.66 79.67 82.94 72.04 88.13 79.27 81.36 74.60 
+
+(b) Registration Atlas [28] NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN 
+
+(c) Input-Cond Diffusion [13] 77.80 84.30 74.20 73.34 87.44 81.64 82.72 76.25 86.53 79.68 81.74 79.04 
+
+(d) GenMed-Naive (Ours) 83.52 88.87 77.21 75.70 90.13 86.35 86.52 80.76 88.36 82.06 85.17 82.74 
+
+GenMed-Full (Ours) 83.80 89.62 78.06 76.01 90.77 87.46 86.29 81.37 88.27 82.49 85.44 83.39 
+
+CT training set → CT test set 
+
+(a) nnU-Net [12] 57.88 47.18 60.05 22.41 73.31 42.62 49.68 25.35 69.24 43.25 62.03 36.16 SwinUNETR [65] 54.22 43.67 60.63 22.05 67.59 32.77 47.46 20.15 64.21 34.99 58.82 30.73 
+
+(b) Registration Atlas [28] 51.13 40.56 65.28 30.66 60.04 31.13 66.96 39.54 55.38 29.47 59.76 34.27 
+
+(c) Input-Cond Diffusion [13] 58.03 52.63 41.98 26.05 68.51 45.64 66.47 41.81 39.98 25.56 54.99 38.34 
+
+(d) GenMed-Naive (Ours) 78.02 73.75 87.27 74.74 86.68 74.41 80.25 65.87 84.02 66.79 83.25 71.11 
+
+GenMed-Full (Ours) 78.76 74.14 88.16 77.20 87.31 74.89 79.97 65.46 84.83 65.46 83.81 71.43 
+
+MRI training set → MRI test set 
+
+(a) nnU-Net [12] 41.11 38.90 51.63 20.28 67.63 31.98 49.66 22.00 50.05 28.99 52.02 28.43 SwinUNETR [65] 23.64 30.88 51.18 21.15 48.39 16.74 48.01 22.33 38.05 17.09 41.85 21.64 
+
+(b) Registration Atlas [28] 38.28 42.01 53.10 30.49 63.19 34.32 59.34 28.18 49.76 26.84 52.73 32.37 
+
+(c) Input-Cond Diffusion [13] 53.14 55.40 32.97 21.98 65.51 40.97 61.84 37.48 39.87 27.10 50.67 36.59 
+
+(d) GenMed-Naive (Ours) 57.97 46.42 70.67 41.11 75.70 43.93 73.11 44.14 65.77 41.64 68.64 43.45 
+
+GenMed-Full (Ours) 56.63 36.36 72.56 40.19 74.99 46.25 76.01 50.01 67.53 44.63 69.54 43.49 
+
+the scope of this paper. To quantify our results, we adopt the evaluation protocol of Metrics Reloaded [74] and related works [13], [28], employing the Dice similarity coefficient (Dice) and normalized surface distance (NSD) [75] as our primary metrics. 
+
+Datasets. We use two datasets MM-WHS [32] and TotalSeg-mentator (TS) [32]. In both cases, we retained five labels for full heart segmentation: Myocardium of the LV ( Myo ), LV blood cavity (LV), left atrium (LA), right atrium (RA), and right ventricle (RV). For the TS dataset, we used the cardiac CT portion, which contains 746 cases. For MM-WHS, we used the 20 available CTs and 20 MRIs. 
+
+Comparative Results. We compare GenMed-Naive and 
+
+GenMed-Full against our baselines in different experimental settings that correspond to frequently occurring scenarios in medical practice. In all tables below, we group the baselines as (a) discriminative methods, (b) atlas-based method, (c) input-conditioned generative methods, and (d) the two versions of our method. The bold face numbers denote the best performing method. 
+
+Single-Modality: Table I. We train and test using images acquired using the same modalities on the TS and MM-WHS datasets. In all cases. we use 80% of the data for training and the remaining 20% for testing. CMMAS [28], the registration-based atlas method, is limited by the high time and space complexity of the atlas paradigm, which restricts its scalability. As a result, it could not be executed on the large-scale TS dataset, hence the ‘NaN’ in the table. 
+
+Zero-Shot Cross-Modality: Table II. We evaluate zero-shot cross-domain generalization on MM-WHS [32] by train-ing on one modality, CT or MRI, and testing on the other. Interestingly, since CT and MRI share similar anatomical structures, our method can generalize to unseen modalities effectively adapting to new images at test time. In contrast, reg-istration atlas methods lack such test-time adaptability, making it difficult to transfer atlas knowledge across modalities. 
+
+Few-Shot: Table III. We evaluate the few-shot setting on MM-WHS [32]. The test set remains the same as in the previous setting, comprising 20% of the total data, while the training set uses either 2 samples (2-shot) or 4 samples (4-shot). Original Image Degraded Image GT Mask SwinUNETR nnUNet DiffAtlas GenMed(ours) 
+
+> Resolution 8x8x8
+> Missing Middle 16 Frames
+> Missing Middle 32 Frames
+> 8 Slices Only
+> 16 Slices Only
+> …… ……
+> Low Resolution
+> Missing Frames
+> Few Slices
+> Degradation Types
+
+Figure 3: Segmentation using degraded inputs. GenMed-Full is less affected than the baselines. 
+
+Degraded Inputs: Table IV. To gauge sensitivity to input quality, we degrade the original high-resolution TS images in three different ways. We use low-resolution inputs of size 
+
+8 × 8 × 8, remove 8, 16, or 32 middle slices, or retain only a small number of slices, as shown in Fig. 3. 
+
+Ablation Analysis. For our GenMed-Full , we adopt the smooth update formulation defined in Eq. 7, in which the update strength is controlled by the hyperparameter η and has a significant impact on model performance. To investigate this effect, we conduct an ablation study on different values of η under the Missing middle 16 frames setting from Ta-7
+
+Table II: Zero-shot cross-domain segmentation. 
+
+Methods Myo LV LA RA RV Average Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑
+
+Cross-domain: CT training set → MRI test set 
+
+(a) nnU-Net [12] 26.89 28.38 45.95 19.39 41.96 19.34 31.33 13.69 30.18 16.34 35.26 19.42 SwinUNETR [65] 22.49 25.33 37.41 16.02 40.63 17.86 31.00 13.26 30.02 15.32 32.31 17.56 
+
+(b) Registration Atlas [28] 31.70 34.53 42.01 24.88 50.71 27.71 43.05 29.92 39.72 23.55 41.44 28.12 
+
+(c) Input-Cond Diffusion [13] 14.09 14.56 48.60 37.04 41.35 22.60 38.93 27.47 16.55 16.82 31.90 23.70 
+
+(d) GenMed-Naive (Ours) 46.43 24.80 61.59 30.55 70.42 38.13 69.14 33.14 51.79 21.08 59.22 29.54 
+
+GenMed-Full (Ours) 47.26 28.40 62.00 31.19 70.37 38.58 65.76 32.73 54.17 21.70 59.91 30.52 
+
+Cross-domain: MRI training set → CT test set 
+
+(a) nnU-Net [12] 25.03 30.29 47.54 20.01 56.74 24.12 52.59 21.85 48.46 18.22 46.07 22.90 SwinUNETR [65] 24.06 28.03 51.22 23.58 45.23 17.86 42.88 17.97 48.93 20.45 42.46 21.58 
+
+(b) Registration Atlas [28] 32.44 32.61 51.43 23.30 52.76 23.18 51.26 26.25 40.43 23.06 45.67 25.68 
+
+(c) Input-Cond Diffusion [13] 46.52 20.84 41.53 11.84 67.41 18.54 66.62 18.21 16.25 4.91 47.67 14.87 
+
+(d) GenMed-Naive (Ours) 54.24 33.72 72.22 36.97 61.90 21.58 69.14 32.06 61.49 27.78 63.80 30.42 
+
+GenMed-Full (Ours) 54.08 34.15 73.43 40.40 61.65 21.13 69.27 32.34 61.81 28.71 64.05 31.34 
+
+Table III: Few-shot segmentation. 
+
+Methods Myo LV LA RA RV Average Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑
+
+2-shot CT training set → CT test set 
+
+(a) nnU-Net [12] 26.09 33.54 49.66 16.93 69.70 42.22 39.16 21.94 50.17 15.83 46.96 26.09 SwinUNETR [65] NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN 
+
+(b) Registration Atlas [28] 44.29 39.16 58.83 13.85 67.99 31.68 61.83 33.45 59.83 32.70 58.55 30.17 
+
+(c) Input-Cond Diffusion [13] 38.26 39.59 38.31 24.22 49.05 33.38 50.91 25.70 29.31 19.08 41.17 28.39 
+
+(d) GenMed-Naive (Ours) 70.30 58.45 80.86 59.60 82.39 45.30 78.01 58.42 77.08 55.88 77.73 55.53 
+
+GenMed-Full (Ours) 70.03 61.29 83.73 61.11 80.17 44.91 77.59 55.16 76.84 57.27 77.67 55.95 
+
+4-shot CT training set → CT test set 
+
+(a) nnU-Net [12] 35.35 31.13 60.25 18.71 71.78 31.14 40.40 16.29 64.39 40.73 54.43 27.60 SwinUNETR [65] NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN 
+
+(b) Registration Atlas [28] 49.61 41.69 61.03 34.53 71.21 35.72 58.01 39.12 65.95 33.88 61.16 36.99 
+
+(c) Input-Cond Diffusion [13] 43.32 40.74 38.49 24.55 62.80 38.74 51.05 25.59 28.65 19.34 44.86 29.79 
+
+(d) GenMed-Naive (Ours) 72.05 53.21 83.07 56.69 86.72 44.40 74.56 41.35 79.50 55.69 79.18 50.27 
+
+GenMed-Full (Ours) 70.36 51.66 82.95 61.74 86.06 54.39 75.57 49.22 81.42 59.38 79.27 55.28 
+
+2-shot MRI training set → MRI test set 
+
+(a) nnU-Net [12] 25.95 27.15 23.63 13.68 35.33 16.32 37.52 18.47 13.16 12.73 27.12 17.67 SwinUNETR [65] NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN 
+
+(b) Registration Atlas [28] 33.74 35.17 40.24 25.99 51.59 28.73 61.10 33.63 38.38 23.38 45.01 29.38 
+
+(c) Input-Cond Diffusion [13] 45.39 44.72 7.90 6.97 61.35 36.69 56.13 33.71 22.43 17.91 38.64 28.00 
+
+(d) GenMed-Naive (Ours) 49.56 42.06 57.48 24.71 61.05 28.52 64.59 30.19 51.26 34.55 56.79 32.01 
+
+GenMed-Full (Ours) 47.64 33.38 58.41 26.42 69.13 28.15 57.54 36.92 54.43 38.39 57.43 32.65 
+
+4-shot MRI training set → MRI test set 
+
+(a) nnU-Net [12] 33.12 32.30 48.79 25.47 55.48 26.19 41.42 19.53 31.78 19.57 42.12 24.61 SwinUNETR [65] NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN 
+
+(b) Registration Atlas [28] 47.88 43.62 49.24 24.56 59.99 30.42 65.89 35.18 49.78 28.41 54.56 32.44 
+
+(c) Input-Cond Diffusion [13] 49.19 44.88 20.64 16.48 65.81 35.22 55.19 33.74 9.44 17.09 40.06 29.48 
+
+(d) GenMed-Naive (Ours) 54.34 48.42 69.69 39.43 72.09 44.78 75.92 48.09 63.22 41.46 67.05 44.44 
+
+GenMed-Full (Ours) 55.07 53.76 72.53 40.32 73.67 46.64 73.76 46.61 61.11 40.84 67.23 45.64 
+
+ble IV, with the resulting segmentation performance reported in Table V. As shown, a small value (e.g., η = 0 .5) provides insufficient guidance for effective updates, whereas a large value (e.g., η = 5 ) tends to destabilize the model and lead to performance degradation. Based on these results, we select 
+
+η = 1 .5 as a suitable trade-off that ensures both stable and effective updates. 
+
+Discussion. Under standard and few-shot settings, GenMed-Naive and GenMed-Full outperform the other methods while performing similarly. However, in the more challenging sce-narios, they also do better than the baselines but the more sophisticated guidance mechanism GenMed-Full gives an edge over GenMed-Naive . An explanation is that, under easier conditions, the modeling of the joint distribution suffices to surpass the baselines while, under more difficult ones, careful guidance is also required. 
+
+B. Operating in Latent Space for Shape Completion 
+
+Unlike segmentation, 3D shape completion involves dense representations with prohibitive dimensionality, which ne-cessitates the use of auxiliary encoders and decoders for compression and recovery to improve both robustness and computational efficiency. We therefore validate the latent space approach of Section III-B for the purpose of shape completion in a diverse set of medical 3D shapes [9]. In this context, X
+
+denotes the latent feature representing a partial shape encoded 8
+
+Table IV: Segmentation Using Degraded Inputs. 
+
+Methods Myo LV LA RA RV Average Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑
+
+Resolution 8 × 8 × 8
+
+nnU-Net [12] 57.09 52.03 58.50 39.07 74.14 42.88 68.82 44.48 77.85 53.33 67.28 46.36 SwinUNETR [65] 59.10 52.50 59.54 43.82 74.13 44.10 67.00 42.54 78.08 54.72 67.57 47.54 
+
+GenMed-Naive (Ours) 18.54 20.51 1.93 1.22 24.21 11.54 26.86 15.06 4.70 3.89 15.25 10.44 
+
+GenMed-Full (Ours) 69.17 64.99 66.44 50.21 81.93 58.80 77.06 57.76 81.09 60.32 75.14 58.42 
+
+Missing middle 8 frames 
+
+nnU-Net [12] 75.76 78.32 61.40 50.04 84.86 73.99 83.89 74.67 83.41 68.84 77.87 69.17 SwinUNETR [65] 78.95 81.67 72.23 64.11 87.91 79.85 82.39 72.61 82.84 66.53 80.86 72.95 
+
+GenMed-Naive (Ours) 82.41 87.14 75.51 71.03 89.74 85.08 85.83 79.08 87.70 79.71 84.24 80.41 
+
+GenMed-Full (Ours) 84.05 89.63 76.59 73.42 90.86 87.87 86.62 82.25 88.11 81.16 85.25 82.87 
+
+Missing middle 16 frames 
+
+nnU-Net [12] 67.82 69.87 40.85 25.29 81.05 66.10 81.35 69.06 70.56 45.15 68.33 55.09 SwinUNETR [65] 68.76 69.41 56.96 40.22 81.67 67.04 76.86 62.13 73.01 47.17 71.45 57.20 
+
+GenMed-Naive (Ours) 79.50 82.50 71.26 60.88 87.72 80.07 84.33 75.73 84.91 72.47 81.54 74.33 
+
+GenMed-Full (Ours) 83.62 88.98 76.93 73.92 90.51 87.34 84.32 77.37 85.84 75.41 84.24 80.60 
+
+Missing middle 32 frames 
+
+nnU-Net [12] 43.68 42.33 27.37 9.33 62.14 38.92 67.48 46.83 52.51 21.88 50.64 31.86 SwinUNETR [65] 36.53 35.20 26.77 13.55 50.36 27.04 45.61 27.19 46.04 21.91 41.06 24.98 
+
+GenMed-Naive (Ours) 59.52 60.07 53.59 37.04 71.06 55.33 68.52 53.24 69.10 48.20 64.36 50.78 
+
+GenMed-Full (Ours) 67.35 67.15 57.24 40.21 78.29 61.64 76.74 64.01 73.51 52.04 70.63 57.01 
+
+8 Slices only 
+
+nnU-Net [12] 35.60 35.38 56.49 36.14 60.44 21.24 58.75 26.15 69.45 37.07 56.15 31.20 SwinUNETR [65] 40.44 36.49 58.37 37.61 62.37 25.09 67.49 39.29 76.12 46.98 60.96 37.09 
+
+GenMed-Naive (Ours) 34.51 35.45 19.32 13.17 45.34 25.86 45.56 26.27 26.69 18.03 34.29 23.76 
+
+GenMed-Full (Ours) 53.29 41.58 61.92 39.53 73.38 33.49 68.62 33.84 79.29 53.58 67.30 40.40 
+
+16 Slices only 
+
+nnU-Net [12] 65.59 57.70 71.32 60.88 80.23 51.45 77.19 54.17 83.30 65.73 75.53 57.98 SwinUNETR [65] 67.13 59.78 72.41 62.73 80.85 54.19 80.72 65.84 85.50 71.95 77.32 62.90 
+
+GenMed-Naive (Ours) 61.75 62.99 51.29 43.20 71.31 57.93 69.32 53.77 60.54 50.61 62.84 53.70 
+
+GenMed-Full (Ours) 76.68 78.73 73.51 66.30 86.82 74.61 82.77 70.88 87.01 76.94 81.36 73.49 
+
+Table V: Ablation results under different values of η for defect segmentation. 
+
+η Myo LV LA RA RV Average Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑ Dice ↑ NSD ↑
+
+0.5 81.97 85.97 72.88 63.90 89.58 83.68 60.13 79.77 86.22 75.56 78.15 77.77 1.0 81.75 85.63 72.35 63.31 89.22 82.97 85.84 79.96 85.21 72.59 82.87 76.89 1.5 83.62 88.98 76.93 73.92 90.51 87.34 84.32 77.37 85.84 75.41 84.24 80.60 
+
+2.0 80.12 82.74 70.73 59.99 88.60 79.56 83.39 74.62 82.92 65.99 81.15 72.58 5.0 63.23 39.72 58.60 32.08 83.53 38.18 58.69 34.65 79.29 54.67 68.66 39.86 
+
+via a Signed Distance Function (SDF), Y corresponds to the latent feature of the missing region, and D∗ represents the observed partial SDF. Because shapes are represented in the explicit space rather than the implicit one, we need to use a decoder, D = Dec( X), to reconstruct the full SDF before computing the loss and back-propagating gradients using Eq. 10. 
+
+Baselines. We benchmark representative open-source 3D shape diffusion frameworks spanning two paradigms: dense voxelised SDF on regular grids (SDFusion [39], Diffusion-SDF [40]) and octree-based adaptive latent representations (OctFusion [41]). Building upon these frameworks, we con-structed strong baselines tailored for medical shape generation. Further details on shape representations and architecture are deferred to Appendix B2a. Fixing the baseline architecture and representation, we then compare two families of guidance methods against ours: 
+
+• Classifier-Free Guidance (CFG). We consider two groups of variants: (i) different guidance schedules [52] – Con-stant, Linear, and Exponential; and (ii) modifications to the CFG update rule, including APG [53], Rectified-CFG++ [54], and CFG-Zero ⋆ [55]. 
+
+• Input Conditioning . The conditioning signal is explicitly provided during training to directly model P (Y | X),and is fed into the model as part of its input at inference time [42], [43]. 
+
+Metrics. For evaluation purposes, we adopt two classes of metrics. Shape generation quality is measured by Minimum Matching Distance (MMD), Coverage (COV), and 1-Nearest-Neighbour Accuracy (1-NN), which together assess distri-butional fidelity and diversity. Shape completion quality is measured by the Dice Coefficient (Dice), Chamfer Distance (CD), and Unidirectional Hausdorff Distance (UHD), captur-ing overlap, average geometric error, and worst-case deviation, respectively. 
+
+Datasets. We employ two datasets. The first evaluates baseline 9
+
+performance: the cleaned MedShapeNet [9], comprising 139 categories (22 instruments) and 68,754 samples (97 instru-ments), split 4:1 into 54,947 training and 13,807 testing sam-ples. The second assesses zero-shot generalization on unseen, non-fine-tuned data: 100 cases of 3D eyeball shapes from the Fundus2Globe dataset [76], derived from the Zhongshan Oph-thalmic Center–Brien Holden Vision Institute (ZOC-BHVI) Guangzhou High Myopia Cohort Study. Further details of both datasets are provided in Appendix B1. Table VI: Shape Generation and Different Guidance Strate-gies for Shape Completion under Diverse Prompts. Group 1 evaluates multi-category shape generation on MedShapeNet; Group 2 compares different guidance strategies for shape com-pletion under multi-plane prompts based on the best frame-work from Group 1; Group 3 focuses on shape completion across various corruption prompts (% values).                                                                                 
+
+> Type Method MMD ↓COV ↑1-NN ↓
+> Text-only SDFusion [39] 2.07 52.33 70.44 Diffusion-SDF [40] 3.19 41.05 83.49 OctFusion [41] 8.75 24.14 87.56
+> GenMed-Base (Ours) 1.16 52.80 66.24
+> Comparison of Multi-Plane Prompt Generation Strategies Dice ↑CD ↓UHD ↓
+> CFG Constant [52] 61.19 0.67 13.92 Linear Schedule [52] 55.33 1.94 19.02 Exponential Schedule [52] 63.26 0.55 12.42 APG [53] 63.92 0.59 12.94 Rectified-CFG++ [54] 56.93 1.04 14.60 CFG-Zero ⋆[55] 54.44 2.15 17.96 Input Conditioning [42], [43] 67.66 0.21 12.32
+> GenMed (Ours) 75.94 0.75 10.16
+> Shape Completion across Different Visual Prompts Dice ↑CD ↓UHD ↓
+> Input Conditioning [42], [43] Broken 69.22 0.21 12.98 Oneplane 42.63 2.77 23.10 Triplane 49.91 2.31 21.29 Multiplane 67.66 0.21 12.32 Random 35.11 3.86 27.91
+> GenMed (Ours) Broken 84.19 0.13 10.40 Oneplane 51.18 2.08 21.11 Triplane 69.74 1.02 14.01 Multiplane 75.94 0.75 10.16 Random 53.26 1.61 18.87
+
+Comparative Results. We first compare various shape rep-resentations and architectures on medical shape generation under text-only conditioning to motivate our design, denoted 
+
+GenMed-Base . We then evaluate GenMed on shape com-pletion, comparing different Classifier-Free Guidance (CFG) strategies and input conditioning schemes across various set-tings. 
+
+Shape Generation: Table VI Group 1. The first group of text-only experiments demonstrates the architectural effective-ness of GenMed-Base for medical shape generation. We adopt dense voxelised SDF on regular grids [39], [40] rather than octree-based adaptive latent representations [41], and introduce architectural modifications tailored to the characteristics of medical shapes. This design yields shapes with higher fidelity to the ground truth, more comprehensively covers the diversity of real shape modes, and produces a generated distribution more consistent with the real medical shape distribution. 
+
+Shape Completion: Table VI Group 2. Building upon the text conditioning setup, we further evaluate how different modeling paradigms affect guidance effectiveness. We first adopt the Multiplane setting, in which only a limited number of slices are available as the prompt, and the model is required to recover the corresponding complete target shape. The results are reported in the second group of Table VI. An interesting observation is that, despite trying a range of CFG variants and performing a hyperparameter search (see Appendix B4), CFG-based guidance tends to underperform direct Input Con-ditioning in our setting. A possible explanation is that CFG was designed for weak, semantic-level conditions such as text, where amplifying the conditional direction helps alignment. Shape prompts like multi-plane masks instead impose dense, voxel-level geometric constraints that already tightly restrict the generation space, leaving little room for further guidance. In this regime, extrapolation along the conditional direction may push samples off the geometric manifold, producing distortions that remain visually plausible but are penalised by Dice, CD, and UHD. In contrast, our GenMed naturally adapts to such dense visual corruption prompts. 
+
+Diverse Corruptions: Table VI Group 3. Building on the previous observation, the third group of Table VI focuses on a direct comparison between GenMed and Input Conditioning under a range of clinically motivated incomplete inputs. In real clinical scenarios, data corruption is often unpredictable and may arise from factors such as acquisition devices or storage issues, leading to diverse and stochastic degradation patterns. To reflect this, we consider Broken (randomly missing regions) as well as more extreme cases in which only a limited number of slices are available, namely Oneplane , Triplane , and 
+
+Multiplane . Moreover, the available prompt is not restricted to a single form and may consist of several types combined together. To capture such realistic conditions, we additionally evaluate a Random setting, in which prompt combinations are sampled stochastically across the different corruption types. The results show that GenMed learns an effective shape prior and remains robust across diverse and stochastic corruption prompts, including the highly challenging Oneplane setting where only a single slice is available. Fig. 4 visualises shape completion across organs of increasing structural complexity, covering Broken shapes and limited-frame prompts ( Oneplane ,
+
+Triplane , and Multiplane ). The first row shows the original shapes, used as ground truth for the metrics in Table VI. The second row illustrates the corruption patterns: for Broken , clin-ical device errors or segmentation artefacts may cause missing or redundant regions (highlighted in purple); the remaining columns show frame-based prompts as small front, left, and top views. The third and fourth rows give the completion results of Input Conditioning and GenMed (Ours). Under Bro-ken , both methods largely preserve the global structure thanks to learned shape priors, but GenMed recovers finer boundary details that align more closely with the blue ground truth. Under limited-frame prompts, Input Conditioning struggles to cover all corruption patterns at training time and often fails to match the expected contours; in contrast, GenMed consistently generates shapes that adhere closely to the desired completion boundaries. 
+
+Zero-Shot Shape Completion: Table VII. We further conduct zero-shot generation experiments on a new domain. As shown in Table VII, by applying control optimisation 10 Original  Shape Defect Prompts Input Conditioning Ours    
+
+> Broken Oneplane Triplane Multiplane
+
+Figure 4: Visualization of shape completion under different visual prompts. Compared with input conditioning, GenMed 
+
+produces completions that align more closely with the blue ground-truth boundaries across organs and tissues of increasing structural complexity (e.g., eyeball, urinary bladder, heart, and bone). at the output stage, GenMed reduces the reliance on large-scale training data and consistently outperforms the Input Conditioning baseline. Fig. 5 visualises the inference results on a new eyeball dataset without any fine-tuning, where we observe trends consistent with Fig. 4: under Broken , where only coarse structural cues are provided, GenMed produces shapes that more closely match the ground truth, and under different frame-based prompts it likewise yields more stable and accurate completions. Table VII: Zero-Shot of Different Guidance Strategies under Diverse Prompts on Eyeball Data (% values).                                                                                     
+
+> Methods Setting Eyeball Left Eyeball Right Average
+> Dice ↑CD ↓UHD ↓Dice ↑CD ↓UHD ↓Dice ↑CD ↓UHD ↓
+> Input Conditioning Oneplane 83.76 0.84 15.59 82.81 0.89 15.84 83.29 0.87 15.71 Triplane 86.41 0.65 14.50 87.06 0.62 14.08 86.74 0.64 14.29 Multiplane 94.06 0.27 14.60 93.97 0.28 13.20 94.02 0.28 13.90 Broken 94.57 0.28 16.15 94.55 0.28 15.35 94.56 0.28 15.75
+> GenMed
+> (Ours) Oneplane 87.55 0.68 14.25 87.84 0.66 15.03 87.70 0.67 14.64 Triplane 95.65 0.26 9.24 95.45 0.26 9.66 95.55 0.26 9.45 Multiplane 98.15 0.19 6.60 98.21 0.19 6.45 98.18 0.19 6.53 Broken 98.13 0.20 10.15 98.17 0.19 8.76 98.15 0.19 9.45
+
+Ablation Analysis. In this section, we ablate the key hy-perparameters of our framework. We adopt DDIM sampling with 20 steps to achieve efficient inference. We study the update strength η in Eq. 6 and the guidance interval, where the number of effective guidance applications equals the total number of DDIM steps divided by the interval. As shown in Tab. VIII, increasing the interval reduces the number of guidance updates, lowering runtime at the cost of reconstruc-tion quality. Specifically, as the interval increases from 1 to 4, the runtime drops from 4.00 s to 1.57 s, while the best Dice score falls from 83.65 to 70.57, and distance-based metrics Table VIII: Frequency and Scale for Shape Completion. 
+
+Scale Dice ↑ CD ↓ UHD ↓
+
+Interval = 1, Time = 4.00 s 
+
+0.5 75.81 0.75 9.96 0.7 80.82 0.49 8.51 
+
+1.0 83.18 0.33 8.58 1.3 83.61 0.25 8.97 1.5 83.65 0.23 9.34 2.0 83.09 0.21 10.17 5.0 79.12 0.21 15.19 
+
+Interval = 2, Time = 2.73 s 
+
+0.5 57.79 1.68 16.60 0.7 64.98 1.37 14.13 1.0 72.67 0.95 11.30 1.3 76.94 0.79 9.84 1.5 78.72 0.66 9.29 2.0 80.21 0.57 9.22 
+
+5.0 76.98 0.37 11.93 
+
+Interval = 4, Time = 1.57 s 
+
+0.5 45.20 2.56 21.43 0.7 48.70 2.43 20.40 1.0 53.47 2.18 18.86 1.3 57.57 1.96 17.49 1.5 60.02 1.85 16.80 2.0 64.80 1.65 15.17 5.0 70.57 1.26 13.14 
+
+degrade accordingly (best CD from 0.21 to 1.26; best UHD from ∼8.5 to 13.14). These results reveal a clear trade-off between efficiency and performance. We also observe that the optimal η is strongly coupled with the interval: as guidance is applied less frequently, a larger update strength is needed to compensate, with the optimal η increasing from 1.5 at interval 
+
+= 1 to 2.0 at interval = 2 , and further to 5.0 at interval = 4 .11 Original  Shape Defect Prompts Input Conditioning Ours    
+
+> Broken Oneplane Triplane Multiplane
+
+Figure 5: Zero-shot shape completion on 3D eyeball under different defect prompts. GenMed aligns more closely with the blue ground truth than Input Conditioning. We further introduce a recurrent guidance mechanism [77], [78], in which the denoising trajectory is repeated multiple times at each guided timestep before advancing to the next step. As shown in Tab. IX, we select recurrent = 2 as a favorable trade-off between runtime and performance. It is worth noting that all guidance strategies compared in this section share the same model architecture and thus incur identical memory costs. Further implementation details are provided in Appendix Sec. B. Table IX: Recurrent Steps for Shape Completion.                     
+
+> Recurrent Time (s) Dice ↑CD ↓UHD ↓
+> 14.00 83.65 0.23 9.34
+> 26.00 84.19 0.13 10.40 412.63 84.57 0.15 11.80 619.08 84.55 0.21 13.93
+
+Discussion. We compared the approach of GenMed against classifier free guidance and input guidance. We also attempted to benchmark alternative loss-guidance paradigms, but found that these methods are tightly coupled to specific diffusion for-mulations and architectural choices, making a fair comparison difficult. For example, we tried adapting D-Flow [62] to the shape completion task. However, its requirement of LBFGS-based optimization over the initial noise made it computation-ally intractable within a practical wall-clock budget. More-over, the cosine schedule and ε-prediction parameterization in our framework caused the back-propagation chain to become numerically unstable, leading directly to divergence. Despite the technical differences among these guidance approaches, they all steer the output generation conditioned on a fixed 
+
+input signal, leaving the model’s fundamental input-output contract unchanged. We view such loss-guidance designs as orthogonal and complementary to our pairwise modeling of 
+
+P (X, Y ), rather than competing with it; a stronger guidance scheme would inherently translate to improved performance for our framework as well. We therefore do not include a direct empirical comparison against this class of methods. 
+
+C. Joint Framework for Diagnostic Applications 
+
+The proposed paradigm GenMed supports both image seg-mentation and shape completion. We integrate these two tasks into a single pipeline, enabling end-to-end transformation from raw imaging data to the final reconstructed shape. This demonstrates the applicability of our framework to clinical diagnostic workflows. Built upon the unified pairwise mod-eling paradigm in Sec. III-A, the framework adopts a two-stage design. In the first stage, the segmentation model from Sec. III-A3 converts CT scans into volumetric masks, which remains robust to corrupted or incomplete imaging data. In the second stage, shape completion is performed in the latent space (Sec. III-B) to recover the complete anatomical structure from the segmented shape. 
+
+Datasets. Our pipeline consists of two stages: segmentation and shape completion. For evaluation, we use KiTS23 [79], which contains 599 contrast-enhanced abdominal CT scans with semantic annotations, from which we extract the left kidney label of each case. CT intensities are clipped to 
+
+[−250 , 450] HU and rescaled to [−1, 1] . To better reflect real clinical scenarios, we evaluate under degraded CT inputs covering three challenging cases: highly incomplete volumes containing only 4 slices, less severely corrupted volumes containing 8 slices, and a low-resolution setting in which the input is resampled from 64 × 64 × 64 voxels to 8 × 8 × 812 Segmentation Completion Target  
+
+> Low Resolution 4 Slices 8 Slices
+
+Figure 6: Visualization of Different Stages under Different Degradations. Rows 1-2 (green) show the segmentation results and the refined outputs after shape completion; row 3 (blue) shows the corresponding ground-truth shapes. Table X: Effect of Shape Completion under Different Degradations. We report the Dice (%) for segmentation and shape completion stages 
+
+Degradation Segmentation Shape Completion Gain 4 Slices 50.22 64.16 +13.94 8 Slices 65.49 69.50 +4.01 Low Resolution 38.95 50.11 +11.16 
+
+voxels. The 489 training cases are randomly split (seed = 23) into 391 training, 49 validation, and 49 test cases. For the shape completion stage, we directly adopt the pre-trained shape priors from MedShapeNet [9] described in Sec. IV-B. Since KiTS23 is independent of the dataset used to train the shape completion model, data leakage is avoided. Further implementation details can be found in Appendix Sec. C. 
+
+Results. Table X illustrates the respective roles and contribu-tions of the two stages (segmentation and shape completion.) in our framework for diagnostic applications. Even under the highly challenging 4 Slices setting, the first-stage segmentation model still achieves a Dice score of 50.22%, indicating that it can provide a reasonable coarse estimate from extremely limited input data. At the same time, the second-stage shape completion is an essential component of the overall pipeline. For example, in the Low Resolution setting, although the segmentation result is still limited in accuracy, applying shape completion with our framework and the pretrained shape prior leads to a substantial improvement, yielding a gain of 11.16 Dice points. More broadly, the results suggest that for more challenging degradation settings, such as 4 Slices and Low Resolution , the first-stage segmentation performance tends to deteriorate more noticeably, while the subsequent shape completion stage provides larger improvements by leveraging the pretrained shape prior. Fig. 6 visualizes the two-stage diagnostic pipeline in our unified framework under degraded CT inputs. As shown, under severe degradation settings such as 4 Slices and Low Resolution , the segmentation stage can only recover the anatomically visible regions from the limited imaging evidence, often producing underestimated shapes and failing to preserve the full organ geometry. In contrast, the second-stage shape completion leverages the pretrained shape prior to effectively correct these incomplete segmentation results, compensating for the lack of global shape awareness caused by corrupted or insufficient observations. V. C ONCLUSION 
+
+We presented GenMed , a generative reformulation of dis-criminative medical tasks. By modeling the joint distribution 
+
+p(X, Y ) through a diffusion-based framework and applying test-time output optimization, GenMed shifts the paradigm from input conditioning to output-level guidance. This enables flexible, training-free adaptation to real-world clinical scenar-ios involving partial, noisy, low-resolution, or modality-shifted inputs—settings where traditional discriminative or prompt-based models often fail, especially in the absence of extensive data and augmentation. Our experiments demonstrate strong performance on standard settings and highlight GenMed’s unique ability to generalize across tasks and observation types without task-specific retraining. Furthermore, we establish its utility as a general-purpose medical shape prior, capable of unified shape completion from diverse and even unseen observation forms. Beyond its practical utility, our generative perspective enables models to treat data not as static inputs but as partial observations of an underlying reality. We believe this shift opens promising avenues for more flexible and general-izable medical AI systems, and the framework readily extends to other domains, as demonstrated in Appendix Sec. D. REFERENCES [1] E. J. Topol, “High-performance medicine: the convergence of human and artificial intelligence,” Nature medicine , vol. 25, no. 1, pp. 44–56, 2019. [2] M. Moor, O. Banerjee, Z. S. H. Abad, H. M. Krumholz, J. Leskovec, E. J. Topol, and P. Rajpurkar, “Foundation models for generalist medical artificial intelligence,” Nature , vol. 616, no. 7956, pp. 259–265, 2023. [3] J. Jeong, S. Kim, L. Pan, D. Hwang, D. Kim, J. Choi, Y. Kwon, P. Yi, J. Jeong, and S.-J. Yoo, “Reducing the workload of medical diagnosis through artificial intelligence: A narrative review,” Medicine , vol. 104, no. 6, p. e41470, 2025. 13 
+
+[4] J. Wang, Z. Zeng, Z. Li, G. Liu, S. Zhang, C. Luo, S. Hu, S. Wan, and L. Zhao, “The clinical application of artificial intelligence in cancer precision treatment,” Journal of Translational Medicine , vol. 23, no. 1, p. 120, 2025. [5] E. U. Alum, “Ai-driven biomarker discovery: enhancing precision in cancer diagnosis and prognosis,” Discover oncology , vol. 16, no. 1, p. 313, 2025. [6] Q. Song, J. Bai, M. K. Garvin, M. Sonka, J. M. Buatti, and X. Wu, “Optimal multiple surface segmentation with shape and context priors,” 
+
+IEEE transactions on medical imaging , vol. 32, no. 2, pp. 376–386, 2012. [7] J. Zhu, B. Bolsterlee, Y. Song, and E. Meijering, “Improving cross-domain generalizability of medical image segmentation using uncer-tainty and shape-aware continual test-time domain adaptation,” Medical Image Analysis , vol. 101, p. 103422, 2025. [8] H. Zhang, W. Guo, S. Wan, B. Zou, W. Wang, C. Qiu, K. Liu, P. Jin, and J. Yang, “Tuning vision foundation models for rectal cancer segmentation from ct scans,” Communications Medicine , vol. 5, no. 1, p. 256, 2025. [9] J. Li, Z. Zhou, J. Yang, A. Pepe, C. Gsaxner, G. Luijten, C. Qu, T. Zhang, X. Chen, W. Li et al. , “Medshapenet–a large-scale dataset of 3d medical shapes for computer vision,” Biomedical Engineering/Biomedizinische Technik , vol. 70, no. 1, pp. 71–90, 2025. [10] J. Liu, Y. Zhang, J.-N. Chen, J. Xiao, Y. Lu, B. A Landman, Y. Yuan, A. Yuille, Y. Tang, and Z. Zhou, “Clip-driven universal model for organ segmentation and tumor detection,” in Proceedings of the IEEE/CVF international conference on computer vision , 2023, pp. 21 152–21 164. [11] K. Xie, Y. Zhu, K. Kuang, L. Zhang, H. B. Li, M. Gao, and J. Yang, “Template-guided reconstruction of pulmonary segments with neural implicit functions,” Medical Image Analysis , p. 103916, 2025. [12] F. Isensee, P. F. Jaeger, S. A. Kohl, J. Petersen, and K. H. Maier-Hein, “nnu-net: a self-configuring method for deep learning-based biomedical image segmentation,” Nature methods , vol. 18, no. 2, pp. 203–211, 2021. [13] J. Wu, W. Ji, H. Fu, M. Xu, Y. Jin, and Y. Xu, “Medsegdiff-v2: Diffusion-based medical image segmentation with transformer,” in Proceedings of the AAAI conference on artificial intelligence , vol. 38, no. 6, 2024, pp. 6030–6038. [14] J. Yang, “Multi-task learning for medical foundation models,” Nature Computational Science , vol. 4, no. 7, pp. 473–474, 2024. [15] A. Kirillov, E. Mintun, N. Ravi, H. Mao, C. Rolland, L. Gustafson, T. Xiao, S. Whitehead, A. C. Berg, W.-Y. Lo et al. , “Segment anything,” in Conference on Computer Vision and Pattern Recognition , 2023, pp. 4015–4026. [16] J. Ma, Y. He, F. Li, L. Han, C. You, and B. Wang, “Segment anything in medical images,” Nature Communications , vol. 15, no. 1, p. 654, 2024. [17] J. Ho, A. Jain, and P. Abbeel, “Denoising diffusion probabilistic models,” 
+
+Advances in Neural Information Processing Systems , vol. 33, pp. 6840– 6851, 2020. [18] R. Rombach, A. Blattmann, D. Lorenz, P. Esser, and B. Ommer, “High-resolution image synthesis with latent diffusion models,” in Conference on Computer Vision and Pattern Recognition , 2022, pp. 10 684–10 695. [19] B. Sauvalle and M. Salzmann, “Hybrid diffusion models: combining supervised and generative pretraining for label-efficient fine-tuning of segmentation models,” arXiv preprint arXiv:2408.03433 , 2024. [20] X. Li, C. Herrmann, K. C. Chan, Y. Li, D. Sun, C. Ma, and M.-H. Yang, “A simple approach to unifying diffusion-based conditional generation,” in International Conference on Learning Representations , 2025. [21] H. Zhang, Y. Liu, J. Yang, W. Guo, X. Wang, and P. Fua, “DiffAtlas: Genai-Fying Atlas Segmentation via Image-Mask Diffusion,” in Confer-ence on Medical Image Computing and Computer Assisted Intervention ,2025. [22] E. Polverino, P. C. Goeminne, M. J. McDonnell, S. Aliberti, S. E. Mar-shall, M. R. Loebinger, M. Murris, R. Cant´ on, A. Torres, K. Dimakou 
+
+et al. , “European respiratory society guidelines for the management of adult bronchiectasis,” European Respiratory Journal , vol. 50, no. 3, 2017. [23] O. Ronneberger, P. Fischer, and T. Brox, “U-net: Convolutional networks for biomedical image segmentation,” in Medical image computing and computer-assisted intervention–MICCAI 2015: 18th international con-ference, Munich, Germany, October 5-9, 2015, proceedings, part III 18 .Springer, 2015, pp. 234–241. [24] H. Wang, P. Cao, J. Wang, and O. R. Zaiane, “Uctransnet: rethinking the skip connections in u-net from a channel-wise perspective with trans-former,” in Proceedings of the AAAI conference on artificial intelligence ,vol. 36, no. 3, 2022, pp. 2441–2449. [25] D. T. Kushnure and S. N. Talbar, “Ms-unet: A multi-scale unet with fea-ture recalibration approach for automatic liver and tumor segmentation in ct images,” Computerized Medical Imaging and Graphics , vol. 89, p. 101885, 2021. [26] D. Nie and D. Shen, “Adversarial confidence learning for medical image segmentation and synthesis,” International journal of computer vision ,vol. 128, no. 10, pp. 2494–2513, 2020. [27] R. Feng, X. Zheng, T. Gao, J. Chen, W. Wang, D. Z. Chen, and J. Wu, “Interactive few-shot learning: Limited supervision, better medical im-age segmentation,” IEEE Transactions on Medical Imaging , vol. 40, no. 10, pp. 2575–2588, 2021. [28] W. Ding, L. Li, X. Zhuang, and L. Huang, “Cross-modality multi-atlas segmentation via deep registration and label fusion,” IEEE Journal of Biomedical and Health Informatics , vol. 26, no. 7, pp. 3104–3115, 2022. [29] Z. Kus ¸ and M. Aydin, “Medsegbench: A comprehensive benchmark for medical image segmentation in diverse data modalities,” Scientific Data ,vol. 11, no. 1, p. 1283, 2024. [30] T. Chen, C. Wang, Z. Chen, Y. Lei, and H. Shan, “Hidiff: hybrid dif-fusion framework for medical image segmentation,” IEEE Transactions on Medical Imaging , 2024. [31] L. Zhang, F. Wu, K. Bronik, and B. W. Papiez, “Diffuseg: domain-driven diffusion for medical image segmentation,” IEEE Journal of Biomedical and Health Informatics , vol. 29, no. 5, pp. 3619–3631, 2025. [32] X. Zhuang, L. Li, C. Payer, D. ˇ Stern, M. Urschler, M. P. Heinrich, J. Oster, C. Wang, ¨ O. Smedby, C. Bian et al. , “Evaluation of algorithms for multi-modality whole heart segmentation: an open-access grand challenge,” Medical image analysis , vol. 58, p. 101537, 2019. [33] Y. Xie, C. Zhou, L. Gao, J. Wu, X. Li, H.-Y. Zhou, S. Liu, L. Xing, J. Zou, C. Xie et al. , “Medtrinity-25m: A large-scale multimodal dataset with multigranular annotations for medicine,” in The Thirteenth International Conference on Learning Representations , 2025. [34] S. Koitka, G. Baldini, L. Kroll, N. van Landeghem, O. B. Pollok, J. Haubold, O. Pelka, M. Kim, J. Kleesiek, F. Nensa et al. , “Saros: A dataset for whole-body region and organ segmentation in ct imaging,” 
+
+Scientific Data , vol. 11, no. 1, p. 483, 2024. [35] W. Li, C. Qu, X. Chen, P. R. Bassi, Y. Shi, Y. Lai, Q. Yu, H. Xue, Y. Chen, X. Lin et al. , “Abdomenatlas: A large-scale, detailed-annotated, & multi-center dataset for efficient transfer learning and open algorith-mic benchmarking,” Medical Image Analysis , vol. 97, p. 103285, 2024. [36] R. Azad, E. K. Aghdam, A. Rauland, Y. Jia, A. H. Avval, A. Bozorgpour, S. Karimijafarbigloo, J. P. Cohen, E. Adeli, and D. Merhof, “Medical image segmentation review: The success of u-net,” IEEE Transactions on Pattern Analysis and Machine Intelligence , 2024. [37] X. J. Chen, S. Maheswaran, D. Ruckert, and R. M. Henkelman, “Image registration of whole-body mouse mri,” in 2010 IEEE International Symposium on Biomedical Imaging: From Nano to Macro . IEEE, 2010, pp. 1063–1064. [38] W. Bai, W. Shi, A. de Marvao, T. J. Dawes, D. P. O’Regan, S. A. Cook, and D. Rueckert, “A bi-ventricular cardiac atlas built from 1000+ high resolution mr images of healthy subjects and an analysis of shape and motion,” Medical image analysis , vol. 26, no. 1, pp. 133–145, 2015. [39] Y.-C. Cheng, H.-Y. Lee, S. Tulyakov, A. G. Schwing, and L.-Y. Gui, “Sdfusion: Multimodal 3d shape completion, reconstruction, and gener-ation,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2023, pp. 4456–4465. [40] M. Li, Y. Duan, J. Zhou, and J. Lu, “Diffusion-sdf: Text-to-shape via voxelized diffusion,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2023, pp. 12 642–12 651. [41] B. Xiong, S.-T. Wei, X.-Y. Zheng, Y.-P. Cao, Z. Lian, and P.-S. Wang, “Octfusion: Octree-based diffusion models for 3d shape generation,” in 
+
+Computer Graphics Forum , vol. 44, no. 5. Wiley Online Library, 2025, p. e70198. [42] G. Zhang, J. Yang, S. Chen, A. Zhang, and Y. Li, “High-fidelity medical shape generation via skeletal latent diffusion,” arXiv preprint arXiv:2603.07504 , 2026. [43] H. Wang, Z. Liu, K. Sun, X. Wang, D. Shen, and Z. Cui, “3d meddiffusion: A 3d medical latent diffusion model for controllable and high-quality medical image generation,” IEEE Transactions on Medical Imaging , 2025. [44] R. Chen, J. Zhang, Y. Liang, G. Luo, W. Li, J. Liu, X. Li, X. Long, J. Feng, and P. Tan, “Dora: Sampling and benchmarking for 3d shape variational auto-encoders,” in Proceedings of the Computer Vision and Pattern Recognition Conference , 2025, pp. 16 251–16 261. [45] Z. Zhao, Z. Lai, Q. Lin, Y. Zhao, H. Liu, S. Yang, Y. Feng, M. Yang, S. Zhang, X. Yang et al. , “Hunyuan3d 2.0: Scaling diffusion mod-els for high resolution textured 3d assets generation,” arXiv preprint arXiv:2501.12202 , 2025. 14 
+
+[46] S. Sun, K. Han, D. Kong, H. Tang, X. Yan, and X. Xie, “Topology-preserving shape reconstruction and registration via neural diffeomor-phic flow,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2022, pp. 20 845–20 855. [47] A. X. Chang, T. Funkhouser, L. Guibas, P. Hanrahan, Q. Huang, Z. Li, S. Savarese, M. Savva, S. Song, H. Su et al. , “Shapenet: An information-rich 3d model repository,” arXiv preprint arXiv:1512.03012 , 2015. [48] M.-A. Gafencu, Y. Velikova, M. Saleh, T. Ungi, N. Navab, T. Wendler, and M. F. Azampour, “Shape completion in the dark: completing vertebrae morphology from 3d ultrasound,” International Journal of Computer Assisted Radiology and Surgery , vol. 19, no. 7, pp. 1339– 1347, 2024. [49] K. Xie, J. Yang, D. Wei, Z. Weng, and P. Fua, “Efficient anatomical la-beling of pulmonary tree structures via deep point-graph representation-based implicit fields,” Medical image analysis , vol. 99, p. 103367, 2025. [50] J. Song, C. Meng, and S. Ermon, “Denoising Diffusion Implicit Models,” in International Conference on Learning Representations , 2021. [51] Y. Lipman, R. T. Chen, H. Ben-Hamu, M. Nickel, and M. Le, “Flow Matching for Generative Modeling,” in arXiv Preprint , 2022. [52] W. Xi, N. Dufour, N. Andreou, C. Marie-Paule, V. F. Abrevaya, D. Pi-card, and V. Kalogeiton, “Analysis of classifier-free guidance weight schedulers,” Transactions on Machine Learning Research , 2024. [53] S. Sadat, O. Hilliges, and R. M. Weber, “Eliminating oversaturation and artifacts of high guidance scales in diffusion models,” in The Thirteenth International Conference on Learning Representations , 2024. [54] S. Saini, S. Gupta, and A. Bovik, “Rectified cfg++ for flow based models,” in The Thirty-ninth Annual Conference on Neural Information Processing Systems .[55] W. Fan, A. Y. Zheng, R. A. Yeh, and Z. Liu, “Cfg-zero*: Improved classifier-free guidance for flow matching models,” arXiv preprint arXiv:2503.18886 , 2025. [56] P. Dhariwal and A. Nichol, “Diffusion models beat gans on image synthesis,” Advances in neural information processing systems , vol. 34, pp. 8780–8794, 2021. [57] J. Ho and T. Salimans, “Classifier-free diffusion guidance,” arXiv preprint arXiv:2207.12598 , 2022. [58] Y. You, C. Zhao, H. Zhang, M. Xu, and P. Fua, “Physgen: Physically grounded 3d shape generation for industrial design,” arXiv preprint arXiv:2512.00422 , 2025. [59] Y. Zheng, R. Liang, K. ZHENG, J. Zheng, L. Mao, J. Li, W. Gu, R. Ai, S. E. Li, X. Zhan et al. , “Diffusion-based planning for autonomous driv-ing with flexible guidance,” in The Thirteenth International Conference on Learning Representations , 2025. [60] B. Yang, H. Su, N. Gkanatsios, T.-W. Ke, A. Jain, J. Schneider, and K. Fragkiadaki, “Diffusion-es: Gradient-free planning with diffusion for autonomous and instruction-guided driving,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2024, pp. 15 342–15 353. [61] S. Choi, S. Seo, B. J. Kim, C. Park, and S. Park, “Pidiff: Physics informed diffusion model for protein pocket-specific 3d molecular generation,” Computers in Biology and Medicine , vol. 180, p. 108865, 2024. [62] H. Ben-Hamu, O. Puny, I. Gat, B. Karrer, U. Singer, and Y. Lipman, “D-flow: Differentiating through flows for controlled generation,” arXiv preprint arXiv:2402.14017 , 2024. [63] J. Song, Q. Zhang, H. Yin, M. Mardani, M.-Y. Liu, J. Kautz, Y. Chen, and A. Vahdat, “Loss-guided diffusion models for plug-and-play con-trollable generation,” in International Conference on Machine Learning .PMLR, 2023, pp. 32 483–32 498. [64] R. Singhal, Z. Horvitz, R. Teehan, M. Ren, Z. Yu, K. McKeown, and R. Ranganath, “A general framework for inference-time scaling and steering of diffusion models,” in Forty-second International Conference on Machine Learning , 2025. [65] A. Hatamizadeh, V. Nath, Y. Tang, D. Yang, H. R. Roth, and D. Xu, “Swin unetr: Swin transformers for semantic segmentation of brain tumors in mri images,” in International MICCAI brainlesion workshop .Springer, 2021, pp. 272–284. [66] M. Gunawardhana and N. Zolek, “A comprehensive benchmarking and systematic analysis of deep learning models for sonomammogram seg-mentation,” in Medical Imaging with Deep Learning-Validation Papers ,2026. [67] J. Zhuang, L. Wu, Q. Wang, P. Fei, V. Vardhanabhuti, L. Luo, and H. Chen, “Mim: Mask in mask self-supervised pre-training for 3d medical image analysis,” IEEE transactions on medical imaging , 2025. [68] M. Vakalopoulou, G. Chassagnon, N. Bus, R. Marini, E. I. Zacharaki, M.-P. Revel, and N. Paragios, “Atlasnet: Multi-atlas non-linear deep networks for medical image segmentation,” in International Conference on Medical Image Computing and Computer-Assisted Intervention .Springer, 2018, pp. 658–666. [69] H. Huang, H. Zheng, L. Lin, M. Cai, H. Hu, Q. Zhang, Q. Chen, Y. Iwamoto, X. Han, Y.-W. Chen et al. , “Medical image segmentation with deep atlas prior,” IEEE transactions on medical imaging , vol. 40, no. 12, pp. 3519–3530, 2021. [70] H. Zhang, Y. Liu, J. Yang, W. Guo, X. Wang, and P. Fua, “Diffatlas: Genai-fying atlas segmentation via image-mask diffusion,” in Interna-tional Conference on Medical Image Computing and Computer-Assisted Intervention . Springer, 2025, pp. 161–172. [71] W. Khan, S. Leem, K. B. See, J. K. Wong, S. Zhang, and R. Fang, “A comprehensive survey of foundation models in medicine,” IEEE Reviews in Biomedical Engineering , 2025. [72] G. Jimenez-Perez, P. Os´ orio, J. Cersovsky, J. Montalt-Tordera, J. Hooge, S. Vogler, and S. Mohammadi, “Dino-diffusion: Scaling medical diffu-sion models via self-supervised pre-training,” in Annual Conference on Medical Image Understanding and Analysis . Springer, 2025, pp. 257– 274. [73] Y. Chen, Y. Liu, M. Lu, L. Fu, and F. Yang, “Multi-consistency for semi-supervised medical image segmentation via diffusion models,” Pattern Recognition , vol. 161, p. 111216, 2025. [74] L. Maier-Hein, A. Reinke, P. Godau, M. D. Tizabi, F. Buettner, E. Christodoulou, B. Glocker, F. Isensee, J. Kleesiek, M. Kozubek et al. ,“Metrics reloaded: recommendations for image analysis validation,” 
+
+Nature methods , vol. 21, no. 2, pp. 195–212, 2024. [75] DeepMind, “Surface-distance,” 2018. [Online]. Available: https://github. com/google-deepmind/surface-distance [76] D. Shi, B. Liu, Z. Tian, Y. Wu, J. Yang, R. Chen, B. Yang, O. Xiao, and M. He, “Fundus2globe: Generative ai-driven 3d digital twins for personalized myopia management,” arXiv preprint arXiv:2502.13182 ,2025. [77] H. Zhang, J. Yang, S. Wan, and P. Fua, “Lefusion: Synthesizing myocardial pathology on cardiac mri via lesion-focus diffusion models,” 
+
+arXiv e-prints , pp. arXiv–2403, 2024. [78] A. Lugmayr, M. Danelljan, A. Romero, F. Yu, R. Timofte, and L. V. Gool, “Repaint: Inpainting Using Denoising Diffusion Probabilistic Models,” in Conference on Computer Vision and Pattern Recognition ,2022, pp. 11 461–11 471. [79] N. Heller, F. Isensee, D. Trofimova, R. Tejpaul, Z. Zhao, H. Chen, L. Wang, A. Golts, D. Khapun, D. Shats et al. , “The kits21 challenge: Automatic segmentation of kidneys, renal tumors, and renal cysts in corticomedullary-phase ct,” arXiv preprint arXiv:2307.01984 , 2023. [80] N. Shazeer, A. Mirhoseini, K. Maziarz, A. Davis, Q. Le, G. Hinton, and J. Dean, “Outrageously large neural networks: The sparsely-gated mixture-of-experts layer,” arXiv preprint arXiv:1701.06538 , 2017. [81] J. Song, C. Meng, and S. Ermon, “Denoising diffusion implicit models,” 
+
+arXiv preprint arXiv:2010.02502 , 2020. [82] M. Raissi, P. Perdikaris, and G. E. Karniadakis, “Physics-informed neural networks: A deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations,” 
+
+Journal of Computational Physics , vol. 378, pp. 686–707, 2019. [Online]. Available: https://www.sciencedirect.com/science/article/pii/ S0021999118307125 [83] N. Kovachki, Z. Li, B. Liu, K. Azizzadenesheli, K. Bhattacharya, A. Stu-art, and A. Anandkumar, “Neural operator: Learning maps between function spaces with applications to pdes,” Journal of Machine Learning Research , vol. 24, no. 89, pp. 1–97, 2023. [84] Z. Li, N. Kovachki, K. Azizzadenesheli, B. Liu, K. Bhattacharya, A. Stuart, and A. Anandkumar, “Fourier neural operator for parametric partial differential equations,” 2021. [Online]. Available: https://arxiv.org/abs/2010.08895 [85] B. Raoni´ c, R. Molinaro, T. De Ryck, and G. E. Karniadakis, “Convolu-tional neural operators for robust and accurate learning of pdes,” arXiv preprint arXiv:2311.17558 , 2023. [86] L. Zhang, A. Rao, and M. Agrawala, “Adding conditional control to text-to-image diffusion models,” in Proceedings of the IEEE/CVF international conference on computer vision , 2023, pp. 3836–3847. [87] R. Tali, A. Rabeh, C.-H. Yang, M. Shadkhah, S. Karki, A. Upadhyaya, S. Dhakshinamoorthy, M. Saadati, S. Sarkar, A. Krishnamurthy, C. Hegde, A. Balu, and B. Ganapathysubramanian, “Flowbench: A large scale benchmark for flow simulation over complex geometries,” 2024. [Online]. Available: https://arxiv.org/abs/2409.18032 15 
+
+APPENDIX 
+
+A. Segmentation 
+
+For the segmentation experiments, we follow the exper-imental setup from our conference version [70], using the Adam optimizer with a learning rate of 1 × 10 −4 (β1 = 0 .9,
+
+β2 = 0 .999 ) and the L1 loss as the objective function. For the 2-shot setting, the batch size is set to 1 with approximately 10,000 training steps; for the 4-shot setting, the batch size is increased to 2 with roughly 15,000 steps; for all other experiments, the batch size is set to 12 and training proceeds for approximately 25,000 steps. 
+
+B. Shape Completion 1) Dataset Construction: We construct a 3D shape dataset of anatomical structures and medical instruments by filtering MedShapeNet. The dataset is designed to support both model training and benchmarking; therefore, we adopt widely used dataset organization and normalization practices from recent 3D shape studies, including 3DShape2VecSet and DORA. The initial collection contains 106,101 meshes spanning 303 original category names. Since category names in Med-ShapeNet may include synonyms, naming variations, or defi-nitions at different levels of granularity, we harmonize seman-tically equivalent labels into a unified taxonomy; for example, ribs are separated into twelve anatomically corresponding left/right classes. After label harmonization and mesh-level filtering, the resulting dataset contains 68,754 3D shapes across 139 categories. Among them, the instrument category includes 22 classes with 97 samples in total, while the non-instrument category includes 117 classes with 68,657 samples. For data splitting, we adopt a stratified train/test partition. The training set contains 54,947 samples, including 67 instrument samples and 54,880 non-instrument samples. The test set contains 13,807 samples, including 30 instrument samples and 13,777 non-instrument samples. Additionally, for low-frequency categories, we ensure that the test set contains at least one sample to guarantee coverage and fairness in evaluation. To standardize geometric inputs and improve reproducibility across categories, we apply a preprocessing pipeline consistent with 3DShape2VecSet and DORA. Specifically, we exclude meshes that cannot be parsed or do not form valid surfaces, retain the largest connected component when necessary, and normalize each mesh by centering and scaling it to fit within a unit cube. For methods based on implicit representations, we further provide signed distance fields (SDFs) computed from the normalized meshes. Moreover, each category is paired with a concise natural-language description (including its name, morphological characteristics, and typical anatomical location), along with a corresponding 5120-dimensional ℓ2-normalized text embedding to facilitate retrieval and condi-tional generation. 
+
+Text–Shape Pair Construction. To construct a text-shape paired dataset, we associate each category with a predefined textual description obtained from a curated mapping. These descriptions are used as prompts to guide shape generation and enable the model to learn category-level geometric priors. The basic procedure is as follows: we input each category in the dataset into ChatGPT-5.2 Thinking and let the model output a detailed description of this category. For organs, the specific instruction is: please output a detailed description of [CATEGORY], including the shape, anatomical location, and characteristics of the organ; for medical instruments, the specific instruction is: please output a detailed description of [CATEGORY], including the function and shape of the medical instrument. We respectively provide the basic example cases for two types of cases: organs and medical instruments. 
+
+Organ Test Cases: Test Case 1:  
+
+> •
+
+Input: heart  
+
+> •
+
+Output: Heart, a muscular organ in the mediastinum between the lungs, featuring four chambers (two atria, two ventricles), coronary vessels, and valves that pump blood through pulmonary and systemic circulations. 
+
+Test Case 2:  
+
+> •
+
+Input: kidney_left  
+
+> •
+
+Output: Left kidney, a bean-shaped retroperitoneal organ located at the T12-L3 level, featuring cortex, medulla with pyramids, renal pelvis, and renal vessels, responsible for filtration and urine production. 
+
+Test Case 3:  
+
+> •
+
+Input: aorta  
+
+> •
+
+Output: Aorta, the body’s largest artery originating from the left ventricle, coursing through the thorax and ab-domen, featuring a thick muscular wall that delivers oxygenated blood throughout the systemic circulation. 
+
+Test Case 4:  
+
+> •
+
+Input: spleen  
+
+> •
+
+Output: Spleen, a fist-sized lymphoid organ in the left upper abdomen beneath the diaphragm, featuring red and white pulp structures that filter blood, recycle iron, and support immune function. 
+
+Instrument Test Cases: Test Case 5 (Instrument):  
+
+> •
+
+Input: instrument3DCOSI_scalpels  
+
+> •
+
+Output: Scalpels (type 1), precision cutting instruments consisting of a handle and a sharp disposable blade, used to make incisions in skin and other tissues during surgical procedures. 
+
+2) Implementation Details: a) Architecture: While the octree-based paradigm offers favorable scalability to higher resolutions, the dense voxelized SDF paradigm provides two properties that are particularly desirable in our setting: (i) more stable optimization on moderate-resolution volumetric data, and (ii) better compat-ibility with diverse conditioning signals (e.g., text prompts and partial observations) through standard latent diffusion mechanisms. We therefore adopt the dense voxelized SDF paradigm as the foundation of our baselines. Building upon these original frameworks, we further tailor them to the char-acteristics of medical shapes—most notably, the substantial inter-organ geometric variability and the strong emphasis on fine-grained anatomical detail. Specifically, we adopt the shape 16 
+
+VAE from Diffusion-SDF [40] to encode 3D medical shapes into a compact latent space, and incorporate text prompts as conditioning signals to support multi-category medical shape generation. At the architectural level, we replace the standard residual blocks in the denoising UNet with text-conditioned Mixture-of-Experts (MoE) [80] residual blocks, deployed con-sistently across the encoder, bottleneck, and decoder stages. Within each block, a lightweight router—implemented as a linear projection of the input text embedding—produces routing logits over four expert feed-forward networks. The top-two experts are selected via sparse soft gating, and their outputs are aggregated as a weighted sum based on normalized softmax scores, while the remaining experts are suppressed. This design enables category-aware specialization guided by the textual condition, which is particularly beneficial given the heterogeneous geometry across organ categories. To further enhance shape fidelity, we introduce a UNet adaptor module that operates on the decoded shapes and applies learned ge-ometric refinements to recover fine-grained structural details. During training, the VAE weights are kept frozen, while the adaptor is jointly optimized with the denoising UNet in an end-to-end manner. 
+
+b) Training.: The model is trained with a learning rate of 1 × 10 −3 for 40,000 steps using DDPM with 50 diffusion steps and a batch size of 24. 
+
+c) Inference: At inference time, we adopt DDIM sam-pling with 20 steps. To strengthen the guidance effect, we introduce a recurrent guidance mechanism: at each guided timestep, the denoising trajectory is repeated multiple times before advancing to the next step. Concretely, given a DDPM schedule of 50 steps, a DDIM step count of 20, a guidance frequency of 2 (i.e., guidance is applied every 2 DDIM steps), and a recurrence factor of 4, the model oscillates 4 times between consecutive guided timesteps before proceeding. For example, at the first guidance interval the trajectory alternates between timestep 49 and 46 for 4 recurrent cycles, followed by a single standard DDIM step at 46, before moving to the next guidance interval ( 44 → 41 ), and so on until the final step. The resulting timestep sequence is as follows: 
+
+49 , 46 , . . . , 49 , 46 
+
+| {z } 
+
+> guided: 49 →46
+
+, 44 , 41 , . . . , 44 , 41 
+
+| {z } 
+
+> guided: 44 →41
+
+, · · · 
+
+9, 6, . . . , 9, 6
+
+| {z } 
+
+> guided: 9→6
+
+, 4, 1, . . . , 4, 1
+
+| {z } 
+
+> guided: 4→1
+
+(11) 
+
+3) Time Cost Analysis: For the shape completion task, we evaluated the runtime under different experimental hyperpa-rameter settings in the following environment: a single RTX 4090D GPU, CUDA 12.4, and PyTorch 2.5.1. We set the batch size to 1, ran inference on 10 cases, and report the average runtime across these 10 cases as the measure of time cost under different hyperparameter settings. Theoretically, we analyze the inference-time overhead introduced by our loss-guided optimization as follows. We adopt DDIM sampling [81] with an interval-based guidance strategy controlled by a guidance frequency f , where guidance is applied at every f -th denoising step, yielding S = ⌊T /f ⌋ guided steps out of T total DDIM steps. At each guided step, we estimate the clean prediction ˆx0
+
+from the current latent xt and perform R recurrent gradient updates, with each update requiring one additional forward-backward pass through the denoising network, while all re-maining steps follow standard DDIM denoising without any backward pass. Consequently, the total number of denoising evaluations is T + RS , and the number of backward passes is 
+
+RS , giving an overall complexity of O(T + RS ).
+
+4) Compared Methods: For each baseline method, we conduct a hyperparameter search to ensure a fair comparison, and report the best-performing results as the corresponding entries in the main table of the paper. Table XI: Effect of CFG Method and Scale on Multiplane Shape Completion Performance. Dice is reported in percent-age (%), while CD and UHD are scaled by ×100 for better readability. All values are truncated to two decimal places.                                                          
+
+> Method Dice ↑CD ↓UHD ↓
+> Scale = 3.0
+> Constant 61.45 0.68 13.01 Linear 49.28 2.53 21.28 Exponential 61.37 0.79 13.24 APG 61.22 0.90 13.40 Rectified++ 56.13 1.28 15.18 Zero-Star 50.24 2.40 19.16
+> Scale = 6.0
+> Constant 61.19 0.67 13.92 Linear 55.33 1.94 19.02 Exponential 63.26 0.55 12.42
+> APG 63.92 0.59 12.94 Rectified++ 56.93 1.04 14.60 Zero-Star 54.44 2.15 17.96
+> Scale = 12.0
+> Constant 36.75 2.09 28.62 Linear 58.01 1.24 18.04 Exponential 58.53 0.72 16.26 APG 60.31 0.71 17.12 Rectified++ 56.41 1.25 15.39 Zero-Star 50.55 2.21 21.62
+
+Table XII: Effect of CFG Method and Scale on Broken Shape Completion Performance. Dice is reported in percent-age (%), while CD and UHD are scaled by ×100 for better readability. All values are truncated to two decimal places.                                                          
+
+> Method Dice ↑CD ↓UHD ↓
+> Scale = 3.0
+> Constant 60.76 0.92 13.59 Linear 50.55 2.33 20.26 Exponential 62.17 0.85 13.10
+> APG 61.66 1.00 13.57 Rectified++ 57.93 1.18 14.60 Zero-Star 54.50 1.81 17.38
+> Scale = 6.0
+> Constant 51.22 1.09 17.95 Linear 56.12 1.67 18.46 Exponential 61.02 0.68 13.94 APG 61.56 0.66 13.59
+> Rectified++ 57.76 1.24 14.96 Zero-Star 52.57 1.61 17.56
+> Scale = 12.0
+> Constant 22.50 2.95 40.06 Linear 54.48 1.35 23.86 Exponential 46.48 1.17 25.88 APG 45.31 1.24 26.90 Rectified++ 57.91 1.22 14.75
+> Zero-Star 48.92 1.38 21.56 17
+
+C. Diagnostic Applications 
+
+Stage 1: Segmentation. We adopt a 3D U-Net with feature multipliers of [1 , 2, 4, 8] to jointly denoise a two-channel volumetric input composed of the CT image and the mask signed distance field (SDF). The model is trained with the Adam optimizer using a learning rate of 1 × 10 −4 and an L1 loss over T = 300 diffusion timesteps, with a batch size of 4, for a total of 20,000 steps. At test time, the model receives a degraded CT volume together with a binary observation mask, where 1 denotes observed voxels and 0 denotes missing voxels. We apply universal guidance during the last 150 denoising steps with 3 gradient iterations per guided timestep and a guidance scale of 0.5. To improve robustness, we generate 4 independent samples with different random seeds and fuse them by averaging the SDF values before thresholding at zero. 
+
+Stage 2: Shape completion. For the subsequent shape com-pletion stage, we do not perform any retraining; instead, we directly reuse the model pretrained on MedShapeNet [9] as described in Sec. IV-B, without any fine-tuning. The mask predicted in the previous stage is treated as an incomplete shape observation and used to guide the completion model, so that the learned shape prior can correct geometric errors such as false positives, false negatives, and incomplete structures. To make the predicted masks compatible with the shape completion model, we apply a centroid–radius transform that maps the binary mask from the KiTS23 [79] image space to the canonical space of the shape prior: we compute the centroid and bounding radius of the foreground voxels, and then apply a global translation and isotropic scaling to align the shape to a canonical center and radius. After completion, the predicted shape is mapped back to the original space via the corresponding inverse transformation. Finally, since starting the sampling process from pure noise is often unstable for severely degraded cases with large missing regions, we adopt a DDIM inversion strategy: we select a template sample of the same anatomical category from the MedShapeNet training set, invert it to a noise state via DDIM inversion, and use the resulting noise as the initialization for guided generation, providing a more informative starting point and improving robustness under extreme degradation. 
+
+D. Discussion of Generalization 
+
+In this section, we further explore the application of our method to physics simulation. By jointly generating physical properties and masks, our approach enables the prediction of physics-informed quantities, highlighting its extensibility and its ability to handle diverse tasks within a unified framework. 
+
+1) Physics Simulation: Recent progress in physics-informed machine learning has demonstrated the potential of deep generative models to represent and solve complex partial differential equations (PDEs). Classical numerical solvers such as Finite Element or Finite Volume Methods provide highly ac-curate solutions but are computationally expensive and limited by mesh resolution and domain complexity. Physics-Informed Neural Networks (PINNs) [82] introduced an elegant frame-work by embedding the PDE residuals directly into the loss function, allowing data-efficient learning while maintaining physical consistency. However, PINNs require explicit formu-lation of governing equations and often struggle to converge for stiff or multi-scale systems.To overcome these limitations, Neural Operators [83] such as the Fourier Neural Operator (FNO) [84] and Convolutional Neural Operator (CNO) [85] generalize traditional neural networks to learn mappings be-tween function spaces, enabling resolution-invariant inference. These operator-based models have achieved significant success across a wide range of PDE problems, but they remain funda-mentally deterministic and can exhibit limited expressiveness when modeling uncertainty or multi-modal physical behavior. In these experiments, we demonstrate how diffusion frame-works can jointly model geometry and physical quantities, providing improved flexibility compared to conventional dis-criminative solvers. This technique can also be used in simula-tion settings to iteratively steer the denoising trajectory toward physically consistent solutions using differentiable loss feed-back, allowing fine-grained control over the generated outputs. By integrating ControlNet [86] for structured conditioning and adapting the framework to handle both geometric and physical domains, we establish a unified generative formulation for physics simulation. More specifically, we jointly model the physical flow field and the geometric shape mask in a shared latent space. As discussed in Section III-A, for the flow field prediction task, 
+
+X represents the geometric shape mask and Y represents the corresponding physical flow field. We conduct our evaluation on the FlowBench benchmark. To facilitate more effective latent-space encoding, we represent the FlowBench masks using signed distance function (SDF). Accordingly, X more precisely refers to the SDF-encoded mask, as illustrated in the first column of Fig. 7 (“SDF Mask”), while Y corresponds to the physical ground truth (GT) shown in the second column. 
+
+2) Datasets and Metrics: To evaluate the effectiveness of our generative formulation for physics simulation, we conduct experiments on the FlowBench benchmark [87] for the 2D lid-driven cavity (LDC) problem. FlowBench contains flow simulation data over complex geometries, including both para-metric and non-parametric shapes. It covers a broad range of flow conditions, characterized by different Reynolds and Grashof numbers, and captures diverse physical phenomena, including steady and unsteady flows, as well as forced and natural convection. Moreover, the benchmark includes both two-dimensional and three-dimensional cases. For evaluation, we follow the same point-wise metrics as in FlowBench [87], including Mean Squared Error (MSE), 
+
+L2 relative error, and L∞ relative error. These metrics are computed for all predicted physical fields, including velocity and pressure ( vx, vy , and p). Specifically, let y and y′ denote the predicted and ground-truth values, respectively, and let n
+
+be the total number of spatial points. The metrics are defined as 
+
+MSE = 
+
+> n
+
+X
+
+> i=1
+
+(yi − y′
+
+> i
+
+)2, (12) 
+
+L2 =
+
+s Pni=1 (yi − y′
+
+> i
+
+)2
+
+Pni=1 (y′
+
+> i
+
+)2 , (13) 18 
+
+Table XIII: Quantitative comparison of different methods for physical flow field prediction                                                                   
+
+> Model MSE (×10 −4)↓L2 (×10 −4)↓L∞(×10 −4)↓Boundary Layer MSE ( ×10 −4)↓
+> vxvypvxvypvxvypvxvyp
+> FNO 21.3 11.4 1.15e4 25.5 27.0 226 70.8 76.2 96.4 10.8 7.28 1.03e4 CNO 0.162 0.0941 179 2.20 2.40 28.2 16.3 6.90 89.2 0.153 0.127 85.3 ControlNet [86] 0.0400 0.0492 10.2 1.10 1.78 6.72 3.03 4.14 23.7 0.0483 0.0576 11.0 Ours 0.0223 0.0257 6.19 0.820 1.28 5.24 2.19 4.40 19.5 0.0493 0.0566 6.70
+
+L∞ = max i |yi − y′
+
+> i
+
+|
+
+max i |y′
+
+> i
+
+| . (14) Additionally, following FlowBench [87], we report the boundary-layer MSE, computed over the narrow region around the object defined by 0 ≤ SDF ≤ 0.2. This metric bet-ter reflects the model’s accuracy in capturing near-surface phenomena, which are critical for applications such as flow diagnostics, shape design, and dynamic control. 
+
+3) Baselines: Similar to FlowBench [87], we compare our method with two established neural-operator baselines. The first is the Fourier Neural Operator (FNO) [84], which parameterizes solution operators via global Fourier convolu-tions. Although highly effective for smooth parametric PDEs, FNO is inherently deterministic and can be less effective in multiscale regimes or near boundary layers. The second is the Convolutional Neural Operator (CNO) [85], which replaces Fourier layers with localized convolutions to mitigate spectral bias and improve spatial locality. However, as a deterministic feed-forward operator, it does not provide the iterative refine-ment or uncertainty-aware predictions enabled by diffusion-based generative models. In addition, we compare with a strong conventional diffusion-based baseline that leverages a pretrained ControlNet [86], conditioned on the geometry and flow parameters, to predict the corresponding physical quantities. Building on this, we implemented our method by following the improved guidance strategy described in Section III-B. Specifically, during the denoising process, our method additionally incorporates target-oriented SDF-encoded shape mask losses to steer the generation toward physically consistent solutions, yielding reasonable prediction results. 
+
+4) Implementation Details: Because the original Stable Diffusion VAE is optimized for natural images and does not preserve fine-scale physical structure, we explore alternative encoder–decoder architectures for velocity and pressure fields and find that a deterministic autoencoder provides the most effective latent representation for diffusion-based generation. To ensure image-space physical fidelity, we additionally apply a reconstruction loss by decoding denoised latents back to field space and supervising them against ground-truth physical quantities. Models are trained in two stages: first finetuning the chosen encoder–decoder on physics fields, then finetun-ing ControlNet [86] using both denoising and reconstruction losses. This configuration produces physically coherent predic-tions and consistently outperforms Neural Operator baselines. 
+
+5) Comparative Results: As shown in Tab. XIII, Control-Net [86] already provides a strong improvement over conven-tional operator-learning baselines, suggesting that conditional diffusion models have promising potential for physics-field prediction. Building on this, our method further improves SDF Mask Physical GT Ours ControlNet CNO FNO 
+
+Figure 7: Visualization of predictions across different meth-ods for physical fields. Each row displays the predicted vx,
+
+vy (velocity components), and p (pressure) fields, respectively. ControlNet [86] on nearly all global metrics. The gain is particularly clear for pressure reconstruction, where the MSE decreases from 10.2 to 6.19, and the corresponding L2 error decreases from 6.72 to 5.24. Similar improvements are also observed for the velocity fields, with lower MSE and L2 errors for both vx and vy , as well as reduced L∞ error for vx and pressure. For boundary-layer prediction, our method remains competitive and achieves the best results on vy and p, while being comparable to ControlNet on vx. These results indicate that our design can further enhance the predictive accuracy of diffusion-based modeling for fluid dynamics. Even though we are not dealing with medical data anymore, this is consistent with the results obtained in medical image segmentation and shape completion. Deterministic neural op-erators tend to oversmooth fine-scale structures and exhibit systematic degradation on pressure fields, while diffusion-based models naturally support iterative error correction, uncertainty-aware refinement, and sharper reconstructions. By combining structured conditioning with physics-driven loss guidance, our approach yields physically coherent predictions that surpass both classical operator-based baselines and stan-dard conditional diffusion. 
+
+6) Visualizations: Fig. 7 shows a visual comparison of different methods for physical flow field prediction. Among the two neural-operator baselines, CNO outperforms FNO, par-ticularly in pressure reconstruction. In comparison, diffusion-based models, including ControlNet and our method, produce visual results comparable to those of CNO. The relatively subtle differences among these three methods indicate that diffusion-based modeling is a promising approach for physics-field prediction. Together with the quantitative results in Tab. XIII, these observations highlight the strong potential of our paradigm for AI for Science tasks. 19 
+
+Hantao Zhang received the B.Eng. degree in computer science and engineering from Northeast-ern University, Shenyang, China, in 2022, and the M.Eng. degree in computer science and technology from the University of Science and Technology of China (USTC), Hefei, China, in 2025. He is currently pursuing the Ph.D. degree in the Doctoral Program in Computer and Communication Sciences (EDIC) at the ´ Ecole Polytechnique F´ ed´ erale de Lau-sanne (EPFL), Lausanne, Switzerland. His research interests include constraint-compliant controllable models for optimizing solutions in medical image processing, computer-aided engineering (CAE), and 3D modeling. 
+
+Weidong Guo is currently working toward the PhD degree with the School of Biomedical Engineering, Fudan University, Shanghai. His research interests include 3D generative models and medical image analysis. 
+
+Yuhe Liu is currently working toward the B.S. degree with the School of Artificial Intelligence, Beihang University, Beijing. His research interests focus on generative models. 
+
+Jiancheng Yang is a Principal Investigator at the ELLIS Institute Finland and Assistant Professor at Aalto University. He received his Bachelor’s and PhD degrees from Shanghai Jiao Tong University and completed postdoctoral training at EPFL. His research focuses on AI for health, with emphasis on spatial intelligence, generative AI, and multimodal deep learning. He has authored over 60 publications and is recognized for developing MedMNIST. He is a Forbes 30 Under 30 honoree and a recipient of the WAIC Yunfan Award. 
+
+Sathvik Bhagavan is currently pursuing a master’s degree in computer science at EPFL, Switzerland. He received a bachelor’s degree in mechanical en-gineering and computer science from the Indian Institute of Technology Kanpur in 2022. His inter-ests include machine learning, computer vision, and data-driven approaches for scientific and engineering applications. 
+
+Danli Shi received BS and MS degrees in Clini-cal Medicine from Shanghai Jiao Tong University and obtained the Doctor of Medicine degree from Sun Yat-sen University in 2022. She is currently a Research Assistant Professor in the School of Op-tometry at The Hong Kong Polytechnic University. Her research focuses on AI for healthcare. 
+
+Mingda Xu is a postdoctoral researcher at the Computer Vision Lab, ´ Ecole Polytechnique F´ ed´ erale de Lausanne (EPFL), Switzerland. He received the B.Comm. degree in Actuarial Studies from the Uni-versity of Melbourne, the M.S. degree in Mathe-matics from the University of New South Wales, Sydney, and the Ph.D. degree in Robotics from the Queensland University of Technology. His re-search spans computer vision, machine learning, and robotics, with a current focus on optimal control and numerical optimization. 
+
+Pascal Fua is a professor of computer science at EPFL, Switzerland, where he leads the Computer Vision Lab. He received his engineering degree in 1984 from ´ Ecole Polytechnique, Paris, and a PhD in computer science from the University of Orsay in 1989. His research focuses on shape and motion reconstruction from images, analysis of microscopy images, and augmented reality. He has authored or co-authored over 300 publications in refereed jour-nals and conferences and has been awarded several ERC grants. He is an IEEE Fellow and an associate editor for IEEE Transactions on Pattern Analysis and Machine Intelligence.
