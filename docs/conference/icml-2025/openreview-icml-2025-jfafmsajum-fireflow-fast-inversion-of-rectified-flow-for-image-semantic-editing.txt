@@ -1,0 +1,1023 @@
+Title: FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing
+
+URL Source: https://openreview.net/pdf?id=JFafMSAjUm
+
+Number of Pages: 19
+
+Markdown Content:
+# FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+Yingying Deng 1 Xiangyu He 2 Changwang Mei 3 Peisong Wang 2 Fan Tang 4Source [C]Origami [C]Sculpture [R]Building [R]Running [+]Football [+]Hat             
+
+> Source [C]Cartoon [R]Cat [R]Crochet dog [R]Flower rings [R]Smile [+]Makeup
+> Source [-]Flower [+]Rainbow Source [R]Chocolate bear Source [+]‘Coca cola’
+
+Figure 1. FireFlow for Image Inversion and Editing in 8 Steps. Our approach achieves outstanding results in semantic image editing and stylization guided by prompts, while maintaining the integrity of the reference content image and avoiding undesired alterations. [+]/[-] means adding or removing contents, [C] indicates changes in visual attributes (style, material, or texture), and [R] denotes content or gesture replacements. 
+
+## Abstract 
+
+Though Rectified Flows (ReFlows) with distilla-tion offer a promising way for fast sampling, its fast inversion transforms images back to struc-tured noise for recovery and following editing re-mains unsolved. This paper introduces FireFlow, an embarrassingly simple yet effective zero-shot approach that inherits the startling capacity of ReFlow-based models (such as FLUX) in gener-
+
+> 1
+
+University of Science and Technology Beijing, Beijing, China 
+
+> 2
+
+Institute of Automation, Chinese Academy of Sciences, Beijing, China 3Nanjing University of Science and Technology, Nanjing, China 4Institute of Computing Technology, Chinese Academy of Sciences, Beijing, China. Correspondence to: Xiangyu He 
+
+<hexiangyu17@mails.ucas.edu.cn >.
+
+Proceedings of the 42 nd International Conference on Machine Learning , Vancouver, Canada. PMLR 267, 2025. Copyright 2025 by the author(s). 
+
+ation while extending its capabilities to accurate inversion and editing in 8 steps. We first demon-strate that a carefully designed numerical solver is pivotal for ReFlow inversion, enabling accurate inversion and reconstruction with the precision of a second-order solver while maintaining the practical efficiency of a first-order Euler method. This solver achieves a 3× runtime speedup com-pared to state-of-the-art ReFlow inversion and editing techniques while delivering smaller recon-struction errors and superior editing results in a training-free mode. The code is available at this-URL. 
+
+## 1. Introduction 
+
+The ability to accurately and efficiently invert generative models is critical for enabling applications such as semantic 1FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+image editing, data reconstruction, style transfer and latent space manipulation (Deng et al., 2024a; Hertz et al., 2022; Tumanyan et al., 2023; Deng et al., 2024b). Inversion, which involves mapping observed data back to its latent represen-tation, serves as the foundation for fine-grained control over generative processes. Achieving a balance between compu-tational efficiency and numerical accuracy in inversion is particularly challenging for diffusion models, which rely on iterative processes to bridge data and latent spaces. Diffusion models have long been used for high-quality im-age generation (Ramesh et al., 2022; Rombach et al., 2022; Podell et al., 2024; Zhang et al., 2023; Deng et al., 2025) and inversion (Hertz et al., 2022; Parmar et al., 2023) due to their ability to capture complex distributions through stochastic differential equations (SDEs). Nevertheless, the nonlinear solver introduces undesirable drift in the reverse trajectory, thereby compromising the accuracy of reconstruc-tion and the fidelity of editing-by-inversion. In contrast, rectified Flow (ReFlow) models (Liu et al., 2023), which replace stochastic sampling with ordinary differential equa-tions (ODEs) for faster and more efficient transformations. This motivate a closer investigation of ReFlow-based mod-els, particularly in the context of inversion and editing, to develop simple and effective methods. ReFlow models possess an underutilized advantage: a well-trained ReFlow model learns nearly constant velocity dy-namics across the data distribution, ensuring stability and bounded velocity approximation errors. However, existing inversion methods for ReFlow models fail to fully exploit this property (Rout et al., 2025; Wang et al., 2024). Current approaches rely on generic Euler solvers that prioritize each step’s computational efficiency at the expense of accuracy or incur additional costs to achieve higher precision. As a result, the potential of ReFlow models to deliver fast and accurate inversion remains untapped. In this work, we introduce a novel numerical solver for the ODEs underlying ReFlow models, addressing the challenges of inversion and editing. Our method achieves second-order precision while retaining the computational cost of a first-order solver. By reusing intermediate velocity approxima-tions, our approach reduces redundant evaluations, stabilizes the inversion process, and fully leverages the constant ve-locity property of well-trained ReFlow models. As shown in Table 1, our approach is the first to provide a solver that strikes an optimal trade-off between accuracy and efficiency, enabling ReFlow models to excel in inversion and editing tasks. By combining computational efficiency, numerical robustness, and simplicity, our method offers a scalable solution for real-world tasks requiring high fidelity and real-time performance, advancing the utility of ReFlow-based generative models like FLUX.                      
+
+> Table 1. Comparison of recent training-free inversion and editing methods based on FLUX, including inversion/denoising steps, NFEs (Number of Function Evaluations) for both inversion and editing, local truncation error orders for solving ODE, and the need for a pre-trained auxiliary model for editing. Our approach offers a simple yet effective solution to address the challenges.
+> Methods Add-it RF-Solver RF-Inv. Ours Steps 30 15 28 8
+> NFE 60 60 56 18
+> Aux. Model ✓w/o w/o w/o
+> Local Error O(∆ t2)O(∆ t3)O(∆ t2)O(∆ t3)
+> (Tewel et al., 2025) for Add-it, (Wang et al., 2024) for RF-Solver, (Rout et al., 2025) for RF-Inv.
+
+## 2. Preliminaries and Related Works 
+
+2.1. Rectified Flow 
+
+Rectified Flow (Liu et al., 2023) offers a principled approach for modeling transformations between two distributions, π0
+
+and π1 , based on empirical observations X0 ∼ π0 and 
+
+X1 ∼ π1 . The transformation is represented as an ordinary differential equation (ODE) over a continuous time interval 
+
+t ∈ [0 , 1] :
+
+dZ t = v(Zt, t ) dt, (1) where Z0 ∼ π0 is initialized from the source distribution, and Z1 ∼ π1 is generated at the end of the trajectory. The drift v : Rd × [0 , 1] → Rd is designed to align the trajectory of the flow with the direction of the linear interpolation path between X0 and X1 . This alignment is achieved by solving the following least squares regression problem: 
+
+min  
+
+> v
+
+E
+
+Z 10
+
+∥(X1 − X0) − vθ (Xt, t )∥22 dt 
+
+
+
+, (2) where Xt = tX 1 +(1 −t)X0 denotes the linear interpolation path between X0 and X1.
+
+Forward process seeks to transform samples X0 ∼ π0 to match the target distribution π1 . A direct parameterization of Xt is given by the linear interpolation Xt = tX 1 + (1 −
+
+t)X0 , which satisfies the non-causal ODE: 
+
+dX t = ( X1 − X0) dt. (3) However, this formulation assumes prior knowledge of X1,rendering it non-causal and unsuitable for practical sim-ulation. By introducing the drift v(Xt, t ) , rectified flow causalizes the interpolation process. The drift v is fit to approximate the linear direction X1 − X0 , resulting in the forward ODE with X0 ∼ π0,:
+
+dX t = v(Xt, t ) dt, t ∈ [0 , 1] . (4) This causalized forward process enables simulation of Zt
+
+without requiring access to X1 during intermediate time steps. 2FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+Reverse process generates samples from π1 by reversing the learned flow. Starting from X1 ∼ π1 , the reverse ODE is given by negating the drift term: 
+
+dX t = −v(Xt, t ) dt, t ∈ [1 , 0] . (5) This process effectively “undoes” the transformations ap-plied during the forward flow, enabling the generation of 
+
+X0 that follows the original distribution π0. The reverse process guarantees consistency with the forward dynamics by leveraging the symmetry of the learned drift v.
+
+2.2. Inversion 
+
+The inversion of real images into noise feature space, as well as the reconstruction of noise features back to the orig-inal real images, is a prominent area of research within diffusion models applied to image editing tasks (Lin et al., 2024; Brack et al., 2024; Miyake et al., 2023; Ju et al., 2024; Zhang et al., 2022; Huberman-Spiegelglas et al., 2024; Cho et al., 2024). The foundational theory of De-noising Diffusion Implicit Models (DDIM) (Song et al., 2021) involves the addition of predicted noise to a fixed noise during the forward process, which can subsequently be mapped to generate an image. However, this approach encounters challenges related to reconstruction bias. To address this issue, Null-Text Inversion (Mokady et al., 2023) optimizes an input null-text embedding, thereby correct-ing reconstruction errors at each iterative step. Similarly, Prompt-Tuning-Inversion (Dong et al., 2023) refines con-ditional embeddings to accurately reconstruct the original image. Negative-Prompt-Inversion (Miyake et al., 2023) replaces the null-text embedding with prompt embeddings to expedite the inversion process. Direct-Inversion (Ju et al., 2024) incorporates the inverted noise corresponding to each timestep within the denoising process to mitigate content leakage. In contrast to the aforementioned Stochastic Differential Equation (SDE)-based formulations, rectified flow models that utilize ordinary differential equations (ODEs) offer a more direct solution pathway. RF-Inversion (Rout et al., 2025) employs dynamic optimal control techniques derived from linear quadratic regulators, while RF-Solver (Wang et al., 2024) utilizes Taylor expansion to minimize inversion errors in ODEs. Nevertheless, achieving superior inversion results typically necessitates an increased number of genera-tion steps, which can lead to significant computational time and resource expenditure. In this paper, we propose a few-step ODE solver designed to balance effective outcomes with high efficiency. 
+
+2.3. Editing 
+
+Image editing utilizing a pre-trained diffusion model has demonstrated promising results, benefiting from advance-ments in image inversion and attention manipulation tech-nologies (Hertz et al., 2022; Cao et al., 2023; Meng et al., 2022; Couairon et al., 2023; Deutch et al., 2024; Xu et al., 2024; Brooks et al., 2023). Training-free editing methods typically employ a dual-network architecture: one network is dedicated to reconstructing the original image, while the other is focused on editing. Prompt-to-Prompt (Hertz et al., 2022) manipulates the cross-attention maps within the editing pipeline by leveraging features from the recon-struction pipeline. Plug-and-Play (Tumanyan et al., 2023) method substitutes the attention matrices of self-attention blocks in the editing pipeline with those from the recon-struction pipeline. Similarly, MasaCtrl (Cao et al., 2023) modifies the Value components of self-attention blocks in the editing pipeline using values derived from the reconstruc-tion pipeline. Additionally, the Add-it (Tewel et al., 2025) method utilizes both the Key and Value components of self-attention blocks from the source image to guide the editing process effectively. With respect to FLUX models, RF-Editing (Wang et al., 2024) reuses Value components from MMDiT (generated during inversion) for reconstruction-based editing, while RF-Inversion (Rout et al., 2025) uses the original image as a prior for guiding the forward and reverse process in semantic editing. We introduce FireFlow, a novel solver that can effectively integrate these techniques (and can also be used with the vanilla ReFlow model) to achieve promising results with fewer steps. 
+
+## 3. Motivation 
+
+The ReFlow model operates under the simple assumption that Xt evolves linearly between X0 and X1, corresponding to uniform linear motion. Drawing an analogy to physics, it is natural to extend this linear motion to accelerated motion by incorporating an acceleration term: 
+
+dv t
+
+dt = a(Xt, t ), dX t
+
+dt = v(Xt, t ), (6) where Xt+1 = Xt + vt∆t + 12 at∆t2 , and vt is equiva-lent to v(Xt, t ) for simplicity. Recent works have empiri-cally shown that training-based strategies (Park et al., 2024; Chen et al., 2024) for solving Equation (6) improve cou-pling preservation and inversion over rectified flow, even with few steps. Moreover, a training-free method (Wang et al., 2024) leveraging pre-trained ReFlow models has also demonstrated the utility of the second-order derivative of 
+
+v in achieving effective inversion, essentially aligning with the principles of accelerated motion. However, this observation appears counterintuitive. A well-trained ReFlow model, such as FLUX, generally assumes that vt approximates the constant value X1 − X0. Thus, the acceleration term at = dv t/dt theoretically approaches zero, as the learning target for vt is constant. 3FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+Connection to High-Order ODE Solvers: Instead of treating at as a continuous term, we reinterpret it through the lens of high-order ODE solvers. Using the finite-difference approximation at = ( vt+∆ t − vt)/∆t , we can rewrite the equation as: 
+
+Xt+1 = Xt + vt∆t + 12 at∆t2 = Xt + 12 (vt + vt+∆ t)∆ t, 
+
+which corresponds to the standard formulation of the second-order Runge-Kutta method. This high-order approach al-lows fewer steps (or equivalently, larger step sizes ∆t )to achieve the same accuracy as Euler’s method, since the global error of a p-th order method scales as O(∆ tp).This enables larger ∆t while maintaining the same er-ror tolerance ϵ. Similarly, if we approximate at using 
+
+at = ( vt+ 12 ∆t − vt)/( 12 ∆t) , the resulting position update becomes: 
+
+Xt+1 = Xt + vt+ 12 ∆t∆t, 
+
+which corresponds to the standard midpoint method, another second-order ODE solver. 
+
+Impact on ReFlow Inversion: It is well-established that the global error in the forward process of ODE solvers benefits from higher-order methods. Likewise, inversion and reconstruction tasks also exhibit improved performance with high-order solvers, as they better preserve original image details during the inversion of ReFlow models. We formalize this property in the following statement. 
+
+Proposition 3.1. Given a p-th order ODE solver and the ODE dX t 
+
+> dt
+
+= vθ (Xt, t ), if the dynamics of the reverse pass satisfy dXt 
+
+> dt
+
+= −vθ (Xt, 1 − t) which is Lipschitz continuous with constant L. The perturbation ∆T at t = T propagates backward to t = 0 . The propagated error satisfies: 
+
+∥∆0∥ ≤ e−LT ∥∆T ∥. (7) 
+
+Implication. The inversion error ∥∆T ∥ introduced during the p-th order numerical solution propagates into the re-verse pass, experiencing a slight reduction scaled by the Lipschitz constant L of the learned drift vθ (Xt, t ). Despite this reduction, the overall reconstruction error ∥∆0∥ for the original image remains asymptotically of the same order, 
+
+O(∆ tp), where ∆t represents the integration step size. Con-sequently, high-order solvers are preferred in ReFlow to achieve accurate inversion and editing with fewer steps. 
+
+## 4. Method 
+
+Challenges with High-Order Solvers: While the use of high-order solvers is theoretically promising, it fails to yield practical runtime speedups. For a parameterized drift 
+
+vθ (Xt, t ), the runtime is determined by the Number of Func-tion Evaluations (NFEs), i.e., the number of forward passes through the model vθ (Xt, t ). High-order solvers require evaluating more points within the interval [t, t + 1] , leading to a higher NFE per step, which negates any reduction in the number of steps and fails to improve overall computational efficiency. For instance, the midpoint method achieves a local error of 
+
+O(∆ t3) and a global error of O(∆ t2). Formally, it proceeds as follows: 
+
+Xt+ ∆t
+
+> 2
+
+= Xt + ∆t
+
+2 vθ (Xt, t ), (8) 
+
+Xt+1 = Xt + ∆ t · vθ
+
+ Xt+ ∆t
+
+> 2
+
+, t + ∆t
+
+2
+
+. (9) This scheme requires two NFEs per step: one to compute 
+
+Xt+ ∆t
+
+> 2
+
+and another for vθ
+
+ Xt+ ∆t
+
+> 2
+
+, t + ∆t
+
+> 2
+
+, effectively dou-bling the cost compared to the Euler method. The midpoint method leverages vt+ ∆t
+
+> 2
+
+to provide a more accurate estimate of Xt+1 −Xt 
+
+> ∆t
+
+than vt, which inspires us to seek an alternative with lower computational cost. 
+
+A Low-Cost Alternative: The training objective of Re-Flow implies that a well-trained model satisfies vθ (Xt, t ) ≈
+
+(X1 − X0) for all t. Leveraging this property, the most effi-cient approach would replace vt with v0, enabling one-step generation as proposed in the original ReFlow method (Liu et al., 2023). However, this simplification makes it difficult to incorporate conditional priors, as multi-step iteration is no longer required. To maintain a multi-step paradigm, we propose a modified scheme that replaces vt with previous t − 1-step midpoint velocity v(t−1)+ ∆t
+
+> 2
+
+rather than vt+ ∆t
+
+> 2
+
+. This approach is formalized as: 
+
+ˆvθ (Xt, t ) := vθ
+
+ X(t−1)+ ∆t
+
+> 2
+
+, (t − 1) + ∆t
+
+2
+
+| {z }
+
+> load from memory
+
+(10) 
+
+ˆXt+ ∆t
+
+> 2
+
+:= Xt + ∆t
+
+2 ˆvθ (Xt, t ) (11) 
+
+Xt+1 = Xt + ∆ t · vθ
+
+  ˆXt+ ∆t
+
+> 2
+
+, t + ∆t
+
+2
+
+| {z }
+
+> run & save to memory
+
+(12) In this simple scheme, only one NFE is required per step 1,matching the computational cost of the Euler method. The key question, then, is whether this scheme retains the second-order accuracy of the original midpoint method. For the local and global truncation error, we derive that if 
+
+vθ (Xt, t ) is well-trained and varies smoothly with respect to both X and t, the proposed scheme achieves the same truncation error as the standard midpoint method. This ensures that the modified approach retains the benefits of        
+
+> 1Specifically, we perform two NFEs at t= 0 to initialize the conditions v0and v0+ ∆t
+> 2
+> for subsequent iterations. Python-style pseudo-code is provided in Sec.D.
+
+4FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+(a) Euler Method (NFE = 20 ) (b) Midpoint Method (NFE = 20 ) (c) Ours (NFE = 20 )
+
+Figure 2. Results on 2D synthetic dataset. We evaluate the performance of 2-Rectified Flow using the Euler solver, midpoint solver, and our proposed approach on a 2D synthetic dataset. The source distribution π0 (orange) and the target distribution π1 (green) are parameterized as Gaussian mixture models. For the Euler method, the number of sampling steps is set to N = 20 , corresponding to an NFE of 20. Our approach generates samples that align more closely with the target distribution, achieving a better match in density and structure. Additionally, the trajectories of the samples exhibit greater straightness, adhering closely to the ideal of linear motion. 1 2 3 4 5 6 7 8 9          
+
+> Steps
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> Value
+> Approximation Error Analysis
+> vv
+> t
+> Shaded area represents ±1 standard deviation 123456789
+> Steps
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> Value
+> Approximation Error Analysis
+> vv
+> t
+> Shaded area represents ±1 standard deviation
+
+(a) Inversion and Reconstruction with Step=10 2.5 5.0 7.5 10.0 12.5 15.0 17.5         
+
+> Steps
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> Value
+> Approximation Error Analysis
+> vv
+> t
+> Shaded area represents ±1 standard deviation 2.5 5.0 7.5 10.0 12.5 15.0 17.5
+> Steps
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> Value
+> Approximation Error Analysis
+> vv
+> t
+> Shaded area represents ±1 standard deviation
+
+(b) Inversion and Reconstruction with Step=20 
+
+Figure 3. Illustrations of the approximation error in velocity ( ∥ˆvθ −
+
+vθ ∥) as it evolves with inversion steps (left subfigures) and denois-ing steps (right subfigures), with ∆t included as a reference. 
+
+second-order accuracy while operating at the computational cost of a first-order solver. 
+
+Proposition 4.1. Let ˆvθ (Xt, t ) denote the reused velocity approximation in Equation 10, and vθ (Xt, t ) denotes the exact velocity at time t. Then, the approximation satisfies the error bound: || ˆvθ (Xt, t ) − vθ (Xt, t )|| ≤ O (∆ t), under the following conditions: 1) Temporal Error: The temporal error is directly propor-tional to the time step ∆t, stemming from smoothness of 
+
+vθ (X, t ) in the time domain. 2) Spatial Error: The spatial error is dominated by O(∆ t) ,due to the boundedness of ∂v θ
+
+∂X .
+
+We formally prove in the appendix that when two required conditions are satisfied, leading to the following result: our modified midpoint method achieves the same truncation error as the standard midpoint method under these circum-stances. Consequently, it is expected to exhibit smaller overall error while maintaining the same runtime cost as the first-order Euler method. 
+
+Theorem 4.2. Consider a ReFlow model governed by ODE: 
+
+dX dt = vθ (X, t ), where vθ (X, t ) is smooth and bounded, and the solution Xt evolves over a time interval [0 , T ].The modified midpoint method, defined in Equation (12) , achieves the same global truncation error O(∆ t2) as the standard midpoint method, provided the reused velocity satisfies: || ˆvθ (Xt, t ) − vθ (Xt, t )|| ≤ O (∆ t).
+
+To highlight the advantages of our approach, we conduct experiments on synthetic data following the setup in (Liu et al., 2023). As shown in Figure 2, the transport trajec-tories generated by our method are straighter, leading to improved accuracy while maintaining the same NFE as the Euler method, and even surpassing the performance of the standard midpoint method. 
+
+Numerical Results and Discussion To empirically validate the theoretical assumption that the reused velocity approxi-mation error ∥ˆvθ (Xt, t ) − vθ (Xt, t )∥ is bounded by O(∆ t),we conducted numerical experiments and analyzed the rela-tionship between the approximation error and the time step size ∆t on FLUX-dev model during inversion and recon-struction. The results are summarized in Figure 3, which depicts the average approximation error across different step sizes, with the shaded area representing ±1 standard deviation. The data exhibit the following key trend that the approx-imation error grows approximately linearly with the step size C · ∆t, consistent with the theoretical bound O(∆ t).Despite the occasional spikes and inherent variability of the error (illustrated by the shaded standard deviation), the trend and magnitude of the error remain well-controlled and stable across most steps, further validating the robustness of the reused velocity approximation in practice. 5FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing Smallest  
+
+> Reconstruction
+> Error
+> 2.0x Speedup
+> 2.73x Speedup
+> 76% Error
+> Reduction
+> Figure 4. Image reconstruction errors versus denoising NFE: Our approach, compared to the first-order vanilla ReFlow inversion and second-order RF-solver, achieves lower reconstruction errors and demonstrates faster convergence with respect to NFE.
+
+Image Semantic Editing: To ensure simplicity and a fair comparison with the second-order solver method, we follow the approach in (Wang et al., 2024), where the value features in self-attention layers during the denoising process are re-placed with pre-stored value features generated during the inversion process, serving as a prior. Subsequently, a refer-ence prompt is used as guidance to achieve semantic editing. Leveraging superior image preservation, our method does not require a careful selection of timesteps for applying the replacements, as suggested in the original paper. The in-version and denoising sampling processes are detailed in Algorithms 1 and 2. 
+
+## 5. Experiment 
+
+5.1. Implementation Details Baselines: This section compares FireFlow with DM inversion-based editing methods such as Prompt-to-Prompt (Hertz et al., 2022) , MasaCtrl (Cao et al., 2023), Pix2Pix-zero (Parmar et al., 2023), Plug-and-Play (Tumanyan et al., 2023), DiffEdit (Couairon et al., 2023) and DirectInversion (Ju et al., 2024). We also consider the recent RF inver-sion methods, such as RF-Inversion (Rout et al., 2025) and RF-Solver (Wang et al., 2024). 
+
+Metrics: We evaluate different methods across three as-pects: generation quality, text-guided quality, and preserva-tion quality. The Fr ´echet Inception Distance (FID) (Heusel et al., 2017) is used to measure image generation quality by comparing the generated images to real ones. A CLIP model (Radford et al., 2021) is used to calculate the simi-larity between the generated image and the guiding text. To assess the preservation quality of non-edited areas, we use metrics including Learned Perceptual Image Patch Similar-ity (LPIPS) (Zhang et al., 2018), Structural Similarity Index Measure (SSIM) (Wang et al., 2004), Peak Signal-to-Noise Ratio (PSNR), and structural distance (Ju et al., 2024). 
+
+Steps: Since the number of inference steps can significantly impact performance, we follow the best settings reported for the RF-Solver to ensure a fair comparison: 10 steps for text-                                           
+
+> Table 2. Quantitative results for Unconditional Image Generation on CIFAR-10. Our approach achieves performance comparable to that of a second-order solver, but with reduced computational cost.
+> ODE Solver Steps( ↓)NFE( ↓)FID( ↓)IS( ↑)
+> Euler 15 15 5.67 9.20
+> Euler 10 10 5.83 9.03
+> Midpoint 510 5.45 9.27 Ours 565.35 9.26
+> Table 3. Quantitive results on Text-to-Image Generation. The FLUX-dev uses 1st-order ODE Solver, the RF-Solver and our approach use 1st-order ODE Solver. Compared with FLUX-dev and RF-Solver, our approach has higher FID and CLIP Score.
+> Methods Steps NFE( ↓)FID( ↓)CLIP Score( ↑)
+> FLUX-dev 20 20 26.77 31.44 RF-Solver 20 40 25.54 31.39
+> RF-Solver 10 20 25.93 31.35
+> Ours 10 11 25.16 31.42
+
+to-image generation (T2I) and 30 steps for reconstruction. For editing, RF-Solver varies the number of steps by task, using up to 25 steps. In contrast, we find that our approach achieves comparable or better results using 8 steps. The ablation study is shown in Section E. 
+
+5.2. Text-to-image Generation Conditional Image Generation: We compare the perfor-mance of our method against the vanilla rectified flow and the second-order RF-solver on the fundamental T2I task. Following the setup in RF-solver, we evaluate a randomly selected subset of 10K images from the MSCOCO Caption 2014 validation set (Chen et al., 2015), using the ground-truth captions as reference prompts. The FID and CLIP scores for results generated with a fixed random seed of 1024 are presented in Table 3. In summary, our method de-livers superior image quality while maintaining comparable text alignment performance. 
+
+Unconditional Image Generation: We adhere to the pro-tocol established in the original ReFlow paper (Liu et al., 2023) for unconditional image generation on CIFAR-10, uti-lizing the open-source 1-Rectified-Flow-distill weights. The results, as shown in Table 2, compare various ODE solvers, and our method demonstrates consistent performance with fewer steps and higher scores. 
+
+5.3. Inversion and Reconstruction Quantitative Comparison: We report the inversion and re-construction results on the first 1K images from the Densely Captioned Images (DCI) dataset (Urbanek et al., 2024), us-ing the official descriptions as source prompts. The results, 6FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+Table 4. Compare our approach with other editing methods on PIE-Bench. Our method demonstrates superior performance in terms of background preservation and CLIP similarity. 
+
+Method Model Structure Background Preservation CLIP Similarity ↑ Steps NFE ↓
+
+Distance ↓ PSNR ↑ SSIM ↑ Whole Edited 
+
+Prompt2Prompt (Hertz et al., 2022) Diffusion 0.0694 17.87 0.7114 25.01 22.44 50 100 Pix2Pix-Zero (Parmar et al., 2023) Diffusion 0.0617 20.44 0.7467 22.80 20.54 50 100 MasaCtrl (Cao et al., 2023) Diffusion 0.0284 22.17 0.7967 23.96 21.16 50 100 PnP (Tumanyan et al., 2023) Diffusion 0.0282 22.28 0.7905 25.41 22.55 50 100 PnP-Inv. (Ju et al., 2024) Diffusion 0.0243 22.46 0.7968 25.41 22.62 50 100 RF-Inversion (Rout et al., 2025) ReFlow 0.0406 20.82 0.7192 25.20 22.11 28 56 RF-Solver (Wang et al., 2024) ReFlow 0.0311 22.90 0.8190 26.00 22.88 15 60 Ours ReFlow 0.0284 23.29 0.8287 26.01 22.96 15 32 Ours ReFlow 0.0271 23.03 0.8249 26.02 22.81 8 18 NFE=6    
+
+> NFE=12
+> NFE=18
+> Vanilla ReFlow RF-Inversion RF-Solver Ours
+> Source Image
+> ‘’ A young boy is
+> playing with a toy
+> airplane on the
+> grassy front lawn
+> of a suburban
+> house, with a blue
+> sky and fluffy
+> clouds above. ’’
+> Prompt
+
+Figure 5. Qualitative results of image reconstruction. Our approach achieves faster convergence and superior reconstruction quality compared to baseline ReFlow methods utilizing the FLUX model. Difference images showing the pixel-wise variations between the source image and the reconstructed images are also provided. 
+
+Table 5. Quantitative results for inversion and reconstruction us-ing the FLUX-dev model (excluding the DDIM baseline). NFE includes both inversion and reconstruction function evaluations. Steps or computational costs are kept comparable across compar-isons. Reconstruction is performed without leveraging latent features from the inversion process. Steps NFE ↓ LPIPS ↓ SSIM ↑ PSNR ↑
+
+DDIM-Inv. 50 100 0.2342 0.5872 19.72 ReFlow-Inv. 30 60 0.5044 0.5632 16.57 RF-Solver 30 120 0.2926 0.7078 20.05 RF-Inversion 30 60 0.4480 0.4599 16.22 Ours 30 62 0.1579 0.8160 23.87 
+
+ReFlow-Inv. 9 18 0.8145 0.3828 15.29 RF-Solver 5 20 0.5010 0.5232 14.72 RF-Inversion 9 18 0.7574 0.3742 13.37 Ours 8 18 0.4111 0.5945 16.01 
+
+shown in Table 5, demonstrate that our approach achieves a significant reduction in reconstruction error, whether com-pared at the same number of steps (yielding approximately 
+
+2× speedup) or at the same computational cost. 
+
+Qualitative Comparison: As shown in Figure 5, our ap-proach provides an efficient and effective reconstruction method based on FLUX. The drift from the source image is significantly smaller compared to baseline methods, align-ing with the quantitative results. 
+
+Convergence Rate: We empirically compare the conver-gence rates of different numerical solvers during reconstruc-tion, as shown in Figure 4. For a fair comparison, we use the demo “boy” image and prompt provided in the RF-solver source code. Our approach achieves the lowest reconstruc-tion error with the fastest convergence rate, offering up to 
+
+2.7× speedup and over 70% error reduction. Figure 7 fur-ther illustrates the results when other approaches are fully converged at denoising NFE = 60 .
+
+5.4. Inversion-based Semantic Image Editing Quantitative Comparison: We evaluate prompt-guided editing using the recent PIE-Bench dataset (Ju et al., 2024), which comprises 700 images across 10 types of edits. As shown in Table 4, we compare the editing performance in terms of preservation ability and CLIP similarity. Our method not only competes with but often outperforms other approaches, particularly in CLIP similarity. Notably, our approach achieves high-quality results with relatively few editing steps, demonstrating its efficiency and effectiveness in maintaining the integrity of the original content while producing edits that closely align with the intended modifi-7FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing Ours RF-Solver MasaCtrl P2P DiffEdit RF-Inversion Source 
+
+> [R]Castle [C]Plush [C]Real [+] biWild
+> gooserd
+> [R]Child [+]Sun [R]Cat [+]Snow [R]Wave
+
+PnP PnP-Inv. Pix2Pix-Zero 
+
+Figure 6. Comparison with State-of-the-art editing methods. As shown in the comparison (original images in Row 1 vs. edited results in subsequent rows), our approach delivers the most accurate and high-quality edits. 
+
+cations. 
+
+Qualitative Comparison: We present the visual editing re-sults in Figure 6, which are consistent with our quantitative findings. Our method highlights a fundamental trade-off between minimizing changes to non-editing areas and en-hancing the fidelity of the edits. In contrast, methods like P2P, Pix2Pix-Zero, MasaCtrl, and PnP often struggle with inconsistencies relative to the source image, as evident in the 3rd and 6th rows of the figure. Additionally, these methods frequently produce invalid edits, as shown in the 7th and 9th rows. While PnP-Inv excels at preserving the structure of the source image, it often fails to effectively apply the desired edits. Rectified flow model-based methods, such as RF-Inversion and RF-Solver, deliver better editing re-
+
+Table 6. Per-image inference time for ReFlow inversion-based edit-ing measured on an RTX 3090. 
+
+Resolution Steps Time Cost Speedup 
+
+Vanilla ReFlow 512 × 512 28 23.76s 1.0×
+
+RF-Inversion 512 × 512 28 23.36s 1.02 ×
+
+RF-Solver 512 × 512 15 25.31s 0.94 ×
+
+Ours 512 × 512 8 7.70 s 3.09 ×
+
+Vanilla ReFlow 1024 × 1024 28 72.10s 1.0×
+
+RF-Inversion 1024 × 1024 28 71.35s 1.01 ×
+
+RF-Solver 1024 × 1024 15 78.80s 0.92 ×
+
+Ours 1024 × 1024 8 24.52 s 2.94 ×
+
+8FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+sults compared to the aforementioned methods. However, they still face challenges with inconsistencies in non-editing areas. Overall, our method provides a more effective solu-tion to these challenges, achieving superior results in both preservation and editing fidelity. 
+
+Inference Speed: In Table 6, we compare the inference time of FireFlow with several recent models. The number of steps is based on those reported in the original papers or provided in open-source code. FireFlow is significantly faster than competing reflow models and does not require an auxiliary model for editing. 
+
+## 6. Conclusion 
+
+We proposed a novel numerical solver for ReFlow models, achieving second-order precision at the computational cost of a first-order method. By reusing intermediate velocity approximations, our training-free approach fully exploits the nearly constant velocity dynamics of well-trained Re-Flow models, minimizing computational overhead while maintaining accuracy and stability. This method addresses key limitations of existing inversion techniques, providing a scalable and efficient solution for tasks such as image re-construction and semantic editing. Our work highlights the untapped potential of ReFlow-based generative frameworks and establishes a foundation for further advancements in efficient numerical methods for generative ODEs. We also provide a discussion of the limitations in Section F. 
+
+## Acknowledgement 
+
+This work was partially supported by the National Key R&D Program of China (No. 2022ZD0160304), the Beijing Science and Technology Plan Project (No. Z231100005923033) and CCF-Tencent Rhino-Bird Open Research Fund. 
+
+## Impact Statement 
+
+This paper presents work whose goal is to advance the field of Machine Learning. There are many potential societal consequences of our work, none of which we feel must be specifically highlighted here. 
+
+## References 
+
+Brack, M., Friedrich, F., Kornmeier, K., Tsaban, L., Schramowski, P., Kersting, K., and Passos, A. LED-ITS++: limitless image editing using text-to-image mod-els. In IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2024, Seattle, WA, USA, June 16-22, 2024 , pp. 8861–8870. IEEE, 2024. Brooks, T., Holynski, A., and Efros, A. A. Instruct-pix2pix: Learning to follow image editing instructions. In 
+
+IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2023, Vancouver, BC, Canada, June 17-24, 2023 , pp. 18392–18402. IEEE, 2023. Cao, M., Wang, X., Qi, Z., Shan, Y., Qie, X., and Zheng, Y. Masactrl: Tuning-free mutual self-attention control for consistent image synthesis and editing. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pp. 22560–22570, October 2023. Chen, T., Gu, J., Dinh, L., Theodorou, E., Susskind, J. M., and Zhai, S. Generative modeling with phase stochastic bridge. In The Twelfth International Confer-ence on Learning Representations , 2024. URL https: //openreview.net/forum?id=tUtGjQEDd4 .Chen, X., Fang, H., Lin, T., Vedantam, R., Gupta, S., Doll ´ar, P., and Zitnick, C. L. Microsoft COCO cap-tions: Data collection and evaluation server. CoRR ,abs/1504.00325, 2015. URL http://arxiv.org/ abs/1504.00325 .Cho, H., Lee, J., Kim, S. B., Oh, T., and Jeong, Y. Noise map guidance: Inversion with spatial context for real image editing. In The Twelfth International Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024 . OpenReview.net, 2024. Couairon, G., Verbeek, J., Schwenk, H., and Cord, M. Diffedit: Diffusion-based semantic image editing with mask guidance. In The Eleventh International Confer-ence on Learning Representations, ICLR 2023, Kigali, Rwanda, May 1-5, 2023 . OpenReview.net, 2023. Deng, Y., He, X., Tang, F., and Dong, W. Z*: Zero-shot style transfer via attention reweighting. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 6934–6944, June 2024a. Deng, Y., He, X., Tang, F., and Dong, W. Z-star+: A zero-shot style transfer method via adjusting style dis-tribution, 2024b. URL https://arxiv.org/abs/ 2411.19231 .Deng, Y., He, X., Tang, F., and Dong, W. Z-magic: Zero-shot multiple attributes guided image creator, 2025. URL 
+
+https://arxiv.org/abs/2503.12124 .Deutch, G., Gal, R., Garibi, D., Patashnik, O., and Cohen-Or, D. Turboedit: Text-based image editing using few-step diffusion models. In Igarashi, T., Shamir, A., and Zhang, H. R. (eds.), SIGGRAPH Asia 2024 Conference Papers, SA 2024, Tokyo, Japan, December 3-6, 2024 , pp. 41:1–41:12. ACM, 2024. 9FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+Dong, W., Xue, S., Duan, X., and Han, S. Prompt tuning inversion for text-driven image editing using diffusion models. In IEEE/CVF International Conference on Com-puter Vision, ICCV 2023, Paris, France, October 1-6, 2023 , pp. 7396–7406. IEEE, 2023. Hertz, A., Mokady, R., Tenenbaum, J., Aberman, K., Pritch, Y., and Cohen-Or, D. Prompt-to-prompt im-age editing with cross attention control. arXiv preprint arXiv:2208.01626 , 2022. Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., and Hochreiter, S. Gans trained by a two time-scale update rule converge to a local nash equilibrium. In Guyon, I., von Luxburg, U., Bengio, S., Wallach, H. M., Fergus, R., Vishwanathan, S. V. N., and Garnett, R. (eds.), Advances in Neural Information Processing Systems 30: Annual Conference on Neural Information Processing Systems 2017, December 4-9, 2017, Long Beach, CA, USA , pp. 6626–6637, 2017. Huberman-Spiegelglas, I., Kulikov, V., and Michaeli, T. An edit friendly DDPM noise space: Inversion and manip-ulations. In IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2024, Seattle, WA, USA, June 16-22, 2024 , pp. 12469–12478. IEEE, 2024. Ju, X., Zeng, A., Bian, Y., Liu, S., and Xu, Q. Pnp inversion: Boosting diffusion-based editing with 3 lines of code. 
+
+International Conference on Learning Representations (ICLR) , 2024. Lin, H., Wang, M., Wang, J., An, W., Chen, Y., Liu, Y., Tian, F., Dai, G., Wang, J., and Wang, Q. Schedule your edit: A simple yet effective diffusion noise schedule for image editing. CoRR , abs/2410.18756, 2024. Liu, X., Gong, C., and Liu, Q. Flow straight and fast: Learning to generate and transfer data with rectified flow. In The Eleventh International Conference on Learning Representations, ICLR 2023, Kigali, Rwanda, May 1-5, 2023 . OpenReview.net, 2023. URL https: //openreview.net/forum?id=XVjTT1nw5z .Meng, C., He, Y., Song, Y., Song, J., Wu, J., Zhu, J.-Y., and Ermon, S. SDEdit: Guided image synthesis and editing with stochastic differential equations. In International Conference on Learning Representations , 2022. Miyake, D., Iohara, A., Saito, Y., and Tanaka, T. Negative-prompt inversion: Fast image inversion for editing with text-guided diffusion models. CoRR , abs/2305.16807, 2023. Mokady, R., Hertz, A., Aberman, K., Pritch, Y., and Cohen-Or, D. Null-text inversion for editing real images using guided diffusion models. In IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2023, Vancouver, BC, Canada, June 17-24, 2023 , pp. 6038– 6047. IEEE, 2023. Park, D., Lee, S., Kim, S., Lee, T., Hong, Y., and Kim, H. J. Constant acceleration flow. In The Thirty-eighth Annual Conference on Neural Information Processing Systems ,2024. URL https://openreview.net/forum? id=hsgNvC5YM9 .Parmar, G., Singh, K. K., Zhang, R., Li, Y., Lu, J., and Zhu, J. Zero-shot image-to-image translation. In Brunvand, E., Sheffer, A., and Wimmer, M. (eds.), 
+
+ACM SIGGRAPH 2023 Conference Proceedings, SIG-GRAPH 2023, Los Angeles, CA, USA, August 6-10, 2023 , pp. 11:1–11:11. ACM, 2023. doi: 10.1145/ 3588432.3591513. URL https://doi.org/10. 1145/3588432.3591513 .Podell, D., English, Z., Lacey, K., Blattmann, A., Dock-horn, T., M ¨uller, J., Penna, J., and Rombach, R. SDXL: Improving latent diffusion models for high-resolution image synthesis. In The Twelfth International Confer-ence on Learning Representations , 2024. URL https: //openreview.net/forum?id=di52zR8xgf .Radford, A., Kim, J. W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J., Krueger, G., and Sutskever, I. Learning transferable visual models from natural language supervision. In Meila, M. and Zhang, T. (eds.), Proceedings of the 38th International Conference on Machine Learning, ICML 2021, 18-24 July 2021, Virtual Event , volume 139 of 
+
+Proceedings of Machine Learning Research , pp. 8748– 8763. PMLR, 2021. Ramesh, A., Dhariwal, P., Nichol, A., Chu, C., and Chen, M. Hierarchical text-conditional image generation with CLIP latents. CoRR , abs/2204.06125, 2022. doi: 10.48550/ ARXIV.2204.06125. URL https://doi.org/10. 48550/arXiv.2204.06125 .Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and Ommer, B. High-resolution image synthesis with la-tent diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 10684–10695, June 2022. Rout, L., Chen, Y., Ruiz, N., Caramanis, C., Shakkottai, S., and Chu, W.-S. Semantic image inversion and edit-ing using rectified stochastic differential equations. In 
+
+The Thirteenth International Conference on Learning Representations , 2025. URL https://openreview. net/forum?id=Hu0FSOSEyS .Song, J., Meng, C., and Ermon, S. Denoising diffusion im-plicit models. In 9th International Conference on Learn-
+
+10 FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+ing Representations, ICLR 2021, Virtual Event, Austria, May 3-7, 2021 . OpenReview.net, 2021. Tewel, Y., Gal, R., Samuel, D., Atzmon, Y., Wolf, L., and Chechik, G. Add-it: Training-free object insertion in im-ages with pretrained diffusion models. In The Thirteenth International Conference on Learning Representations ,2025. URL https://openreview.net/forum? id=ZeaTvXw080 .Tumanyan, N., Geyer, M., Bagon, S., and Dekel, T. Plug-and-play diffusion features for text-driven image-to-image translation. In IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2023, Vancouver, BC, Canada, June 17-24, 2023 , pp. 1921–1930. IEEE, 2023. Urbanek, J., Bordes, F., Astolfi, P., Williamson, M., Sharma, V., and Romero-Soriano, A. A picture is worth more than 77 text tokens: Evaluating clip-style models on dense captions. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 26700–26709, June 2024. Wang, J., Pu, J., Qi, Z., Guo, J., Ma, Y., Huang, N., Chen, Y., Li, X., and Shan, Y. Taming rectified flow for inversion and editing. arXiv preprint arXiv:2411.04746 , 2024. Wang, Z., Bovik, A. C., Sheikh, H. R., and Simoncelli, E. P. Image quality assessment: from error visibility to structural similarity. IEEE Trans. Image Process. , 13(4): 600–612, 2004. Xu, S., Huang, Y., Pan, J., Ma, Z., and Chai, J. Inversion-free image editing with language-guided diffusion mod-els. In IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2024, Seattle, WA, USA, June 16-22, 2024 , pp. 9454–9461. IEEE, 2024. doi: 10.1109/CVPR52733.2024.00903. URL https:// doi.org/10.1109/CVPR52733.2024.00903 .Zhang, L., Rao, A., and Agrawala, M. Adding condi-tional control to text-to-image diffusion models. In 2023 IEEE/CVF International Conference on Computer Vision (ICCV) , pp. 3813–3824, 2023. doi: 10.1109/ICCV51070. 2023.00355. Zhang, R., Isola, P., Efros, A. A., Shechtman, E., and Wang, O. The unreasonable effectiveness of deep features as a perceptual metric. In 2018 IEEE Conference on Computer Vision and Pattern Recognition, CVPR 2018, Salt Lake City, UT, USA, June 18-22, 2018 , pp. 586–595. Computer Vision Foundation / IEEE Computer Society, 2018. Zhang, Y., Huang, N., Tang, F., Huang, H., Ma, C., Dong, W., and Xu, C. Inversion-based creativity transfer with diffusion models. CoRR , abs/2211.13203, 2022. 11 FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+## A. The Pseudo-code for Inversion and Editing 
+
+Algorithm 1 Solving ReFlow Inversion ODE 
+
+Require: Discretization steps N , reference image X0, prompt embedding network Φ, Flux model v(·, ·, ·; φ), time steps t =[t0, ..., t N −1]
+
+Ensure: Structured noise X1
+
+1: Initialize vt0 (Xt0 ) = v(Xt0 , t 0, Φ( ·); φ) {Run }
+
+2: ∆t0 = t1 − t0
+
+3: Xt0+ 12 ∆t0 = Xt0 + 12 ∆t0 · vt0 (Xt0 )
+
+4: Initialize vt0+ 12 ∆t0 (Xt0+ 12 ∆t0 ) = v(Xt0+ 12 ∆t, t 0 + 12 ∆t0, Φ( ·); φ) {Run & Save to GPU Memory }
+
+5: Xt1 = Xt0 + ∆ t0 · vt0+ 12 ∆t0 (Xt0+ 12 ∆t0 )
+
+6: for i = 1 : N − 1 do 
+
+7: ˆvti (Xti ) ← vti−1+ 12 ∆ti−1 (Xti−1+ 12 ∆ti−1 ) {Load from GPU Memory }
+
+8: ∆ti = ti+1 − ti
+
+9: Xti+ 12 ∆ti = Xti + 12 ∆ti · ˆvti (Xti )
+
+10: vti+ 12 ∆ti (Xti+ 12 ∆ti ) = v(Xti+ 12 ∆ti , t i + 12 ∆ti, Φ( ·); φ) {Run & Save to GPU Memory }
+
+11: Xti+1 = Xti + ∆ ti · vti+ 12 ∆ti (Xti+ 12 ∆ti )
+
+12: if i== N − 1 then 
+
+12: Save V inv. tN −1 to storage. 13: end if 
+
+14: end for 
+
+15: return X1, V inv. tN −1 in Self-attention Layers 
+
+Algorithm 2 Solving ReFlow Denoising ODE (Editing) 
+
+Require: Discretization steps N , reference text ”prompt”, structured noise X1, prompt embedding network Φ, Flux model v(·, ·, ·; φ),time steps t = [ tN −1, ..., t 0], pre-computed V inv. tN −1 in Self-attention Layers during inversion 
+
+Ensure: Edited image X0
+
+1: Initialize vtN −1 (XtN −1 ) = v(XtN −1 , t N −1, Φ( prompt ); φ) {Replace V edit tN −1 with V inv. tN −1 in Self-attention & Run }
+
+2: ∆tN −1 = tN −2 − tN −1
+
+3: XtN −1+ 12 ∆tN −1 = XtN −1 + 12 ∆tN −1 · vtN −1 (XtN −1 )
+
+4: Initialize vtN −1+ 12 ∆tN −1 (XtN −1+ 12 ∆tN −1 ) = v(XtN −1+ 12 ∆tN −1 , t N −1 + 12 ∆tN −1, Φ( prompt ); φ){Replace V edit tN −1 with V inv. tN −1
+
+in Self-attention & Run & Save to GPU Memory }
+
+5: XtN −2 = XtN −1 + ∆ tN −1 · vtN −1+ 12 ∆tN −1 (XtN −1+ 12 ∆tN −1 )
+
+6: for i = N − 2 : 0 do 
+
+7: ˆvti (Xti ) ← vti+1 + 12 ∆ti+1 (Xti+1 + 12 ∆ti+1 ) {Load from GPU Memory }
+
+8: ∆ti = ti−1 − ti
+
+9: Xti+ 12 ∆ti = Xti + 12 ∆ti · ˆvti (Xti )
+
+10: vti+ 12 ∆ti (Xti+ 12 ∆ti ) = v(Xti+ 12 ∆ti , t i + 12 ∆ti, Φ( prompt ); φ) {Run & Save to GPU Memory }
+
+11: Xti−1 = Xti + ∆ ti · vti+ 12 ∆ti (Xti+ 12 ∆ti )
+
+12: end for 
+
+13: return X0
+
+## B. Technical Proofs 
+
+This section provides detailed technical proofs for the theoretical results discussed in this paper. 
+
+B.1. Proof of Proposition 3.1 
+
+Proof. The reverse ODE is given by: 
+
+dx
+
+dt = −v(x, t ). (13) Let xTrue (t) be the true solution of the reverse ODE, starting from xTrue 
+
+T , and xPerturbed (t) be the solution starting from 
+
+xNumerical 
+
+T = xTrue 
+
+T + ∆ T . The initial condition difference is: 
+
+xPerturbed 
+
+T (T ) − xTrue 
+
+T (T ) = ∆ T . (14) 12 FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+Define the error ∆( t) as the difference between the perturbed and true solutions: 
+
+∆( t) = xPerturbed (t) − xTrue (t). (15) The dynamics of ∆( t) follow from the reverse ODE: 
+
+d∆( t)dt = dxPerturbed (t)dt − dxTrue (t)dt . (16) Substituting the reverse ODE for each term: 
+
+d∆( t)dt = −v(xPerturbed (t), t ) + v(xTrue (t), t ). (17) Using the Lipschitz continuity of v(x, t ), we have: 
+
+∥v(xPerturbed (t), t ) − v(xTrue (t), t )∥ ≤ L∥∆( t)∥, (18) where L is the Lipschitz constant of v(x, t ). Thus, 
+
+d∆( t)dt ≤ L∥∆( t)∥. (19) Based on the definition of the derivative of a norm: 
+
+d∥∆( t)∥
+
+dt = ∆( t)
+
+∥∆( t)∥ · d∆( t)dt ≤ ∆( t)
+
+∥∆( t)∥ · d∆( t)dt = d∆( t)dt ≤ L∥∆( t)∥, (20) This can be rewritten as: d∥∆( t)∥∥∆( t)∥ ≤ L dt. (21) Integrate both sides from t = T (initial condition) to t = 0 (final condition): 
+
+Z 0
+
+> T
+
+d∥∆( t)∥∥∆( t)∥ ≤
+
+Z 0
+
+> T
+
+L dt. (22) Thus, the inequality becomes: 
+
+ln ∥∆(0) ∥ − ln ∥∆( T )∥ ≤ − LT. (23) Simplify: 
+
+ln ∥∆(0) ∥ ≤ ln ∥∆( T )∥ − LT. (24) Exponentiate both sides to remove the logarithm: 
+
+∥∆(0) ∥ ≤ ∥ ∆( T )∥e−LT . (25) 
+
+B.2. Proof of Proposition 4.1 
+
+Proof. Define the time interval between t and t − 1 as ∆t for simplicity, the reused velocity at t is given by: 
+
+ˆvθ (Xt, t ) = vθ (X(t−1)+ ∆t
+
+> 2
+
+, (t − 1) + ∆t
+
+2 ), (26) where X(t−1)+ ∆t
+
+> 2
+
+is computed recursively using: 
+
+X(t−1)+ ∆t
+
+> 2
+
+= Xt−1 + ∆t
+
+2 ˆvθ (Xt−1, t − 1) . (27) The exact velocity at t is: 
+
+vθ (Xt, t ). (28) 13 FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+To quantify the difference || ˆvθ (Xt, t ) − vθ (Xt, t )|| , we expand the reused velocity ˆvθ (Xt, t ) around the exact velocity 
+
+vθ (Xt, t ). Using a Taylor series expansion, expand vθ (X(t−1)+ ∆t
+
+> 2
+
+, (t − 1) + ∆t 
+
+> 2
+
+) around Xt and t :
+
+vθ (X(t−1)+ ∆t
+
+> 2
+
+, (t − 1) + ∆t
+
+2 ) ≈ vθ (Xt, t ) + ∂v θ
+
+∂X (X(t−1)+ ∆t
+
+> 2
+
+− Xt) + ∂v θ
+
+∂t (−∆t + ∆t
+
+2 ) + O(∆ t2). (29) The temporal difference is: 
+
+−∆t + ∆t
+
+2 = −∆t
+
+2 . (30) Thus, the temporal contribution to the velocity difference is: 
+
+− ∆t
+
+2
+
+∂v θ
+
+∂t . (31) The leading term introduces an error of O(∆ t).The spatial difference is: 
+
+X(t−1)+ ∆t
+
+> 2
+
+− Xt. (32) Using the recursive relationship: 
+
+X(t−1)+ ∆t
+
+> 2
+
+= Xt−1 + ∆t
+
+2 ˆvθ (Xt−1, t − 1) , (33) and the local truncation error of Euler method 
+
+Xt ≈ Xt−1 + ∆ t · vθ (Xt−1, t − 1) + O(∆ t2), (34) we subtract: 
+
+X(t−1)+ ∆t
+
+> 2
+
+− Xt = −∆t · vθ (Xt−1, t − 1) + ∆t
+
+2 ˆvθ (Xt−1, t − 1) + O(∆ t2). (35) Simplify: 
+
+X(t−1)+ ∆t
+
+> 2
+
+− Xt = ∆t
+
+2 (ˆ vθ (Xt−1, t − 1) − 2 · vθ (Xt−1, t − 1)) + O(∆ t2). (36) Substitute this into the spatial term: 
+
+∂v θ
+
+∂X (X(t−1)+ ∆t
+
+> 2
+
+− Xt) = ∆t
+
+2
+
+∂v θ
+
+∂X (ˆ vθ (Xt−1, t − 1) − 2 · vθ (Xt−1, t − 1)) + O(∆ t2). (37) Combine both temporal and spatial difference: 
+
+ˆvθ (Xt, t ) − vθ (Xt, t ) = ∆t
+
+2
+
+∂v θ
+
+∂X 
+
+ ˆvθ (Xt−1, t − 1) − vθ (Xt−1, t − 1)  − ∆t
+
+2 ( ∂v θ
+
+∂t + ∂v θ
+
+∂X vθ (Xt−1, t − 1)) + O(∆ t2). (38) Let δt = || ˆvθ (Xt, t ) − vθ (Xt, t )|| . From the above analysis and triangle inequality: 
+
+δt ≤ ∆t
+
+2 δt−1 + O(∆ t). (39) Unfold the recursion: 
+
+δt ≤ O (∆ t) + ∆t
+
+2 O(∆ t) + 
+
+ ∆t
+
+2
+
+2
+
+O(∆ t) + · · · . (40) This is a geometric series with common ratio ∆t 
+
+> 2
+
+, summing to: 
+
+δt ≤ O (∆ t) ·
+
+> ∞
+
+X
+
+> k=0
+
+ ∆t
+
+2
+
+k
+
+= O(∆ t) · 11 − ∆t
+
+> 2
+
+. (41) For small ∆t, 11− ∆t
+
+> 2
+
+≈ 1 + ∆t 
+
+> 2
+
+, so: 
+
+δt = || ˆvθ (Xt, t ) − vθ (Xt, t )|| ≤ O (∆ t). (42) 14 FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+B.3. Proof of Theorem 4.2 
+
+Proof. Define the time interval as ∆t for simplicity, our modified midpoint method updates Xt+1 as: 
+
+Xt+1 = Xt + ∆ t · vθ
+
+ Xt+ ∆t
+
+> 2
+
+, t + ∆t
+
+2
+
+, (43) where: 
+
+Xt+ ∆t
+
+> 2
+
+= Xt + ∆t
+
+2 ˆvθ (Xt, t ). (44) Substituting Xt+ ∆t
+
+> 2
+
+, the velocity term becomes: 
+
+vθ
+
+ Xt+ ∆t
+
+> 2
+
+, t + ∆t
+
+2
+
+ ≈ vθ (Xt, t ) + ∆t
+
+2
+
+∂v θ
+
+∂t + ∆t
+
+2
+
+∂v θ
+
+∂X ˆvθ (Xt, t ) + O(∆ t2). (45) Under the assumption || ˆvθ (Xt, t ) − vθ (Xt, t )|| ≤ O (∆ t), we write: 
+
+ˆvθ (Xt, t ) = vθ (Xt, t ) + δv, (46) where || δv || ≤ O (∆ t). Substituting this into the velocity term expansion: 
+
+∂v θ
+
+∂X ˆvθ (Xt, t ) = ∂v θ
+
+∂X vθ (Xt, t ) + ∂v θ
+
+∂X δv. (47) Since || δv || ≤ O (∆ t), the additional term ∆t 
+
+> 2
+
+· ∂v θ 
+
+> ∂X
+
+δv contributes an error of O(∆ t2), which is of the same order as higher-order terms in the expansion. Thus, the velocity term becomes: 
+
+vθ
+
+ Xt+ ∆t
+
+> 2
+
+, t + ∆t
+
+2
+
+ ≈ vθ (Xt, t ) + ∆t
+
+2
+
+∂v θ
+
+∂t + ∆t
+
+2
+
+∂v θ
+
+∂X vθ (Xt, t ) + O(∆ t2). (48) Substituting the expanded velocity back into the updated equation: 
+
+Xt+1 = Xt + ∆ t ·
+
+
+
+vθ (Xt, t ) + ∆t
+
+2
+
+∂v θ
+
+∂t + ∆t
+
+2
+
+∂v θ
+
+∂X vθ (Xt, t ) + O(∆ t2)
+
+
+
+. (49) Simplify: 
+
+Xt+1 = Xt + ∆ t · vθ (Xt, t ) + ∆t2
+
+2
+
+∂v θ
+
+∂t + ∆t2
+
+2
+
+∂v θ
+
+∂X vθ (Xt, t ) + O(∆ t3). (50) The exact solution to the ODE is: 
+
+X(t + ∆ t) = X(t) + ∆ t · vθ (Xt, t ) + ∆t2
+
+2
+
+∂v θ
+
+∂t + ∆t2
+
+2
+
+∂v θ
+
+∂X vθ (Xt, t ) + O(∆ t3). (51) The modified midpoint method’s update matches the exact solution up to O(∆ t2), confirming that the local truncation error remains O(∆ t3). Since the local truncation error is O(∆ t3), the global error accumulates over O(1 /∆t) steps, resulting in 
+
+O(∆ t2).
+
+## C. Empirical Convergence Rate 
+
+We now present a comparative analysis of reconstruction errors for different solvers, considering up to 60 Number of Function Evaluations (NFE). Our method exhibits rapid convergence to a consistently low reconstruction error, demonstrating its efficiency in minimizing reconstruction loss. The vanilla ReFlow model, implemented with a first-order Euler method, suffers from a slow convergence rate, implying a higher computational cost to achieve comparable accuracy. Notably, the RF-solver, which incorporates a second-order truncation error, displays a non-monotonic convergence behavior. Although it initially converges more quickly than vanilla ReFlow, the reconstruction error begins to increase after approximately 25 steps. This suggests that the second-order approximation in the RF-solver may introduce instability or over-fitting beyond this point, emphasizing the robustness and efficiency of our proposed method. 15 FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing  
+
+> Figure 7. Visualization of the convergence rate of different order inversion and reconstruction method. With 60 NFE, our approach still enjoys the lowest reconstruction error and the fastest convergence speed.
+
+## D. Python-style Pseudo-Code 
+
+In this section, we provide Python-style pseudo-code to elucidate the core algorithmic steps of our proposed approach. This approach, while conceptually simple, delivers substantial performance improvements. Specifically, initialization of the variable ˆv is performed as None in the first iteration. Subsequently, each iteration requires only a single invocation of the model evaluation function, thereby maintaining a computational cost per iteration equivalent to that of the baseline ReFlow model employing the first-order Euler method. However, as evidenced by the convergence analysis presented in Figure 7, our approach achieves a significantly accelerated rate of convergence.                                                        
+
+> 1hat_velocity =None
+> 2for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
+> 3if hat_velocity is None:
+> 4velocity =model(X, t_curr)
+> 5else:
+> 6velocity =hat_velocity
+> 7X_mid =X + (t_prev -t_curr) /2*velocity
+> 8velocity_mid =model(X_mid, t_curr +(t_prev -t_curr) /2)
+> 9hat_velocity =velocity_mid
+> 10 X=X+(t_prev -t_curr) *velocity_mid
+> 11 return X
+
+## E. Ablation Study 
+
+Editing Steps: An ablation study was conducted to evaluate the influence of the number of editing steps on the editing performance. The number of steps was varied from 2 to 12, and the corresponding results are presented in Figure 8. The analysis reveals that with only two editing steps, the editing prompts are not effectively incorporated, resulting in suboptimal performance. However, a significant improvement in performance is observed as the number of steps increases. Notably, the performance achieved with eight steps is comparable to that obtained with 10 or 12 steps, indicating that eight steps provide sufficient capacity for effective editing. Consequently, a value of eight editing steps was selected for use in all subsequent experiments. 
+
+Inversion-free Editing: Here, we apply our modified midpoint method to solve the controlled ODEs employed by other ReFlow-based editing methods. This compatibility underscores FireFlow’s robustness in handling the ODE challenges inherent in ReFlow models, regardless of whether they occur during the forward or reverse diffusion process. Visual comparisons highlighting the superiority of our approach are shown in Figures 9. 16 FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing Source 4 steps 8 steps 12 steps 2 steps 6 steps 10 steps 
+
+Figure 8. Ablation Study on the Number of Editing Steps. 
+
+(a) cat (b) tulip (c) tiger (d) cat (e) pink flower (f) in the woods (g) Source Images 
+
+(h) silver sculpture (i) lion (j) cat (k) fox (l) teddy bear (m) in the city (n) FlowEdit Results 
+
+(o) silver sculpture (p) lion (q) cat (r) fox (s) teddy bear (t) in the city (u) FlowEdit + FireFlow Results 
+
+Figure 9. Illustration on the effect of FireFlow solver when coupled with other controlled ODE. 
+
+17 FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing             
+
+> (a) Source Image (b) Black Cat (c) Source Image (d) Raising Hands (e) Source Image (f) Storm-trooper
+> Figure 10. Illustrations on FireFlow Failure Cases.
+> (a) Source Image (b) Black Cat (c) Source Image (d) Raising Hands (e) Source Image (f) Storm-trooper
+> Figure 11. Illustrations on FireFlow with K feature addition in Self-attention.
+
+## F. Limitations 
+
+We empirically observe that our approach struggles with editing tasks involving changes to object colors or uncommon scenarios in natural images. As illustrated in Figure 10, the cat’s color remains unsatisfactory after editing. Similarly, in less common scenes, such as when the person’s head is not visible in the image, the editing results are poor. Another example involves an uncommon description, such as “a [stormtrooper] with blue hair wearing a shirt,” which also yields unexpected results. We attribute these issues to the simplicity of the editing strategy, which involves only replacing the V feature in the self-attention module: Self Attn edit = Softmax ( Qedit Kedit 
+
+√d )Vinv. (52) This approach appears insufficient for handling such scenarios. We empirically find that incorporating K feature addition in the self-attention module can resolve these problems. Formally, Self Attn edit = Softmax ( Qedit (Kedit + Kinv. )
+
+√d )Vedit (53) However, this comes at the cost of diminished preservation of the original structure and background details. Details can be found in Figure 11. We also include an quantitative analysis on different editing strategies in Table 7. The results are consistent with the illustrations. It is evident that Equation 53 belongs to the category of “cross-attention,” focusing on merging features from the self-attention module during inversion with the corresponding features generated during the denoising process. This concept has been extensively discussed in diffusion model (DM) editing methods. Table 7 presents only the foundational attempts in this direction. We hope this will inspire further research and advancements in future work. 18 FireFlow: Fast Inversion of Rectified Flow for Image Semantic Editing 
+
+Table 7. Comparison on different editing methods. Results on PIE Bench are reported. Guidance terms indicate the guidance ratio settings used in the FLUX model during the denoising process. 
+
+Method Guidance Structure Background Preservation CLIP Similarity ↑ Steps NFE ↓
+
+Distance ↓ PSNR ↑ SSIM ↑ Whole Edited 
+
+Add Q [1,2,2,...] 0.0590 17.72 0.7340 27.01 23.84 8 18 
+
+Add Q + Add K [1,2,2,...] 0.0537 18.35 0.7520 26.82 23.60 8 18 
+
+Add Q + Add K + Add V [1,2,2,...] 0.0416 19.63 0.7805 25.95 22.92 8 18 
+
+Add Q [1,1,2,...] 0.0530 18.78 0.7580 26.99 23.85 15 32 Add Q + Add K [1,1,2,...] 0.0486 19.30 0.7721 26.68 23.59 15 32 Replace V [2,2,...] 0.0271 23.03 0.8249 26.02 22.81 8 18 
+
+Add Q [2,2,...] 0.0710 16.49 0.7077 27.33 24.09 8 18 
+
+Add K [2,2,...] 0.0738 16.41 0.7066 27.25 24.01 8 18 
+
+19

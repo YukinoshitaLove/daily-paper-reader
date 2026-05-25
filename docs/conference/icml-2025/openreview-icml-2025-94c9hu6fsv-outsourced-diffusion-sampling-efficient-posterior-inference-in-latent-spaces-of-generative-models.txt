@@ -1,0 +1,894 @@
+Title: Outsourced Diffusion Sampling:Efficient Posterior Inference in Latent Spaces of Generative Models
+
+URL Source: https://openreview.net/pdf?id=94c9hu6Fsv
+
+Number of Pages: 28
+
+Markdown Content:
+# Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+Siddarth Venkatraman * 1 2 Mohsin Hasan * 1 2 Minsu Kim 1 2 3 Luca Scimeca 1 2 Marcin Sendera 4
+
+Yoshua Bengio 1 2 5 Glen Berseth 1 2 5 Nikolay Malkin 6
+
+# Abstract 
+
+Any well-behaved generative model over a vari-able x can be expressed as a deterministic transfor-mation of an exogenous ( ‘outsourced’ ) Gaussian noise variable z: x = 𝑓 𝜃 (z). In such a model ( e.g. ,a VAE, GAN, or continuous-time flow-based model), sampling of the target variable x ∼ 𝑝 𝜃 (x)
+
+is straightforward, but sampling from a posterior distribution of the form 𝑝 (x | y) ∝ 𝑝 𝜃 (x)𝑟 (x, y),where 𝑟 is a constraint function depending on an auxiliary variable y, is generally intractable. We propose to amortize the cost of sampling from such posterior distributions with diffusion models that sample a distribution in the noise space ( z). These diffusion samplers are trained by reinforcement learning algorithms to enforce that the transformed samples 𝑓 𝜃 (z) are distributed according to the posterior in the data space ( x). For many models and constraints, the posterior in noise space is smoother than in data space, making it more suitable for amortized inference. Our method enables conditional sampling under unconditional GAN, (H)VAE, and flow-based priors, comparing favorably with other inference methods. We demonstrate the proposed out-sourced diffusion sampling in several experiments with large pretrained prior models: conditional image generation, reinforcement learning with human feedback, and protein structure generation. 
+
+# 1. Introduction 
+
+Generative models, trained on a dataset to maximize likeli-hood or related quantities, can become priors for Bayesian 
+
+> *
+
+Equal contribution 1Mila – Qu ´ebec AI Institute 2Universit ´e de Montr ´eal 3KAIST 4Jagiellonian University 5CIFAR 6University of Edinburgh. Correspondence to: <{siddarth.venkatraman, mohsin.hasan }@mila.quebec >.
+
+Proceedings of the 42 𝑛𝑑 International Conference on Machine Learning , Vancouver, Canada. PMLR 267, 2025. Copyright 2025 by the author(s). 
+
+Table 1. Common families of generative models can be expressed as deterministic transformations of noise. Here, 𝑑 latent refers to the dimension of the latent variable as typically understood in the model; typically, 𝑑 latent ≪ 𝑑 data (§2). Posteriors under these generative model priors are generally intractable, but some models can be fine-tuned by asymptotically unbiased variational objec-tives to sample intractable posteriors (§3.1). Outsourced diffusion sampling approximates posteriors in the noise space (§3.2 and §4).                               
+
+> Model Noise dim. 𝑑 noise Invertible? Variational tuning? (H)VAE 𝑑 latent ·𝑁 +𝑑 data ×✓
+> GAN 𝑑 latent ××NF / CNF 𝑑 data ✓✓/× Diffusion 𝑑 data · ( 𝑇 +1)×✓
+> Latent diffusion 𝑑 latent · ( 𝑇 +1) + 𝑑 data ×✓
+
+inference problems. The aim is to approximate or sam-ple from the product of the modeled distribution over a data space with an observation likelihood or other constraint function. While such diverse applications as conditional gen-eration (Dhariwal & Nichol, 2021; Ho & Salimans, 2022), inverse problems (Song et al., 2022; Chung et al., 2023; Venkatraman et al., 2024), and constrained improvement from human feedback (Korbak et al., 2022; Fan et al., 2023) can be cast as posterior inference tasks, sampling from such posterior distributions when no unbiased target data is avail-able is generally intractable. For some model families, ap-proximate solutions, such as MCMC, approximate guidance, and variational inference, may be possible. Each of those methods has limitations, such as high cost to reach conver-gence for multimodal posteriors, intractability of accurate density estimation, and reliance on techniques specialized to the model and constraint. Fundamentally, generative models are probabilistic pro-grams that produce samples from the distributions they de-fine by a combination of deterministic computation and injection of random noise. 1 This paper argues that the noise space of generative models – the space where the noise in-jected during generation resides – is an effective target for posterior inference. To be precise, we consider a generative 
+
+> 1
+
+We refer here to models that produce samples in a bounded number of operations, not to objects such as deep energy-based models, for which sampling is intractable. 
+
+1Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+Figure 1. Left: Top row: Marginal densities of a CNF that transforms a Gaussian distribution ( 𝑡 = 0) to a Swiss roll ( 𝑡 = 1). Middle row: The constraint function – a mixture of two Gaussians centered an an observation 
+
+y (•) and its reflection through the origin – pulled back to x𝑡 . Bottom row: Posterior densities at x𝑡 , propor-tional to the product of the first two rows. The rightmost column shows samples in the data space. Right: The same objects shown in noise and data space for a GAN that transforms noise ( z) to data ( x). Outsourced dif-fusion samplers approximate 𝑝 (x0 | y) or 𝑝 (z | y),which are smoother than 𝑝 (x | y) (see Fig. 2). p(xt)      
+
+> t= 0.00
+> p(xt y) p(y xt)
+> t= 0.50 t= 0.75 t= 1.00 p(z)
+> z
+> p(z y) p(y z)
+> p(x)
+> x
+> p(x y) p(y x)p(z)
+> z
+> p(z y) p(y z)
+> p(x)
+> x
+> p(x y) p(y x)
+
+model that expresses data as a deterministic transformation of noise, x = 𝑓 𝜃 (z), where the noise variable z follows a known distribution z ∼ 𝑝 z (z) and 𝜃 are the model parame-ters. This model defines a distribution over x – the pushfor-ward [ 𝑓 𝜃 ]∗ 𝑝 z of the noise distribution by the deterministic transformation – with density 𝑝 (x). A constraint function 
+
+𝑟 (x, y) in the data space, depending on an auxiliary variable 
+
+y, defines a posterior distribution 𝑝 (x | y) ∝ 𝑝 (x)𝑟 (x, y).This posterior can be sampled by inferring a distribution over the noise variable z that, when transformed by 𝑓 𝜃 ,aligns with the posterior in the data space. The posterior in the noise space is often smoother (and lower-dimensional) than the corresponding posterior in the data space (Fig. 1), making it more amenable to efficient sampling (Fig. 2). While posterior sampling in noise space is still intractable, it can be addressed by methods of black-box variational inference. Recent advances in diffusion samplers – diffusion models trained not on a dataset, but to match a given unnormalized density (Zhang & Chen, 2022; Vargas et al., 2023; Richter & Berner, 2024; Sendera et al., 2024) – open an opportunity to model complex posteriors in noise space. We call such amortized posterior inference in the noise space outsourced diffusion sampling .Our exposition and experiments support three claims: (1) Outsourced diffusion sampling is agnostic to the form of the mapping 𝑓 𝜃 and applicable to a wide range of prior models, including VAEs, GANs, normalizing flows, and continuous-time flow-based models (Table 1). (2) Outsourced diffusion sampling is an effective poste-rior inference method under large pretrained genera-tive model priors in a variety of domains: conditional image generation, reinforcement learning with human feedback, discriminator-adjusted GAN sampling, and protein structure generation (Table 2). (3) Outsourced diffusion sampling is more efficient than amortized inference methods that fit a model to sample the data space posterior directly and than non-amortized methods like MCMC, illustrating the flexibility of diffu-sion sampling in outsourced noise spaces for sampling Target 
+
+> p(x1 y)
+> Outsourced
+> p(x0 y)
+
+Figure 2. Marginal densities of a diffusion sampler of the posteriors from the CNF example in Fig. 1 in data space and noise space. The data space posterior (top row) has well-separated modes and is harder to sample from than the outsourced posterior (bottom row). 
+
+complex posteriors (§5). 
+
+# 2. Outsourcing Noise in Generative Models 
+
+Consider a probabilistic model over a variable x taking val-ues in R𝑑 data , with auxiliary latent variables w valued in 
+
+R𝑑 latent . The model is a joint distribution over x and w, and it induces a distribution over x, its marginalization over w. In terms of densities (if they exist), if 𝑝 (w, x) is the joint den-sity, then the marginal density of x is 𝑝 (x) = ∫ 𝑝 (w, x) 𝑑 w.A form of the noise outsourcing lemma (see, e.g. , Austin, 2015) states that, under basic assumptions, any such model is equivalent to one augmented with additional latent vari-ables w′, independent of w and following a fixed distribu-tion, such that x is a (deterministic) function of w and w′. In particular, if w and w′ are both standard Gaussian, then x is a deterministic function of a Gaussian noise variable z (the concatentation of w and w′), called the ‘outsourced’ noise: 
+
+Proposition 2.1 (Noise outsourcing lemma for Gaussians) .
+
+Let w and x be Borel-measurable random variables val-ued in R𝑑 latent and R𝑑 data , respectively, with w marginally standard Gaussian, and let 𝑑 noise > 𝑑 latent . There exists a random variable z in R𝑑 noise such that: (1) z is standard Gaussian; (2) w is the projection of z onto its first 𝑑 latent coordinates; (3) there exists a measurable function 𝑓 : R𝑑 noise → R𝑑 data 
+
+such that (w, x) = (w, 𝑓 (z)) almost surely. 
+
+2Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+Prop. 2.1 ensures that any generative model with marginally Gaussian latent variables can be rewritten as a deterministic function of a higher-dimensional Gaussian noise variable, but does not specify the form of the function 𝑓 (which is very non-unique). We will be interested in modeling Bayesian posteriors over x given observations by pulling them back to the noise variable z, using methods agnostic to the form of 𝑓 , which is seen as a black-box transformation. Common families of generative models have a natural form for 𝑓 , obtainable explicitly from their latent variable struc-ture, that we will exploit. We now explain how several model families, in their basic form, can be expressed as de-terministic transformations of noise z following a Gaussian distribution over R𝑑 noise . See Table 1 for a summary. 
+
+Variational autoencoders (VAEs; Kingma & Welling, 2014). The generative model in a simple VAE may have the form x ∼ N ( 𝝁 𝜃 (w), 𝜎 2 
+
+> 𝜃
+
+(w)𝐼 𝑑 data ), where w follows a Gaussian distribution in R𝑑 latent and 𝝁 𝜃 and 𝜎 𝜃 are neural networks outputting a vector and scalar, respectively. This model may be reparametrized as 
+
+x = 𝝁 𝜃 (w) + 𝜎 𝜃 (w)𝜉, (1) where 𝜉 ∼ N ( 0, 𝐼 𝑑 data ). Thus x is a deterministic transfor-mation of the concatenation of w and 𝜉 , which follows a Gaussian distribution in R𝑑 latent +𝑑 data . (The encoder, an aux-iliary object used in training the VAE, does not form part of the generative model.) Hierarchical VAEs (HVAEs; Rezende et al., 2014) , generalize VAEs, using a Marko-vian chain of latent variables in the generative process i.e. ,a graphical model structure of w𝑁 → · · · → w1 → x
+
+with each transition a conditional Gaussian distribution. If these variables are all R𝑑 latent -valued, then x can be similarly reparametrized as a function of the 𝑁 𝑑 latent -dimensional Gaussian noises injected on each transition w𝑖 +1 → w𝑖 and the 𝑑 data -dimensional noise on the last step, as in (1). 
+
+Generative adversarial networks (GANs; Goodfellow et al., 2014). In a GAN, a generator 𝐺 𝜃 maps Gaussian-distributed noise z ∼ N ( 0, 𝐼 𝑑 latent ) deterministically to data, 
+
+x = 𝐺 𝜃 (z). Thus a GAN is naturally a model with out-sourced noise in R𝑑 latent . (The discriminator is an auxiliary object used in training, not a part of the generative model.) 
+
+Normalizing flows (NFs; Rezende & Mohamed, 2015). 
+
+In a NF – also naturally a generative model with out-sourced noise – the generator 𝑓 𝜃 maps Gaussian noise 
+
+z ∼ N ( 0, 𝐼 𝑑 data ) to data x deterministically, x = 𝑓 𝜃 (z). Un-like a GAN generator, the function 𝑓 𝜃 is constrained to be in-vertible and necessarily (in order to model a full-support dis-tribution) must have noise of the same dimension as the data. 
+
+Continuous normalizing flows (CNFs; Chen et al., 2018) 
+
+A CNF is an invertible transformation from noise z = x0
+
+to data x = x1 that is the solution of a neural ordinary differential equation (ODE) 
+
+𝑑 x𝑡 = 𝑣 𝜃 (x𝑡 , 𝑡 ) 𝑑𝑡. 
+
+This includes ODEs derived from diffusion models, e.g. ,DDIMs (Song et al., 2021a), and those trained with flow matching, the family of methods introduced by Lipman et al. (2023); Albergo & Vanden-Eijnden (2023); Liu et al. (2023). Under regularity conditions on 𝑣 𝜃 , a distribution over initial conditions x0 induces marginal distributions over x𝑡 for 
+
+𝑡 > 0, and in particular over the data variable x1. The CNF is a generative model with outsourced noise variable z = x0.
+
+Diffusion models. Diffusion models (Sohl-Dickstein et al., 2015; Ho et al., 2020) and latent diffusion models (Rom-bach et al., 2021) can also be expressed as deterministic transformations of noise; see Appendix A.1 for discussion and connections. 
+
+# 3. Posteriors under Generative Model Priors 
+
+For a generative model 𝑝 (x) of any of the types described in §2, and a positive constraint function 𝑟 (x, y) such that 
+
+Ex∼ 𝑝 (x) [𝑟 (x, y)] is finite, we are interested in sampling the posterior distribution 𝑝 (x | y) ∝ 𝑝 (x)𝑟 (x, y). Various sources of constraints will be described in §5 (see Table 2). 
+
+3.1. Posterior Sampling and Approximation 
+
+In this section, we describe existing methods for sampling approximately from such intractable posteriors. 
+
+Model-agnostic methods. The most general methods for sampling from distributions defined by unnormalized densities are Markov chain Monte Carlo (MCMC) methods. These methods may not require fitting parametric models, although hybrid methods – such as adaptive importance sampling (Bugallo et al., 2017), twisted SMC variants (Lawson et al., 2018; 2022), and neural boostrap algorithms (Midgley et al., 2023) – can accelerate their convergence. MCMC methods are agnostic to the form of the target dis-tribution and are guaranteed to converge to it under mild conditions in the limit of infinite time (or memory in the case of particle filtering methods like SMC (Del Moral et al., 2006; Doucet et al., 2009)), making them anytime algorithms that can trade off computation cost for accuracy. However, MCMCs assume access to the target density and possibly to its gradient, limiting their applicability: • For (H)VAEs and their special case diffusion models ,the density cannot be computed exactly; only variational bounds are available. • For GANs , the density cannot be computed because the generator is not injective (invertible) and may not even define a full-support distribution over the target space. • For CNFs , the density can be approximated using the 3Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+Hutchinson trace estimator (Hutchinson, 1989; Grath-wohl et al., 2019), but accurately computing the gradient is expensive, as it requires backpropagating through the computation graph of a neural ODE integrator. 
+
+Monte Carlo methods in latent space. MCMC sampling can be performed at intermediate time points of continuous-time flow-based models (Cabezas et al., 2024). MCMC techniques are also used for sampling in GAN latent spaces for discriminator-guided sampling (Che et al., 2020; Hou et al., 2025) and for conditional generation by sampling in intermediate activation spaces (Nguyen et al., 2017). Simi-lar approaches are applied to normalizing flows (Coeurdoux et al., 2024). Monte Carlo techniques are also used in diffu-sion models (Appendix A.1). 
+
+Amortized inference and fine-tuning. For some families of models, it is possible to train a model that, at convergence to the global optimum, samples from the posterior distribution exactly. This is a problem of variational inference: the model is trained – or perhaps fine-tuned using the prior model as initialization – to be close to the target distribution in some measure of divergence. For CNFs , a method for fine-tuning the drift function 𝑣 𝜃 
+
+to yield a CNF that samples from the posterior distribution, known as adjoint matching , has recently been proposed by Domingo-Enrich et al. (2024). While this method is asymptotically unbiased, it requires access to the gradient of the likelihood function. Furthermore, it is only applicable to a narrow class of flow-based models, namely, those that are trained from certain marginal couplings and interpolants and closely related to the probability flow ODEs of diffusion models. This restrictiveness is due to adjoint matching converting the neural ODE to an equivalent neural SDE 2,which is not possible in general ( e.g. , for flow-based models trained using minibatch optimal transport couplings (Tong et al., 2024; Pooladian et al., 2023) or with non-Gaussian source distributions). Na ¨ıvely applying adjoint matching to such CNFs gives biased results (Fig. 3). 
+
+3.2. Bayesian Posterior in Noise Space 
+
+We describe how posterior distributions can be pulled back to the noise space of a generative model expressed as a de-terministic transformation of an outsourced variable. This relies on a basic measure-theoretic fact regarding the trans-formation of density functions under pushforward measures: 
+
+Proposition 3.1. Suppose that (𝑍, Σ𝑍 ) and (𝑋, Σ𝑋 ) are measurable spaces and 𝑓 : 𝑍 → 𝑋 is measurable. If 𝜇 is a 𝜎 -finite measure on 𝑍 and 𝜈 is a 𝜎 -finite measure on 𝑋 
+
+> 2In diffusion models (SDEs), the prior model can also be fine-tuned to sample from the posterior using objectives closely related to those proposed here; see Appendix A.1.
+
+with 𝜈 ≪ 𝑓 ∗ 𝜇 , then 𝑓 ∗
+
+ 𝑑𝜈 𝑑 𝑓 ∗ 𝜇 ◦ 𝑓 
+
+
+
+· 𝜇 
+
+
+
+= 𝜈 .In particular, if 𝜇 is a probability measure and ℎ : 𝑋 →
+
+R≥0 is 𝑓 ∗ 𝜇 -integrable, then 𝜆 := 1∫ ℎ 𝑑 ( 𝑓 ∗ 𝜇 ) (ℎ ◦ 𝑓 ) · 𝜇 is a probability measure on 𝑍 , and 𝑓 ∗𝜆 = 1∫ ℎ 𝑑 ( 𝑓 ∗ 𝜇 ) (ℎ · 𝑓 ∗ 𝜇 ) is a probability measure on 𝑋 .
+
+(See Appendix A.2 for the proof.) In common terms, in terms of densities, the relevance of the proposition of our setting is as follows. Let 𝑓 : R𝑑 noise → R𝑑 data be a function from the noise space to the data space. Aprior density 𝑝 (z) in the noise space, transformed via 
+
+x = 𝑓 (z), defines a prior 𝑝 (x) (a density with respect to some reference measure, such as the volume measure on the image of 𝑓 ). If ℎ(x) = 𝑟 (x, y) is a constraint function with ∫ 𝑟 (x, y) 𝑝 (x) 𝑑 x < ∞, then if z′ is a variable in the noise space distributed with density proportional to 
+
+𝑝 (z′)𝑟 ( 𝑓 (z′), y), and x′ = 𝑓 (z′), then x′ is distributed with density proportional to 𝑝 (x′)𝑟 (x′, y) in the data space. This means that to sample the posterior in latent space, we can sample from the posterior in noise space (with density 
+
+𝑝 (z)𝑟 ( 𝑓 (z), y)) and transform the sample by 𝑓 . (Note that such sampling does not require computation of the push-forward density. Indeed, 𝑓 need not be injective or smooth, as would typically be required for such computations.) 
+
+Amortizing outsourced posterior sampling. Although noise space posteriors might be simpler than the distribution in target space (Figs. 1 and 2), they can still be multimodal and high-dimensional. MCMC methods have been used to sample from noise spaces of NFs and GANs (Che et al., 2020; Cannella et al., 2021), but suffer from long mixing times. In addition, many MCMC methods assume that the target density 𝑝 (z)𝑟 ( 𝑓 (z), y) is (efficiently) differentiable, which is not the case when 𝑓 is a CNF. Instead, it can be desirable to use amortized variational inference to fit a fast sampler to the latent posterior, that is, to approximate it by a parametric model. We have no samples from this posterior, but have access to its unnormalized density 𝑅 (z | y) := 𝑝 (z)𝑟 ( 𝑓 (z), y).We call such a model an outsourced sampler , a name moti-vated by the fact that the factors of variation in the posterior are ‘outsourced’ to the noise space via the pullback opera-tion. We shall use diffusion models as the variational family, as will be discussed in §4.2. 
+
+# 4. Outsourced Diffusion Sampling 
+
+4.1. Diffusion Samplers for Amortized Inference 
+
+Diffusion sampling is the variational inference problem of approximating a distribution over R𝑑 , with a given unnor-malized density 𝑅 : R𝑑 → R>0, by a diffusion model. Samples from the target distribution, which has density 4Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+𝑝 target (z) = 1 
+
+> 𝑍
+
+𝑅 (z), are not available, nor do we have access to the normalizing constant 𝑍 ; however, we have the ability to query for the unnormalized density 𝑅 (z) at any point z.The goal is to train a neural stochastic differential equation 
+
+z0 ∼ N ( 0, 𝐼 𝑑 ) 𝑑 z𝑡 = 𝑢 𝜙 (z𝑡 , 𝑡 ) 𝑑𝑡 + 𝜎 𝑡 𝑑 B𝑡 , (2) where 𝑢 𝜙 is a neural network, 𝜎 𝑡 is a scalar function of time, and B𝑡 is standard Brownian motion, so that the induced distribution over z1 = z is close to the target distribution 
+
+𝑝 target (z) in some measure of divergence. (Note that, unlike for diffusion models trained from data, it is standard for generation to proceed in increasing time (from noise at 
+
+𝑡 = 0 to the target at 𝑡 = 1.) The model can be sampled by simulating (2) in a time discretization, e.g. , using the Euler-Maruyama method. Training diffusion samplers is more difficult than training typical diffusion models, i.e. , maximizing a variational bound on log-likelihood of a dataset. Various objectives have been proposed, including: (1) ones that rely on differ-entiable simulation of the generative process during training (Li et al., 2020; Kidger et al., 2021; Zhang & Chen, 2022; Vargas et al., 2023) and are linked with optimal control (Berner et al., 2024; Vargas et al., 2024), (2) ones using biased but asymptotically consistent Monte Carlo estimates of the score function (Vargas et al. (2022); Huang et al. (2024); Akhound-Sadegh et al. (2024)), and (3) ‘off-policy’ divergences that can be optimized on arbitrary generative trajectories not necessarily sampled from the current itera-tion of the model (Richter et al., 2020; N ¨usken & Richter, 2021; Sendera et al., 2024, inter alia ). A unifying perspec-tive on these methods and analysis in the continuous-time limit were recently given by Berner et al. (2025). In this work, we adopt training methods of the third kind, using off-policy divergences, as they have have two notable advantages. First, they treat the target 𝑅 as a black-box re-ward function and do not require access to the score ∇ log 𝑅 ,as differentiable simulation methods and some Monte Carlo methods do. Second, they can be trained off-policy, on trajectories obtained through exploration, allowing the flexi-ble use of exploration strategies and thus promoting mode discovery, as demonstrated for continuous-space samplers by Malkin et al. (2023); Sendera et al. (2024); Phillips & Cipcigan (2024); Kim et al. (2025). The exact form of the off-policy divergence will be described in §4.2. 
+
+4.2. Diffusion Sampling in Noise Space 
+
+Diffusion models are an attractive choice of variational family due to their ability to sample from complex high-dimensional distributions. We train outsourced diffusion samplers by using the methods introduced in §4.1 to approx-imate posteriors in outsourced noise spaces (§3.2). The target density we wish to sample takes the form 𝑅 (z |
+
+y) := 𝑝 (z)𝑟 ( 𝑓 (z), y). The sampler can be conditioned on the auxiliary variable y (taking it as an input, resulting in amortization over y and the possibility of generalizing to new y) or can be trained for a single, fixed value of y to sample the corresponding posterior. 
+
+Training objective. To train a diffusion model to sample from the target density 𝑅 (z | y), we use the trajectory bal-ance objective (TB; Malkin et al., 2022). TB was first intro-duced in the context of (discrete) generative flow networks (GFlowNets; Bengio et al., 2021; 2023) and generalized to the continuous setting in Lahlou et al. (2023); it is also a close relative of the VarGrad objective (Richter et al., 2020). It was comprehensively evaluated for diffusion samplers in Sendera et al. (2024) and its asymptotic consistency in the continuous-time limit was established in Berner et al. (2025). We briefly review the TB objective and refer to those works for further details. A diffusion model – a neural network with parameters 𝜙 and possibly conditioned on y – defines a Markovian distribution over denoising trajectories 𝜏 = (z0 → zΔ𝑡 → · · · → z1),where Δ𝑡 = 1 
+
+> 𝑇
+
+is the time step of the discretization of the SDE (2), via 
+
+𝑝 𝜙 𝐹 (𝜏 | y) = 𝑝 (z0)
+
+> 𝑇
+
+Ö
+
+> 𝑖 =1
+
+𝑝 𝜙 𝐹 (z𝑖 Δ𝑡 | z(𝑖 −1)Δ𝑡 , y). (3) Here 𝑝 (z0) is the density of a fixed distribution over the initial noise (recall that generation goes forward in time) and 𝑝 𝜙 𝐹 is the density of the transition kernel defined by the model, i.e. , the probability of transitioning from a sample at a given noise level to a sample at the next-lowest noise level. Similarly, the (fixed) noising process defines a distribution over noising trajectories conditioned on their terminal end-point: 𝑝 𝐵 (𝜏 | z1) = Î𝑇 𝑖 =1 𝑝 𝐵 (z(𝑖 −1)Δ𝑡 | z𝑖 Δ𝑡 ). The TB ob-jective associated with a trajectory 𝜏 is a squared log-ratio: 
+
+LTB (𝜏 ; y, 𝜙 ) = log 𝑍 𝜙 (y) 𝑝 𝜙 𝐹 (𝜏 | y)
+
+𝑅 (z1 | y) 𝑝 𝐵 (𝜏 | z1)
+
+!2
+
+, (4) where 𝑍 𝜙 is a learned model that, at optimality, estimates the partition function ∫ 𝑅 (z | y) 𝑑 z. This objective aims to match two distributions over trajectories: the one defined by the denoising model and that defined by the target dis-tribution and the noising kernel. If the two distributions are equal, then their marginal densities at 𝑡 = 1 also coincide. For training, one draws trajectories 𝜏 from some training distribution (which is not necessarily the current model 𝑝 𝜙 𝐹 )and optimizes (4) with respect to the parameters 𝜙 . If the TB loss is optimized to 0 for every trajectory 𝜏 in the continuous-time limit, the model 𝑝 𝜙 𝐹 asymptotically samples from the target density 𝑅 (z | y) (Berner et al., 2025). The training loop is described in Algorithm 1. 5Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models             
+
+> Figure 3. (a) Flow paths of a CNF trained with OT-CFM (Tong et al., 2024) from a source distribution ( •) to the ‘2 moons’ distribution ( •). The source is Gaussian (top row) or a mixture of 8 Gaussians (bottom row). (b) The constraint is constructed such that the posterior is the lower moon. CNF flow paths from the lower moon (target posterior) to the source latents (outsourced posterior). (c) Flow paths from naive application of Adjoint Matching (Domingo-Enrich et al., 2024), which is is biased for OT flows and non-Gaussian sources. (d) Flows starting at samples from an outsourced diffusion model, which samples the latent posterior, give target samples close to the ground truth. (a) OT-CFM prior (b) True Posterior (c) Adj. Matching (d) Ours
+
+Algorithm 1 Training loop for Outsourced Diffusion Sam-pling  
+
+> 1:
+
+Initialize: deterministic prior function 𝑓 , randomly initialized noise posterior model 𝑝 𝜙 𝐹 , randomly initial-ized 𝑍 𝜙 (y), VP-SDE backward policy 𝑝 𝐵 , log reward function log 𝑟 (x, y), on-policy update fraction 𝑝 . 
+
+> 2:
+
+for each step 𝑛 = 1, 2, . . . , 𝑁 do  
+
+> 3:
+
+Sample a batch of trajectories: {𝜏 (𝑖 ) }𝐵 𝑖 =1 ∼ 𝑝 𝜙 𝐹 (𝜏 | y) 
+
+> 4:
+
+for 𝑖 = 1, . . . , 𝐵 do  
+
+> 5:
+
+Compute log density: 
+
+log 𝑅 (𝑖 ) ← log N ( z(𝑖 ) ; 0, I) + 𝑟 
+
+
+
+𝑓 (z(𝑖 ) ), y
+
+ 
+
+> 6:
+
+Store experience (𝜏 (𝑖 ) , log 𝑅 (𝑖 ) ) in buffer D 
+
+> 7:
+
+end for  
+
+> 8:
+
+Draw 𝑢 ∼ Uniform (0, 1) 
+
+> 9:
+
+if 𝑢 ≤ 𝑝 then  
+
+> 10:
+
+Keep on-policy batch {( 𝜏 (𝑖 ) , log 𝑅 (𝑖 ) )} 𝐵 𝑖 =1 
+
+> 11:
+
+else  
+
+> 12:
+
+Sample off-policy batch {( 𝜏 (𝑖 ) , log 𝑅 (𝑖 ) )} 𝐵 𝑖 =1 ∼ D  
+
+> 13:
+
+end if  
+
+> 14:
+
+Compute LTB (𝜏 ; y, 𝜙 ) for batch using Equation 4.  
+
+> 15:
+
+Update 𝑝 𝜙 𝐹 , 𝑍 𝜙 (y) using ∇𝜙 LTB (𝜏 ; y, 𝜙 ). 
+
+> 16:
+
+end for Exploration and credit assignment techniques. We bor-row a number of off-policy exploration techniques (such as replay buffers), as well as methods to make training more stable (such as temperature annealing) from the diffusion samplers literature. For details, see Appendix B. 
+
+# 5. Experiments 
+
+The goal of our experiments is to demonstrate the general applicability of outsourced sampling, highlighting tasks which lack specialized techniques for posterior inference. We list the different tasks, alongside the sources of priors, constraints, and the dimension of noise sampled by the outsourced diffusion model in Table 2. 
+
+5.1. Class-Conditional Sampling Setup. The prior model 𝑝 𝜃 (x) is an off-the-shelf uncon-ditional image generator trained on the CIFAR-10 dataset (Krizhevsky, 2009). Using a CIFAR-10 classifier 𝑝 (y | x),we train a posterior class-conditioned generative model 
+
+𝑝 (x | y) ∝ 𝑝 𝜃 (x) 𝑝 (y | x). For our experiments we work with two priors which achieve high fidelity unconditional generation: a flow matching (CNF) model trained with inde-pendent coupling and linear interpolants (I-CFM; Tong et al., 2024), and a spectrally normalized GAN (SN-GAN; Miy-ato et al., 2018). We use a 13-layer VGG-net model as the classifier (Simonyan & Zisserman, 2015). We compare out-sourced diffusion sampling against a powerful MCMC base-line and a recent method for fine-tuning flow-based models: • Hamiltonian Monte Carlo (HMC; Brooks et al., 2011) 
+
+applied in the noise spaces of both the SN-GAN and CFM priors to sample the outsourced posterior. We highlight that HMC with CNF priors can be quite slow, since it requires differentiating through the ODE integrator. • Adjoint Matching (Domingo-Enrich et al., 2024) : see §3.1 and Fig. 3 for discussion. Note that adjoint matching requires access to the gradient of the constraint function. For the SN-GAN prior, we train an outsourced diffusion model to sample generator noise z ∈ R512 . For the CFM prior, we sample the initial noise latent at 𝑡 = 0, where 
+
+z ∈ R3×32 ×32 . See details in Appendix B.2. 
+
+Results. We report average log-reward (classifier log-likelihood) of samples and FID scores (computed with the dataset images of the given class) in Table 3. The CFM posteriors consistently outperform SN-GAN posteriors, re-flecting the superior quality of the CFM prior. Among the methods evaluated, adjoint matching with the CFM prior achieves the best performance – as expected, since it is specifically designed for fine-tuning I-CFM models with a Gaussian source (samples in Fig. 8). Outsourced diffusion, a more general approach, also delivers strong conditional gen-eration (visualized in Fig. 4). Unlike adjoint matching and HMC, outsourced diffusion does not rely on gradient infor-mation from either the classifier or the prior. Additionally, 6Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models  
+
+> Table 2. The priors and constraints studied in §5. Outsourced diffusion sampling works in noise spaces of a wide range of generative models and is agnostic to their specific form.
+
+Task Constraint Prior Prior type 𝑑 noise 𝑑 data 
+
+CIFAR-10 classifer guidance CIFAR-10 classifer SN-GAN GAN 128 3 × 32 × 32 
+
+I-CFM CNF 3 × 32 × 32 3 × 32 × 32 
+
+FFHQ text conditioning ImageReward StyleGAN3 GAN 512 3 × 256 × 256 
+
+NVAE Hierarchical VAE 4 × 20 × 8 × 8 3 × 256 × 256 
+
+Text-to-Image model RLHF ImageReward Stable Diffusion 3 Latent-CNF 16 × 64 × 64 3 × 512 × 512 
+
+Protein structure Structure Diversity FoldFlow 2 Riemannian CNF 7 × 64 7 × 64      
+
+> (a) SN-GAN Prior (b) Posterior (Dog) (c) Posterior (Car)
+> (d) I-CFM Prior (e) Posterior (Dog) (f) Posterior (Car)
+> Figure 4. CIFAR-10 samples generated using SN-GAN (top row) and CFM (bottom row) priors and posterior samples from trained outsourced diffusion models for the ‘Dog’ and ‘Car’ classes.
+
+the outsourced diffusion model offers significant advantages in training efficiency, requiring approximately 5 hours on an A100 GPU compared to 12 hours for adjoint matching (see Appendix C.2). Moreover, we show how we can distill one-step outsourced diffusion samplers in Appendix C.1, with no performance degradation and significant sampling speed advantage. 
+
+5.2. Conditional High-Resolution Face Generation Setup. Given a generator of high-resolution ( 256 × 256 )human face images trained on the FFHQ dataset (Karras et al., 2021b) as the prior 𝑝 𝜃 (x), we aim to generate faces aligned with a specified text caption y. To achieve this, we use a constraint function given by ImageReward (Xu et al., 2023), a text-image reward model built on the BLIP backbone (Li et al., 2022) that scores images based on their alignment with the provided text prompt and aesthetic quality. The ImageReward score serves as the log-constraint function log 𝑟 (x, y) in our formulation, enabling us to frame the text-conditional face generation problem as posterior inference. For the prior models, we employ NVAE (Vahdat  
+
+> Table 3. CIFAR-10 posterior sampling results for GAN and CNF priors. We report expected classifier log probability and FID scores for the class posteriors, averaged over all 10 classes.
+
+Prior Sampler E[log 𝑝 (y | x)] (↑) FID (↓) 
+
+SN-GAN Prior −5.37 97 .14 
+
+Latent HMC −3.26 75 .33 
+
+Outsourced Diff. −3.84 68 .12 
+
+I-CFM Prior −5.88 84 .79 
+
+Latent HMC −2.80 46 .69 
+
+Adj. Matching −3.09 19.45 
+
+Outsourced Diff. −3.35 34 .28 
+
+& Kautz, 2020) and StyleGAN3 (Karras et al., 2021a), both of which achieve high-fidelity unconditional generation. NVAE is a deep hierarchical VAE with a large number of latents of different scales. Vahdat & Kautz (2020, Appendix B.6) notes that almost all the feature variance is captured by the first 4 levels of the latent hierarchy. We train the outsourced diffusion model to sample noise z ∈ R4×20 ×8×8
+
+for these levels, which turns out to be sufficient for condi-tional generation. For StyleGAN3, we sample the generator noise space z ∈ R512 . Due to the absence of specialized variational techniques for posterior inference with GANs and VAEs, we use HMC sampling of the outsourced noise, targeting the same distribution as the outsourced diffusion sampler, as the baseline. More details in Appendix B.3. 
+
+Results. We report average ImageReward score and diver-sity, measured as average cosine distance of CLIP (Radford et al., 2021) embeddings for 100 generated images from the posterior, for 4 different prompts in Table 4. We find HMC for StyleGAN3 can get stuck in bad reward modes, but some-times obtains high reward. HMC is consistently poor with the NVAE prior, which we attribute to a combination of di-mensionality and high energy barriers. Outsourced diffusion samplers consistently generate prompt-accurate posterior samples. Illustrative samples are displayed in Fig. 5 and more uncurated samples in Appendix D. StyleGAN3 pos-teriors are of higher quality than NVAE posteriors, likely 7Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models NVAE StyleGAN3 
+
+Prior Old man Asian girl with glasses Bald man, black beard Brown haired child 
+
+Figure 5. Sampled images from the FFHQ priors and outsourced diffusion posteriors for different prompts. More examples in Appendix D. 
+
+Table 4. FFHQ text-conditioning results for NVAE and StyleGAN3 priors. We report average log-reward and CLIP cosine distance (diversity) for posteriors, averaged over the prompts shown in Fig. 5.                    
+
+> Prior Sampler E[log 𝑟 (x,y)] (↑) CLIP Diversity (↑)
+> NVAE Prior −1.94 0.30
+> Latent HMC −1.20.30
+> Outsourced Diff. 0.98 0.26
+> StyleGAN3 Prior −1.52 0.36
+> Latent HMC −0.62 0.31
+> Outsourced Diff. 1.23 0.26
+
+because the prior is also stronger. 
+
+5.3. Text-to-Image RLHF Setup. Diffusion and flow matching models that gener-ate images conditioned on textual prompts often struggle with complex prompts that involve compositional relation-ships. A promising strategy to address this limitation is to fine-tune such models using reward functions that quan-tify image-caption alignment. In previous work, Fan et al. (2023); Venkatraman et al. (2024) used Stable-Diffusion-1.5 (Rombach et al., 2021) as a caption-conditioned prior 
+
+𝑝 (x | y) and ImageReward as the unnormalized log-likelihood log 𝑟 (x, y). In both of those works, the prior diffusion model was tuned to sample approximately from the posterior 𝑝 aligned (x | y) ∝ 𝑝 (x | y)𝑟 (x, y). In our experi-ments, we instead align Stable Diffusion 3 (SD3; Esser et al., 2024), which is a CNF, not a diffusion model, and is thus unsuitable for fine-tuning using the mentioned techniques. We train outsourced diffusion samplers of the CNF’s 16 ×
+
+64 × 64 -dimensional noise space. Gradient-based posterior inference techniques, such as adjoint matching and HMC, are prohibitive for a flow model at the scale of SD3, since they involve differentiating through the reward model, high resolution multiscale decoder, and ODE integrator. Instead, as a baseline, we tune the classifier-free-guidance weight (Ho & Salimans, 2022) individually for each prompt and report the best performance. See Appendix B.4 for details. 
+
+Results. We report the ImageReward score and the average CLIP cosine distance averaged over 4 prompts in Table 5. We present illustrative examples in Fig. 6, with further un-curated samples provided in Appendix E. We find that latent sampling greatly improves reward (and our qualitative as-sessments) compared to the prior. These results, along with the analysis in §5.2, demonstrate the effectiveness of our pro-posed method to fine-tune high-dimensional image priors. 
+
+Table 5. RLHF finetuning results for SD3 prior. We report ex-pected log reward and CLIP cosine distance (diversity) for posteri-ors, averaged over the prompts listed in Fig. 6. 
+
+Sampler E[log 𝑟 (x, y)] (↑) CLIP diversity (↑) 
+
+Prior 0.791 0.19 
+
+CFG 0.84 0.17 
+
+Outsourced Diff. 1.27 0.16 
+
+A cat and a dog. A cat riding a llama. 
+
+Prior Posterior Prior Posterior 
+
+Quiet village disrupted by meteor strike. A human with a horse face and a human with a wolf face. 
+
+Figure 6. Sampled images from the SD3 prior and outsourced dif-fusion posterior for different prompts. More examples in Ap-pendix E. 
+
+5.4. Protein Secondary Structure Diversity Setup. Many protein generative models have been proposed to tackle the problem of designing novel yet realistic protein structures (Watson et al., 2023; Bose et al., 2024). They learn to produce proteins of 𝑁 residues by sampling ro-tations and translations applied to each residue backbone (the space SE (3)𝑁 ). As our prior 𝑝 𝜃 (x), we use the recent FoldFlow 2 model, which is a Riemannian CNF (on the man-ifold SE (3)𝑁 embedded in R7× 𝑁 ) trained with minibatch OT coupling (Huguet et al., 2024). Protein residues fold into patterns called secondary struc-8Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models                         
+
+> Table 6. Results for protein structure experiments. We report the average log-reward, as well as the pairwise TM-Score (as a mea-sure of sample diversity), averaged over 64 samples. Standard deviation over 3 seeds is reported.
+> Method E[log 𝑟 div (x)] (↑)Pairwise TM-Score ( ↓)Prior −1.325 ±0.014 0.4480 ±0.0044
+> RW MCMC −0.640 ±0.073 0.4181 ±0.0057
+> Outsourced Diff. 0.422 ±0.225 0.4407 ±0.0706
+
+tures, which include 𝛼 -helices, 𝛽 -sheets, and coils. Many protein generative models have issues producing proteins with diverse secondary structures, typically under-sampling proteins with 𝛽 -sheets. A natural problem is to produce samples which are both probable under the prior model and exhibit this structural diversity. This can be framed as sampling from 𝑝 𝜃 (x)𝑟 div (x), where the constraint function 
+
+𝑟 div (x) assigns high-values to proteins with diverse sec-ondary structures (in-particular, the presence of 𝛽 -sheets). Let 𝑝 = [ 𝑝 𝛼 , 𝑝 𝛽 , 𝑝 𝑐 ] be a vector representing the proportion of residues that are in 𝛼 -helices, 𝛽 -sheets or coils. The particular constraint function that we use, adapted from Huguet et al. (2024), is 𝑟 div (x) = 𝑒 −1.2 𝑤 ⊤ 𝑝   
+
+> 1.2−H [ 𝑝 ]
+
+, where 𝑤 =
+
+[1, 2, 0.5] is a weight vector, and H [ 𝑝 ] is the entropy of 𝑝 .This problem poses two challenges. First, since the model is a Riemannian CNF, the flow ODE cannot be converted into a diffusion SDE, so that adjoint matching and diffusion fine-tuning techniques are not applicable. Second, the constraint function is not differentiable with respect to the generative model’s output, ruling out methods such as HMC. We there-fore compare our method to a gradient-free MCMC method in the noise space z. We fix the protein length to 64 residues, and evaluate the model achieving the highest diversity score during training. See Appendix B.5 for details. 
+
+Results. We report the average log 𝑟 div (x), as well as a di-versity metric (the pairwise TM-Score) in Table 6. The latter calculates the similarity between pairs of proteins, averaged across a set of generated samples (Zhang & Skolnick, 2004). Uncurated protein samples are shown in Fig. 7. We find that our proposed method samples diverse protein structures rich in 𝛽 -sheets more frequently than the baselines, while maintaining a TM-Score comparable to the prior. 
+
+# 6. Conclusion 
+
+We have proposed outsourced diffusion samplers for effi-cient posterior inference in the noise spaces of generative models. These samplers take advantage of the expressive-ness of diffusion models and the flexibility of off-policy training algorithms for black-box target distributions and can be applied to any model that can be written as a deter-ministic transformation of noise. While we have demon-   
+
+> (a) CFM Prior
+> (b) Outsourced Diffusion Posterior
+> Figure 7. Protein samples with pertinent secondary structures high-lighted: 𝛼 -helices (blue), 𝛽 -sheets (red), and coils (green).
+
+strated the effectiveness of this method in a variety of set-tings, there are many questions for future work. One natural direction is to extend the method to discrete problems, where the noise space is discrete or the transformation involves discretization. Another is to adapt outsourced diffusion sampling to general probabilistic programs, where the gen-erative model includes both stochasticity and nontrivial con-trol flow, and where current inference methods use MCMC sampling in outsourced noise spaces (Dash et al., 2023). 
+
+# Acknowledgments 
+
+The authors thank Moksh Jain for comments and sugges-tions in the course of this project, Kirill Tamogashev for comments on a draft of the manuscript, and Prudencio Tossou and Dominique Beaini for helpful discussions and suggestions about the protein conformation experiments. L.S. acknowledges support from Recursion. The research of M.S. was funded by National Science Centre, Poland, 2022/45/N/ST6/03374. Y.B. acknowledges the support from CIFAR and the CIFAR AI Chair program as well as NSERC funding for the Herzberg Canada Gold medal. G.B. ac-knowledges funding support from Samsung AI Lab and CIFAR. The research was enabled in part by computational re-sources provided by the Digital Research Alliance of Canada ( https://alliancecan.ca ), Mila ( https: //mila.quebec ), and NVIDIA. 
+
+# Impact Statement 
+
+Improving reward finetuning strategies for generative mod-els can enhance their usefulness but also carries risks asso-ciated with misuse, reward misspecification and unintended generalization. Careful evaluation and responsible deploy-ment are essential as these methods scale. 
+
+# References 
+
+Akhound-Sadegh, T., Rector-Brooks, J., Bose, A. J., Mittal, S., Lemos, P., Liu, C.-H., Sendera, M., Ravanbakhsh, S., Gidel, G., Bengio, Y., Malkin, N., and Tong, A. Iterated 9Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+denoising energy matching for sampling from Boltzmann densities. International Conference on Machine Learning (ICML) , 2024. Albergo, M. S. and Vanden-Eijnden, E. Building normal-izing flows with stochastic interpolants. International Conference on Learning Representations (ICLR) , 2023. Austin, T. Exchangeable random measures. Annales de l’Institut Henri Poincar ´e, Probabilit ´es et Statistiques , 51 (3):842–861, 2015. Bengio, E., Jain, M., Korablyov, M., Precup, D., and Ben-gio, Y. Flow network based generative models for non-iterative diverse candidate generation. Neural Information Processing Systems (NeurIPS) , 2021. Bengio, Y., Lahlou, S., Deleu, T., Hu, E. J., Tiwari, M., and Bengio, E. GFlowNet foundations. Journal of Machine Learning Research , 24(210):1–55, 2023. Berner, J., Richter, L., and Ullrich, K. An optimal con-trol perspective on diffusion-based generative model-ing. Transactions on Machine Learning Research , 2024. ISSN 2835-8856. URL https://openreview. net/forum?id=oYIjw37pTP .Berner, J., Richter, L., Sendera, M., Rector-Brooks, J., and Malkin, N. From discrete-time policies to continuous-time diffusion samplers: Asymptotic equivalences and faster training. arXiv preprint arXiv:2501.06148 , 2025. Bose, J., Akhound-Sadegh, T., Huguet, G., FATRAS, K., Rector-Brooks, J., Liu, C.-H., Nica, A. C., Korablyov, M., Bronstein, M. M., and Tong, A. SE(3)-stochastic flow matching for protein backbone generation. International Conference on Learning Representations (ICLR) , 2024. Brooks, S., Gelman, A., Jones, G., and Meng, X.-L. Hand-book of Markov Chain Monte Carlo . Chapman and Hall/CRC, May 2011. ISBN 9780429138508. doi: 10.1201/b10905. URL http://dx.doi.org/10. 1201/b10905 .Bugallo, M. F., Elvira, V., Martino, L., Luengo, D., Miguez, J., and Djuric, P. M. Adaptive importance sampling: The past, the present, and the future. IEEE Signal Processing Magazine , 34(4):60–79, 2017. Cabezas, A., Sharrock, L., and Nemeth, C. Markovian flow matching: Accelerating MCMC with continuous normalizing flows. Neural Information Processing Sys-tems (NeurIPS) , 2024. Cannella, C., Soltani, M., and Tarokh, V. Projected latent Markov chain Monte Carlo: Conditional sampling of normalizing flows. International Conference on Learning Representations (ICLR) , 2021. Cardoso, G., Janati el idrissi, Y., Le Corff, S., and Moulines, E. Monte Carlo guided denoising diffusion models for Bayesian linear inverse problems. International Confer-ence on Learning Representations (ICLR) , 2024. Che, T., Zhang, R., Sohl-Dickstein, J., Larochelle, H., Paull, L., Cao, Y., and Bengio, Y. Your GAN is secretly an energy-based model and you should use discriminator driven latent sampling. Neural Information Processing Systems (NeurIPS) , 2020. Chen, J., Richter, L., Berner, J., Blessing, D., Neumann, G., and Anandkumar, A. Sequential controlled Langevin diffusions. International Conference on Learning Repre-sentations (ICLR) , 2025. Chen, R. T., Rubanova, Y., Bettencourt, J., and Duvenaud, D. K. Neural ordinary differential equations. Neural Information Processing Systems (NIPS) , 31, 2018. Chung, H., Kim, J., Mccann, M. T., Klasky, M. L., and Ye, J. C. Diffusion posterior sampling for general noisy inverse problems. International Conference on Learning Representations (ICLR) , 2023. Cobb, A. D. and Jalaian, B. Scaling Hamiltonian Monte Carlo inference for Bayesian neural networks with sym-metric splitting. Uncertainty in Artificial Intelligence (UAI) , 2021. Coeurdoux, F., Dobigeon, N., and Chainais, P. Normalizing flow sampling with Langevin dynamics in the latent space. 
+
+Machine Learning , 113(11):8301–8326, 2024. Dash, S., Kaddar, Y., Paquet, H., and Staton, S. Affine monads and lazy structures for Bayesian programming. 
+
+Proc. ACM Program. Lang. , 7(POPL), January 2023. Del Moral, P., Doucet, A., and Jasra, A. Sequential Monte Carlo samplers. Journal of the Royal Statistical Society Series B: Statistical Methodology , 68(3):411–436, 2006. Dhariwal, P. and Nichol, A. Q. Diffusion models beat GANs on image synthesis. Neural Information Processing Sys-tems (NeurIPS) , 2021. Domingo-Enrich, C., Drozdzal, M., Karrer, B., and Chen, R. T. Q. Adjoint matching: Fine-tuning flow and diffusion generative models with memoryless stochastic optimal control. arXiv preprint arXiv:2409.08861 , 2024. Dou, Z. and Song, Y. Diffusion posterior sampling for linear inverse problem solving: A filtering perspective. 
+
+International Conference on Learning Representations (ICLR) , 2024. Doucet, A., Johansen, A. M., et al. A tutorial on particle filtering and smoothing: Fifteen years later. Handbook of nonlinear filtering , 12(656-704):3, 2009. 10 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+Doucet, A., Grathwohl, W. S., Matthews, A. G., and Strath-mann, H. Score-based diffusion meets annealed impor-tance sampling. Neural Information Processing Systems (NeurIPS) , 2022. Esser, P., Kulal, S., Blattmann, A., Entezari, R., M ¨uller, J., Saini, H., Levi, Y., Lorenz, D., Sauer, A., Boesel, F., Podell, D., Dockhorn, T., English, Z., Lacey, K., Good-win, A., Marek, Y., and Rombach, R. Scaling rectified flow transformers for high-resolution image synthesis. 
+
+International Conference on Machine Learning (ICML) ,2024. Fan, Y., Watkins, O., Du, Y., Liu, H., Ryu, M., Boutilier, C., Abbeel, P., Ghavamzadeh, M., Lee, K., and Lee, K. Reinforcement learning for fine-tuning text-to-image dif-fusion models. Neural Information Processing Systems (NeurIPS) , 2023. Goodfellow, I., Pouget-Abadie, J., Mirza, M., Xu, B., Warde-Farley, D., Ozair, S., Courville, A., and Bengio, Y. Generative adversarial nets. Neural Information Process-ing Systems (NIPS) , 2014. Graikos, A., Malkin, N., Jojic, N., and Samaras, D. Diffu-sion models as plug-and-play priors. Neural Information Processing Systems (NeurIPS) , 2022. Grathwohl, W., Chen, R. T., Bettencourt, J., Sutskever, I., and Duvenaud, D. FFJORD: Free-form continuous dy-namics for scalable reversible generative models. Interna-tional Conference on Learning Representations (ICLR) ,2019. Ho, J. and Salimans, T. Classifier-free diffusion guidance. 
+
+arXiv preprint arXiv:2207.12598 , 2022. Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-bilistic models. Neural Information Processing Systems (NeurIPS) , 2020. Hou, Z., Lang, N., and Zhou, X. WL-GAN: Learning to sample in generative latent space. Information Sciences ,700:121834, 2025. Huang, X., Dong, H., Hao, Y., Ma, Y.-A., and Zhang, T. Reverse diffusion Monte Carlo. International Conference on Learning Representations (ICLR) , 2024. Huguet, G., Vuckovic, J., Fatras, K., Thibodeau-Laufer, E., Lemos, P., Islam, R., Liu, C.-H., Rector-Brooks, J., Akhound-Sadegh, T., Bronstein, M., et al. Sequence-augmented SE(3)-flow matching for conditional protein backbone generation. Neural Information Processing Systems (NeurIPS) , 2024. Hutchinson, M. F. A stochastic estimator of the trace of the influence matrix for laplacian smoothing splines. Com-munications in Statistics - Simulation and Computation ,18:1059–1076, 1989. Kadkhodaie, Z. and Simoncelli, E. P. Solving linear inverse problems using the prior implicit in a denoiser. Neural Information Processing Systems (NeurIPS) , 2021. Karras, T., Aittala, M., Laine, S., H ¨ark ¨onen, E., Hellsten, J., Lehtinen, J., and Aila, T. Alias-free generative adver-sarial networks. Neural Information Processing Systems (NeurIPS) , 2021a. Karras, T., Laine, S., and Aila, T. A Style-Based Generator Architecture for Generative Adversarial Networks . 
+
+IEEE Transactions on Pattern Analysis & Machine Intelligence , 43(12):4217–4228, December 2021b. ISSN 1939-3539. doi: 10.1109/TPAMI.2020.2970919. URL 
+
+https://doi.ieeecomputersociety.org/ 10.1109/TPAMI.2020.2970919 .Kawar, B., Vaksman, G., and Elad, M. SNIPS: Solving noisy inverse problems stochastically. Neural Information Processing Systems (NeurIPS) , 2021. Kidger, P., Foster, J., Li, X. C., and Lyons, T. Efficient and accurate gradients for neural SDEs. Neural Information Processing Systems (NeurIPS) , 2021. Kim, M., Choi, S., Yun, T., Bengio, E., Feng, L., Rector-Brooks, J., Ahn, S., Park, J., Malkin, N., and Bengio, Y. Adaptive teachers for amortized samplers. International Conference on Learning Representations (ICLR) , 2025. Kingma, D. P. and Welling, M. Auto-encoding variational Bayes. International Conference on Learning Represen-tations (ICLR) , 2014. Korbak, T., Perez, E., and Buckley, C. L. RL with KL penalties is better viewed as bayesian inference. Findings of Empirical Methods in Natural Language Procedding (EMNLP) , 2022. Krizhevsky, A. Learning multiple layers of features from tiny images. Master’s thesis, University of Tront , 2009. Lahlou, S., Deleu, T., Lemos, P., Zhang, D., Volokhova, A., Hern ´andez-Garcıa, A., Ezzine, L. N., Bengio, Y., and Malkin, N. A theory of continuous generative flow networks. International Conference on Machine Learning (ICML) , 2023. Lawson, D., Tucker, G., Naesseth, C. A., Maddison, C. J., Adams, R. P., and Teh, Y. W. Twisted variational se-quential Monte Carlo. 2018. URL https://www.cs. utoronto.ca/˜cmaddis/pubs/tvsmc.pdf .11 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+Lawson, D., Ravent´ os, A., Warrington, A., and Linderman, S. SIXO: Smoothing inference with twisted objectives. 
+
+Neural Information Processing Systems (NeurIPS) , 2022. Li, J., Li, D., Xiong, C., and Hoi, S. BLIP: Bootstrapping language-image pre-training for unified vision-language understanding and generation. International Conference on Machine Learning (ICML) , 2022. Li, X., Wong, T.-K. L., Chen, R. T., and Duvenaud, D. Scalable gradients for stochastic differential equations. 
+
+Artificial Intelligence and Statistics (AISTATS) , 2020. Lipman, Y., Chen, R. T. Q., Ben-Hamu, H., Nickel, M., and Le, M. Flow matching for generative modeling. Interna-tional Conference on Learning Representations (ICLR) ,2023. Liu, X., Gong, C., and Liu, Q. Flow straight and fast: Learning to generate and transfer data with rectified flow. 
+
+International Conference on Learning Representations (ICLR) , 2023. Malkin, N., Jain, M., Bengio, E., Sun, C., and Bengio, Y. Trajectory balance: Improved credit assignment in gflownets. Neural Information Processing Systems (NeurIPS) , 2022. Malkin, N., Lahlou, S., Deleu, T., Ji, X., Hu, E., Everett, K., Zhang, D., and Bengio, Y. GFlowNets and varia-tional inference. International Conference on Learning Representations (ICLR) , 2023. Mardani, M., Song, J., Kautz, J., and Vahdat, A. A varia-tional perspective on solving inverse problems with dif-fusion models. International Conference on Learning Representations (ICLR) , 2024. Midgley, L. I., Stimper, V., Simm, G. N., Sch ¨olkopf, B., and Hern ´andez-Lobato, J. M. Flow annealed importance sam-pling bootstrap. International Conference on Learning Representations (ICLR) , 2023. Miyato, T., Kataoka, T., Koyama, M., and Yoshida, Y. Spec-tral normalization for generative adversarial networks. 
+
+International Conference on Learning Representations (ICLR) , 2018. Nguyen, A., Clune, J., Bengio, Y., Dosovitskiy, A., and Yosinski, J. Plug & play generative networks: Conditional iterative generation of images in latent space. Computer Vision and Pattern Recognition (CVPR) , 2017. N ¨usken, N. and Richter, L. Solving high-dimensional Hamilton–Jacobi–Bellman PDEs using neural networks: perspectives from the theory of controlled diffusions and measures on path space. Partial differential equations and applications , 2(4):48, 2021. Phillips, D. and Cipcigan, F. MetaGFN: Exploring dis-tant modes with adapted metadynamics for continuous GFlowNets. arXiv preprint arXiv:2408.15905 , 2024. Pooladian, A.-A., Ben-Hamu, H., Domingo-Enrich, C., Amos, B., Lipman, Y., and Chen, R. T. Multisample flow matching: Straightening flows with minibatch couplings. 
+
+International Conference on Learning Representations (ICLR) , 2023. Radford, A., Kim, J. W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J., et al. Learning transferable visual models from natu-ral language supervision. International Conference on Machine Learning (ICML) , 2021. Rezende, D. and Mohamed, S. Variational inference with normalizing flows. International Conference on Machine Learning (ICML) , 2015. Rezende, D. J., Mohamed, S., and Wierstra, D. Stochas-tic backpropagation and approximate inference in deep generative models. International Conference on Machine Learning (ICML) , 2014. Richter, L. and Berner, J. Improved sampling via learned diffusions. International Conference on Learning Repre-sentations (ICLR) , 2024. Richter, L., Boustati, A., N ¨usken, N., Ruiz, F. J. R., and ¨Omer Deniz Akyildiz. VarGrad: A low-variance gradient estimator for variational inference. Neural Information Processing Systems (NeurIPS) , 2020. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and Ommer, B. High-resolution image synthesis with latent diffusion models. Conference on Computer Vision and Pattern Recognition (CVPR) , 2021. Ronneberger, O., Fischer, P., and Brox, T. U-Net: Con-volutional networks for biomedical image segmentation. 
+
+Medical Image Computing and Computer-Assisted Inter-vention (MICCAI) , 2015. Sendera, M., Kim, M., Mittal, S., Lemos, P., Scimeca, L., Rector-Brooks, J., Adam, A., Bengio, Y., and Malkin, N. Improved off-policy training of diffusion samplers. 
+
+Neural Information Processing Systems (NeurIPS) , 2024. Simonyan, K. and Zisserman, A. Very deep convolutional networks for large-scale image recognition. International Conference on Learning Representations (ICLR) , 2015. Sohl-Dickstein, J., Weiss, E. A., Maheswaranathan, N., and Ganguli, S. Deep unsupervised learning using nonequi-librium thermodynamics. International Conference on Machine Learning (ICML) , 2015. 12 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+Song, J., Meng, C., and Ermon, S. Denoising diffusion implicit models. International Conference on Learning Representations (ICLR) , 2021a. Song, J., Zhang, Q., Yin, H., Mardani, M., Liu, M.-Y., Kautz, J., Chen, Y., and Vahdat, A. Loss-guided diffusion models for plug-and-play controllable generation. International Conference on Maching Learning (ICML) , 2023. Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-mon, S., and Poole, B. Score-based generative modeling through stochastic differential equations. International Conference on Learning Representations (ICLR) , 2021b. Song, Y., Shen, L., Xing, L., and Ermon, S. Solving inverse problems in medical imaging with score-based generative models. International Conference on Learning Represen-tations (ICLR) , 2022. Tong, A., Fatras, K., Malkin, N., Huguet, G., Zhang, Y., Rector-Brooks, J., Wolf, G., and Bengio, Y. Improv-ing and generalizing flow-based generative models with minibatch optimal transport. Transactions on Machine Learning Research (TMLR) , 2024. Tzen, B. and Raginsky, M. Neural stochastic differential equations: Deep latent Gaussian models in the diffusion limit. arXiv preprint arXiv:1905.09883 , 2019. Uehara, M., Zhao, Y., Black, K., Hajiramezanali, E., Scalia, G., Diamant, N. L., Tseng, A. M., Biancalani, T., and Levine, S. Fine-tuning of continuous-time diffusion models as entropy-regularized control. arXiv preprint arXiv:2402.15194 , 2024. Vahdat, A. and Kautz, J. NVAE: A deep hierarchical varia-tional autoencoder. Neural Information Processing Sys-tems (NeurIPS) , 2020. Vargas, F., Ovsianas, A., Fernandes, D., Girolami, M., Lawrence, N. D., and N ¨usken, N. Bayesian learning via neural Schr ¨odinger–F ¨ollmer flows. Statistics and Computing , 33(1):3, 2022. Vargas, F., Grathwohl, W., and Doucet, A. Denoising dif-fusion samplers. International Conference on Learning Representations (ICLR) , 2023. Vargas, F., Padhy, S., Blessing, D., and N ¨usken, N. Trans-port meets variational inference: Controlled Monte Carlo diffusions. International Conference on Learning Repre-sentations (ICLR) , 2024. Venkatraman, S., Jain, M., Scimeca, L., Kim, M., Sendera, M., Hasan, M., Rowe, L., Mittal, S., Lemos, P., Bengio, E., et al. Amortizing intractable inference in diffusion models for vision, language, and control. Neural Infor-mation Processing Systems (NeurIPS) , 2024. Watson, J. L., Juergens, D., Bennett, N. R., Trippe, B. L., Yim, J., Eisenach, H. E., Ahern, W., Borst, A. J., Ragotte, R. J., Milles, L. F., Wicky, B. I. M., Hanikel, N., Pellock, S. J., Courbet, A., Sheffler, W., Wang, J., Venkatesh, P., Sappington, I., Torres, S. V., Lauko, A., Bortoli, V. D., Mathieu, E., Ovchinnikov, S., Barzilay, R., Jaakkola, T., DiMaio, F., Baek, M., and Baker, D. De novo design of protein structure and function with rfdiffusion. Nature ,620:1089–1100, 2023. Xu, J., Liu, X., Wu, Y., Tong, Y., Li, Q., Ding, M., Tang, J., and Dong, Y. ImageReward: learning and evaluating human preferences for text-to-image generation. Neural Information Processing Systems (NeurIPS) , 2023. Zhang, Q. and Chen, Y. Path integral sampler: a stochastic control approach for sampling. International Conference on Learning Representations (ICLR) , 2022. Zhang, Y. and Skolnick, J. Scoring function for automated assessment of protein structure template quality. Proteins: Structure , 57, 2004. 13 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+# A. Theory and Method Details 
+
+A.1. Outsourced Sampling for Diffusion Priors 
+
+We describe posterior sampling, outsourced posterior inference and diffusion sampling when the prior generative model is itself a diffusion model. 
+
+Monte Carlo methods. The ‘guidance’ term in diffusion posteriors – the difference between the scores of the noised prior and posterior distributions – can be estimated by Monte Carlo integration (Song et al., 2023; Cardoso et al., 2024) or using approximations specialized for constraints arising from linear inverse problems (Kawar et al., 2021; Kadkhodaie & Simoncelli, 2021; Song et al., 2022; Chung et al., 2023). Posterior estimation can also be achieved through stochastic optimization (Graikos et al., 2022; Mardani et al., 2024) Methods related to sequential Monte Carlo, which treat a modification to the denoising transition kernel as a proposal, have also been proposed (Doucet et al., 2022; Dou & Song, 2024; Chen et al., 2025). 
+
+Amortized methods. Because generation proceeds in a long sequence of sampling steps, and the modes of the posterior are not known a priori , these methods use reinforcement learning techniques to discover regions of high posterior density. Asymptotically unbiased methods include ELEGANT (Uehara et al., 2024) and relative trajectory balance (Venkatraman et al., 2024). 
+
+Outsourcing noise in diffusion models. Generation of data x = x0 is modeled as a Markov process x𝑇 → · · · → x1 → x0,where x𝑇 ∼ N ( 0, 𝐼 𝑑 data ) and the transition from x𝑡 to x𝑡 −1 is conditionally spherical-Gaussian. Via the reparametrization trick, the trajectory of latent variables can be expressed as a function of the initial sample x𝑇 and the 𝑇 standard Gaussian noises injected at each step of sampling, just as in a VAE. Thus a diffusion model is a generative model with outsourced noise in R𝑑 data · ( 𝑇 +1) (see (6) below). Generalizing this setting, a typical latent diffusion model chains a diffusion model in a latent space R𝑑 latent , w𝑇 → · · · → 
+
+w1 → w0, with a Gaussian decoder w0 → x of the same form as a VAE decoder. Combining the two, the data x is a deterministic transformation of the concatenation of the initial latent variable w𝑇 , the 𝑇 standard Gaussian noises injected at each step of sampling, and the noise in the final decoder. Thus a latent diffusion model is a generative model with outsourced noise in R𝑑 latent · ( 𝑇 +1)+ 𝑑 data .(Note the similarity to the outsourced interpretation of HVAEs above: a diffusion model indeed be understood as a deep hierarchical VAE. However, a diffusion model is also a neural stochastic differential equation (Tzen & Raginsky, 2019; Song et al., 2021b) integrated in discrete time. In this view, in the continuous-time limit, the outsourced noise is a sample of Brownian motion, and indeed an Itˆ o integral is a deterministic transformation of a Brownian noise random variable.) 
+
+Outsourced autoregressive sampling under diffusion priors recovers relative trajectory balance. Venkatraman et al. (2024) studied the problem of fine-tuning a diffusion model 𝑝 𝜃 – seen as a transition policy 𝑝 𝜃 (x𝑖 Δ𝑡 | x(𝑖 −1)Δ𝑡 ) – to yield a diffusion model 𝑝 post  
+
+> 𝜙
+
+that samples the product of the distribution 𝑝 𝜃 (x1) defined by the prior model with a constraint 𝑟 (x1),where the prior and posterior diffusion model share the noising process and standard Gaussian noise distribution 𝑝 (x0). The 
+
+relative trajectory balance (RTB) objective was proposed; for a trajectory 𝜏 ,
+
+LRTB (𝜏 ; 𝜙 ) = log 𝑍 𝜙 
+
+𝑟 (x1) +
+
+> 𝑇
+
+∑︁ 
+
+> 𝑖 =1
+
+log 𝑝 post  
+
+> 𝜙
+
+(x𝑖 Δ𝑡 | x(𝑖 −1)Δ𝑡 )
+
+𝑝 𝜃 (x𝑖 Δ𝑡 | x(𝑖 −1)Δ𝑡 )
+
+!2
+
+, (5) where 𝑍 𝜙 is a learned scalar (note the resemblance to (4)). Let 𝜉 𝑖 be the standard Gaussian noise injected in sampling 𝑥 𝑖 Δ𝑡 conditionally on 𝑥 (𝑖 −1)Δ𝑡 , so that the prior model can be rewritten as a deterministic function of the noises 𝜉 0, 𝜉 1, . . . , 𝜉 𝑇 via 
+
+x0 = 𝜉 0, x𝑖 Δ𝑡 = x(𝑖 −1)Δ𝑡 + 𝑣 𝜃 (x(𝑖 −1)Δ𝑡 , (𝑖 − 1)Δ𝑡 )Δ𝑡 + 𝜎 𝑖 Δ𝑡 
+
+√Δ𝑡𝜉 𝑖 , (6) where 𝜇 𝜃 outputs the drift of the generative SDE. Similarly, let 𝜇 post  
+
+> 𝜙
+
+be the drift of the posterior generative SDE. For a trajectory 𝜏 sampled using a sequence of noises 𝜉 0, 𝜉 1, . . . , 𝜉 𝑇 under the prior model, the RTB loss (5) can then be rewritten 14 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+in terms of the noises: 
+
+LRTB (𝜏 ; 𝜙 ) = log 𝑍 𝜙 
+
+𝑟 (x1) +
+
+> 𝑇
+
+∑︁ 
+
+> 𝑖 =1
+
+log N ( x𝑖 Δ𝑡 − x(𝑖 −1)Δ𝑡 ; 𝜇 post  
+
+> 𝜙
+
+(x(𝑖 −1)Δ𝑡 , (𝑖 − 1)Δ𝑡 )Δ𝑡, 𝜎 2 
+
+> 𝑖 Δ𝑡
+
+Δ𝑡 )N ( x𝑖 Δ𝑡 − x(𝑖 −1)Δ𝑡 ; 𝜇 𝜃 (x(𝑖 −1)Δ𝑡 , (𝑖 − 1)Δ𝑡 )Δ𝑡, 𝜎 2 
+
+> 𝑖 Δ𝑡
+
+Δ𝑡 )
+
+!2
+
+= log 𝑍 𝜙 
+
+𝑟 (x1) +
+
+> 𝑇
+
+∑︁ 
+
+> 𝑖 =1
+
+log N ( 𝜉 𝑖 ; 𝜇 diff (x(𝑖 −1)Δ𝑡 , (𝑖 − 1)Δ𝑡 )√Δ𝑡 /𝜎 𝑖 Δ𝑡 , 𝐼 𝑑 data )N ( 𝜉 𝑖 ; 0 , 𝐼 𝑑 data )
+
+!2
+
+= log 𝑍 𝜙 N ( 𝜉 0; 0 , 𝐼 𝑑 data ) Î𝑇 𝑖 =1 N ( 𝜉 𝑖 ; 𝜇 diff (x(𝑖 −1)Δ𝑡 , (𝑖 − 1)Δ𝑡 )√Δ𝑡 /𝜎 𝑖 Δ𝑡 , 𝐼 𝑑 data )
+
+𝑟 (x1) Î𝑇 𝑖 =0 N ( 𝜉 𝑖 ; 0 , 𝐼 𝑑 data )
+
+!2
+
+(7) where 𝜇 diff (x, 𝑡 ) := 𝜇 post  
+
+> 𝜙
+
+(x, 𝑡 ) − 𝜇 𝜃 (x, 𝑡 ).Consider now an amortized sampler of the outsourced noises 𝜉 0, 𝜉 1, . . . , 𝜉 𝑇 that generates the variables autoregressively (𝜉 0 from a standard Gaussian, then subsequently each 𝜉 𝑖 from a Gaussian with unit variance and mean conditioned on the previously sampled noises). The transition policy density of this sampler can be written 
+
+𝑝 𝐹 (𝜉 𝑖 | 𝜉 0, . . . , 𝜉 𝑖 −1) = N ( 𝜉 𝑖 ; 𝜇 outsourced (𝜉 0, . . . , 𝜉 𝑖 −1), 𝐼 𝑑 data ).
+
+Under a model parametrization in which the policy takes as input the intermediate state x(𝑖 −1)Δ𝑡 , computed as a function of the noises 𝜉 0, . . . , 𝜉 𝑖 −1 using the prior model, 
+
+𝜇 outsourced (𝜉 0, . . . , 𝜉 𝑖 −1) = 𝜇 diff (x(𝑖 −1)Δ𝑡 , (𝑖 − 1)Δ𝑡 )√Δ𝑡 /𝜎 𝑖 Δ𝑡 ,
+
+the numerator in (7) is precisely 𝑍 𝜙 𝑝 𝐹 (𝜏 ), where 𝜏 is the sampling trajectory of the autoregressive sampler generating 
+
+𝜉 0, 𝜉 1, . . . , 𝜉 𝑇 . The denominator is 𝑟 (x1) multiplied with the prior density of the noise, which is the target density for the sampler (the unnormalized density of the outsourced posterior). Thus we see that (7) exactly recovers the trajectory balance objective (Malkin et al., 2022) for an autoregressive sampler of outsourced noise. 
+
+A.2. Proof of Prop. 3.1 Proposition A.1. Suppose that (𝑍, Σ𝑍 ) and (𝑋, Σ𝑋 ) are measurable spaces and 𝑓 : 𝑍 → 𝑋 is measurable. If 𝜇 is a 𝜎 -finite measure on 𝑍 and 𝜈 is a 𝜎 -finite measure on 𝑋 with 𝜈 ≪ 𝑓 ∗ 𝜇 , then 𝑓 ∗
+
+ 𝑑𝜈 𝑑 𝑓 ∗ 𝜇 ◦ 𝑓 
+
+
+
+· 𝜇 
+
+
+
+= 𝜈 .In particular, if 𝜇 is a probability measure and ℎ : 𝑋 → R≥0 is 𝑓 ∗ 𝜇 -integrable, then 𝜆 := 1∫ ℎ 𝑑 ( 𝑓 ∗ 𝜇 ) (ℎ ◦ 𝑓 ) · 𝜇 is a probability measure on 𝑍 , and 𝑓 ∗𝜆 = 1∫ ℎ 𝑑 ( 𝑓 ∗ 𝜇 ) (ℎ · 𝑓 ∗ 𝜇 ) is a probability measure on 𝑋 .Proof of Prop. 3.1. Let ℎ = 𝑑𝜈 𝑑 𝑓 ∗ 𝜇 ; we must show that 𝑓 ∗ (( ℎ ◦ 𝑓 ) · 𝜇 ) = ℎ · 𝑓 ∗ 𝜇 . Let 𝐸 ∈ Σ𝑋 and 𝐷 = 𝑓 −1 (𝐸 ) ∈ Σ𝑍 . By definitions and properties of pushforward measures, 
+
+𝑓 ∗ (( ℎ ◦ 𝑓 ) · 𝜇 )( 𝐸 ) = (( ℎ ◦ 𝑓 ) · 𝜇 )( 𝐷 )
+
+=
+
+∫
+
+> 𝑍
+
+(ℎ ◦ 𝑓 )1𝐷 𝑑𝜇 
+
+=
+
+∫
+
+> 𝑍
+
+(ℎ1𝐸 ) ◦ 𝑓 𝑑𝜇 
+
+=
+
+∫
+
+> 𝑋
+
+ℎ1𝐸 𝑑𝑓 ∗ 𝜇 
+
+= (ℎ · 𝑓 ∗ 𝜇 )( 𝐸 ),
+
+as required. For the second part of the proposition, if 𝜈 = ℎ · 𝑓 ∗ 𝜇 , then 𝑑𝜈 𝑑 𝑓 ∗ 𝜇 = ℎ 𝑓 ∗ 𝜇 -almost everywhere, and the result follows easily from the first part by linearity of the pushforward. □
+
+15 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+# B. Experiment Details 
+
+Code for our experiments is available at https://github.com/HyperPotatoNeo/Outsourced_Diffusion_ Sampling .
+
+B.1. Diffusion model 
+
+For all experiments, we use a convolutional UNet architecture (Ronneberger et al., 2015) for the diffusion model. This architecture is naturally well-suited for latent spaces structured as image feature maps. However, for other types of latent representations, we found that simply reshaping them into 𝐻 × 𝑊 × 𝐶 feature maps and treating them as images yielded surprisingly effective results. We use the variance preserving SDE (Song et al., 2021b) as backward policy 𝑃 𝐵 for the trajectory balance loss in (4), with a discretisation of 25 steps. For all of the experiments, we use off-policy training with a replay buffer similar to Sendera et al. (2024). Specifically, for every training update we randomly sample either from the replay buffer, or generate new on-policy samples which are added to the replay buffer according to the buffer probability 𝛼 – whose value specific to experiments is provided in the following sections. 
+
+B.2. Class-Conditional Sampling 
+
+We set the classifier inverse temperature 𝛽 = 4 for all our baselines, otherwise the soft logits of the classifier results in a fuzzy posterior. We provide some additional information regarding implementation of the baselines below: 
+
+Outsourced Diffusion. We learn to sample the 128 dimensional generator noise with the outsourced sampler. To keep architectures consistent across experiments, we used the convolutional UNet to sample this noise by reshaping them to 
+
+2 × 8 × 8 feature maps. For sampling from the CNF prior, we use 45 Euler steps to discretise the ODE. The outsourced sampler operates on the noise space which the same dimensionality as the output image – 3 × 32 × 32 .
+
+Adjoint Matching. To fine-tune flow matching models with a classifier, we use adjoint matching following the approach described in Domingo-Enrich et al. (2024). Due to the unavailability of the open source code at this time, we made our own implementation which we found works extremely well. First, we convert the ODE inference of conditional flow matching into a memoryless SDE, ensuring that both have the same marginal distribution as outlined in the referenced paper. Next, we apply the adjoint matching method for the stochastic optimal controls of the memoryless SDE. This process requires gradient information of the log-reward ( i.e. , the classifier’s log-likelihood), which we compute using PyTorch’s autograd functionality. All hyperparameters remain identical to those of the outsourced diffusion sampler, including the learning rate, except for the number of training iterations and the temperature annealing schedule. Training is significantly slower because it requires computing the log-reward gradients and simulating the full trajectory for adjoint matching. Therefore, we set a total of 2,500 iterations with 1,000 linear temperature annealing steps. This configuration results in similar or reduced wall time compared to the outsourced diffusion sampler while achieving stable convergence and high performance on CIFAR-10. Figure 8 shows the qualitative results of applying adjoint matching to the CIFAR-10 task. Note that for Stable Diffusion 3, the actual implementation of the inference pipeline—which involves a diffusion transformer with various combinations of language embedding fusion for multimodality—is not fully open-sourced. Implementing a memoryless SDE on top of this pipeline is non-trivial and requires careful tuning and integration with the internal processes of Stable Diffusion’s inference mechanisms. 
+
+Temperature Annealing. We anneal the inverse temperature from 𝛽 = 2 to the final 𝛽 = 4. We tune the schedule linearly over the first 2, 000 steps of training for outsourced diffusion, and 1, 000 steps for adjoint matching. 
+
+HMC baselines. We use hamiltorch (Cobb & Jalaian, 2021) to implement HMC. We use step size of 10 −2, with 5 leapfrog integration steps. We use a burn-in chain of length 100 before starting to collecting samples, spaced out by 10 samples. Chains are run for 1, 000 samples, after which we reset the seed to help diversity. The runtime of HMC is quite slow with the CNF prior due to gradient computation. A chain of 1, 000 samples takes close to an hour on 𝐴 100 GPUs. We only keep 90 
+
+samples from this chain to preserve diversity, but these are still correlated. It would take close to 10 hours to generate 1, 000 
+
+samples for FID computation, but using extra resources we can run parallel chains. For comparison, outsourced diffusion takes close to 5 hours for full training, after which sample generation is extremely cheap due to amortization. Despite the 16 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models       
+
+> (a) Adj. (Dog) (b) Adj. (Car)
+> Figure 8. CIFAR-10 samples generated Adjoint Matching (Adj.) for the Dog and Car classes.
+
+need to train a model, outsourced diffusion is actually more memory-efficient than even a single HMC chain, as it eliminates the need to compute gradients through the ODE integrator. We visualize samples from a latent HMC chain in Fig. 40. Our results for each class are listed in Table 7 and Table 8. We additionally evaluate the ELBO for I-CFM posteriors in Table 9.  
+
+> Table 7. SN-GAN results on CIFAR-10
+
+Class Prior HMC Outsourced Diff. Reward FID Reward FID Reward FID 
+
+Airplane -5.82 100.28 -2.53 82.56 -3.89 79.55 Car -5.36 125.16 -3.91 94.81 -4.22 85.88 Bird -5.40 71.30 -4.86 52.14 -3.91 59.76 Cat -5.40 68.30 -2.21 67.55 -3.97 55.05 Deer -5.40 70.10 -3.67 51.10 -3.38 43.04 Dog -5.32 95.62 -4.00 82.32 -4.23 68.52 Frog -4.98 93.00 -4.20 68.12 -3.91 74.70 Horse -5.23 97.53 -3.21 64.60 -3.70 52.87 Ship -5.19 116.89 -2.11 94.45 -3.76 79.73 Truck -5.59 133.23 -2.25 97.88 -3.50 82.07 
+
+AVG -5.37 97.14 -3.26 75.33 -3.847 68.117 B.3. Conditional High-Resolution Face Generation 
+
+For all prompts we use fixed inverse temperature 𝛽 = 100 , which we found to be a suitable reward scale. 
+
+Outsourced Diffusion. StyleGAN3 uses 512 dimensional generator noise. Similar to our SN-GAN experiment for CIFAR, we reshape this into a 2 × 16 × 16 feature map to be passed to the UNet model. The NVAE prior for FFHQ is a very deep latent variable model, having 36 total latent groups starting from 8 × 8 scale all the way up to 128 × 128 . The joint dimensionality of this latent space is extremely large, making joint posterior inference very challenging. Luckily most variable features of interest are captured in the first 4 latent groups of size 20 × 8 × 8 each. We stack the noise groups to create 80 × 8 × 8 feature maps jointly diffused by the UNet. We use 25 steps for diffusion sampling. 
+
+HMC baseline. We use 5 · 10 −3 as the step size for StyleGAN3, and 10 −2 as the step size for NVAE. We use 5 leapfrog integration steps. We only require 100 samples for evaluation in this task (unlike 1000 needed for FID in CIFAR), and so we can afford to only collect 2 samples for every 1000 length chain. We collect the samples at 𝑡 = 500 and 𝑡 = 1000 . This takes around 3 hours for StyleGAN3 and 5 hours for NVAE without parallelism. We only sample the first 4 latent groups with NVAE prior. We find that unlike the CIFAR-10 priors, HMC struggles to obtain high reward with these priors, but performs better with StyleGAN3 than NVAE. We attribute the particularly poor performance of NVAE to the high dimensionality and high energy barriers. Interestingly, outsourced diffusion performs significantly better for sampling these posteriors. We suspect that it is 17 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models  
+
+> Table 8. I-CFM results on CIFAR-10
+
+Class Prior HMC Adj. Matching Outsourced Diff. Reward FID Reward FID Reward FID Reward FID 
+
+Airplane -5.81 73.09 -2.45 62.24 -3.30 27.64 -3.36 47.61 Car -6.22 92.07 -2.12 24.85 -2.93 17.51 -3.02 19.12 Bird -5.94 73.48 -2.93 60.75 -3.16 23.09 -3.11 41.04 Cat -5.53 70.33 -3.60 54.32 -3.33 20.11 -3.57 43.66 Deer -5.59 72.19 -2.72 49.46 -3.08 15.52 -3.78 31.87 Dog -5.83 89.38 -3.89 41.13 -3.21 23.11 -3.57 34.33 Frog -6.06 93.08 -3.36 55.64 -3.27 20.86 -3.98 34.74 Horse -6.13 82.88 -2.10 46.22 -2.79 16.59 -2.95 31.85 Ship -5.85 102.33 -2.28 37.80 -3.09 18.00 -2.92 32.13 Truck -5.82 99.10 -2.55 34.48 -2.55 12.34 -3.20 26.46 
+
+AVG -5.88 84.79 -2.80 46.69 -3.09 19.45 -3.35 34.28  
+
+> Table 9. Additional comparisons against the training-free DPS (Chung et al., 2023) and diffusion fine-tuning with RTB (Venkatraman et al., 2024). For methods where it is applicable, we also report the estimated ELBO.
+
+Model Sampler E[log 𝑝 (y | x)] (↑) FID (↓) ELBO (↑) 
+
+I-CFM Prior −5.88 84 .79 −24 .04 
+
+DPS −2.22 84 .96 -RTB −4.20 90 .77 −147 .69 
+
+Latent HMC −2.80 46 .69 -Adj. Matching −3.09 19 .45 −17 .23 
+
+Outsourced Diff. −3.35 34 .28 −20 .36 
+
+primarily the nice mode mixing properties of the diffusion annealing path that facilitate this. However, an additional factor might be the benefits of amortization, which is an interesting direction for future work to investigate. We present the results for different prompts in Table 10, and showcase the first 10 samples for each prompt, generated from a fixed random seed, in Appendix D.  
+
+> Table 10. StyleGAN3 results on FFHQ
+
+Prompt Prior HMC Outsourced Diff. Reward Diversity Reward Diversity Reward Diversity 
+
+An old man -1.02 0.35 -0.60 0.3 1.62 0.32 A young Asian girl with glasses -1.97 0.36 -0.81 0.32 1.13 0.21 A bald man with a black beard -1.89 0.38 -0.71 0.32 1.02 0.27 A brown-haired child -1.2 0.36 -0.35 0.28 1.14 0.23 
+
+AVG -1.52 0.36 -0.62 0.31 1.23 0.26 B.4. Text-To-Image RLHF 
+
+We intentionally choose prompts that pose a challenge for Stable Diffusion 3 while still receiving reliable feedback from ImageReward. Since SD3 is generally a more powerful model than ImageReward, this approach is not applicable to most prompts. However, in a real-world scenario, we anticipate the use of a better preference model trained with human feedback, which would offer more reliable guidance for improving the generative model. For training, we use a fixed inverse temperature 𝛽 = 30 .
+
+Outsourced Diffusion. We learn to sample from the noise space of SD3, which is a latent CNF. This means we can 18 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+Table 11. StyleGAN3 results on FFHQ 
+
+Prompt Prior HMC Outsourced Diff. Reward Diversity Reward Diversity Reward Diversity 
+
+An old man. -1.74 0.30 -1.24 0.32 1.38 0.31 A young Asian girl with glasses. -2.12 0.30 -0.95 0.31 0.70 0.25 A bald man with a black beard. -2.16 0.29 -1.40 0.29 1.32 0.26 A brown-haired child. -1.76 0.30 -1.21 0.31 0.53 0.23 
+
+AVG -1.94 0.30 -1.20 0.30 0.98 0.26 
+
+sample at a reduced dimensionality from the full image (of size 3 × 512 × 512 ), however the latent space is still fairly high dimensional with shape 16 × 64 × 64 .
+
+Classifier-Free Guidance. Since SD3 is trained as both an unconditional and conditional model, we can use CFG to approximately sample from lowered temperature conditional distribution: 
+
+ˆv𝜃 (x𝑡 , y) = (1 + 𝑤 )v𝜃 (x𝑡 , y) − 𝑤 v𝜃 (x𝑡 ) (8) Increasing the guidance scale 𝑤 generally guides the model to be more prompt accurate at the cost of diversity and if increased too much, image fidelity. We find tuning the CFG weight slightly improves score with ImageReward. Increasing 
+
+𝑤 resulted in degraded performance (”A cat riding a llama.”), so we report score with the default guidance scale 𝑤 = 5.0
+
+(same as prior). We present the results for different prompts in Table 12, and showcase the first 10 samples for each prompt, generated from a fixed random seed, in Appendix E. We set 𝑤 = (6.0, 5.0, 5.5, 5.5) for the prompts ordered as in the table. Additionally, we train Outsourced Diffusion posteriors using Stable Diffusion 1.5 with the same prompts as in (Venkatraman et al., 2024). We compare our results against those reported in their paper in Table 13. 
+
+Table 12. SD3 RLHF results for each prompt                                                         
+
+> Prompt Prior CFG Outsourced Diff. Reward Diversity ELBO Reward Diversity ELBO Reward Diversity ELBO
+> A cat and a dog. 0.50 0.14 3.55 0.61 0.10 -1.24 0.09 27.25 A cat riding a llama. 0.79 0.18 1.01 0.79 0.18 -1.53 0.14 10.83 A quiet village is disrupted by a meteor strike. 0.65 0.24 1.30 0.71 0.20 -0.94 0.21 23.20 A human with a horse face and a human with a wolf face. 1.22 0.20 19.32 1.26 0.22 -1.36 0.18 26.10
+> AVG 0.79 0.19 6.29 0.84 0.17 -1.27 0.16 21.85
+
+Table 13. SD 1.5 RLHF results, averaged across prompts 
+
+Sampler E[log 𝑟 (x, y)] (↑) CLIP diversity (↑) 
+
+Prior -0.17 0.18 DDPO 1.37 0.09 DPOK 1.23 0.13 RTB 1.4 0.11 
+
+Outsourced Diff. 1.26 0.14 
+
+B.5. Protein Structure Prediction 
+
+The specific form of the constraint function 𝑟 div (x) (which can also be thought of as a reward) is adapted from (Huguet et al., 2024). It is a monotonic function of the entropy over secondary structure proportions (restricted to 𝛼 -helices, 𝛽 -sheets and coils). The non-linear transformation increases the discrepancy between the rewards of samples with and without 𝛽 -sheets. The expression is adjusted so that it is positive, to allow us to take the logarithm. 19 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+The 𝑒 −1.2 multiplier ensures the log-constraint function is roughly centered around 0. We found this to improve numerical stability in the diffusion training. 
+
+Outsourced Diffusion. In the outsourced diffusion experiments, an inverse temperature of 𝛽 = 400 .0 was used to allow for improvement in this sparse reward setting. The diffusion sampler used 20 sampling steps. The SE (3)𝑁 elements representing protein structure were parameterized as R7× 𝑁 vectors, with the first 4 coordinates being a quaternion representation for a rotation matrix and the 3 other numbers representing the translation vector. For the UNet model, the protein coordinates were shaped into 7×8×8 vectors. Additionally, the diffusion sampler was first pre-trained (for 200 epochs) using the denoising score matching objective (Ho et al., 2020), with samples from U ( SO (3)𝑁 ) × N ( 0, 10 2 𝐼 3)
+
+(where U is the Haar measure, i.e. , the unique invariant probability measure on SO (3)𝑁 ), the initial x0 distribution used for training the CNF prior model. All inference parameters for the flow model were based on the default configuration from the FoldFlow 2 paper, including 50 steps for integrating the flow ODE (Huguet et al., 2024). For TB training, we used a replay buffer, where 1/4 of the samples are drawn proportional to their reward, and the rest are sampled uniformly. The buffer is used at each iteration with a probability of 0.2 (𝛼 = 0.2). The reason for the modification from the standard uniform buffer used in other experiments is to make the best use of high reward samples, which are rare especially early on in training. A learning rate of 10 −5, and a batch size of 16 was used. Gradient 𝑙 2 norms were clipped to 
+
+0.05 .Due to policy collapse and training instability, models were saved every 100 training iterations, and the model with highest reward was selected for evaluation. The diffusion model was trained for 4 A100 GPU hours. 
+
+Random Walk MCMC baseline. A Gaussian proposal, 𝑝 (z′ | z) = N ( z′; z, 0.01 2 𝐼 ) (i.e. , a step-size of 0.01 ). The quaternion dimensions are normalized to have unit norm (projected back to SO (3)𝑁 ). Note this proposal is symmetric. The MCMC chain was run for 1000 iterations, with 32 chains in parallel. Metrics were evaluated on samples from the iterations 900 and 1000 (to reduce sample correlation). This was run for 8 A100 GPU hours. 20 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models  
+
+> Figure 9. Posterior samples via the original outsourced diffusion sampler and the distilled one-step sampler in three experiments. We use the prompt ”A cat and a dog.” for the stable diffusion experiments, and ”An old man” for the SN-GAN experiments.
+
+# C. Additional Experiments 
+
+C.1. Distillation and One-Step Outsourced Samplers   
+
+> Table 14. FID scores of standard and distilled outsourced diffusion samplers for a CFM prior on CIFAR-10.
+
+Sampler FID 
+
+SDE 38.65 ODE 36.71 Distilled 33.85 
+
+Training outsourced samplers of the kind described in this paper may have the downside of an increase in the number of sampling steps necessary to produce posterior samples of interest. We perform further experiments to show how we can mitigate these side effects via distillation. We distill outsourced models for the CMF posterior on the ‘car’ class in CIFAR-10, the SN-GAN posterior for “A dog and a cat”, and a stable diffusion posterior for a “A green car”. We train distilled one-step samplers equivalent in architecture and size to our original diffusion samplers. We use the trained outsourced samplers as teacher models and employ a simple training regime whereby we sample z0 ∼ N ( 0, 𝐼 𝑑 ), use an ODE sampling scheme to sample z1, and then learn a one-step mapping from z0 to z1 with the student model. We use Mean Square Error (MSE) loss and a simple variance agnostic regularizer to train the student model and encourage diversity. We report in Fig. 9 original and posterior samples for all experiments. We observe high-quality distilled samples, undistin-guishable from the original outsourced diffusion sampler. Furthemore, we report in Table 14 the FID score computed from samples from the original and distilled sampler, with respect to the original CIFAR-10 samples of the class of interest. We observe comparable, if not improved, FID for our distilled model. In line with the results in the main paper, we posit that the ability to fit high fidelity one-step samplers is due to the simplicity of the properties of the target distribution in latent space, often smoother and lower dimensional than the distribution in data space, leading to easy-to-learn transforms from z0 to z1.
+
+C.2. Efficiency Analysis 
+
+The results in Appendix C.1 show that the diffusion sampler can be distilled into a single-step generator, enabling inference of the fine-tuned model without incurring additional sampling time. As a result, the inference efficiency remains comparable to that of direct finetuning methods. On the CIFAR-10 dataset, our method achieves approximately twice the training speed of adjoint matching when using an NVIDIA A100 GPU. This performance advantage is expected to grow for higher-dimensional outputs. It is important to note that the requirement for gradient computation not only raises training memory costs but also limits the flexibility of the method. For tasks where the reward gradient is unavailable, such as many protein or molecule tasks, Adjoint Matching is not applicable. In contrast, the outsourced diffusion sampler can be efficiently applied to arbitrary black-box tasks where the reward (or prior) is not differentiable. 21 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+# D. FFHQ Samples 
+
+D.1. Prior. 
+
+Figure 10. NVAE prior 
+
+Figure 11. StyleGAN3 prior 
+
+D.2. An old man. 
+
+Figure 12. NVAE HMC 
+
+Figure 13. NVAE Outsourced Diffusion 
+
+Figure 14. StyleGAN3 HMC 
+
+Figure 15. StyleGAN3 Outsourced Diffusion 
+
+22 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+D.3. An asian girl with glasses. 
+
+Figure 16. NVAE HMC 
+
+Figure 17. NVAE Outsourced Diffusion 
+
+Figure 18. StyleGAN3 HMC 
+
+Figure 19. StyleGAN3 Outsourced Diffusion 
+
+23 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+D.4. Bald man with black beard. 
+
+Figure 20. NVAE HMC 
+
+Figure 21. NVAE Outsourced Diffusion 
+
+Figure 22. StyleGAN3 HMC 
+
+Figure 23. StyleGAN3 Outsourced Diffusion 
+
+24 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+D.5. Brown haired child. 
+
+Figure 24. NVAE HMC 
+
+Figure 25. NVAE Outsourced Diffusion 
+
+Figure 26. StyleGAN3 HMC 
+
+Figure 27. StyleGAN3 Outsourced Diffusion 
+
+25 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+# E. Stable Diffusion 3 Samples 
+
+E.1. A cat and a dog. 
+
+Figure 28. Prior 
+
+Figure 29. Classifer-Free Guidance 
+
+Figure 30. Outsourced Diffusion 
+
+E.2. A cat riding a llama. 
+
+Figure 31. Prior 
+
+Figure 32. Classifer-Free Guidance 
+
+Figure 33. Outsourced Diffusion 
+
+26 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+E.3. A quiet village is disrupted by a meteor strike. 
+
+Figure 34. Prior 
+
+Figure 35. Classifer-Free Guidance 
+
+Figure 36. Outsourced Diffusion 
+
+E.4. A human with a horse face and a human with a wolf face. 
+
+Figure 37. Prior 
+
+Figure 38. Classifer-Free Guidance 
+
+Figure 39. Outsourced Diffusion 
+
+27 Outsourced Diffusion Sampling: Efficient Posterior Inference in Latent Spaces of Generative Models 
+
+# F. CIFAR-10 HMC Chain 
+
+(a) t=100 (b) t=150 (c) t=200 (d) t=250 (e) t=300 
+
+(f) t=350 (g) t=400 (h) t=450 (i) t=500 (j) t=550 
+
+(k) t=600 (l) t=650 (m) t=700 (n) t=750 (o) t=800 
+
+(p) t=850 (q) t=900 (r) t=950 (s) t=1000 
+
+Figure 40. Samples from HMC chain of length 1000 after 100 steps of burn-in, for CIFAR class ’Airplane’ with CNF prior. We find that in the latent space, MCMC smoothly traverses through different modes. The samples (d,o,q,r,s) are distinctly identifiable as airplanes and 
+
+(c) is partially identifiable as an airplane. The samples approach the correct class after long mixing time. 
+
+28
