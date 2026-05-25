@@ -1,0 +1,734 @@
+Title: Accelerating Video Inverse Problem Solvers with Autoregressive Diffusion Models
+
+URL Source: https://arxiv.org/pdf/2605.20624v1
+
+Published Time: Thu, 21 May 2026 00:32:20 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# Accelerating Video Inverse Problem Solvers with Autoregressive Diffusion Models 
+
+Taesung Kwon 1* Jonghyun Park 1* Hyungjin Chung 2† Jong Chul Ye 1† 1 KAIST 2 EverEx 
+
+Figure 1: The AVIS framework leverages autoregressive video diffusion models to restore videos in a streaming manner, naturally eliminating latency bottlenecks. Examples show diverse video inverse problems that AVIS can solve in a zero-shot manner. 
+
+## Abstract 
+
+Diffusion models provide powerful priors for zero-shot video inverse problems, but their real-time deployment is hindered by two inefficiencies: high initial latency caused by holistic video restoration, and low throughput resulting from multiple VAE passes to enforce measurement consistency in pixel space. To overcome these limitations, we propose Autoregressive Video Inverse problem Solver (AVIS). The AVIS framework leverages autoregressive video diffusion models to restore videos in a streaming manner, naturally eliminating latency bottlenecks. Specifically, AVIS initializes reverse diffusion with a measurement-consistent estimate, reducing the required sampling steps. Compared to leading non-autoregressive solvers, AVIS drastically reduces initial latency from 114s to 4s and increases throughput from 0.71 to 1.18 FPS while achieving superior restoration quality. We further introduce a highly accelerated variant, dubbed AVIS Flash , that enforces measurement consistency solely on the first chunk. AVIS Flash substantially boosts throughput to 5.91 FPS on a single RTX 4090 GPU while maintaining competitive performance and achieving a favorable efficiency–performance trade-off, paving the way toward real-time deployment.   
+
+> * First authors. † Corresponding authors. Project page is available here. Preprint.
+> arXiv:2605.20624v1 [cs.CV] 20 May 2026
+
+## 1 Introduction 
+
+Video inverse problems aim to reconstruct a clean video x from a degraded measurement y (e.g. ,low-resolution, masked, or blurred). The degradation process is mathematically formulated as 
+
+y = A(x) + n, (1) where A is a degradation operator and n denotes measurement noise. These video restoration tasks are inherently ill-posed, as a single measurement y can correspond to many possible clean videos x.To resolve this ambiguity, diffusion and flow-based models [ 1–9 ] have recently emerged as powerful priors for solving video inverse problems in a zero-shot manner [ 10 –15 ], producing results that are both perceptually realistic and faithful to the measurements. Despite their successful restoration performance, these solvers remain far from real-time deployment due to two inefficiencies: 1. High initial latency: Recent Diffusion model-based Video Inverse problem Solvers (DVIS) [ 11 – 15 ] restore the entire video in a holistic manner, sampling the entire video sequence simultaneously. Consequently, the first frame cannot be displayed until the last frame has been restored, introducing latency equal to the time required to restore all frames. 2. Low throughput: Modern diffusion and flow-based video models [ 16 –20 ] operate in the latent space of a variational autoencoder (VAE) [ 21 ] for computational efficiency. Recent DVIS based on such models [ 13 , 15 ] require multiple VAE passes during restoration, restricting throughput to below 1 FPS. While some works [ 22 , 23 ] bypass this with auxiliary latent operators, they require degradation-specific training, sacrificing zero-shot generality. Here, we identify a promising yet underexplored direction toward the efficient deployment of DVIS: harnessing the potential of autoregressive (AR) video diffusion models [ 24 – 26 ]. Unlike non-autoregressive solvers that process the entire video jointly (Figure 2(a)), autoregressive solvers restore videos in a streaming manner, naturally eliminating the latency bottleneck. However, simply adopting an AR backbone does not automatically resolve the issue of low throughput, as it still requires multiple VAE passes for measurement consistency updates. To overcome this limitation, we propose Autoregressive Video Inverse problem Solver ( AVIS ), which accelerates restoration by initializing the reverse diffusion process with a measurement-consistent estimate, thereby reducing the required sampling steps. We draw inspiration from CCDF [ 27 ], which demonstrates that initializing the reverse diffusion process from a coarse estimate, predicted by an auxiliary pretrained restorer, exploits stochastic contraction to significantly reduce the required sampling steps. Unlike CCDF, AVIS does not rely on an auxiliary pretrained restorer; instead, it obtains an initial restoration by directly minimizing the measurement consistency objective. By utilizing this estimate to initialize the reverse diffusion, AVIS begins the restoration process from a better starting point while enforcing measurement consistency for every video chunk (Figure 2(b)). To push efficiency further, we introduce a highly accelerated variant, AVIS Flash . Unlike AVIS, which applies iterative measurement guidance to every chunk, AVIS Flash enforces measurement consistency only on the first video chunk. Interestingly, we observe that this is sufficient to restore the entire sequence (Figure 2(c)). Once the first chunk is fully restored and accurately grounded to the measurement, subsequent chunks can be generated through autoregressive propagation from this corrected prefix, completely bypassing explicit measurement guidance. This eliminates iterative VAE passes for subsequent chunks, accelerating restoration by 5 × while preserving zero-shot performance. Compared to the leading non-autoregressive solver [ 15 ], AVIS reduces initial latency from 114s to 4s and improves throughput from 0.71 to 1.18 FPS while achieving superior restoration quality. Pushing efficiency further, AVIS Flash substantially boosts throughput to 5.91 FPS on a single RTX 4090 GPU while maintaining competitive performance, paving the way toward real-time deployment. Our main contributions can be summarized as follows: • AVIS. We investigate the potential of adopting autoregressive video diffusion models for zero-shot video restoration. AVIS accelerates restoration by initializing the reverse diffusion process with a measurement-consistent estimate, reducing the required sampling steps while enforcing measurement consistency for every video chunk. • AVIS Flash . We introduce a highly accelerated variant of AVIS that retains the initialization while enforcing measurement consistency solely on the first video chunk. This substantially increases throughput, paving the way for real-time video inverse problem solvers. 2Figure 2: Overview of our proposed AVIS and AVIS Flash framework. (a) Non-autoregressive restoration processes the entire video holistically, suffering from high initial latency. (b) AVIS restores videos in a streaming manner and reduces sampling steps via measurement-consistent initialization while enforcing measurement updates for every video chunk. (c) AVIS Flash retains the same initialization as AVIS but applies measurement updates only to the first video chunk. Subsequent chunks ( n ≥ 2) are restored through autoregressive propagation from the corrected prefix, eliminating iterative VAE passes and dramatically accelerating throughput. 
+
+## 2 Related Work 
+
+2.1 Diffusion for Video Inverse Problems 
+
+Diffusion model-based Inverse problem Solvers (DIS) [ 28 –37 ] enable repurposing the diffusion or flow-based models [ 1– 4, 6– 9 ] originally trained to model the data distribution p(x) as powerful plug-and-play priors. By guiding the sampling trajectory toward the posterior p(x|y), these methods achieve strong zero-shot performance across a wide range of image restoration tasks, producing solutions that are perceptually natural and consistent with the measurement y.Motivated by this success, Diffusion model-based Video Inverse problem Solvers (DVIS) [ 11 – 15 ]extend this paradigm to the video modality. One line of work [ 11 – 13 ] repurposes image diffusion priors [ 3, 6] for video restoration by introducing explicit temporal conditioning. Warping-based approaches [ 10 , 11 ] explicitly control temporal consistency using optical flow [ 38 ]. An alternative approach enforces temporal consistency without optical flow through batch-consistent sampling [ 12 ,13 ], which efficiently synchronizes stochastic components across frames. More recently, methods leveraging native video diffusion priors [ 14 , 15 ] have shown an improved ability to capture temporal correlations without requiring explicit temporal conditioning. As mentioned earlier, all of these solvers restore the video holistically by sampling all frames simultaneously. As a result, the first frame cannot be displayed until the entire sequence is fully restored, introducing latency equal to the time required to restore all frames. We pinpoint this issue as a critical barrier for real-time deployment and propose a direction toward efficient DVIS. 
+
+2.2 Autoregressive Diffusion Models for Video Generation 
+
+In recent years, both closed- and open-source models [ 39 , 40 , 16 – 20 ] have demonstrated remarkable progress in foundational video generation. Currently, the dominant open-source video diffusion models [ 16 –18 , 20 ] typically adopt diffusion transformers [ 41 ] with bidirectional attention [ 42 ] that generate the entire video sequence simultaneously. Recent works [ 24 – 26 , 43 – 46 ] have explored autoregressive (AR) modeling, which generates the next frame by conditioning on previously generated ones, enabling low-latency generation. One representative direction is distilling diffusion transformers with bidirectional attention into student transformers with causal attention, allowing support for key-value (KV) caching during inference [ 25 ,26 ]. Among these, Self Forcing [ 26 ] has emerged as a leading autoregressive video diffusion model. 3It addresses the train-test gap by conditioning on its own previously generated outputs rather than ground-truth frames during training, preventing error accumulation (i.e., exposure bias) at test time. Given its effectiveness in closing this gap and its KV caching efficiency, we adopt Self-Forcing as the backbone of our framework. 
+
+## 3 Preliminaries: Autoregressive Video Diffusion Models 
+
+Autoregressive (AR) modeling. AR video diffusion models combine sequential generation along the temporal axis with denoising diffusion processes. Specifically, let z = [ z1, z2, . . . , zN ] be a sequence of N video chunks, where each chunk refers to a block corresponding to a short sequence of consecutive latent frames. Rather than modeling the entire video at once, the model builds the sequence progressively, predicting each new video chunk conditioned on previously generated ones. Mathematically, the joint distribution of the sequence is factorized sequentially as follows: 
+
+p(z) = 
+
+> N
+
+Y
+
+> n=1
+
+p(zn|z<n ). (2) Each conditional distribution p(zn|z<n ) is then parameterized by a diffusion model, where zn is generated by gradually denoising the initial Gaussian noise, conditioned on the past context z<n ,with the initial context z0 = ∅.
+
+Diffusion process. To model the conditional distribution p(zn|z<n ), we employ the flow matching framework [ 7 –9 ], which offers a simple and deterministic ordinary differential equation (ODE) formulation for the diffusion process. Specifically, let zn 
+
+> 0
+
+denote the clean n-th video chunk and 
+
+zn 
+
+> 1
+
+∼ N (0, I) be pure Gaussian noise. For a continuous timestep t ∈ [0 , 1] , the intermediate noisy state znt is formulated as a linear interpolation: 
+
+znt = (1 − t)zn 
+
+> 0
+
++ tzn 
+
+> 1
+
+. (3) The corresponding ground-truth vector field driving this transformation is defined as vnt = zn 
+
+> 1
+
+− zn 
+
+> 0
+
+.During training, the model vθ is optimized through conditional flow matching to regress this vector field using a mean squared error (MSE) objective: 
+
+LCFM = Et, zn    
+
+> 0∼pdata ,znt∼pt(znt|zn
+> 0)
+
+∥vθ (znt , t ; z<n  
+
+> 0
+
+) − vnt ∥22, (4) where pt(znt |zn 
+
+> 0
+
+) denotes the time-dependent probability path induced by the linear interpolation in Eq. (3). Then, the minimizer of this objective corresponds to the conditional expectation: 
+
+vθ (znt , t ; z<n  
+
+> 0
+
+) = E[zn 
+
+> 1
+
+− zn 
+
+> 0
+
+|znt , z<n  
+
+> 0
+
+]. (5) At inference, given a noisy video chunk znt at timestep t, the model predicts the vector field 
+
+vθ (znt , t ; z<n  
+
+> 0
+
+). By rearranging Eq. (3) , we can obtain a clean estimate ˆzn
+
+> 0|t
+
+, which approximates the posterior mean E[zn 
+
+> 0
+
+| znt , z<n  
+
+> 0
+
+]:
+
+ˆzn 
+
+> 0|t
+
+:= E[zn 
+
+> 0
+
+| znt , z<n  
+
+> 0
+
+] = znt − tvθ (znt , t ; z<n  
+
+> 0
+
+). (6) In practice, to avoid the computational overhead of processing the full past context at each step, the conditioning on z<n  
+
+> 0
+
+is efficiently implemented using its KV cache [ 25 , 26 ], denoted as KV <n .Subsequently, following the specific sampling procedure of our backbone [ 26 ], the process continues to the next timestep t − ∆t by re-noising the clean estimate ˆzn 
+
+> 0|t
+
+from Eq. (6): 
+
+znt−∆t = (1 − (t − ∆t))ˆ zn 
+
+> 0|t
+
++ ( t − ∆t)zn 
+
+> 1
+
+, zn 
+
+> 1
+
+∼ N (0, I). (7) 
+
+## 4 AVIS: Autoregressive Video Inverse Problem Solver 
+
+In this section, we detail the architecture of our Autoregressive Video Inverse problem Solver (AVIS) and its highly efficient variant, AVIS Flash , designed to harness the underexplored potential of AR video diffusion models for zero-shot restoration. We begin by introducing an efficient mechanism to enforce measurement consistency during the reverse diffusion process in Section 4.1. Building upon this, Section 4.2 presents our core framework, AVIS, which accelerates the process by initializing the reverse diffusion with a measurement-consistent estimate, thereby reducing the required sampling steps. Finally, in Section 4.3, we propose AVIS Flash , which pushes efficiency further by eliminating multiple VAE passes for subsequent video chunks. 44.1 Guidance for Measurement Consistency 
+
+During the reverse diffusion process of the n-th noisy video chunk znt , measurement consistency is enforced at each denoising step to guide the sampling trajectory toward the posterior. The conventional approach is to compute the gradient of the measurement consistency term [ 14 , 28 ] ( e.g. ,
+
+∇z∥y − A (D(z)) ∥2). However, this requires backpropagation through both the VAE decoder D and the model vθ , which is computationally prohibitive for high-dimensional video data. To ensure both efficiency and generalizability, we follow the common practice of recent DVIS [ 12 ,13 , 15 ] by adopting a multi-step optimization algorithm for the update. Specifically, we employ the Decomposed Diffusion Sampling (DDS) [ 31 ] framework, which utilizes the conjugate gradient (CG) method [47, 48] to efficiently enforce measurement consistency. Formally, at each timestep t, we first obtain the clean latent estimate ˆzn 
+
+> 0|t
+
+from znt using Eq. (6) and decode it into the pixel space: 
+
+ˆxn 
+
+> 0|t
+
+= D(ˆ zn
+
+> 0|t
+
+). (8) Next, we enforce data consistency by solving the following proximal optimization problem through the aforementioned CG method: 
+
+˜xn 
+
+> 0|t
+
+:= arg min 
+
+> x
+
+γ
+
+2 ∥y − A (x)∥2 + 12 ∥x − ˆxn
+
+> 0|t
+
+∥2. (9) To avoid complex parameter tuning, we fix γ = 1 throughout this paper. We then re-encode the updated pixel-space estimate ˜xn 
+
+> 0|t
+
+back into the latent space: 
+
+˜zn 
+
+> 0|t
+
+= E(˜ xn
+
+> 0|t
+
+). (10) By doing so, we enforce measurement consistency using only forward passes of D and E, entirely avoiding the expensive neural network Jacobian computation. Finally, the updated latent estimate 
+
+˜zn 
+
+> 0|t
+
+is renoised back to the next timestep t − ∆t using Eq. (7), 
+
+znt−∆t = (1 − (t − ∆t))˜ zn 
+
+> 0|t
+
++ ( t − ∆t)zn 
+
+> 1
+
+, zn 
+
+> 1
+
+∼ N (0, I), (11) to continue the reverse process. 
+
+4.2 AVIS: Accelerating DVIS with a Better Starting Point 
+
+Diffusion models are inherently slow, as they require numerous steps to generate data from pure Gaussian noise. To accelerate solving inverse problems, CCDF [ 27 ] proposes initializing the reverse diffusion process from a better starting point. Specifically, it obtains a coarse estimate from an auxiliary pre-trained network, diffuses it to an intermediate timestep t0 < 1, and starts the reverse sampling from there. By starting at t0, CCDF effectively reduces the total number of sampling steps, thereby significantly reducing inference time while leveraging the stochastic contraction property of the reverse diffusion path. However, its reliance on a task-specific auxiliary network for the initial correction fundamentally sacrifices the zero-shot generality of the solver. To overcome this limitation, we propose a training-free, multi-step optimization strategy to obtain a better starting point, preserving the acceleration benefits of the CCDF principle. Specifically, we obtain the starting point of the reverse sampling as follows. We first compute a measurement-consistent initial estimate xinit in pixel space using a multi-step optimization algorithm (e.g., CG) that minimizes the measurement consistency objective: 
+
+xinit = arg min  
+
+> x
+
+∥y − A (x)∥2. (12) Next, we encode xinit to get zinit and diffuse it to timestep t0:
+
+zt0 = [ z1 
+
+> t0
+
+, z2 
+
+> t0
+
+, . . . , zNt0 ] = (1 − t0)zinit + t0z1, z1 ∼ N (0, I). (13) While this initial estimate xinit satisfies measurement consistency, it is only a coarse estimate and may lack perceptual realism. The role of the reverse diffusion process is to transport this estimate onto the high-density region of the video data manifold. To this end, we perform K sampling steps starting from t0, yielding a step size of ∆t = t0/K for each reverse diffusion process. During this process, we continuously apply DDS guidance at each step to ensure the trajectory remains strictly faithful to the given measurement. By integrating the guidance and the accelerated sampling strategy into the autoregressive diffusion process, we establish our complete framework: the Autoregressive 
+
+Video Inverse problem Solver ( AVIS ). 54.3 AVIS Flash : Accelerating AVIS with Autoregressive Propagation 
+
+Here, we propose AVIS Flash , a highly accelerated variant that fully unlocks the potential of autoregressive propagation. While it shares the same initialization at t0 with AVIS, it fundamentally eliminates the need for iterative measurement guidance after the first chunk. Although the guidance introduced in Section 4.1 avoids expensive neural network Jacobian computations, applying it to every video chunk requires iterative VAE passes at each reverse step, which remains a bottleneck for high-throughput video restoration. Empirically, we discover a strikingly simple yet effective solution: bypassing measurement guidance for all subsequent chunks ( n ≥ 2) dramatically accelerates throughput with competitive restoration performance. We attribute this success to the temporal context propagation induced by the autoregres-sive formulation, combined with the initialization. Once the first video chunk ( n = 1 ) is grounded to the measurements through guidance, its restored features are extracted and stored as a prefix cache KV 1. Furthermore, since the initialization in Section 4.2 provides a measurement-consistent estimate that is then re-noised to an intermediate timestep t0, the model does not need to generate subsequent chunks ( n ≥ 2) from scratch; it simply refines this estimate through the guidance-free sampling steps in Eq. (6) and Eq. (7), conditioned on the accumulated prefix cache KV <n .To clarify the intuition behind AVIS Flash , we provide an error decomposition within our framework. Specifically, Proposition 1 decomposes the final error into two terms: the initial error from the measurement-consistent estimate, and the context error propagated from previously restored chunks. Detailed derivations are provided in Appendix A. 
+
+Proposition 1. Let ϵn 
+
+> 0
+
+denote the initial error of the current chunk, and let δn denote the context error propagated from previously restored chunks. Under local Lipschitz assumptions on the autoregressive vector field vθ , the final error ϵnK of the n-th chunk after K sampling steps satisfies 
+
+ϵnK ≤ ΛK ϵn 
+
+> 0
+
++ BK δn, (14) 
+
+where ΛK and BK depend on the sampling schedule and local Lipschitz constants. 
+
+This decomposition provides an interpretive view for understanding the design of AVIS Flash . The measurement-consistent initialization is designed to reduce the per-chunk initial error ϵn 
+
+> 0
+
+before autoregressive sampling. Meanwhile, the context error δn contributes to the bound as an additive perturbation term. This indicates that the context error propagated from previous chunks affects the current chunk through incremental additions rather than through multiplicative amplification of the initial error. AVIS Flash can also be naturally extended to handle long video sequences. By periodically re-injecting measurement consistency (e.g., applying guidance every N chunks), we can further suppress error accumulation. This periodic guidance effectively mitigates drift, allowing for more stable restoration over extended video sequences, as demonstrated in Appendix C. The complete AVIS 
+
+Flash pipeline is detailed in Algorithm 1. 
+
+Algorithm 1 Autoregressive Video Inverse problem Solver (AVIS and AVIS Flash )                                                                                                             
+
+> Require: Measurement y, operator A, diffusion model vθ, number of chunks N, start time t0, encoder E,decoder D, and mode ∈ { AVIS ,AVIS Flash }.
+> 1: xinit = arg min x∥y− A (x)∥2and zinit ← E (xinit )▷Pre-restoration
+> 2: KV 0← ∅
+> 3: for n= 1 : Ndo
+> 4: znt0←(1 −t0)zn
+> init +t0z1,z1∼ N (0,I)▷Initialization
+> 5: for t:t0→0do
+> 6: ˆzn
+> 0|t←znt−tvθ(znt, t ;KV <n )▷Obtain clean estimate
+> 7: if mode is AVIS or (mode is AVIS Flash and n= 1) then
+> 8: ˆzn
+> 0|t←Solve Eq. (9) via CG ▷Measurement consistency update
+> 9: end if
+> 10: znt−∆t←(1 −(t−∆t))ˆ zn
+> 0|t+ ( t−∆t)z1,z1∼ N (0,I)▷Re-noise
+> 11: end for
+> 12: Display D(zn
+> 0)and KV ≤n←Update KV (zn
+> 0,KV <n )
+> 13: end for
+> 14: return [z10, . . . , zN
+> 0]
+
+65 Experiments 
+
+5.1 Experimental Setup Dataset & Inverse Problems. We evaluate our method on 100 high-resolution videos sourced from Pexels [ 49 ]. Each video is spatially resized to 480 × 854 and temporally cropped to the initial 81 frames. We comprehensively evaluate our method on five video restoration tasks: (1) Super-Resolution at a 4 × scaling factor, (2) Random Inpainting with 50% of the video masked, (3) Gaussian Deblur with a kernel size of 61 and a σ of 3.0, (4) Temporal Average using 7 × averaging over a 7-frame causal window, and (5) Spatio-Temporal Average using 4 × spatial average pooling and 4 ×
+
+temporal averaging over a 4-frame causal window. 
+
+Baselines. We compare our methods (AVIS and AVIS Flash ) against other diffusion model-based solvers for high-resolution video inverse problems: DiffIR2VR-Zero [ 50 ], VISION-XL [ 12 ], and LVTINO [ 15 ]. We include DiffIR2VR-Zero specifically for super-resolution (SR), as it only sup-ports SR among the various inverse problems addressed in this work. For completeness, detailed descriptions of each baseline method are provided in Appendix B. 
+
+Metrics & Implementation Details. To assess restoration quality, we report five fidelity and perceptual metrics: PSNR, SSIM [ 51 ], LPIPS [ 52 ], FID [ 53 ], and FVD [ 54 ]. We further evaluate video quality using VBench [ 55 ], specifically focusing on Subject Consistency (Sub. C.), Background Consistency (Bg. C.), Motion Smoothness (M. Smooth.), Aesthetic Quality (Aesth.), and Imaging Quality (Imag.). Computational efficiency is measured in terms of latency (time to restore the first frame in seconds), total restoration time, and throughput (FPS). Unless otherwise specified, all experiments are conducted on a single NVIDIA RTX 4090 GPU. Based on our ablation studies, we employ t0 = 0 .1 and K = 2 as our default settings. Please refer to Appendix B for more information. 
+
+5.2 Results Computational Efficiency. The primary advantage of our framework is its practical efficiency. As shown in Table 1, both AVIS and AVIS Flash reduce the initial latency to only 4 seconds, whereas the baselines suffer from severe delays (167 seconds for VISION-XL and 114 seconds for LVTINO). Beyond latency improvements, our framework significantly enhances overall throughput. While the baselines fail to surpass 1 FPS, AVIS successfully achieves over 1 FPS. Notably, AVIS Flash 
+
+achieves 5.91 FPS, making it over 12 × and 8× faster than VISION-XL and LVTINO, respectively. Furthermore, we found that deploying AVIS Flash on a single NVIDIA H100 GPU pushes the performance even further to an initial latency of 1.85 seconds and a throughput of 10.2 FPS, paving the way toward real-time deployment.                       
+
+> Method Latency (s) ↓Time (s) ↓FPS (frame/s) ↑
+> DiffIR2VR-Zero 1300 1300 0.06 VISION-XL 167 167 0.49 LVTINO 114 114 0.71 AVIS 468.5 1.18 AVIS Flash 413.7 5.91
+
+Table 1: Efficiency comparison for 4× video super-resolution. Our framework (AVIS and AVIS 
+
+Flash ) achieves significant improvements across all efficiency metrics. Bold and underline indicate the best and second-best results, respectively. 
+
+Restoration Performance. Table 2 compares AVIS and AVIS Flash against baselines across five restoration tasks. Overall, AVIS achieves the best restoration performance, outperforming or remaining highly competitive with all baselines on the majority of metrics. In particular, AVIS consistently attains the best or near-best PSNR, SSIM, LPIPS, and FVD across most tasks, validating the effectiveness of combining autoregressive video diffusion priors with our initialization. While LVTINO occasionally achieves favorable perceptual metrics, it relies on both a video diffusion prior [ 25 ] and an additional image diffusion prior [ 56 ]. In contrast, AVIS achieves better overall results with only a single backbone. AVIS Flash targets a faster operating point. By bypassing iterative measurement updates for subse-quent chunks, AVIS Flash experiences a slight drop in certain metrics compared to AVIS. However, it remains competitive with baselines such as VISION-XL and LVTINO, while reducing initial latency by over 100 seconds and boosting throughput by over 12 × and 8×, respectively (Table 1). These 7Method PSNR ↑ SSIM ↑ LPIPS ↓ FVD ↓ FID ↓ Sub. Con. ↑ Bg. Con. ↑ M. Smooth. ↑ Aesth. ↑ Imag. ↑                                                                                                                                                                                                                       
+
+> Super Resolution
+> DiffIR2VR-Zero 27.46 0.722 0.157 225.6 24.49 95.92 95.22 98.14 56.00 69.09
+> VISION-XL 29.89 0.800 0.115 76.24 22.51 96.10 95.75 99.05 51.96 53.73 LVTINO 30.04 0.824 0.102 59.42 18.32 96.36 96.09 99.11 52.63 59.05 AVIS 30.38 0.826 0.101 40.36 23.94 96.30 96.21 99.24 52.19 55.13 AVIS Flash 29.95 0.818 0.109 62.98 25.46 96.29 96.14 99.15 51.80 54.59
+> Inpainting
+> VISION-XL 29.39 0.801 0.123 144.8 18.92 96.09 94.51 98.95 52.82 60.37 LVTINO 26.36 0.737 0.187 322.0 35.75 95.95 95.56 98.60 51.94 66.86
+> AVIS 31.27 0.870 0.075 68.90 10.21 96.24 94.61 99.20 54.06 64.15 AVIS Flash 30.29 0.842 0.091 81.75 13.96 96.18 94.84 99.14 53.22 62.90
+> Gaussian Deblur
+> VISION-XL 31.10 0.835 0.093 41.52 16.38 96.27 96.23 99.08 52.52 58.01
+> LVTINO 30.64 0.835 0.109 47.45 20.37 96.43 96.18 99.20 51.65 57.17 AVIS 30.69 0.831 0.110 36.07 24.40 96.30 96.41 99.25 51.54 54.63 AVIS Flash 30.41 0.827 0.115 49.66 25.29 96.31 96.33 99.23 51.24 54.39
+> Temporal Average
+> VISION-XL 30.46 0.825 0.095 110.5 12.15 95.87 95.00 98.67 54.27 63.08 LVTINO 31.68 0.878 0.069 77.76 8.015 96.34 95.11 99.01 55.73 66.36 AVIS 32.10 0.887 0.063 54.85 6.803 96.26 95.58 99.12 55.29 67.07 AVIS Flash 31.57 0.878 0.067 57.92 6.829 96.21 95.65 99.05 55.16 67.54
+> Spatio-Temporal Average
+> VISION-XL 29.62 0.794 0.124 99.54 24.13 95.96 95.41 98.96 51.44 52.73 LVTINO 29.85 0.818 0.110 95.35 19.73 96.27 95.98 99.03 52.42 58.02
+> AVIS 29.99 0.818 0.112 62.11 25.61 96.22 96.05 99.20 51.62 54.28 AVIS Flash 29.81 0.815 0.117 73.23 25.94 96.22 95.97 99.13 51.32 54.20
+
+Table 2: Quantitative comparison across five video restoration tasks. Our proposed AVIS achieves superior performance, and its highly efficient variant, AVIS Flash , maintains competitive performance. 
+
+Bold and underline indicate the best and second-best results, respectively. results highlight the central benefit of our framework: AVIS establishes a high-quality autoregressive video inverse problem solver, while AVIS Flash offers a favorable efficiency–performance trade-off for practical deployment. For additional qualitative comparisons, please refer to Appendix C, where we provide long video restoration results and examples of novel view synthesis formulated as another type of inpainting problem. 
+
+5.3 Ablation Study 
+
+To isolate the contributions of our core components, we report the ablation study results on AVIS 
+
+Flash for video inpainting in Table 3. 
+
+Autoregressive Propagation. To isolate the contribution of autoregressive context propagation, we remove the KV cache for subsequent chunks while keeping the rest of AVIS Flash unchanged. Under this setting, each subsequent chunk starts from the same initialized noisy state as in AVIS 
+
+Flash , but is restored without access to the previously generated prefix. As shown in Table 3(a), removing the KV cache consistently degrades all metrics. This highlights the benefit of autoregressive propagation, which provides performance gains complementary to the initialization. In other words, the autoregressive propagation of the restored prefix further improves subsequent chunk restoration and maintains temporal coherence across the video. To further isolate the role of autoregressive propagation, we visualize the case where subsequent chunks are generated with KV cache conditioning but without the initialization ( i.e. , starting from pure noise). As shown in the middle row of Figure 3, autoregressive propagation alone effectively preserves the context from previous chunks, but gradually drifts from the desired restoration. This drift is mitigated by our initialization, as shown in the bottom row of Figure 3. Starting the reverse process from the initialized anchor keeps each chunk closer to the desired restoration trajectory, while periodic re-injection of measurement consistency further prevents long-range drift for longer videos, as described in Section 4.3. 
+
+Start Time ( t0). We study the effect of the start time t0 ∈ { 0.1, 0.2, 0.5}. As shown in Table 3(b), a smaller t0 consistently improves the majority of metrics, with t0 = 0 .1 yielding the best overall performance. This is consistent with the results in Figure 3: as t0 increases, the starting point approaches pure noise, and the reverse process increasingly relies on pure autoregressive propagation, which gradually drifts away from the desired restoration. Although a larger t0 slightly improves some 8Setting PSNR ↑ SSIM ↑ LPIPS ↓ FVD ↓ FID ↓ Sub. C. ↑ Bg. C. ↑ M. Smooth. ↑ Aesth. ↑ Imag. ↑                                                                                           
+
+> (a) Autoregressive Propagation
+> w/ AR Prop (default) 30.29 0.842 0.091 81.75 13.96 96.18 94.84 99.14 53.22 62.90
+> w/o AR Prop 29.75 0.830 0.103 108.3 17.67 95.99 94.82 99.11 52.97 62.36 (b) Start Time ( t0)
+> t0= 0 .1(default) 30.29 0.842 0.091 81.75 13.96 96.18 94.84 99.14 53.22 62.90
+> t0= 0 .228.98 0.810 0.112 112.0 16.48 96.13 94.53 99.14 53.28 63.45
+> t0= 0 .525.50 0.716 0.192 283.3 30.50 95.92 94.11 99.15 53.31 65.21
+> (c) Sampling Steps ( K)
+> K= 1 30.40 0.843 0.091 81.73 14.64 96.18 94.73 99.13 53.15 62.47
+> K= 2 (default) 30.29 0.842 0.091 81.75 13.96 96.18 94.84 99.14 53.22 62.90
+> K= 4 29.95 0.837 0.094 81.78 13.69 96.23 95.17 99.15 53.34 63.46
+
+Table 3: Ablation studies on AVIS Flash for the video inpainting task. (a) Effect of autoregressive propagation with KV cache. (b) Impact of the start time t0. (c) Impact of the number of diffusion sampling steps K. Bold and underline indicate the best and second-best results, respectively. 
+
+Figure 3: Effect of AR propagation and initialization. (Top) Ground-truth video. (Middle) While AR propagation preserves the preceding context, it exhibits gradual error accumulation over time. (Bottom) Our initialization for the reverse diffusion effectively mitigates this temporal drift. perceptual VBench metrics, it substantially degrades fidelity metrics. We therefore adopt t0 = 0 .1 as our default setting. 
+
+Sampling Steps ( K). We also evaluate the impact of the number of sampling steps ( K ∈ { 1, 2, 4}). Table 3(c) reveals a clear trade-off: as the number of steps increases, certain perceptual metrics ( e.g. ,FID) improve, whereas pixel-level fidelity metrics (PSNR, SSIM) slightly decrease. Since larger K
+
+increases inference time with diminishing returns in overall quality, we adopt K = 2 as the default setting to achieve the best balance between speed and quality. 
+
+## 6 Conclusion 
+
+In this paper, we proposed Autoregressive Video Inverse problem Solver (AVIS) and its highly efficient variant, AVIS Flash , for practical deployment of diffusion model-based video inverse problem solvers. Extensive experiments show that the proposed methods improve efficiency over existing non-autoregressive solvers by large margins, with AVIS achieving superior restoration performance and AVIS Flash providing a dramatic boost in throughput while maintaining competitive restoration quality. We believe our framework establishes a strong foundation for future research, bridging the gap between generative priors and real-time deployment of video restoration. 
+
+Limitations and Broader Impacts. While AVIS paves the way for the practical, real-time de-ployment of diffusion-based video inverse problem solvers, it still requires multiple VAE passes for the initial pixel-space guidance. Incorporating measurement consistency updates directly in the latent space with auxiliary latent operators, similar to [ 22 , 23 ], represents an interesting direction toward further acceleration. Furthermore, the capability to restore high-fidelity videos from severely degraded inputs raises potential ethical concerns regarding misinformation and the unauthorized reconstruction of sensitive visual data. 9References 
+
+[1] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in Neural Information Processing Systems , 33:6840–6851, 2020. [2] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In International Conference on Learning Representations , 2020. [3] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances in neural information processing systems , 34:8780–8794, 2021. [4] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. [5] Jonathan Ho, Tim Salimans, Alexey A Gritsenko, William Chan, Mohammad Norouzi, and David J Fleet. Video diffusion models. In ICLR Workshop on Deep Generative Models for Highly Structured Data , 2022. [6] Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe Penna, and Robin Rombach. SDXL: Improving latent diffusion models for high-resolution image synthesis. In 
+
+The Twelfth International Conference on Learning Representations , 2024. URL https://openreview. net/forum?id=di52zR8xgf .[7] Xingchao Liu, Chengyue Gong, and qiang liu. Flow straight and fast: Learning to generate and transfer data with rectified flow. In The Eleventh International Conference on Learning Representations , 2023. URL https://arxiv.org/abs/2209.03003 .[8] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matthew Le. Flow matching for generative modeling. In The Eleventh International Conference on Learning Representations , 2023. URL https://arxiv.org/abs/2210.02747 .[9] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. Scaling rectified flow transformers for high-resolution image synthesis. In Forty-first international conference on machine learning , 2024. [10] Pascal Chang, Jingwei Tang, Markus Gross, and Vinicius C. Azevedo. How i warped your noise: a temporally-correlated noise prior for diffusion models. In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id=pzElnMrgSD .[11] Giannis Daras, Weili Nie, Karsten Kreis, Alexandros G Dimakis, Morteza Mardani, Nikola B Kovachki, and Arash Vahdat. Warped diffusion: Solving video inverse problems with image diffusion models. 
+
+Advances in Neural Information Processing Systems , 37:101116–101143, 2024. [12] Taesung Kwon and Jong Chul Ye. Solving video inverse problems using image diffusion models. In The Thirteenth International Conference on Learning Representations , 2025. URL https://openreview. net/forum?id=TRWxFUzK9K .[13] Taesung Kwon and Jong Chul Ye. Vision-xl: High definition video inverse problem solver using latent image diffusion models. In Proceedings of the IEEE/CVF International Conference on Computer Vision ,pages 10465–10474, 2025. [14] Taesung Kwon, Gookho Song, Yoosun Kim, Jeongsol Kim, Jong Chul Ye, and Mooseok Jang. Video diffusion posterior sampling for seeing beyond dynamic scattering layers. IEEE Transactions on Pattern Analysis and Machine Intelligence , 2025. [15] Alessio Spagnoletti, Andres Almansa, and Marcelo Pereyra. LVTINO: LAtent video consistency INverse solver for high definition video restoration. In The Fourteenth International Conference on Learning Representations , 2026. URL https://openreview.net/forum?id=8SyEcWVe10 .[16] Weijie Kong, Qi Tian, Zijian Zhang, Rox Min, Zuozhuo Dai, Jin Zhou, Jiangfeng Xiong, Xin Li, Bo Wu, Jianwei Zhang, et al. Hunyuanvideo: A systematic framework for large video generative models. arXiv preprint arXiv:2412.03603 , 2024. [17] Yoav HaCohen, Nisan Chiprut, Benny Brazowski, Daniel Shalem, Dudu Moshe, Eitan Richardson, Eran Levin, Guy Shiran, Nir Zabari, Ori Gordon, et al. Ltx-video: Realtime video latent diffusion. arXiv preprint arXiv:2501.00103 , 2024. 
+
+10 [18] Team Wan, Ang Wang, Baole Ai, Bin Wen, Chaojie Mao, Chen-Wei Xie, Di Chen, Feiwu Yu, Haiming Zhao, Jianxiao Yang, et al. Wan: Open and advanced large-scale video generative models. arXiv preprint arXiv:2503.20314 , 2025. [19] Niket Agarwal, Arslan Ali, Maciej Bala, Yogesh Balaji, Erik Barker, Tiffany Cai, Prithvijit Chattopadhyay, Yongxin Chen, Yin Cui, Yifan Ding, et al. Cosmos world foundation model platform for physical ai. arXiv preprint arXiv:2501.03575 , 2025. [20] Arslan Ali, Junjie Bai, Maciej Bala, Yogesh Balaji, Aaron Blakeman, Tiffany Cai, Jiaxin Cao, Tianshi Cao, Elizabeth Cha, Yu-Wei Chao, et al. World simulation with video foundation models for physical ai. arXiv preprint arXiv:2511.00062 , 2025. [21] Diederik P Kingma and Max Welling. Auto-encoding variational bayes. arXiv preprint arXiv:1312.6114 ,2013. [22] Ron Raphaeli, Sean Man, and Michael Elad. Silo: Solving inverse problems with latent operators. In 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 10570–10580, 2025. [23] Yeobin Hong, Suhyeon Lee, Hyungjin Chung, and Jong Chul Ye. Inversecrafter: Efficient video recapture as a latent domain inverse problem. arXiv preprint arXiv:2512.05672 , 2025. [24] Boyuan Chen, Diego Martí Monsó, Yilun Du, Max Simchowitz, Russ Tedrake, and Vincent Sitzmann. Diffusion forcing: Next-token prediction meets full-sequence diffusion. Advances in Neural Information Processing Systems , 37:24081–24125, 2024. [25] Tianwei Yin, Qiang Zhang, Richard Zhang, William T Freeman, Fredo Durand, Eli Shechtman, and Xun Huang. From slow bidirectional to fast autoregressive video diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 22963–22974, 2025. [26] Xun Huang, Zhengqi Li, Guande He, Mingyuan Zhou, and Eli Shechtman. Self forcing: Bridging the train-test gap in autoregressive video diffusion. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2025. [27] Hyungjin Chung, Byeongsu Sim, and Jong Chul Ye. Come-closer-diffuse-faster: Accelerating conditional diffusion models for inverse problems through stochastic contraction. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 12413–12422, 2022. [28] Hyungjin Chung, Jeongsol Kim, Michael Thompson Mccann, Marc Louis Klasky, and Jong Chul Ye. Diffusion posterior sampling for general noisy inverse problems. In International Conference on Learning Representations , 2023. URL https://openreview.net/forum?id=OnD9zGAGT0k .[29] Jiaming Song, Arash Vahdat, Morteza Mardani, and Jan Kautz. Pseudoinverse-guided diffusion models for inverse problems. In International Conference on Learning Representations , 2023. URL https: //openreview.net/forum?id=9_gsMA8MRKQ .[30] Yinhuai Wang, Jiwen Yu, and Jian Zhang. Zero-shot image restoration using denoising diffusion null-space model. In The Eleventh International Conference on Learning Representations , 2023. URL 
+
+https://openreview.net/forum?id=mRieQgMtNTQ .[31] Hyungjin Chung, Suhyeon Lee, and Jong Chul Ye. Decomposed diffusion sampler for accelerating large-scale inverse problems. In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id=DsEhqQtfAG .[32] Morteza Mardani, Jiaming Song, Jan Kautz, and Arash Vahdat. A variational perspective on solving inverse problems with diffusion models. In The Twelfth International Conference on Learning Representations ,2024. URL https://openreview.net/forum?id=1YO4EE3SPB .[33] Bowen Song, Soo Min Kwon, Zecheng Zhang, Xinyu Hu, Qing Qu, and Liyue Shen. Solving inverse problems with latent diffusion models via hard data consistency. In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id=j8hdRqOUhN .[34] Litu Rout, Negin Raoof, Giannis Daras, Constantine Caramanis, Alex Dimakis, and Sanjay Shakkottai. Solving linear inverse problems provably via posterior sampling with latent diffusion models. Advances in Neural Information Processing Systems , 36, 2024. [35] Bingliang Zhang, Wenda Chu, Julius Berner, Chenlin Meng, Anima Anandkumar, and Yang Song. Improving diffusion inverse problem solving with decoupled noise annealing. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 20895–20905, 2025. 
+
+11 [36] Jeongsol Kim, Bryan Sangwoo Kim, and Jong Chul Ye. Flowdps: Flow-driven posterior sampling for inverse problems. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 12328–12337, 2025. [37] Jonghyun Park and Jong Chul Ye. Flowlps: Langevin-proximal sampling for flow-based inverse problem solvers. arXiv preprint arXiv:2512.07150 , 2025. [38] Zachary Teed and Jia Deng. Raft: Recurrent all-pairs field transforms for optical flow. In Computer Vision–ECCV 2020: 16th European Conference, Glasgow, UK, August 23–28, 2020, Proceedings, Part II 16 , pages 402–419. Springer, 2020. [39] OpenAI. Sora. https://openai.com/sora/ , 2024. [40] Google DeepMind. Veo 3. https://deepmind.google/models/veo/ , 2025. [41] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF international conference on computer vision , pages 4195–4205, 2023. [42] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. Advances in neural information processing systems ,30, 2017. [43] David Ruhe, Jonathan Heek, Tim Salimans, and Emiel Hoogeboom. Rolling diffusion models. In 
+
+International Conference on Machine Learning , pages 42818–42835. PMLR, 2024. [44] Jihwan Kim, Junoh Kang, Jinyoung Choi, and Bohyung Han. Fifo-diffusion: Generating infinite videos from text without training. Advances in Neural Information Processing Systems , 37:89834–89868, 2024. [45] Lvmin Zhang, Shengqu Cai, Muyang Li, Gordon Wetzstein, and Maneesh Agrawala. Frame context packing and drift prevention in next-frame-prediction video diffusion models. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. [46] Yang Jin, Zhicheng Sun, Ningyuan Li, Kun Xu, Kun Xu, Hao Jiang, Nan Zhuang, Quzhe Huang, Yang Song, Yadong MU, and Zhouchen Lin. Pyramidal flow matching for efficient video generative modeling. In 
+
+The Thirteenth International Conference on Learning Representations , 2025. URL https://openreview. net/forum?id=66NzcRQuOq .[47] Magnus R Hestenes, Eduard Stiefel, et al. Methods of conjugate gradients for solving linear systems. 
+
+Journal of research of the National Bureau of Standards , 49(6):409–436, 1952. [48] Jörg Liesen and Zdenek Strakos. Krylov subspace methods: principles and analysis . Numerical Mathemat-ics and Scie, 2013. [49] Pexels. Pexels. https://www.pexels.com/ , 2024. [50] Chang-Han Yeh, Chin-Yang Lin, Zhixiang Wang, Chi-Wei Hsiao, Ting-Hsuan Chen, and Yu-Lun Liu. Diffir2vr-zero: Zero-shot video restoration with diffusion-based image restoration models. arXiv preprint arXiv:2407.01519 , 2024. [51] Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Simoncelli. Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing , 13(4):600–612, 2004. [52] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 586–595, 2018. [53] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. Gans trained by a two time-scale update rule converge to a local nash equilibrium. Advances in neural information processing systems , 30, 2017. [54] Thomas Unterthiner, Sjoerd van Steenkiste, Karol Kurach, Raphaël Marinier, Marcin Michalski, and Sylvain Gelly. FVD: A new metric for video generation, 2019. URL https://openreview.net/ forum?id=rylgEULtdN .[55] Ziqi Huang, Yinan He, Jiashuo Yu, Fan Zhang, Chenyang Si, Yuming Jiang, Yuanhan Zhang, Tianxing Wu, Qingyang Jin, Nattapol Chanpaisit, et al. Vbench: Comprehensive benchmark suite for video generative models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 21807–21818, 2024. 
+
+12 [56] Tianwei Yin, Michaël Gharbi, Taesung Park, Richard Zhang, Eli Shechtman, Fredo Durand, and William T Freeman. Improved distribution matching distillation for fast image synthesis. Advances in neural information processing systems , 37:47455–47487, 2024. [57] Saurabh Saxena, Charles Herrmann, Junhwa Hur, Abhishek Kar, Mohammad Norouzi, Deqing Sun, and David J Fleet. The surprising effectiveness of diffusion models for optical flow and monocular depth estimation. Advances in Neural Information Processing Systems , 36:39443–39469, 2023. [58] Xinqi Lin, Jingwen He, Ziyan Chen, Zhaoyang Lyu, Bo Dai, Fanghua Yu, Yu Qiao, Wanli Ouyang, and Chao Dong. Diffbir: Toward blind image restoration with generative diffusion prior. In European conference on computer vision , pages 430–448. Springer, 2024. [59] Weimin Bai, Suzhe Xu, Yiwei Ren, Jinhua Hao, Ming Sun, Wenzheng Chen, and He Sun. Instantvir: Real-time video inverse problem solver with distilled diffusion prior. arXiv preprint arXiv:2511.14208 ,2025. [60] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, et al. Pytorch: An imperative style, high-performance deep learning library. Advances in neural information processing systems , 32, 2019. [61] Songwei Ge, Aniruddha Mahapatra, Gaurav Parmar, Jun-Yan Zhu, and Jia-Bin Huang. On the content bias in fréchet video distance. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 7277–7288, 2024. [62] Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jon Shlens, and Zbigniew Wojna. Rethinking the inception architecture for computer vision. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 2818–2826, 2016. [63] Joao Carreira and Andrew Zisserman. Quo vadis, action recognition? a new model and the kinetics dataset. In proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 6299–6308, 2017. [64] Mathilde Caron, Hugo Touvron, Ishan Misra, Hervé Jégou, Julien Mairal, Piotr Bojanowski, and Armand Joulin. Emerging properties in self-supervised vision transformers. In Proceedings of the IEEE/CVF international conference on computer vision , pages 9650–9660, 2021. [65] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervision. In International conference on machine learning , pages 8748–8763. PmLR, 2021. [66] Zhen Li, Zuo-Liang Zhu, Ling-Hao Han, Qibin Hou, Chun-Le Guo, and Ming-Ming Cheng. Amt: All-pairs multi-field transforms for efficient frame interpolation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 9801–9810, 2023. [67] LAION-AI. aesthetic-predictor. https://github.com/LAION-AI/aesthetic-predictor , 2022. [68] Junjie Ke, Qifei Wang, Yilin Wang, Peyman Milanfar, and Feng Yang. Musiq: Multi-scale image quality transformer. In Proceedings of the IEEE/CVF international conference on computer vision , pages 5148–5157, 2021. [69] Hyeonho Jeong, Suhyeon Lee, and Jong Chul Ye. Reangle-a-video: 4d video generation as video-to-video translation. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 11164–11175, 2025. [70] Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiaogang Xu, Jiashi Feng, and Hengshuang Zhao. Depth anything v2. Advances in Neural Information Processing Systems , 37:21875–21911, 2024. 
+
+13 A Discussion on the Error Bound and Proof 
+
+Let t0 > t 1 > · · · > t K = 0 be the reverse sampling schedule of K steps for the n-th chunk, where zn, tgt denotes the target chunk and zn 
+
+> init
+
+= E(xn
+
+> init
+
+) denotes the initial chunk encoded from the measurement-consistent estimate. We define the initial error as: 
+
+ϵn 
+
+> 0
+
+:= ∥zn 
+
+> init
+
+− zn, tgt ∥. (15) Consider the reverse sampling trajectories of both the current chunk znt and the target chunk zn, tgt  
+
+> t
+
+,coupled via the shared Gaussian noise ξ0. At the start time t0, the noisy states are given by: 
+
+znt0 = (1 − t0)zn 
+
+> init
+
++ t0ξ0, zn, tgt  
+
+> t0
+
+= (1 − t0)zn, tgt + t0ξ0, ξ0 ∼ N (0, I). (16) Therefore, the initial error at the start time t0 is explicitly scaled down by the noise level: 
+
+ϵnt0 := ∥znt0 − zn, tgt  
+
+> t0
+
+∥ = (1 − t0)ϵn 
+
+> 0
+
+. (17) For each reverse step tk → tk+1 coupled via the shared Gaussian noise ξk+1 , the guidance-free updates are given by: 
+
+ˆzn 
+
+> 0|tk
+
+= zntk − tkvθ (zntk , t k; KV <n ), (18) 
+
+ˆzn, tgt  
+
+> 0|tk
+
+= zn, tgt  
+
+> tk
+
+− tkvθ (zn, tgt  
+
+> tk
+
+, t k; KV <n, tgt ), (19) 
+
+zntk+1 = (1 − tk+1 )ˆ zn 
+
+> 0|tk
+
++ tk+1 ξk+1 , (20) 
+
+zn, tgt  
+
+> tk+1
+
+= (1 − tk+1 )ˆ zn, tgt  
+
+> 0|tk
+
++ tk+1 ξk+1 , ξk+1 ∼ N (0, I). (21) To capture the sensitivity of the vector field to previously restored chunks, we introduce the context error δn, defined as the average mismatch over the preceding chunks ( m < n ): 
+
+δn := 1
+
+n − 1
+
+> n−1
+
+X
+
+> m=1
+
+∥zm 
+
+> 0
+
+− zm, tgt  
+
+> 0
+
+∥. (22) This quantity represents the accumulated prefix mismatch presented to the autoregressive model. We assume that, at each timestep tk, the vector field vθ is Lipschitz continuous with respect to both the current chunk and the context condition: 
+
+∥vθ (z, t k; c) − vθ (z′, t k; c)∥ ≤ Lz,k ∥z − z′∥, (23) 
+
+∥vθ (z, t k; c) − vθ (z, t k; c′)∥ ≤ Lc,k ∥c − c′∥ctx . (24) We are now ready to prove Proposition 1. 
+
+Proposition 1. Let ϵn 
+
+> 0
+
+denote the initial error of the current chunk, and let δn denote the context error propagated from previously restored chunks. Under local Lipschitz assumptions on the autoregressive vector field vθ , the final error ϵnK of the n-th chunk after K sampling steps satisfies 
+
+ϵnK ≤ ΛK ϵn 
+
+> 0
+
++ BK δn, (14) 
+
+where ΛK and BK depend on the sampling schedule and local Lipschitz constants. Proof. Since the trajectories for the current chunk zntk+1 and the target chunk zn, tgt  
+
+> tk+1
+
+are coupled via the shared Gaussian noise at step k + 1 , the explicit noise terms cancel in the difference: 
+
+∥zntk+1 − zn, tgt  
+
+> tk+1
+
+∥
+
+= (1 − tk+1 ) zntk − zn, tgt  
+
+> tk
+
+− tk
+
+
+
+vθ (zntk , t k; KV <n ) − vθ (zn, tgt  
+
+> tk
+
+, t k; KV <n, tgt )
+
+
+
+.
+
+By the triangle inequality and the Lipschitz assumptions, 
+
+∥zntk+1 − zn, tgt  
+
+> tk+1
+
+∥ ≤ (1 − tk+1 )
+
+
+
+∥zntk − zn, tgt  
+
+> tk
+
+∥ + tkLz,k ∥zntk − zn, tgt  
+
+> tk
+
+∥ + tkLc,k δn
+
+
+
+= (1 − tk+1 )(1 + tkLz,k )∥zntk − zn, tgt  
+
+> tk
+
+∥ + (1 − tk+1 )tkLc,k δn.
+
+14 Let λk := (1 − tk+1 )(1 + tkLz,k ) and βk := (1 − tk+1 )tkLc,k . This yields the recursive relation: 
+
+ϵntk+1 ≤ λkϵntk + βkδn. (25) Applying this relation recursively over k = 0 , · · · , K − 1 yields the final error after K sampling steps: 
+
+ϵnK = ϵntK ≤
+
+> K−1
+
+Y
+
+> r=0
+
+λr
+
+!
+
+ϵnt0 +
+
+> K−1
+
+X
+
+> r=0
+> K−1
+
+Y
+
+> ℓ=r+1
+
+λℓ
+
+!
+
+βr δn (26) 
+
+≤ (1 − t0)
+
+> K−1
+
+Y
+
+> r=0
+
+λr
+
+!| {z }
+
+> :=Λ K
+
+ϵn 
+
+> 0
+
++
+
+> K−1
+
+X
+
+> r=0
+> K−1
+
+Y
+
+> ℓ=r+1
+
+λℓ
+
+!
+
+βr
+
+| {z }
+
+> := BK
+
+δn. (27) This concludes the proof of the Proposition. 
+
+Discussion of the start time t0. For a fixed number of sampling steps K, the start time t0 affects the two terms in the bound differently. Under the linear schedule tk = (1 − k/K )t0, the context-dependent coefficient BK decreases as t0 becomes smaller, indicating that a smaller t0 suppresses the propagation of prefix mismatch across chunks. Meanwhile, the coefficient ΛK does not possess an interior minimizer with respect to t0. Its lowest values are approached only near the boundaries (t0 → 0 or t0 → 1), depending on the local Lipschitz constants of the vector field. Consequently, the bound is better viewed as an interpretive insight rather than a prescription for the optimal choice of t0.In particular, as t0 → 1, the starting latent becomes nearly pure noise, so the reverse process becomes progressively less dependent on the pre-restored initial estimate and more dominated by the learned video prior and autoregressive context. This helps explain why a larger t0 empirically leads to more generation-like behavior, whereas a smaller t0 better preserves restoration fidelity in our evaluations. 
+
+## B Experimental details 
+
+B.1 Implementation Details 
+
+Our implementation is built upon the Self-Forcing codebase [ 26 ] with Wan2.1-T2V-1.3B [ 18 ]. To ensure straightforward reproducibility, we retain the original configurations, except for specific parameter settings adapted for video restoration tasks (initial timestep t0 and sampling steps K). For the video encoding, we use Wan-VAE [ 18 ] with spatial and temporal downsampling factors of 8 and 4, respectively. Consequently, an input RGB video with 1 + T frames at a resolution of H × W
+
+is encoded into a latent tensor of 1 + T / 4 latent frames with spatial dimensions of H/ 8 × W/ 8.Following recent advancements in autoregressive (AR) modeling [ 25 , 26 ], we generate a chunk of 
+
+L = 3 latent frames at a time, consistent with the original Self-Forcing setup. Although the original framework employs a 4-step diffusion, we found that adapting it to a 2-step process ( K = 2 ) with a start time of t0 = 0 .1 provides a favorable balance between computational efficiency and visual quality, specifically for video restoration. 
+
+Initial Estimation. We detail the procedure for obtaining the initial estimate through multi-step op-timization. To derive the initial estimate for each degradation, we employ the conjugate gradient (CG) method to optimize Eq. (12) . Typically, the optimization is initialized directly with the measurement 
+
+y. However, to address dimensional mismatches in specific tasks, we apply tailored preprocessing to y. For super-resolution and spatio-temporal averaging, we align the spatial dimensions using bilinear interpolation. For inpainting, inspired by DDVM [ 57 ], we apply nearest-neighbor infilling to the measurement to establish a robust starting point. Following this initialization, we perform a task-specific number of CG updates: 5 steps for Gaussian deblurring and super-resolution, 50 steps for temporal averaging, and 100 steps for spatio-temporal averaging. Notably, for inpainting, since the initialized measurement already satisfies the measurement consistency term, no further CG updates are required. 
+
+Inference and Optimization Setup. Once the initial estimate is obtained, it serves as the starting point for the reverse diffusion process. For the sampling configuration, we employ a start time 15 of t0 = 0 .1 and K = 2 sampling steps for the main experiments. The justification for these optimal values is provided in our ablation studies (Section 5.3). For the DDS update, we avoid complex parameter tuning by fixing γ = 1 for the proximal optimization in Eq. (9) . Additionally, we consistently conduct 5 CG updates across all degradation types. 
+
+Computing resources. Leveraging the efficiency of our framework, we process videos at a 480 ×
+
+832 resolution with a 4-second initial latency and a 5.9 FPS throughput, requiring only 18.4 GB of VRAM on a single consumer-grade GPU (NVIDIA RTX 4090). Furthermore, we confirm that deploying our framework on a single NVIDIA H100 GPU accelerates processing even more, achieving an initial latency of 1.85 seconds and a throughput of 10 .18 FPS with a VRAM consumption of 26 .79 
+
+GB. 
+
+B.2 Baseline models 
+
+The following summarizes the key ideas of the diffusion model-based video inverse problem solvers (DVIS) used for the evaluation. • DiffIR2VR-Zero [50 ] adapts pre-trained image restoration diffusion models [ 58 ] for video restoration without additional training, maintaining temporal consistency through hierarchi-cal latent warping and token merging techniques. • VISION-XL [13 ] is a zero-shot inverse problem solver for high-definition video restoration using latent image diffusion models [ 6 ], efficiently achieving temporal consistency on a single GPU through pseudo-batch sampling and inversion strategies. • LVTINO [ 15 ] is a zero-shot inverse problem solver for high-definition video restoration that integrates Video Consistency Models (VCMs) [ 25 ] and Image Consistency Models (ICMs) [56], thereby reducing sampling steps and achieving superior restoration quality. For all baselines, we used their official implementations in the same environment as AVIS. We configured them to process the same resolution and number of frames, while applying the same degradation operators. Additionally, since LVTINO exceeded the 24GB VRAM limit, we pre-computed the text embeddings and removed the text encoders from both the image and video diffusion models during inference to fit within memory constraints. 
+
+Other baselines. Although there exist other potential candidates for DVIS, direct comparisons with methods such as SVI [ 12 ] and VDPS [ 14 ] were infeasible due to limitations in their supported resolu-tions and high memory consumption caused by heavy operations (e.g., batch processing and Jacobian computations). Furthermore, several recent methods [ 10 , 11 , 59 ] were excluded from our evaluation due to the lack of publicly available implementations. Nevertheless, we believe our experimental setup provides a sufficiently representative baseline for evaluating zero-shot video restoration. As VISION-XL [ 13 ] and LVTINO [ 15 ] are currently recognized as the leading zero-shot solvers for high-definition video restoration, our experiments successfully demonstrate the effectiveness of our proposed method within the scope of zero-shot video inverse problem methodologies. 
+
+B.3 Evaluation metrics 
+
+To ensure straightforward reproducibility, our evaluations rely on official implementations and widely adopted PyTorch [ 60 ] packages. For frame-wise evaluation, we extract individual frames from each video sequence to compute the respective metrics. Specifically, we utilize pytorch-msssim for SSIM [ 51 ], lpips for LPIPS [ 52 ], and pytorch-fid for FID [ 53 ]. For video quality assessment, we employ FVD [ 54 ] and VBench [ 55 ], adopting a publicly available repository [ 61 ] for FVD computation and the official repository for VBench. All primary evaluations are conducted on a single NVIDIA RTX 4090 GPU. To further demonstrate the computational efficiency of our method, we additionally report inference times measured on a single NVIDIA H100 GPU. For completeness, we provide a concise description of the evaluation metrics used in our experiments: • PSNR measures the pixel-level accuracy between the restored and ground-truth frames. • SSIM evaluates the structural similarity between the restored and ground-truth frames. 16 • LPIPS calculates the perceptual similarity based on feature embeddings extracted from a pre-trained backbone [52]. • FID measures the distance between the feature distributions of generated and real images using the Inception-v3 network [ 62 ]. It is computed under the assumption that both feature distributions follow multivariate Gaussian distributions. • FVD extends the principles of FID to measure the quality and diversity of generated videos, utilizing features extracted from an Inflated 3D ConvNet (I3D) [63]. • Subject Consistency (VBench) evaluates whether the appearance of a subject remains consistent by calculating the DINO [64] feature similarity across frames. • Background Consistency (VBench) assesses the temporal stability of the background by computing the CLIP [65] feature similarity across frames. • Motion Smoothness (VBench) measures the temporal continuity of the generated motions using motion priors derived from a video frame interpolation model [66]. • Aesthetic Quality (VBench) evaluates the overall artistic appeal and visual naturalness of the video frames using the LAION aesthetic predictor [67]. • Imaging Quality (VBench) evaluates the visual distortion ( e.g. , over-exposure, noise, blur) appearing in the video frames using the MUSIQ [68] image quality predictor. 
+
+## C Further experimental results 
+
+C.1 Long Video Restoration 
+
+Figure 4: Qualitative results of long video restoration. By periodically re-injecting measurement consistency (every 7 chunks), AVIS Flash effectively prevents temporal drift and remains consistent with the ground truth, even in the final frames. The timestamps at the top indicate the elapsed time within the long video. To further support the claims made in Section 4.3, we conduct additional experiments evaluating the scalability of our approach on longer video sequences. Specifically, we aim to restore a one-minute 17 video consisting of 960 frames at 16 FPS. As described in Section 4.3, AVIS Flash can be further stabilized by periodically re-injecting measurement consistency. In this long video experiment, we apply guidance every 7 chunks to prevent error accumulation over time. As demonstrated in Figure 4, even for a one-minute sequence, AVIS Flash successfully retains the ground truth context and prevents noticeable temporal drift in later frames. This periodic resetting effectively mitigates accumulated context mismatch, ensuring robust restoration regardless of the overall sequence length. 
+
+C.2 Novel View Synthesis 
+
+Figure 5: Qualitative results of novel view video synthesis. We demonstrate the capability of AVIS 
+
+Flash to generate novel views under target camera trajectories, including orbit left and orbit down. For each camera trajectory, the upper row shows the initial warped frames, and the lower row shows the inpainted outputs of AVIS Flash . The boxes highlight corresponding regions in the final frames, illustrating how the method can plausibly synthesize the intended camera movements. In this section, we explore the feasibility of applying AVIS Flash for inference-time novel view synthesis. We adopt the depth-based geometric warping pipeline from [ 69 ] for initial novel view rendering. Specifically, we first estimate the depth map of each video frame using the monocular depth estimator [ 70 ]. Using the input video frames and their corresponding depth maps, we then lift the pixels to construct dynamic 3D point clouds. These point clouds are then reprojected onto the 2D plane according to a target camera trajectory. During this reprojection, disocclusions naturally occur, exposing previously occluded regions and resulting in “holes” in the warped frames. We demonstrate that AVIS Flash can act as an inpainting operator to fill in these missing regions. As shown in Figure 5, AVIS Flash can plausibly synthesize the disoccluded content, demonstrating its potential applicability for inference-time novel view synthesis. 
+
+C.3 Qualitative Evaluation 
+
+Here, we provide comprehensive qualitative comparisons for each degradation type, with detailed discussions provided in the respective figure captions. All figures are best viewed zoomed in. For complete video comparisons, please refer to our project page. 18 Figure 6: Qualitative comparisons on temporal averaging. VISION-XL and LVTINO suffer from noticeable artifacts in the highlighted regions. In contrast, AVIS recovers the most plausible details. Notably, despite its much faster inference, AVIS Flash maintains visual quality comparable to AVIS, preserving overall structural integrity. 
+
+Figure 7: Qualitative comparisons on spatio-temporal averaging. LVTINO produces noticeable vertical artifacts (red arrow), and VISION-XL struggles to reconstruct fine details (e.g., around the eye). In contrast, AVIS restores the most plausible details. Furthermore, despite its much higher throughput, AVIS Flash avoids the artifacts seen in the baselines, remaining highly competitive. 19 Figure 8: Qualitative comparisons on inpainting. LVTINO introduces unnatural floating artifacts in the restored sky region (red arrow), and VISION-XL yields overly smoothed, blurry textures when reconstructing the trees (blue box). In contrast, AVIS and AVIS Flash produce more plausible structures and preserve overall scene consistency. 
+
+Figure 9: Qualitative comparisons on super-resolution. LVTINO produces unnatural artifacts in the highlighted region (blue box). While VISION-XL and AVIS Flash yield slightly softer results, AVIS restores finer details. Notably, even with its highly accelerated inference, AVIS Flash successfully preserves structural integrity without severe artifacts. 20 Figure 10: Qualitative comparisons on Gaussian deblurring. VISION-XL introduces minor distortions (red box), and LVTINO creates unnatural artifacts (blue box). In contrast, our proposed AVIS and AVIS Flash faithfully preserve fine details and structural integrity. 
+
+C.4 Backbone Fairness Check 
+
+To examine whether the gains of AVIS are primarily due to the video prior rather than the solving framework, we additionally evaluate the leading non-autoregressive solver, LVTINO [ 15 ], coupled with the same autoregressive backbone [26] as AVIS on the 4 × super-resolution task. As shown in Table 4, replacing the original bidirectional prior of LVTINO with the autoregressive backbone leads to mixed results: PSNR and FVD improve, whereas SSIM, LPIPS, FID, and most VBench metrics degrade. Under this matched-backbone setting, AVIS still achieves stronger overall performance than LVTINO (AR), suggesting that the gains of AVIS are not explained solely by the choice of video prior, but also by the proposed solving framework.                                         
+
+> Method PSNR ↑SSIM ↑LPIPS ↓FVD ↓FID ↓Sub. Con. ↑Bg. Con. ↑M. Smooth. ↑Aesth. ↑Imag. ↑
+> LVTINO (AR) 30.28 0.818 0.113 48.50 21.99 96.13 95.75 99.11 51.27 55.84 LVTINO 30.04 0.824 0.102 59.42 18.32 96.36 96.09 99.11 52.63 59.05
+> AVIS 30.38 0.826 0.101 40.36 23.94 96.30 96.21 99.24 52.19 55.13
+
+Table 4: Backbone fairness check on 4 × super-resolution. We additionally evaluate LVTINO coupled with the same autoregressive backbone as AVIS to examine whether the observed gains are primarily due to the video prior. While switching LVTINO to the AR backbone yields mixed results, AVIS still achieves stronger overall performance, suggesting that its gains cannot be explained solely by the choice of backbone. Bold and underline denote the best and second-best results, respectively. 21
