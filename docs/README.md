@@ -6,70 +6,64 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-27
-- 运行时间：2026-05-27 21:32:51 UTC
+- 最新运行日期：2026-05-28
+- 运行时间：2026-05-28 21:25:54 UTC
 - 运行状态：成功
-- 本次总论文数：16
+- 本次总论文数：14
 - 精读区：6
-- 速读区：10
+- 速读区：8
 
 ### 今日简报（AI）
-1) 今日聚焦图像超分辨率与低光增强两大突破，精读两篇高分论文探索量化极限与可控性提升。  
-2) 最值得关注方向：量化超分网络QuantSR+刷新性能记录，以及ControlLight实现可控、一致且泛化的低光增强。  
-3) 建议优先精读这两篇高分工作，速读三篇7分论文可快速了解扩散模型采样与生成纠错思路。
-- 详情：[/202605/27/README](/202605/27/README)
+1) 今日推荐14篇论文，精读6篇、速读8篇，重点聚焦《Uni-Edit》（9.0分）及扩散模型加速与图像生成优化。
+2) 最值得关注的是《Uni-Edit》将智能编辑统一为模型调优任务，以及《From Scores to Gibbs Correctors》加速离散扩散模型、《Compositional Text-to-Image Generation》通过区域感知偏好优化提升文本到图像生成。
+3) 建议优先精读《Uni-Edit》以把握统一调优范式，再速读三篇高分论文了解扩散模型效率提升与多模态生成新方法。
+- 详情：[/202605/28/README](/202605/28/README)
 
 ### 精读区论文标签
-1. [QuantSR+: Pushing the Limit of Quantized Image Super-Resolution Networks](/202605/27/2605.22351v1-quantsr-pushing-the-limit-of-quantized-image-super-resolution-networks)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：低比特量化的图像超分辨率
-2. [ControlLight: Towards Controllable, Consistent, and Generalizable Low-Light Enhancement](/202605/27/2605.25569v2-controllight-towards-controllable-consistent-and-generalizable-low-light-enhancement)  
+1. [Uni-Edit: Intelligent Editing Is A General Task For Unified Model Tuning](/202605/28/2605.21487v1-uni-edit-intelligent-editing-is-a-general-task-for-unified-model-tuning)  
    标签：评分：9.0/10、query:real-ir
-   evidence：低光增强属于图像修复范畴。
-3. [Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems: Optimizing Guidance and Stochasticity Schedules](/202605/27/2605.26470v1-triadic-dynamics-aware-diffusion-posterior-sampling-for-inverse-problems-optimizing-guidance-and-stochasticity-schedules)  
+   evidence：与v2内容相同，统一图像编辑模型调优
+2. [Uni-Edit: Intelligent Editing Is A General Task For Unified Model Tuning](/202605/28/2605.21487v2-uni-edit-intelligent-editing-is-a-general-task-for-unified-model-tuning)  
    标签：评分：9.0/10、query:real-ir
-   evidence：扩散后验采样用于图像恢复等逆问题
-4. [MRT: Masked Region Transformer for Layered Image Generation and Editing at Scale](/202605/27/2605.27235v1-mrt-masked-region-transformer-for-layered-image-generation-and-editing-at-scale)  
+   evidence：统一图像编辑作为多模态模型调优的通用任务
+3. [Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping](/202605/28/2605.27990v1-geometry-correct-diffusion-posterior-sampling-with-denoiser-pullback-curvature-guidance-and-manifold-aligned-damping)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于掩码区域扩散的分层图像生成与编辑
-5. [Learning Reference-Guided Exposure Correction with Hybrid Illumination Characteristics](/202605/27/2605.26729v1-learning-reference-guided-exposure-correction-with-hybrid-illumination-characteristics)  
+   evidence：扩散后验采样用于逆问题方法，直接适用于图像修复
+4. [BlazeEdit: Generalist Image Editing on Mobile Devices with Image-to-Image Diffusion Models](/202605/28/2605.28067v1-blazeedit-generalist-image-editing-on-mobile-devices-with-image-to-image-diffusion-models)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：面向移动设备的通用图像编辑扩散模型
+5. [Concept Unlearning via Cross-Attention Activation Projection for Diffusion Models](/202605/28/2605.25765v1-concept-unlearning-via-cross-attention-activation-projection-for-diffusion-models)  
    标签：评分：8.0/10、query:real-ir
-   evidence：参考引导的曝光校正图像修复
-6. [Towards Controllable Image Generation through Representation-Conditioned Diffusion Models](/202605/27/2605.27343v1-towards-controllable-image-generation-through-representation-conditioned-diffusion-models)  
+   evidence：基于交叉注意力的扩散模型概念擦除方法
+6. [Paris 2.0: A Decentralized Diffusion Model for Video Generation](/202605/28/2605.26064v1-paris-20-a-decentralized-diffusion-model-for-video-generation)  
    标签：评分：8.0/10、query:real-ir
-   evidence：基于自监督表示条件的扩散模型
+   evidence：去中心化扩散模型用于视频生成
 
 ### 速读区论文标签
-1. [Beyond Generative Priors: Minority Sampling with JEPA-Guided Diffusion](/202605/27/2605.24631v1-beyond-generative-priors-minority-sampling-with-jepa-guided-diffusion)  
+1. [From Scores to Gibbs Correctors: Accelerating Uniform-Rate Discrete Diffusion Models](/202605/28/2605.27352v1-from-scores-to-gibbs-correctors-accelerating-uniform-rate-discrete-diffusion-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：加速离散扩散模型的吉布斯校正器
+2. [Compositional Text-to-Image Generation Via Region-aware Bimodal Direct Preference Optimization](/202605/28/2605.28615v1-compositional-text-to-image-generation-via-region-aware-bimodal-direct-preference-optimization)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：通过偏好优化增强组合文本到图像生成
+3. [Stage-wise Distortion-Perception Traversal in Zero-shot Inverse Problems with Diffusion Models](/202605/28/2605.28711v1-stage-wise-distortion-perception-traversal-in-zero-shot-inverse-problems-with-diffusion-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：扩散模型在逆问题中的逐阶段失真-感知遍历，适用于图像恢复
+4. [CollectionLoRA: Collecting 50 Effects in 1 LoRA via Multi-Teacher On-Policy Distillation](/202605/28/2605.25378v2-collectionlora-collecting-50-effects-in-1-lora-via-multi-teacher-on-policy-distillation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：采用JEPA引导的扩散采样
-2. [Adversarial Error Correction for Visual Autoregressive Generation](/202605/27/2605.24843v1-adversarial-error-correction-for-visual-autoregressive-generation)  
+   evidence：将多个LoRA效果蒸馏为一个，高效图像编辑
+5. [AI-T2I: Aggregating-and-Isolating Cross-Attention to Diffusion Models for Text-to-Image Synthesis](/202605/28/2605.25763v2-ai-t2i-aggregating-and-isolating-cross-attention-to-diffusion-models-for-text-to-image-synthesis)  
    标签：评分：7.0/10、query:real-ir
-   evidence：通过对抗错误修正改进视觉自回归生成。
-3. [Multi-Objective Learning for Diffusion Models: A Statistical Theory under Semi-Supervised Learning](/202605/27/2605.25210v1-multi-objective-learning-for-diffusion-models-a-statistical-theory-under-semi-supervised-learning)  
+   evidence：扩散模型文本到图像合成中的交叉注意力聚合
+6. [Paris 2.0: A Decentralized Diffusion Model for Video Generation](/202605/28/2605.26064v2-paris-20-a-decentralized-diffusion-model-for-video-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：扩散模型的多目标学习框架
-4. [Mosaic: Compositional Multi-Concept Erasure via Vector Field Blending](/202605/27/2605.25574v1-mosaic-compositional-multi-concept-erasure-via-vector-field-blending)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：文本到图像模型中的概念擦除编辑
-5. [Memorisation, convergence and generalisation in generative models](/202605/27/2605.21402v1-memorisation-convergence-and-generalisation-in-generative-models)  
+   evidence：去中心化扩散模型用于视频生成
+7. [Aligning Few-Step Generative Models by Amortizing Sample-based Variational Inference](/202605/28/2605.26552v2-aligning-few-step-generative-models-by-amortizing-sample-based-variational-inference)  
    标签：评分：6.0/10、query:real-ir
-   evidence：生成模型中记忆化与泛化的理论分析
-6. [Learning from Semantic Dictionaries: Discriminative Codebook Contrastive Learning for Unified Visual Representation and Generation](/202605/27/2605.25012v1-learning-from-semantic-dictionaries-discriminative-codebook-contrastive-learning-for-unified-visual-representation-and-generation)  
+   evidence：生成模型对齐方法
+8. [Continual Learning in Modern Hopfield Networks with an Application to Diffusion Models](/202605/28/2605.27975v1-continual-learning-in-modern-hopfield-networks-with-an-application-to-diffusion-models)  
    标签：评分：6.0/10、query:real-ir
-   evidence：使用码本的统一生成与判别模型
-7. [Personalized Generative Models for Contextual Debiasing](/202605/27/2605.26353v1-personalized-generative-models-for-contextual-debiasing)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：生成模型用于上下文去偏
-8. [Aligning Few-Step Generative Models by Amortizing Sample-based Variational Inference](/202605/27/2605.26552v1-aligning-few-step-generative-models-by-amortizing-sample-based-variational-inference)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：少步生成模型的对齐方法
-9. [RT-Lynx: Putting the GEMM Sparsity In a Right Way for Diffusion Models](/202605/27/2605.26632v1-rt-lynx-putting-the-gemm-sparsity-in-a-right-way-for-diffusion-models)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：扩散Transformer稀疏化加速，降低推理成本
-10. [Sampling Data with Chains of Forward-Backward Diffusion Steps](/202605/27/2605.27006v1-sampling-data-with-chains-of-forward-backward-diffusion-steps)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：使用前向后向扩散步骤链的采样方法
+   evidence：通过Hopfield能量分析实现扩散模型的持续学习
 
 
 <div class="dpr-home-promo-card">
