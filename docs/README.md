@@ -6,64 +6,75 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-28
-- 运行时间：2026-05-28 21:25:54 UTC
+- 最新运行日期：2026-05-29
+- 运行时间：2026-05-29 21:04:00 UTC
 - 运行状态：成功
-- 本次总论文数：14
+- 本次总论文数：17
 - 精读区：6
-- 速读区：8
+- 速读区：11
 
 ### 今日简报（AI）
-1) 今日推荐14篇论文，精读6篇、速读8篇，重点聚焦《Uni-Edit》（9.0分）及扩散模型加速与图像生成优化。
-2) 最值得关注的是《Uni-Edit》将智能编辑统一为模型调优任务，以及《From Scores to Gibbs Correctors》加速离散扩散模型、《Compositional Text-to-Image Generation》通过区域感知偏好优化提升文本到图像生成。
-3) 建议优先精读《Uni-Edit》以把握统一调优范式，再速读三篇高分论文了解扩散模型效率提升与多模态生成新方法。
-- 详情：[/202605/28/README](/202605/28/README)
+今日共筛选17篇扩散模型论文，精读6篇，重点关注两个突破性方向。
+
+最值得看的是：扩散模型在零样本逆问题中实现逐阶段失真-感知权衡，以及噪声对齐解决扩散桥的端欠拟合。
+
+建议优先精读这两篇9.0高分论文，以掌握扩散模型在图像重建与生成中的前沿优化思路。
+- 详情：[/202605/29/README](/202605/29/README)
 
 ### 精读区论文标签
-1. [Uni-Edit: Intelligent Editing Is A General Task For Unified Model Tuning](/202605/28/2605.21487v1-uni-edit-intelligent-editing-is-a-general-task-for-unified-model-tuning)  
+1. [Stage-wise Distortion-Perception Traversal in Zero-shot Inverse Problems with Diffusion Models](/202605/29/2605.28711v2-stage-wise-distortion-perception-traversal-in-zero-shot-inverse-problems-with-diffusion-models)  
    标签：评分：9.0/10、query:real-ir
-   evidence：与v2内容相同，统一图像编辑模型调优
-2. [Uni-Edit: Intelligent Editing Is A General Task For Unified Model Tuning](/202605/28/2605.21487v2-uni-edit-intelligent-editing-is-a-general-task-for-unified-model-tuning)  
+   evidence：扩散模型中零样本逆问题的分阶段失真-感知遍历
+2. [Resolving Endpoint Underfitting in Diffusion Bridges via Noise Alignment](/202605/29/2605.28962v1-resolving-endpoint-underfitting-in-diffusion-bridges-via-noise-alignment)  
    标签：评分：9.0/10、query:real-ir
-   evidence：统一图像编辑作为多模态模型调优的通用任务
-3. [Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping](/202605/28/2605.27990v1-geometry-correct-diffusion-posterior-sampling-with-denoiser-pullback-curvature-guidance-and-manifold-aligned-damping)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：扩散后验采样用于逆问题方法，直接适用于图像修复
-4. [BlazeEdit: Generalist Image Editing on Mobile Devices with Image-to-Image Diffusion Models](/202605/28/2605.28067v1-blazeedit-generalist-image-editing-on-mobile-devices-with-image-to-image-diffusion-models)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：面向移动设备的通用图像编辑扩散模型
-5. [Concept Unlearning via Cross-Attention Activation Projection for Diffusion Models](/202605/28/2605.25765v1-concept-unlearning-via-cross-attention-activation-projection-for-diffusion-models)  
+   evidence：用于图像恢复的噪声对齐扩散桥
+3. [PixIE: Prompted Pixel-Space Low-Light Image Enhancement](/202605/29/2605.23531v2-pixie-prompted-pixel-space-low-light-image-enhancement)  
    标签：评分：8.0/10、query:real-ir
-   evidence：基于交叉注意力的扩散模型概念擦除方法
-6. [Paris 2.0: A Decentralized Diffusion Model for Video Generation](/202605/28/2605.26064v1-paris-20-a-decentralized-diffusion-model-for-video-generation)  
+   evidence：基于提示的像素空间低光照图像增强方法
+4. [SIGMA: Semantic-Difference Instruction-Grounding Mask Annotator for Text-Driven Image Manipulation Localization](/202605/29/2605.27924v1-sigma-semantic-difference-instruction-grounding-mask-annotator-for-text-driven-image-manipulation-localization)  
    标签：评分：8.0/10、query:real-ir
-   evidence：去中心化扩散模型用于视频生成
+   evidence：文本驱动图像操作定位
+5. [Continual Learning in Modern Hopfield Networks with an Application to Diffusion Models](/202605/29/2605.27975v1-continual-learning-in-modern-hopfield-networks-with-an-application-to-diffusion-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：扩散模型中的持续学习
+6. [Orthogonal Negative Guidance in Attention Feature Space for Text-to-Image Generation](/202605/29/2605.29390v1-orthogonal-negative-guidance-in-attention-feature-space-for-text-to-image-generation)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：通过注意力引导的概念消除方法用于文本到图像生成
 
 ### 速读区论文标签
-1. [From Scores to Gibbs Correctors: Accelerating Uniform-Rate Discrete Diffusion Models](/202605/28/2605.27352v1-from-scores-to-gibbs-correctors-accelerating-uniform-rate-discrete-diffusion-models)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：加速离散扩散模型的吉布斯校正器
-2. [Compositional Text-to-Image Generation Via Region-aware Bimodal Direct Preference Optimization](/202605/28/2605.28615v1-compositional-text-to-image-generation-via-region-aware-bimodal-direct-preference-optimization)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：通过偏好优化增强组合文本到图像生成
-3. [Stage-wise Distortion-Perception Traversal in Zero-shot Inverse Problems with Diffusion Models](/202605/28/2605.28711v1-stage-wise-distortion-perception-traversal-in-zero-shot-inverse-problems-with-diffusion-models)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：扩散模型在逆问题中的逐阶段失真-感知遍历，适用于图像恢复
-4. [CollectionLoRA: Collecting 50 Effects in 1 LoRA via Multi-Teacher On-Policy Distillation](/202605/28/2605.25378v2-collectionlora-collecting-50-effects-in-1-lora-via-multi-teacher-on-policy-distillation)  
+1. [A Tutorial on Diffusion Theory: From Differential Equations to Diffusion Models](/202605/29/2605.22586v3-a-tutorial-on-diffusion-theory-from-differential-equations-to-diffusion-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：将多个LoRA效果蒸馏为一个，高效图像编辑
-5. [AI-T2I: Aggregating-and-Isolating Cross-Attention to Diffusion Models for Text-to-Image Synthesis](/202605/28/2605.25763v2-ai-t2i-aggregating-and-isolating-cross-attention-to-diffusion-models-for-text-to-image-synthesis)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：扩散模型文本到图像合成中的交叉注意力聚合
-6. [Paris 2.0: A Decentralized Diffusion Model for Video Generation](/202605/28/2605.26064v2-paris-20-a-decentralized-diffusion-model-for-video-generation)  
+   evidence：从微分方程角度对扩散模型理论的全面教程
+2. [Paris 2.0: A Decentralized Diffusion Model for Video Generation](/202605/29/2605.26064v3-paris-20-a-decentralized-diffusion-model-for-video-generation)  
    标签：评分：7.0/10、query:real-ir
    evidence：去中心化扩散模型用于视频生成
-7. [Aligning Few-Step Generative Models by Amortizing Sample-based Variational Inference](/202605/28/2605.26552v2-aligning-few-step-generative-models-by-amortizing-sample-based-variational-inference)  
+3. [Representation-Conditioned Diffusion Models for Guided Training Data Generation](/202605/29/2605.27495v1-representation-conditioned-diffusion-models-for-guided-training-data-generation)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：扩散模型生成合成数据，可迁移用于修复训练增强。
+4. [DebFilter: Eradicating Biases Stashed in Value](/202605/29/2605.28167v1-debfilter-eradicating-biases-stashed-in-value)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：文本到图像扩散模型的偏见消除
+5. [GAP3D: Generative Alignment of VLM Latents to Patch-Level Embeddings for 3D Generation](/202605/29/2605.28995v1-gap3d-generative-alignment-of-vlm-latents-to-patch-level-embeddings-for-3d-generation)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：使用扩散模型的对齐方法用于3D生成
+6. [Midpoint Generative Models](/202605/29/2605.29920v1-midpoint-generative-models)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：基于流匹配对称性的一步生成模型
+7. [Leveraging Foundation Models for Causal Generative Modeling](/202605/29/2605.23861v1-leveraging-foundation-models-for-causal-generative-modeling)  
    标签：评分：6.0/10、query:real-ir
-   evidence：生成模型对齐方法
-8. [Continual Learning in Modern Hopfield Networks with an Application to Diffusion Models](/202605/28/2605.27975v1-continual-learning-in-modern-hopfield-networks-with-an-application-to-diffusion-models)  
+   evidence：利用预训练基础模型（包括文本到图像扩散）进行因果生成建模
+8. [Geometry-Aware Representation Denoising for Robust Multi-view 3D Reconstruction](/202605/29/2605.26230v1-geometry-aware-representation-denoising-for-robust-multi-view-3d-reconstruction)  
    标签：评分：6.0/10、query:real-ir
-   evidence：通过Hopfield能量分析实现扩散模型的持续学习
+   evidence：基于扩散的特征去噪提升三维重建鲁棒性
+9. [Residualized Temporal Sparse Autoencoders for Interpreting Diffusion Models](/202605/29/2605.27813v1-residualized-temporal-sparse-autoencoders-for-interpreting-diffusion-models)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：利用时序稀疏自编码器解释扩散模型
+10. [Continual Learning in Modern Hopfield Networks with an Application to Diffusion Models](/202605/29/2605.27975v2-continual-learning-in-modern-hopfield-networks-with-an-application-to-diffusion-models)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：持续学习方法应用于扩散模型
+11. [Parameter-Efficient Generative Modeling with Controlled Vector Fields](/202605/29/2605.28267v1-parameter-efficient-generative-modeling-with-controlled-vector-fields)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：通过控制向量场实现参数高效的生成建模
 
 
 <div class="dpr-home-promo-card">
