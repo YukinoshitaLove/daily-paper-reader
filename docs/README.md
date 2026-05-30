@@ -6,75 +6,46 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-29
-- 运行时间：2026-05-29 21:04:00 UTC
+- 最新运行日期：2026-05-30
+- 运行时间：2026-05-30 20:22:13 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
-- 速读区：11
+- 本次总论文数：8
+- 精读区：5
+- 速读区：3
 
 ### 今日简报（AI）
-今日共筛选17篇扩散模型论文，精读6篇，重点关注两个突破性方向。
-
-最值得看的是：扩散模型在零样本逆问题中实现逐阶段失真-感知权衡，以及噪声对齐解决扩散桥的端欠拟合。
-
-建议优先精读这两篇9.0高分论文，以掌握扩散模型在图像重建与生成中的前沿优化思路。
-- 详情：[/202605/29/README](/202605/29/README)
+1) 今日共处理8篇论文，精读5篇，重点关注扩散模型控制与成像逆问题优化方法。  
+2) 最值得看的两项高分工作：《Spectral Guidance》提出频谱引导实现扩散模型灵活高效控制，《Trajectory Constraints》通过轨迹约束提升成像逆问题求解质量。  
+3) 建议优先精读这两篇9分论文，速读部分可重点了解《HarmoVid》视频人像光色融合技术，其余按需浏览。
+- 详情：[/202605/30/README](/202605/30/README)
 
 ### 精读区论文标签
-1. [Stage-wise Distortion-Perception Traversal in Zero-shot Inverse Problems with Diffusion Models](/202605/29/2605.28711v2-stage-wise-distortion-perception-traversal-in-zero-shot-inverse-problems-with-diffusion-models)  
+1. [Spectral Guidance for Flexible and Efficient Control of Diffusion Models](/202605/30/2605.28900v1-spectral-guidance-for-flexible-and-efficient-control-of-diffusion-models)  
    标签：评分：9.0/10、query:real-ir
-   evidence：扩散模型中零样本逆问题的分阶段失真-感知遍历
-2. [Resolving Endpoint Underfitting in Diffusion Bridges via Noise Alignment](/202605/29/2605.28962v1-resolving-endpoint-underfitting-in-diffusion-bridges-via-noise-alignment)  
+   evidence：光谱引导无需重训练即可用任意信号稳定控制扩散模型
+2. [Trajectory Constraints for Imaging Inverse Problems](/202605/30/2605.29012v1-trajectory-constraints-for-imaging-inverse-problems)  
    标签：评分：9.0/10、query:real-ir
-   evidence：用于图像恢复的噪声对齐扩散桥
-3. [PixIE: Prompted Pixel-Space Low-Light Image Enhancement](/202605/29/2605.23531v2-pixie-prompted-pixel-space-low-light-image-enhancement)  
+   evidence：基于扩散的成像逆问题重建
+3. [ConFi-GS Confidence-Guided High-Frequency Injection for 3D Gaussian Splatting Super-Resolution](/202605/30/2605.24964v1-confi-gs-confidence-guided-high-frequency-injection-for-3d-gaussian-splatting-super-resolution)  
    标签：评分：8.0/10、query:real-ir
-   evidence：基于提示的像素空间低光照图像增强方法
-4. [SIGMA: Semantic-Difference Instruction-Grounding Mask Annotator for Text-Driven Image Manipulation Localization](/202605/29/2605.27924v1-sigma-semantic-difference-instruction-grounding-mask-annotator-for-text-driven-image-manipulation-localization)  
+   evidence：三维高斯泼溅超分辨率
+4. [A Principled Self-Referenced Early Stopping Approach for Deep Image Prior](/202605/30/2605.25299v1-a-principled-self-referenced-early-stopping-approach-for-deep-image-prior)  
    标签：评分：8.0/10、query:real-ir
-   evidence：文本驱动图像操作定位
-5. [Continual Learning in Modern Hopfield Networks with an Application to Diffusion Models](/202605/29/2605.27975v1-continual-learning-in-modern-hopfield-networks-with-an-application-to-diffusion-models)  
+   evidence：深度图像先验的早停方法，用于改进图像重建
+5. [Colored Noise Diffusion Sampling](/202605/30/2605.30332v1-colored-noise-diffusion-sampling)  
    标签：评分：8.0/10、query:real-ir
-   evidence：扩散模型中的持续学习
-6. [Orthogonal Negative Guidance in Attention Feature Space for Text-to-Image Generation](/202605/29/2605.29390v1-orthogonal-negative-guidance-in-attention-feature-space-for-text-to-image-generation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：通过注意力引导的概念消除方法用于文本到图像生成
+   evidence：有色噪声采样通过频率解耦噪声注入改进扩散模型采样
 
 ### 速读区论文标签
-1. [A Tutorial on Diffusion Theory: From Differential Equations to Diffusion Models](/202605/29/2605.22586v3-a-tutorial-on-diffusion-theory-from-differential-equations-to-diffusion-models)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：从微分方程角度对扩散模型理论的全面教程
-2. [Paris 2.0: A Decentralized Diffusion Model for Video Generation](/202605/29/2605.26064v3-paris-20-a-decentralized-diffusion-model-for-video-generation)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：去中心化扩散模型用于视频生成
-3. [Representation-Conditioned Diffusion Models for Guided Training Data Generation](/202605/29/2605.27495v1-representation-conditioned-diffusion-models-for-guided-training-data-generation)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：扩散模型生成合成数据，可迁移用于修复训练增强。
-4. [DebFilter: Eradicating Biases Stashed in Value](/202605/29/2605.28167v1-debfilter-eradicating-biases-stashed-in-value)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：文本到图像扩散模型的偏见消除
-5. [GAP3D: Generative Alignment of VLM Latents to Patch-Level Embeddings for 3D Generation](/202605/29/2605.28995v1-gap3d-generative-alignment-of-vlm-latents-to-patch-level-embeddings-for-3d-generation)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：使用扩散模型的对齐方法用于3D生成
-6. [Midpoint Generative Models](/202605/29/2605.29920v1-midpoint-generative-models)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：基于流匹配对称性的一步生成模型
-7. [Leveraging Foundation Models for Causal Generative Modeling](/202605/29/2605.23861v1-leveraging-foundation-models-for-causal-generative-modeling)  
+1. [A Principled Self-Referenced Early Stopping Approach for Deep Image Prior](/202605/30/2605.25299v2-a-principled-self-referenced-early-stopping-approach-for-deep-image-prior)  
    标签：评分：6.0/10、query:real-ir
-   evidence：利用预训练基础模型（包括文本到图像扩散）进行因果生成建模
-8. [Geometry-Aware Representation Denoising for Robust Multi-view 3D Reconstruction](/202605/29/2605.26230v1-geometry-aware-representation-denoising-for-robust-multi-view-3d-reconstruction)  
+   evidence：深度图像先验的早停方法用于图像修复
+2. [HarmoVid: Relightful Video Portrait Harmonization](/202605/30/2605.28811v1-harmovid-relightful-video-portrait-harmonization)  
    标签：评分：6.0/10、query:real-ir
-   evidence：基于扩散的特征去噪提升三维重建鲁棒性
-9. [Residualized Temporal Sparse Autoencoders for Interpreting Diffusion Models](/202605/29/2605.27813v1-residualized-temporal-sparse-autoencoders-for-interpreting-diffusion-models)  
+   evidence：视频扩散模型用于光照协调（图像编辑）
+3. [DP-SAPF: Saliency-Aware Parameter Fine-tuning of Public Models for Differentially Private Image Synthesis](/202605/30/2605.30312v1-dp-sapf-saliency-aware-parameter-fine-tuning-of-public-models-for-differentially-private-image-synthesis)  
    标签：评分：6.0/10、query:real-ir
-   evidence：利用时序稀疏自编码器解释扩散模型
-10. [Continual Learning in Modern Hopfield Networks with an Application to Diffusion Models](/202605/29/2605.27975v2-continual-learning-in-modern-hopfield-networks-with-an-application-to-diffusion-models)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：持续学习方法应用于扩散模型
-11. [Parameter-Efficient Generative Modeling with Controlled Vector Fields](/202605/29/2605.28267v1-parameter-efficient-generative-modeling-with-controlled-vector-fields)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：通过控制向量场实现参数高效的生成建模
+   evidence：显著性感知微调公共模型用于差分隐私图像合成
 
 
 <div class="dpr-home-promo-card">

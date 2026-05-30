@@ -1,0 +1,2636 @@
+Title: Spectral Guidance for Flexible and Efficient Control of Diffusion Models
+
+URL Source: https://arxiv.org/pdf/2605.28900v1
+
+Published Time: Fri, 29 May 2026 00:05:41 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Gabriel Moreira 1 2 Manuel Marques 1 Jo˜ ao Paulo Costeira 1 Chenyan Xiong 2
+
+## Abstract 
+
+We introduce Spectral Guidance, a framework for controlling diffusion models by leveraging the intrinsic geometry of the generative process. As data is progressively corrupted by noise, only a small number of features remain informative for control. We characterize them as the singu-lar functions of a conditional expectation opera-tor and show that they can be learned via a self-supervised objective. Once recovered, this basis enables the projection of arbitrary guidance sig-nals, such as labels, CLIP embeddings, or masks, directly onto the sampling trajectory. This ap-proach allows for stable, high-fidelity control without retraining or denoiser backpropagation during sampling. Empirically, we improve con-ditional accuracy on CIFAR-10 by 37 percentage points over the strongest training-free baseline while offering 4× faster sampling. Moreover, the same representations that support label and CLIP guidance also enable spatial control, such as mask-based guidance, without auxiliary models. Finally, our framework reveals a phase transition in the generative process, pinpointing the optimal time window for effective guidance. 
+
+## 1. Introduction 
+
+Generative modeling has seen tremendous progress with diffusion-based approaches (Sohl-Dickstein et al., 2015), which now produce high-fidelity samples across images, audio, and other modalities (Ho et al., 2020; Song et al., 2020b; Rombach et al., 2022). These models operate by reversing a progressive corruption process, gradually trans-forming structured data into noise. While the forward and reverse dynamics of generation are well-understood, the utility of these models hinges on guidance : sampling ac-cording to user specifications, which can be in the form of          
+
+> 1Institute for Systems and Robotics, Instituto Superior T´ecnico, Lisbon, Portugal 2Carnegie Mellon University, Pitts-burgh, PA, USA. Correspondence to: Gabriel Moreira <gmor-eira@cs.cmu.edu >.
+> Preprint. May 29, 2026.
+
+labels (Dhariwal & Nichol, 2021), text prompts (Saharia et al., 2022), or custom objectives (Zhang et al., 2023). The key challenge is how to impose such guidance in practice. Successful mainstream approaches rely on train-ing models to be conditional from the outset (Dhariwal & Nichol, 2021; Ho & Salimans, 2022), so that desired guidance can be injected directly during sampling. This strategy yields strong and stable control, but tightly couples the model to a fixed set of conditions and requires retraining or additional models whenever the specification changes. An alternative is to start from an unconditional model and enforce the desired behavior only at sampling time by opti-mizing a user-defined objective (Chung et al., 2022; Ye et al., 2024). While this offers greater flexibility, it typically re-quires differentiating through the denoiser during sampling and approximating an intractable posterior distribution. In practice, this leads to higher computational cost and often unstable control, especially for complex objectives. In this work, we propose Spectral Guidance, a framework that enables flexible control by leveraging the intrinsic struc-ture of the diffusion process. As data is gradually corrupted by noise, fine-grained details are lost while coarse semantic features persist. We show that these features form a natural, low-dimensional coordinate system that tracks how infor-mation propagates through the diffusion. By learning this representation, we can project arbitrary guidance objectives, from simple labels to masks, directly into the generative trajectory. This allows for stable control without the need for task-specific retraining or denoiser gradients. Our technical approach is based on a low-rank approxima-tion of the conditional expectation operator across diffusion timesteps. Because high-frequency details are progressively destroyed, the leading singular functions of this operator form a time-indexed low-dimensional basis that captures per-sistent axes of variation over diffusion time. We show that a self-supervised learning (SSL) objective with orthogonality constraints (Bardes et al., 2021) is a variational estimator for the operator’s leading singular functions, with independently diffused views of the same sample acting as augmentations. Once these representations are learned, guidance reduces to a simple linear projection onto this basis. This formulation provides an efficient and flexible guid-ance mechanism. It removes the need for backpropagation 1
+
+> arXiv:2605.28900v1 [cs.LG] 27 May 2026 Spectral Guidance for Flexible and Efficient Control of Diffusion Models
+
+through the denoiser during sampling, requiring only a one-time training to learn the intrinsic coordinates of the diffu-sion process. These representations reveal which features are recoverable and when guidance is effective. Further, be-ing task-agnostic, they support arbitrary downstream control objectives without retraining. Empirically, we achieve consistent gains across label, at-tribute, and CLIP guidance; notably, on CIFAR-10, we surpass the strongest training-free baseline by 37 percentage points in accuracy while improving FID and sampling 4 ×
+
+faster. In addition, our representations generalize to spa-tial control like mask-guided generation without auxiliary models. Finally, they reveal a spectral phase transition that pinpoints the optimal time window for effective guidance. Our contributions are summarized as follows: • We propose Spectral Guidance, which reframes diffu-sion guidance as a projection onto a coordinate system aligned with the generative dynamics, enabling flexible control without retraining the diffusion model. • We introduce an SSL objective that estimates the spec-tral decomposition of the diffusion operator. This rep-resentation yields a lightweight guidance algorithm, decoupled from the gradients of the denoiser. • We outperform training-free baselines by over 37 per-centage points in accuracy and 4× in speed, while enabling complex controls like mask guidance without auxiliary models. Further, our representations reveal a phase transition during the reverse process that aligns with the optimal time window for effective guidance. Code available at https://github.com/gabmoreira/ spectralguidance 
+
+## 2. Related Work 
+
+We review key advances in conditional generation below. 
+
+Diffusion guidance. To introduce conditioning or amplify specific signals during sampling, Classifier Guidance (CG) (Dhariwal & Nichol, 2021) employs an external classifier trained on noisy data, using its gradients to steer the gen-erative trajectory. Classifier-Free Guidance (CFG) (Ho & Salimans, 2022) alleviates the need for external classifiers by jointly training a conditional and unconditional model, subsequently interpolating their score estimates during sam-pling. While CFG has become the de facto standard for modern architectures, ranging from Stable Diffusion (Rom-bach et al., 2022) to Flow Matching models (Lipman et al., 2022), it typically applies a constant guidance scale, re-maining agnostic to the dynamics of the diffusion process. For a comprehensive survey, we refer to Zhan et al. (2024). To address the limitations of static guidance, recent works (Koulischer et al., 2025; Kynk ¨a ¨anniemi et al., 2024) lever-age insights into diffusion dynamics and phase transitions (Handke et al., 2025; Raya & Ambrogioni, 2023) to target time windows where features are most controllable, thereby optimizing generation quality. 
+
+Training-free guidance. A distinct line of research fo-cuses on controlling pre-trained diffusion models via ex-ternal loss functions, in a plug-and-play fashion, eliminat-ing the need for retraining. Initially developed for inverse problems (Kawar et al., 2021; Choi et al., 2021; Kawar et al., 2022), this paradigm includes Diffusion Posterior Sampling (DPS) (Chung et al., 2022), which guides sam-pling with the gradients of a loss function evaluated on a point-estimate of the posterior distribution. For general control, Loss-Guided Diffusion (LGD) (Song et al., 2023) refines DPS by estimating the conditional expectation via Monte Carlo sampling, while MPGD (He et al., 2024) lever-ages the manifold hypothesis to constrain guidance to low-dimensional data manifolds. Universal Guidance for Diffu-sion (UGD) (Bansal et al., 2023) and FreeDoM (Yu et al., 2023) further strengthen guidance through iterative “time-travel” strategies and adaptive schedules across diffusion timesteps. More recently, Training-Free Guidance (TFG) (Ye et al., 2024) unifies many of these approaches under a common guidance algorithm. 
+
+Editing directions in diffusion models. NoiseCLR (Dalva & Yanardag, 2024) discovers interpretable direc-tions in the noise space of pre-trained diffusion models via a contrastive self-supervised objective; while it shares the use of SSL-style training, it targets latent-space editing rather than information-preserving structure. More closely related, Park et al. (2023) and Chen et al. (2024) use the spectral decomposition of the denoiser’s Jacobian as a post hoc tool for identifying semantic editing directions. In contrast, we avoid training task-dependent conditional denoisers and relying on point estimates. Instead, we pro-pose to guide unconditional models by mapping guidance signals onto the diffusion model’s spectral coordinates. 
+
+## 3. Preliminaries 
+
+Diffusion models. Let X0 ∼ p0 be a data random variable with support X . Denoising Diffusion Probabilistic Models (DDPMs) (Ho et al., 2020) define a forward process that gradually perturbs X0 into Gaussian noise using a variance schedule {αt}Tt=1 , where αt ∈ (0 , 1) and ¯αt := Qts=1 αs.This process allows for direct sampling of any noisy latent 
+
+xt at timestep t via 
+
+pt(xt | x0) = N  xt; √¯αtx0, (1 − ¯αt)I . (1) 2Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+To reverse this process, a neural network ϵθ (xt, t ) is trained to predict the noise ϵ added to x0. This training objective is equivalent to denoising score matching (Song & Ermon, 2019), as the optimal denoiser is related to the score of the marginal distribution by 
+
+∇xt log pt(xt) = − ϵθ (xt, t )
+
+√1 − ¯αt
+
+. (2) While the original DDPM formulation requires a stochas-tic Markov chain, Denoising Diffusion Implicit Mod-els (DDIMs) (Song et al., 2020a) provide a faster, non-Markovian alternative, via the update rule 
+
+xt−1 = √¯αt−1
+
+ xt − √1 − ¯αtϵθ (xt, t )
+
+√¯αt
+
+
+
++
+
+q
+
+1 − ¯αt−1 − σ2 
+
+> t
+
+ϵθ (xt, t ) + σtε, (3) where ε ∼ N (0 , I ).
+
+Diffusion guidance. The practical utility of the genera-tive reverse-time process depends on the ability to guide the unconditional trajectory in Eq. (3) , given a conditioning signal y (such as a class label, text prompt, or task objec-tive). This corresponds to sampling from the conditional distribution p(x0 | y). By Bayes’ rule we can decompose the conditional score as 
+
+∇xt log pt(xt | y) = ∇xt log pt(xt) + ∇xt log pt(y | xt).
+
+While ∇xt log pt(xt) is provided by the unconditional model, the guidance term ∇xt log pt(y | xt) requires a time-dependent predictor (Dhariwal & Nichol, 2021), 
+
+pt(y | xt) = EX0∼pt(·| xt)[p(y | X0)] . (4) Hence, this approach restricts control of the generation to the conditioning signal y used for training pt(y | xt).
+
+Training-free guidance. In contrast to training-based ap-proaches, training-free guidance aims at steering the un-conditional trajectory in Eq. (3) using any clean data sig-nal p(y | x0) by estimating pt(y | xt) during sampling. As Eq. (4) is generally intractable, methods such as DPS (Chung et al., 2022) rely on the denoiser’s point estimate of the posterior mean ˆx0(xt) ≈ E[X0 | Xt = xt],
+
+EX0∼pt(·| xt)[p(y | X0)] ≈ p (y | ˆx0(xt)) . (5) This substitution is exact only when p(y | x0) is affine in x0,which rarely holds for semantic tasks. At large noise levels the posterior mean may even lie outside the data manifold (He et al., 2024), leading to misaligned gradients. Further, differentiating ˆx0(xt) requires backpropagating through the denoiser at every step, which is computationally expensive and prone to vanishing gradients. y = 0 y = 1 y = 2 y = 3 y = 4 y = 5 generated 
+
+(a) Prior (b) y ∈ { 4, 2, 1} (c) y ∈ { 3, 5}
+
+Figure 1. Spectral Guidance on a Gaussian mixture prior. Con-tours depict log p0(x0). (a) Prior samples colored by component. 
+
+(b, c) Samples generated by spectral guidance (white) conditioned on different label subsets, using a fixed set of K = 30 spectral modes. The same features enable sampling from p(x0 | y ∈ Y )
+
+for arbitrary conditioning sets Y.
+
+## 4. Spectral Representation for Guidance 
+
+A key observation motivates our approach: as diffusion noise increases, information about the data is progressively destroyed, and only a small number of features remain re-coverable. Consequently, at each diffusion timestep, there exists a low-dimensional set of intrinsic directions along which guidance can effectively act. We propose to guide samples along these diffusion-stable directions (Fig. 1). We can view the expectation in Eq. (4) as the action of an operator from the clean data space H0 = L2(p0) to the noisy data space Ht = L2(pt). This yields pt(y | xt) = (Ttp(y | · ))( xt), where Tt : H0 → H t is the conditional expectation of a function of the clean data f (x0) given xt,
+
+(Ttf )( xt) := EX0∼pt(·| xt)[f (X0)] . (6) This operator retains components of f that are recoverable from the noisy observation xt. To identify them, we consider the covariance operator TtT ∗ 
+
+> t
+
+, where the adjoint operator 
+
+T ∗ 
+
+> t
+
+: Ht → H 0 corresponds to the forward process 
+
+(T ∗ 
+
+> t
+
+g)( x0) := EXt∼pt(·| x0)[g(Xt)] . (7) The covariance operator TtT ∗ 
+
+> t
+
+represents a round-trip infor-mation bottleneck, smoothing features of noisy data via the adjoint and then reconstructing them, 
+
+(TtT ∗ 
+
+> t
+
+f )(˜ xt) = EX0∼pt(·| ˜xt)
+
+EXt∼pt(·| X0)[f (Xt)]  . (8) The principal modes of TtT ∗ 
+
+> t
+
+correspond to the directions in the noisy data that survive the round-trip. These are the intrinsic coordinates along which guidance can act. At high noise levels, only a few modes remain significant, allowing 
+
+Tt to be approximated by a low-rank decomposition. 
+
+4.1. Spectral Decomposition 
+
+If p0 has compact support, TtT ∗ 
+
+> t
+
+is compact (App. A.2, Theorem A.4) and self-adjoint. Thus, it admits an eigen-value decomposition and Tt a singular value decomposition 3Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+i.e. , there exist singular values {σt,k }∞
+
+> k=1
+
+, and orthonormal bases {ψt,k }∞ 
+
+> k=1
+
+⊂ H 0 and {ϕt,k }∞ 
+
+> k=1
+
+⊂ H t such that 
+
+(Ttf )( xt) = 
+
+> ∞
+
+X
+
+> k=1
+
+σt,k ϕt,k (xt)Ep0 [f (X0) ψt,k (X0)] , (9) with σt, 1 = 1 and ϕt, 1 ≡ ψt, 1 ≡ 1 corresponding to the con-stant mode (App. A.3, Proposition A.5). The right singular functions ψt,k ∈ H 0 capture clean-space features preserved by diffusion. The left singular functions ϕt,k ∈ H t represent their optimal reconstructions from noisy data, correspond-ing to eigenfunctions of the covariance operator TtT ∗ 
+
+> t
+
+. The singular values σt,k quantify robustness: large σt,k indicate modes that are recoverable from noise while smaller σt,k 
+
+correspond to modes lost during diffusion. 
+
+4.2. Spectral Guidance 
+
+The SVD in Eq. (9) gives a natural decomposition of the posterior expectation of any guidance signal into basis func-tions {ϕt,k }k≥1, determined by the unconditional diffusion process, weighted by guidance-dependent coefficients ct,k .
+
+Proposition 4.1. For any h ∈ H 0, its conditional ex-pectation at time t admits the expansion 
+
+EX0∼pt(·| xt)[h(X0)] = 
+
+> ∞
+
+X
+
+> k=1
+
+ct,k ϕt,k (xt), (10) 
+
+where ct,k := EX0,X t [h(X0) ϕt,k (Xt)] .
+
+We approximate the series in Eq. (10) by truncating it to its leading K terms. This low-rank approximation incurs an 
+
+L2(pt) error bounded by σ2 
+
+> t,K +1
+
+∥h∥2 
+
+> p0
+
+(App. A.4, Proposi-tion A.11). However, the diffusion process ensures that 
+
+σ2 
+
+> t,k
+
+≤ Ep0
+
+χ2(pt(· | X0) pt) , k ≥ 2 (11) where χ2 denotes the chi-squared divergence. Because both 
+
+pt(xt | x0) and pt(xt) converge to the standard normal as 
+
+¯αt → 0, the right-hand side vanishes, forcing every singular value beyond the first to zero (Proposition A.7). Thus, at high noise levels, the spectrum concentrates on a few leading modes and the truncated expansion closely approximates the true posterior expectation of the guidance signal. 
+
+4.3. Learning the Diffusion Spectrum 
+
+As ϕt,k ∈ H t are eigenfunctions of the covariance operator 
+
+TtT ∗ 
+
+> t
+
+, they maximize the correlation between diffused views 
+
+(xt, ˜xt) ∼ ζ of the same clean sample x0, with 
+
+ζ(xt, ˜xt) := 
+
+Z
+
+> X
+
+pt(xt | x0)pt(˜ xt | x0)p0(x0) dx 0. (12) This allows us to learn the leading left singular subspace 
+
+span {ϕt,k }K+1  
+
+> k=2
+
+of Tt using an SSL objective. 
+
+Theorem 4.2 (Variational characterization) . Let f =(f1, . . . , f K )⊤ with Ept [f ] = 0 . Define the covariance 
+
+Σt(f ) := Ept
+
+f (Xt) f (Xt)⊤ ≻ 0 (13) 
+
+and the cross-covariance 
+
+Ct(f ) := Eζ
+
+h
+
+f (Xt) f ( ˜Xt)⊤i
+
+. (14) 
+
+Then, 
+
+max  
+
+> f
+
+Tr  Ct(f ) Σt(f )−1 =
+
+> K+1
+
+X
+
+> k=2
+
+σ2 
+
+> t,k
+
+(15) 
+
+and any maximizer f ⋆ satisfies span {f ⋆k }Kk=1 =span {ϕt,k }K+1  
+
+> k=2
+
+.
+
+Connection to SSL objectives. SSL methods such as VI-CReg (Bardes et al., 2021) and Barlow Twins (Zbontar et al., 2021) rely on hand-crafted augmentations (cropping, color jittering) to define invariance. We replace these heuristics with the diffusion process itself. The optimization problem in Eq. (15) is the Rayleigh-Ritz characterization of the top-
+
+K eigenspace, equivalent to a Kernel PCA with the kernel defined by the joint distribution ζ. Maximizing the diag-onal of Ct(f ) enforces that the representation is invariant under the noise process, while the whitening transformation 
+
+Σt(f )−1 prevents collapse into a constant solution. 
+
+## 5. Learning to Guide 
+
+The complete Spectral Guidance algorithm consists of an offline stage and a sampling stage; the latter augments an unconditional diffusion sampler with a guidance signal ap-plied at a designated set of diffusion timesteps T . We first describe how we learn the leading left singular functions of the conditional expectation operator. We then show how they are used for guidance. 
+
+5.1. Learning Singular Functions 
+
+As the constant mode is known a priori (ϕt, 1 ≡ 1), we parameterize the next K left singular functions of Tt by a ResNet (He et al., 2016) with time-modulation using FiLM layers (Perez et al., 2018). The network fϕ : X × R>0 →
+
+RK receives a noisy sample and its timestep as input. Given a mini-batch {x(i)0 }Bi=1 ∼ p0 and a timestep t ∈ T , we draw coupled noisy samples (xt, ˜xt) according to 
+
+x(i) 
+
+> t
+
+, ˜x(i)
+
+> t
+> i.i.d.
+
+∼ pt
+
+ · | x(i)0
+
+, (16) where pt(xt | x0) is the forward diffusion process. We evaluate fϕ on these two views, yielding 
+
+Z = fϕ(xt, t ), ˜Z = fϕ(˜ xt, t ) ∈ RB×K . (17) 4Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Algorithm 1 Training loss for fϕ
+
+Input: Prior distribution p0, diffusion schedule {¯αt}Tt=1 
+
+Mini-batch {x(i)0 }Bi=1 ∼ p0
+
+Sample timestep t ∼ Uniform( T )
+
+Sample noise {ϵ(i)}Bi=1 , {˜ϵ(i)}Bi=1 ∼ N (0, I)
+
+x(i) 
+
+> t
+
+← √¯αtx(i)0 + √1 − ¯αtϵ(i)
+
+˜x(i) 
+
+> t
+
+← √¯αtx(i)0 + √1 − ¯αt˜ϵ(i)
+
+Z ← sg( fϕ(xt, t )) , ˜Z ← fϕ(˜ xt, t )
+
+μ ← col -mean( Z)ˆΣ ← (Z − μ)⊤(Z − μ)/(B − 1) 
+
+V, Λ ← eigh( ˆΣ)
+
+W ← V (Λ + ξI)−1/2
+
+Zw ← (Z − μ)W, ˜Zw ← (˜Z − μ)W
+
+Return: L = − Tr  (Zw)⊤ ˜Zw/(K(B − 1)) 
+
+Whitening. We implement the whitening transformation 
+
+Σt(f )−1 in Theorem 4.2 via the eigendecomposition of the empirical covariance. Let μ ∈ RK denote the column-mean of Z and write 
+
+ˆΣ := 1
+
+B − 1 (Z − μ)⊤(Z − μ) = VΛV ⊤. (18) We define the whitening matrix as 
+
+W := V(Λ + ξI)−1/2, (19) where ξ > 0 is a small ridge hyperparameter ensuring W is well defined when ˆΣ is rank-deficient. 
+
+Loss. Let Zw := ( Z − μ) W and ˜Zw := ( ˜Z − μ) W
+
+denote the whitened views. A Monte Carlo approximation of the objective in Eq. (15) yields the loss 
+
+L = − 1
+
+K(B − 1) Tr 
+
+
+
+(Zw)⊤ ˜Zw
+
+, (20) which is equivalent to the objective in Theorem 4.2, up to the ridge regularization. Following common SSL practice, we apply a stop-gradient ( sg ) to Z (which also detaches the whitening statistics μ and W), which empirically stabilizes training. The full procedure, which is independent of the U-Net denoiser, is given in Algorithm 1. 
+
+Reference statistics. The training loss whitens the output of fϕ with batch statistics recomputed at every step. To obtain a deployable estimator that can be evaluated on a sin-gle noisy sample and produce population-whitened features, we compute, post-training, a whitening transformation per timestep on a reference set Dref = {x(i)0 }Mi=1 . For each 
+
+t ∈ T , we draw noisy versions x(i) 
+
+> t
+
+∼ pt(· | x(i)0 ) and en-code them with fϕ to obtain a feature matrix Zt ∈ RM ×K .We set μt to its column-mean and compute Wt from Eq. (19) on the centered features. The whitened network, with the constant mode appended, is then 
+
+f wϕ (xt, t ) := 1  fϕ(xt, t ) − μt
+
+ Wt
+
+ , (21) and we cache its evaluation on the reference set, 
+
+Φt := 1 (Zt − μt) Wt
+
+ ∈ RM ×(K+1) , (22) for use in guidance. By construction, Φt has orthogonal columns; on a fresh sample xt, the outputs of f wϕ are ap-proximately zero-mean with identity covariance under pt.
+
+5.2. Guidance 
+
+We consider clean-data guidance signals h(x0) ∈ RDh .Examples include the probability p(y | x0) of a target class 
+
+y (Dh = 1 ), a CLIP image embedding ( Dh = DCLIP ) or a flattened binary segmentation mask over the W × H pixel grid ( Dh = W H ). 
+
+Guidance coefficients. To guide generation, we first es-timate the spectral coefficients ct,k ∈ RDh from Proposi-tion 4.1. Evaluating h on the clean samples of Dref , we construct H ∈ RM ×Dh and combine it with the cached ref-erence matrix Φt from Eq. (22) to obtain the Monte Carlo estimate 
+
+ˆct = 1
+
+M Φ⊤ 
+
+> t
+
+H ∈ R(K+1) ×Dh , (23) whose k-th row ˆct,k ∈ RDh estimates the coefficient ct,k .
+
+Sampling. Algorithm 2 summarizes the sampling stage, which consists of a standard DDIM step followed by com-puting and applying a guidance vector g with strength κ.For a noisy sample xt, truncating the spectral expansion of Proposition 4.1 to the leading K + 1 terms yields the estimate ˆc⊤ 
+
+> t
+
+f wϕ (xt, t ) ≈ EX0∼pt(·| xt)[h(X0)] . We define the guidance vector g(xt) as 
+
+g(xt) = ∇xt L  ˆc⊤ 
+
+> t
+
+f wϕ (xt, t ) , (24) for a guidance-dependent loss function L. If h(x0) is a class probability, ˆc⊤ 
+
+> t
+
+f wϕ (xt, t ) ≈ pt(y | xt) and we use the log-likelihood. Since the truncated series approxima-tion of the density may locally violate positivity, we set 
+
+∇xt L(z) = ( ∇xt z)/z . For CLIP guidance, Eq. (23) yields the expected CLIP embedding of the clean image. We employ the cosine similarity with the normalized text em-bedding etext as L(z) = z⊤etext /∥z∥. For mask guid-ance, Eq. (23) yields the expected clean mask and we set 
+
+L(z) = −∥ z − ztarget ∥2, for a target mask ztarget .
+
+Complexity comparison. Table 1 provides a complex-ity comparison between Spectral Guidance, CG and TFG. 5Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Algorithm 2 Spectral Guidance 
+
+Input: Timesteps T ; Strength κ; Denoiser ϵθ ; DDIM scheduler S; Coefficients {ˆct}t∈T ; Pre-trained fϕ
+
+For t in reverse( T ):Predict noise ϵ ← ϵθ (x, t )
+
+Denoising step x ← S (ϵ, x, t )
+
+Guidance g ← ∇ xL
+
+
+
+ˆc⊤ 
+
+> t
+
+f wϕ (x, t )
+
+
+
+Update latent x ← x + κ√1 − ¯αt g
+
+Output: Final sample x
+
+Spectral Guidance amortizes computational cost by shifting the heavy optimization to a one-time offline phase, avoiding the O(Nrec · (∇xϵθ + ∇xfcls )) bottleneck of training-free methods that require backpropagating through the denoiser and classifier. By using a lightweight network fϕ (16M pa-rameters vs. denoiser’s 114M on CelebA-HQ), the per-step inference overhead is reduced to a shallow gradient ∇xfϕ,with per-step latency comparable to classifier guidance. 
+
+## 6. Experiments 
+
+We evaluate Spectral Guidance along four axes: (i) its ef-fectiveness and flexibility relative to training-free guidance baselines across categorical, text, and spatial conditioning tasks (§6.2); (ii) the sensitivity of guidance to the spectral rank K and guidance strength κ (§6.3); (iii) the connection between the spectrum of TtT ∗ 
+
+> t
+
+and the temporal window in which guidance is most effective (§6.4); and (iv) sampling efficiency (§6.5). 
+
+6.1. Experimental Setup Models and data. We evaluate conditional image gener-ation on CIFAR-10 (Krizhevsky et al., 2009), CelebA-HQ (Karras et al., 2017), and ImageNet (Deng et al., 2009), us-ing unconditional DDPM U-Nets with 36M (CIFAR-10), 114M (CelebA-HQ), and 121M (ImageNet) parameters. All experiments use a DDIM sampler. The spectral networks fϕ
+
+are time-conditioned ResNets (He et al., 2016) with FiLM modulation (Perez et al., 2018). The output dimensions are set to K = 512 on CIFAR-10 and CelebA-HQ, and 
+
+K = 2000 on ImageNet. The fϕ networks are substantially lighter than the corresponding generative U-Nets: 9M pa-rameters on CIFAR-10, 16M on CelebA-HQ, and 91M on ImageNet. Full details are provided in Appendix C.1. 
+
+Baselines. We compare our approach against state-of-the-art training-free guidance methods: DPS (Chung et al., 2022), LGD (Song et al., 2023), FreeDoM (Yu et al., 2023), UGD (Bansal et al., 2023), MPGD (He et al., 2024), and TFG (Ye et al., 2024), using the implementation and hyper-parameters provided in the TFG framework. 
+
+Tasks. We evaluate three conditioning modalities. • Categorical. We guide toward the 10 classes of CIFAR-10, combinations of attributes on CelebA-HQ (Gender + Age and Gender + Hair color), and 4 classes of ImageNet. The clean-data signal h(x0) is the one-hot label available with each dataset; baselines back-propagate through external classifiers. • Text (CLIP). On CelebA-HQ, we evaluate generation conditioned on 15 text prompts e.g. , “a young woman wearing sunglasses” . In our method, h(x0) is the CLIP embedding of the clean image; baselines backpropa-gate cosine similarity through CLIP’s image encoder. • Mask. We evaluate mask guidance on CelebA-HQ by setting the clean-data signal h(x0) of our framework to a hair-segmentation mask. We guide all models using the gradients of the MSE between the target mask and the clean mask estimate; baselines backpropagate through an external face-parsing model. Crucially, our approach relies on the same spectral repre-sentations {Φt}t∈T from Eq. (22) to support all three tasks. Only the guidance signal h is swapped at sampling time. 
+
+Metrics. We report fidelity and guidance validity. Fidelity is measured via intra-class FID (Heusel et al., 2017) against target-class training images on CIFAR-10 and ImageNet, and via the log Kernel Inception Distance (log KID) on CelebA-HQ. For categorical guidance, validity is the top-1 accuracy of a pre-trained classifier on generated samples. For text guidance, we measure image–prompt alignment with VQAScore (Lin et al., 2024) (range [0 , 1] , higher is better), using llava-v1.5-7b . For mask guidance, we report the Intersection-over-Union (IoU) between the tar-get hair mask and the mask predicted by an independent segmentation model. 
+
+6.2. Overall Results 
+
+Table 2 reports validity and fidelity across all guidance tasks. Spectral Guidance attains the highest validity in every set-ting, with competitive fidelity on most tasks. On CIFAR-10, Spectral Guidance reaches 89.4% accuracy, 37 percentage points above the strongest baseline, while also improving FID. On CelebA-HQ, it leads on both attribute-combination tasks; LGD achieves a better log KID but at a substantial cost in accuracy. On ImageNet, Spectral Guid-ance reaches 41.6% accuracy (vs. 40.9% for TFG). For CLIP guidance, Spectral Guidance attains the best VQAScore, while the training-free baselines drop markedly relative to their categorical performance. Fig. 3 shows clearer attribute realization and fewer off-target generations 6Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Table 1. Computational complexity comparison of guidance approaches. ϵθ and fϕ represent forward passes of the denoiser and the spectral network, respectively. Nrec denotes the number of recursive steps required by UGD, FreeDoM and TFG. Method Offline preprocessing Weights Per-step sampling cost Backpropagation required CG Train Classifier Mcls O(ϵθ + fcls + ∇xfcls ) Grad through classifier TFG None Mcls O(Nrec (ϵθ + fcls + ∇xϵθ + ∇xfcls )) Grad through denoiser and classifier 
+
+Ours Train fϕ + Compute {Φt}T Mϕ O(ϵθ + fϕ + ∇xfϕ) Grad through fϕ only 
+
+(a) Spectral Guidance (Ours) 
+
+(b) Training-Free Guidance (TFG) 
+
+Figure 2. Qualitative comparison on CIFAR-10. Spectral Guid-ance (a) generates high-fidelity samples with clear class semantics. 
+
+than DPS, particularly for prompts involving localized at-tributes (sunglasses, beards). For mask guidance, Spectral Guidance reaches an IoU of 0.80 (vs. 0.78 for TFG and FreeDoM), reusing the same 
+
+{Φt}t∈T learned for the categorical and CLIP tasks. Quali-tative examples in Fig. 4 show high-fidelity faces generated by Spectral Guidance, with hairlines aligning with the target masks (red boundary). 
+
+(a) Prompt: a young woman wearing sunglasses 
+
+(b) Prompt: a dark haired man with a beard Figure 3. Qualitative comparison of CLIP guidance. Top rows: Spectral Guidance (ours); Bottom rows: DPS. 
+
+6.3. Rank and Guidance Strength Ablations Accuracy vs. FID. In Fig. 5(a), we analyze the trade-off between guidance strength κ and sample quality. Spectral Guidance achieves significantly higher accuracy at equiva-lent FID levels. While supervised Classifier Guidance (CG) yields better accuracy for the same FID, it requires training a dedicated noise-aware classifier for every new task. In con-
+
+Figure 4. Mask guidance . Images generated with Spectral Guid-ance and target hair masks, indicated by the red boundary. 50 100 150   
+
+> FID
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> Accuracy
+> TFG
+> UGD
+> MPGD FreeDom
+> LGD
+> DPS
+> CG Spectral
+> Guidance
+
+(a) Accuracy vs. FID 0 200 400  
+
+> K
+> 20
+> 40
+> 60
+> 80
+> 100
+> Accuracy
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> FID
+> Acc
+> FID
+
+(b) Ablation of Rank K
+
+Figure 5. CIFAR-10 analysis. (a) Sweeping guidance strength 
+
+κ, Spectral Guidance achieves a better accuracy-FID frontier than training-free baselines. (b) Sweeping rank K at fixed κ: accuracy improves with diminishing returns, while FID is non-monotonic, mirroring the fidelity-diversity trade-off in (a). 
+
+trast, Spectral Guidance approaches this performance using a single, unsupervised representation. At extreme guidance scales (rightmost points), we observe a degradation of FID, as guidance dominates the unconditional score, driving the sampling trajectory off the data manifold. 
+
+Sensitivity to rank ( K). Fig. 5(b) ablates the dimension of the spectral approximation. Accuracy improves monoton-ically in K, rising sharply between 8 and 128 and saturating thereafter. This behavior is predicted by Proposition A.11, which bounds the L2(pt) error of the rank-K approximation of E[h(X0) | xt]: the rapid decay of the singular spectrum (§4) ensures the leading modes capture the bulk of the re-coverable class information. Beyond this regime, K takes on the role of a guidance-strength knob, with each added mode raising the effective scale at fixed guidance strength κ.This sharpens class typicality, further improving accuracy at the cost of within-class diversity, mirroring the well-known 7Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Table 2. Guidance evaluation. Validity is measured via accuracy, IoU, or VQAScore ( ↑); fidelity is measured via FID or log KID ( ↓). NG = No guidance (unconditional sampling). Dataset / Task Metric NG DPS LGD FreeDoM MPGD UGD TFG Ours 
+
+CIFAR-10 / Labels Accuracy ( ↑) 10.0 50.1 32.2 34.8 38.0 45.9 52.0 89.4 
+
+FID ( ↓) 98.1 172 102 135 88.3 94.2 91.7 70.7 
+
+CelebA-HQ / Gender + Age Accuracy ( ↑) 25.0 71.0 52.0 68.7 68.6 75.1 75.2 91.5 
+
+log KID ( ↓) -3.22 -4.26 -5.10 -3.89 -4.79 -4.37 -3.86 -2.98 CelebA-HQ / Gender + Hair Accuracy ( ↑) 22.4 73.0 55.0 67.1 63.9 71.3 76.0 88.3 
+
+log KID ( ↓) -3.13 -3.90 -5.00 -3.50 -4.33 -4.12 -3.60 -3.34 ImageNet / Labels Accuracy ( ↑) 0.0 38.8 11.5 19.7 6.8 25.5 40.9 41.6 
+
+FID ( ↓) 209 193 210 200 239 205 176 183 CelebA-HQ / Mask IoU ( ↑) 0.38 0.75 0.45 0.78 0.48 0.69 0.78 0.80 
+
+log KID ( ↓) -4.62 -3.17 -4.08 -3.00 -4.50 -3.62 -3.15 -2.96 CelebA-HQ / CLIP VQAScore ( ↑) 0.34 0.59 0.50 0.57 0.40 0.44 0.62 0.64 
+
+(a) CIFAR-10 spectrum  (b) CelebA-HQ spectrum 
+
+Figure 6. Spectrum of the covariance operator TtT ∗ 
+
+> t
+
+. We visualize the eigenvalues of the covariance operator TtT ∗ 
+
+> t
+
+over diffusion time 
+
+t ∈ [0 , 1000] , sorted by index. The top row displays the corresponding posterior mean reconstruction ˆx0 = E[X0 | xt].0 500 1000 
+
+> Diffusion time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Normalized trace (Tr)
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> Accuracy
+> Tr
+> Acc
+
+(a) CIFAR-10 0 500 1000  
+
+> Diffusion time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Normalized trace (Tr)
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> Accuracy
+> Tr
+> Acc
+
+(b) CelebA-HQ 
+
+Figure 7. Guidance windows . Guidance is most effective during the phase transition of the spectrum of TtT ∗ 
+
+> t
+
+.
+
+fidelity-diversity trade-off of classifier-free guidance and lifting intra-class FID. Despite the worsening FID, reflect-ing lower class diversity, samples remain high-fidelity at 
+
+K = 512 , as shown in Fig. 10 (Appendix C). 
+
+6.4. Diffusion Spectrum and Guidance Window 
+
+As shown in Fig. 6, the spectra of CIFAR-10 and CelebA-HQ undergo a transition over time, separating three distinct regimes. For small t, the singular values of Tt are close to 1. The operator is close to the identity, indicating that the forward process is nearly information-preserving. In this regime, the posterior mean resembles a clean image. For large t, the singular values concentrate near zero, as the forward process has erased all information. Between these two extremes we observe a time interval ( t ≈ 400 for CIFAR-10, t ≈ 700 for CelebA-HQ) in which the spectrum transitions, coinciding with the formation of semantically meaningful posterior. This provides a possible explanation for the lower accuracy of posterior-mean-based guidance on CIFAR-10 (Table 2): the operator rank collapses midway through the forward process, leaving no stable guidance signal during early reverse steps. In contrast, CelebA-HQ retains information until higher noise levels. To empirically validate this interpretation, we perform a sliding window experiment to identify the time interval when guidance is most effective. For a given τ , we generate images while applying guidance only when the timestep t
+
+falls within [τ − 100 , τ + 100] . Fig. 7 plots the accuracy as a function of τ . In the same plot, we overlay the normalized trace of the truncated covariance operator, which equals the mean of the covariance eigenvalues and serves as a proxy for the amount of information retained by the forward process. We observe that guidance effectiveness correlates with the spectral transition. The operator’s spectrum serves thus as a reliable indicator for the guidance window: the period where the diffusion process is sufficiently flexible to be guided but sufficiently structured to retain semantic information. 8Spectral Guidance for Flexible and Efficient Control of Diffusion Models  
+
+> Table 3. Computational cost on CelebA-HQ . NG: No guidance. Batch size 1, DDIM 100 steps.
+
+Metric NG TFG Ours 
+
+Offline stage (fixed cost) 
+
+Train fϕ (GPU h) – – 10.0 Precompute {Φt} (GPU h) – – 0.8 
+
+Online stage (variable cost) 
+
+Latency (ms/step) 19.2 81.2 21.7 
+
+Throughput (s/image) 1.9 8.1 2.2 
+
+Peak memory (GB) 1.1 2.8 3.6 
+
+Effective time (10k images) 
+
+Includes Offline + Online (h) 5.3 22.5 16.9 6.5. Sampling Efficiency 
+
+A key advantage of Spectral Guidance is its amortized cost. Unlike training-free methods that require backpropagation through the denoiser during sampling, our method moves the bulk of the computations offline. As shown in Table 3, while we incur an initial cost of ∼10 GPU hours to train fϕ
+
+on CelebA-HQ, this cost is amortized over future genera-tions. In the sampling phase, our method requires only the gradients of fϕ (16M parameters), resulting in a per-step latency of 21.7 ms, comparable to unconditional sampling (19.2 ms) and nearly 4× faster than TFG with Nrec = 1 
+
+(81.2 ms). The “Effective time” row demonstrates this trade-off for 10,000 images. Even including the one-time training cost, Spectral Guidance is more efficient than TFG. 
+
+## 7. Limitations 
+
+Scale and latent diffusion. Our experiments focus on pixel-space diffusion models at moderate scale; we do not directly evaluate Spectral Guidance on latent diffusion mod-els or large-scale text-to-image foundation models. The framework, however, makes no assumption that x0 lives in pixel space: the operator Tt and its spectral decomposition are defined relative to the diffusion process itself. Learn-ing fϕ in the latent space of an autoencoder and applying Spectral Guidance to a latent diffusion model is therefore a straightforward extension. 
+
+Reference data for coefficient estimation. Estimating ˆct
+
+in Eq. (23) requires evaluating both Φt and the guidance signal h(x0) on a reference set Dref drawn from p0, whereas training-free baselines rely on off-the-shelf losses or pre-trained models. This can be a practical constraint when training data is unavailable or labeled examples are scarce. Two observations mitigate it. First, Dref need not be large: 
+
+ˆct estimates only K + 1 coefficients, and the cached Φt is reused across downstream tasks (Table 2). Second, when only the diffusion model is available, Dref can in principle be drawn from the unconditional model itself. 
+
+Pixel-level inverse problems. For a linear inverse prob-lem y = Ax 0 + η, conditional sampling requires the mea-surement constraint Ax 0 ≈ y to be satisfied at the pixel level. Our method restricts guidance to the span of the top-
+
+K singular functions of Tt, a K-dimensional subspace of 
+
+Ht. For semantic signals such as labels, attributes, CLIP embeddings, and coarse masks, this low-rank structure is precisely what enables stable, denoiser-gradient-free control. For inverse problems, however, the constraint count C typi-cally far exceeds K: inpainting half a 256 × 256 × 3 image imposes C = 98 ,304 independent constraints, leaving the 
+
+K-dimensional subspace insufficient to drive ∥y −Ax 0∥2 to zero. Thus, we view Spectral Guidance as complementary to posterior mean-based guidance methods such as DPS. 
+
+## 8. Conclusion 
+
+We introduced Spectral Guidance, a framework that re-frames conditional generation as a projection onto the in-trinsic coordinates of the unconditional diffusion process. Because this basis is task-agnostic, our method provides a flexible and efficient guidance mechanism that eliminates both the need for expensive per-step denoiser backpropaga-tion used in training-free guidance, and the task-specific retraining required for classifier guidance. Empirically, we demonstrate significant improvements in sampling effi-ciency and in controllability, from classes and attributes to text prompts and masks, over existing baselines. Beyond performance, our approach provides new insights into the internal structure of diffusion models. By learning the spec-tral decomposition of the diffusion operator, we make the evolution of information over time explicit, which allows us to determine when control is most effective. 
+
+## Acknowledgments 
+
+This work is funded by LARSyS FCT funding UID/ 50009/2025 (DOI: 10.54499/UID/50009/2025 ) and  
+
+> LA/P/0083/2020
+
+(DOI: 10.54499/LA/P/0083/2020 ). G. Moreira is also supported via grant SFRH/BD/151466/ 2021 through the Carnegie Mellon Portugal program. J. P. Costeira and M. Marques are also supported by the PT Smart Retail project (PRR - 02/C05-i11/2024. C645440011-00000062 ), through IAPMEI - Ag ˆencia para a Competitividade e Inovac ¸ ˜ ao. 
+
+## Impact Statement 
+
+This paper presents work whose goal is to advance the field of Machine Learning. There are many potential societal consequences of our work, none which we feel must be specifically highlighted here. 9Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+## References 
+
+Bansal, A., Chu, H.-M., Schwarzschild, A., Sengupta, S., Goldblum, M., Geiping, J., and Goldstein, T. Universal guidance for diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 843–852, 2023. Bardes, A., Ponce, J., and LeCun, Y. Vicreg: Variance-invariance-covariance regularization for self-supervised learning. arXiv preprint arXiv:2105.04906 , 2021. Chen, S., Zhang, H., Guo, M., Lu, Y., Wang, P., and Qu, Q. Exploring low-dimensional subspace in diffusion mod-els for controllable image editing. Advances in neural information processing systems , 37:27340–27371, 2024. Choi, J., Kim, S., Jeong, Y., Gwon, Y., and Yoon, S. Ilvr: Conditioning method for denoising diffusion probabilistic models. arXiv preprint arXiv:2108.02938 , 2021. Chung, H., Kim, J., Mccann, M. T., Klasky, M. L., and Ye, J. C. Diffusion posterior sampling for general noisy in-verse problems. arXiv preprint arXiv:2209.14687 , 2022. Coifman, R. R. and Lafon, S. Diffusion maps. Applied and computational harmonic analysis , 21(1):5–30, 2006. Dalva, Y. and Yanardag, P. Noiseclr: A contrastive learn-ing approach for unsupervised discovery of interpretable directions in diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 24209–24218, 2024. Deng, J., Dong, W., Socher, R., Li, L.-J., Li, K., and Fei-Fei, L. Imagenet: A large-scale hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition , pp. 248–255. Ieee, 2009. Dhariwal, P. and Nichol, A. Diffusion models beat gans on image synthesis. Advances in neural information processing systems , 34:8780–8794, 2021. Handke, F., Koulischer, F., Raya, G., and Ambrogioni, L. Measuring semantic information production in genera-tive diffusion models. arXiv preprint arXiv:2506.10433 ,2025. He, K., Zhang, X., Ren, S., and Sun, J. Deep residual learn-ing for image recognition. In Proceedings of the IEEE conference on computer vision and pattern recognition ,pp. 770–778, 2016. He, Y., Murata, N., Lai, C.-H., Takida, Y., Uesaka, T., Kim, D., Liao, W., Mitsufuji, Y., Kolter, Z., Salakhutdinov, R., et al. Manifold preserving guided diffusion. In Interna-tional Conference on Learning Representations , volume 2024, pp. 44819–44850, 2024. Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., and Hochreiter, S. Gans trained by a two time-scale update rule converge to a local nash equilibrium. Advances in neural information processing systems , 30, 2017. Ho, J. and Salimans, T. Classifier-free diffusion guidance. 
+
+arXiv preprint arXiv:2207.12598 , 2022. Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-bilistic models. Advances in neural information process-ing systems , 33:6840–6851, 2020. Karras, T., Aila, T., Laine, S., and Lehtinen, J. Pro-gressive growing of gans for improved quality, stabil-ity, and variation. CoRR , abs/1710.10196, 2017. URL 
+
+http://arxiv.org/abs/1710.10196 .Kawar, B., Vaksman, G., and Elad, M. Snips: Solving noisy inverse problems stochastically. Advances in Neural Information Processing Systems , 34:21757–21769, 2021. Kawar, B., Elad, M., Ermon, S., and Song, J. Denoising diffusion restoration models. Advances in neural infor-mation processing systems , 35:23593–23606, 2022. Koulischer, F., Handke, F., Deleu, J., Demeester, T., and Ambrogioni, L. Feedback guidance of diffusion models. 
+
+arXiv preprint arXiv:2506.06085 , 2025. Krizhevsky, A., Hinton, G., et al. Learning multiple layers of features from tiny images. 2009. Kynk ¨a ¨anniemi, T., Aittala, M., Karras, T., Laine, S., Aila, T., and Lehtinen, J. Applying guidance in a limited interval improves sample and distribution quality in diffusion models. Advances in Neural Information Processing Systems , 37:122458–122483, 2024. Lin, Z., Pathak, D., Li, B., Li, J., Xia, X., Neubig, G., Zhang, P., and Ramanan, D. Evaluating text-to-visual generation with image-to-text generation. In European Conference on Computer Vision , pp. 366–384. Springer, 2024. Lipman, Y., Chen, R. T., Ben-Hamu, H., Nickel, M., and Le, M. Flow matching for generative modeling. arXiv preprint arXiv:2210.02747 , 2022. Park, Y.-H., Kwon, M., Choi, J., Jo, J., and Uh, Y. Un-derstanding the latent space of diffusion models through the lens of riemannian geometry. Advances in Neural Information Processing Systems , 36:24129–24142, 2023. Perez, E., Strub, F., De Vries, H., Dumoulin, V., and Courville, A. Film: Visual reasoning with a general con-ditioning layer. In Proceedings of the AAAI conference on artificial intelligence , volume 32, 2018. 10 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Raya, G. and Ambrogioni, L. Spontaneous symmetry break-ing in generative diffusion models. Advances in Neural Information Processing Systems , 36:66377–66389, 2023. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and Ommer, B. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pp. 10684–10695, 2022. Saharia, C., Chan, W., Saxena, S., Li, L., Whang, J., Denton, E. L., Ghasemipour, K., Gontijo Lopes, R., Karagol Ayan, B., Salimans, T., et al. Photorealistic text-to-image dif-fusion models with deep language understanding. Ad-vances in neural information processing systems , 35: 36479–36494, 2022. Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., and Ganguli, S. Deep unsupervised learning using nonequi-librium thermodynamics. In International conference on machine learning , pp. 2256–2265. pmlr, 2015. Song, J., Meng, C., and Ermon, S. Denoising diffusion im-plicit models. arXiv preprint arXiv:2010.02502 , 2020a. Song, J., Zhang, Q., Yin, H., Mardani, M., Liu, M.-Y., Kautz, J., Chen, Y., and Vahdat, A. Loss-guided diffu-sion models for plug-and-play controllable generation. In International Conference on Machine Learning , pp. 32483–32498. PMLR, 2023. Song, Y. and Ermon, S. Generative modeling by estimating gradients of the data distribution. Advances in neural information processing systems , 32, 2019. Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-mon, S., and Poole, B. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 , 2020b. Tropp, J. A. An introduction to matrix concentration in-equalities. Foundations and trends® in machine learning ,8(1-2):1–230, 2015. Ye, H., Lin, H., Han, J., Xu, M., Liu, S., Liang, Y., Ma, J., Zou, J. Y., and Ermon, S. Tfg: Unified training-free guidance for diffusion models. Advances in Neural Infor-mation Processing Systems , 37:22370–22417, 2024. Yu, J., Wang, Y., Zhao, C., Ghanem, B., and Zhang, J. Free-dom: Training-free energy-guided conditional diffusion model. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pp. 23174–23184, 2023. Zbontar, J., Jing, L., Misra, I., LeCun, Y., and Deny, S. Barlow twins: Self-supervised learning via redundancy reduction. In International conference on machine learn-ing , pp. 12310–12320. PMLR, 2021. Zhan, Z., Chen, D., Mei, J.-P., Zhao, Z., Chen, J., Chen, C., Lyu, S., and Wang, C. Conditional image synthe-sis with diffusion models: A survey. arXiv preprint arXiv:2409.19365 , 2024. Zhang, L., Rao, A., and Agrawala, M. Adding conditional control to text-to-image diffusion models. In Proceedings of the IEEE/CVF international conference on computer vision , pp. 3836–3847, 2023. 11 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+## A. Theoretical Results 
+
+We denote by μ0 and μt the measures with densities p0 and the marginal pt(xt) = R pt(xt | x0) dμ 0(x0), respectively, with respect to the Lebesgue measure. We consider two Hilbert spaces. The clean data space H0 = L2(μ0), with inner product 
+
+⟨f, g ⟩μ0 = EX0∼p0 [f (X0) g(X0)] , (25) and the noisy data space Ht = L2(μt), with inner product 
+
+⟨f, g ⟩μt = EXt∼pt [f (Xt) g(Xt)] . (26) This appendix is structured as follows. • Appendix A.1 defines the backward operator Tt and diffusion operator T ∗ 
+
+> t
+
+, establishes the adjointness relation 
+
+⟨g, T tf ⟩μt = ⟨T ∗ 
+
+> t
+
+g, f ⟩μ0 (Proposition A.3) and derives the covariance operator TtT ∗ 
+
+> t
+
+.• Appendix A.2 shows that Tt is Hilbert–Schmidt (and hence compact) under the compact-support assumption on p0
+
+(Theorem A.4). • Appendix A.3 develops the singular value decomposition of Tt: the leading singular pair is the constant function 
+
+ψt, 1 ≡ 1, ϕt, 1 ≡ 1 with σt, 1 = 1 (Proposition A.5); Tt is a contraction (Proposition A.6); all non-trivial singular values vanish as ¯αt → 0 (Proposition A.7); and establishes a variational characterization of the leading eigenspace (Theorem A.9). • Appendix A.4 derives the spectral expansion of the guidance signal (Proposition A.10) and bounds the L2 error of the rank-K truncation (Proposition A.11). • Appendix A.5 provides a finite-sample error bound (Theorem A.12) for the whitened cross-correlation loss used to learn the singular functions in §4.3. • Appendix A.6 derives closed-form eigenfunctions for tractable priors: Gaussian (Proposition A.13) and circle (Proposition A.14). 
+
+A.1. Conditional Operators Definition A.1 (Backward operator) . The backward operator Tt : H0 → H t is the conditional expectation of a function of the clean data f (x0) given a noisy observation xt. For f ∈ H 0,
+
+(Ttf )( xt) := EX0∼pt(·| xt)[f (X0)] . (27) 
+
+This operator formalizes the denoising: it retains components of f that are inferable from Xt.
+
+Definition A.2 (Diffusion operator) . The diffusion operator T ∗ 
+
+> t
+
+: Ht → H 0 is the conditional expectation of g(xt)
+
+given an initial state x0. For g ∈ H t,
+
+(T ∗ 
+
+> t
+
+g)( x0) := EXt∼pt(·| x0)[g(Xt)] . (28) The operator T ∗ 
+
+> t
+
+describes the evolution of g under the corruption process. 
+
+Proposition A.3 (Adjointness) . The operators Tt and T ∗ 
+
+> t
+
+are Hilbert adjoints. For all f ∈ H 0 and for all g ∈ H t we have 
+
+⟨g, T tf ⟩μt = ⟨T ∗ 
+
+> t
+
+g, f ⟩μ0 , (29) 
+
+and TtT ∗ 
+
+> t
+
+: Ht → H t is self-adjoint. 
+
+12 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Proof. By definition, we have 
+
+⟨g, T tf ⟩μt =
+
+Z
+
+g(xt)
+
+Z 
+
+f (x0)pt(x0 | xt)dx 0
+
+
+
+dμ t(xt)=
+
+Z Z 
+
+g(xt)f (x0)pt(x0 | xt)pt(xt) dx 0 dx t
+
+=
+
+Z Z 
+
+g(xt)f (x0)pt(x0, x t) dx 0 dx t. (30) Similarly, 
+
+⟨T ∗ 
+
+> t
+
+g, f ⟩μ0 =
+
+Z Z 
+
+g(xt)p(xt | x0)dx t
+
+
+
+f (x0) dμ 0(x0)=
+
+Z Z 
+
+g(xt)f (x0)pt(xt | x0)p0(x0) dx t dx 0
+
+=
+
+Z Z 
+
+g(xt)f (x0)pt(x0, x t) dx 0 dx t. (31) From Eqs. (30) and (31), we have that ⟨T ∗ 
+
+> t
+
+g, f ⟩μ0 = ⟨g, T tf ⟩μt . It follows that T ∗ 
+
+> t
+
+and Tt are Hilbert adjoints. Since 
+
+⟨h, T tT ∗ 
+
+> t
+
+g⟩μt = ⟨T ∗ 
+
+> t
+
+h, T ∗ 
+
+> t
+
+g⟩μ0 = ⟨TtT ∗ 
+
+> t
+
+h, g ⟩μt , (32) the operator TtT ∗ 
+
+> t
+
+is self-adjoint in Ht.
+
+Covariance operator. The covariance operator TtT ∗ 
+
+> t
+
+acts on test functions f ∈ H t. By expanding the operator definitions, we have 
+
+(TtT ∗ 
+
+> t
+
+f )(˜ xt) = EX0∼p(·| ˜xt)[EXt∼p(·| X0)[f (Xt)]] =
+
+Z Z 
+
+f (xt)pt(x0 | ˜xt)pt(xt | x0) dx t dx 0
+
+=
+
+Z
+
+f (xt)
+
+Z 
+
+pt(x0 | ˜xt)pt(xt | x0) dx 0
+
+
+
+dx t. (33) To express this as an integral operator with respect to the measure μt, we multiply and divide by the marginal density pt(xt)(TtT ∗ 
+
+> t
+
+f )(˜ xt) = 
+
+Z
+
+f (xt)
+
+Z pt(x0 | ˜xt)pt(xt | x0)
+
+pt(xt) dx 0
+
+
+
+pt(xt) dx t
+
+=
+
+Z
+
+f (xt)
+
+Z pt(x0 | ˜xt)pt(xt | x0)
+
+pt(xt) dx 0
+
+
+
+dμ t(xt). (34) Applying Bayes’ rule, we substitute pt(xt|x0) 
+
+> pt(xt)
+
+= pt(x0|xt) 
+
+> p0(x0)
+
+to obtain 
+
+(TtT ∗ 
+
+> t
+
+f )(˜ xt) = 
+
+Z
+
+f (xt)
+
+Z pt(x0 | ˜xt)pt(x0 | xt)
+
+p0(x0) dx 0
+
+| {z } 
+
+> =: kt(xt,˜xt)
+
+dμ t(xt). (35) Hence, TtT ∗ 
+
+> t
+
+admits a symmetric diffusion kernel kt on the noisy data manifold. Defined with respect to μt, the kernel is: 
+
+kt(xt, ˜xt) = 
+
+Z pt(x0 | xt)pt(x0 | ˜xt)
+
+p0(x0) dx 0. (36) This kernel kt(xt, ˜xt) represents the transition density of the coupled backward-forward process ( xt → x0 → ˜xt). It measures the connectivity between two noisy points xt and ˜xt. A large t allows the kernel to capture the coarser, global structure of the data (Coifman & Lafon, 2006). From Eq. (36), kt is symmetric i.e. , kt(xt, ˜xt) = kt(˜ xt, x t).
+
+A.2. Compactness 
+
+13 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Theorem A.4 (Compactness) . Let p0 have compact support X := supp( p0) with p0 > 0 on X , and let the forward kernel be Gaussian, pt(xt | x0) = N xt; √¯αt x0, (1 − ¯αt)I. Then, for every t > 0, the backward operator Tt is Hilbert–Schmidt and thus, compact. 
+
+Proof. We write Tt in integral-kernel form. Since dμ 0 = p0 dx 0, we have 
+
+(Ttf )( xt) = 
+
+Z
+
+> X
+
+f (x0) pt(x0 | xt) dx 0 =
+
+Z
+
+> X
+
+f (x0) pt(x0 | xt)
+
+p0(x0)
+
+| {z } 
+
+> =: kt(xt,x 0)
+
+dμ 0(x0). (37) Because Tt : L2(μ0) → L2(μt) is an integral operator with kernel kt, its Hilbert–Schmidt norm satisfies 
+
+∥Tt∥2HS =
+
+Z Z 
+
+|kt(xt, x 0)|2 dμ 0(x0) dμ t(xt). (38) Substituting kt = pt(x0 | xt)/p 0(x0) and applying Bayes’ rule, pt(x0 | xt) = pt(xt | x0) p0(x0)/p t(xt), yields 
+
+∥Tt∥2HS =
+
+Z Z pt(x0 | xt)2
+
+p0(x0)2 dμ 0(x0) dμ t(xt)=
+
+Z Z pt(xt | x0)2
+
+pt(xt)2 p0(x0) pt(xt) dx 0 dx t
+
+=
+
+Z
+
+> X
+
+p0(x0)
+
+Z 
+
+> Rd
+
+pt(xt | x0)2
+
+pt(xt) dx t
+
+
+
+dx 0. (39) It therefore suffices to show that the inner integral is uniformly bounded for x0 ∈ X .
+
+Lower bound on pt(xt). Since X is compact, there exists R > 0 such that ∥x′
+
+> 0
+
+∥ ≤ R for all x′ 
+
+> 0
+
+∈ X . By the triangle inequality, ∥xt − √¯αt x′
+
+> 0
+
+∥ ≤ ∥ xt∥ + √¯αt R, and because the Gaussian density is decreasing in ∥xt − √¯αt x′
+
+> 0
+
+∥2, we obtain 
+
+pt(xt | x′
+
+> 0
+
+) ≥ 1
+
+ 2π(1 − ¯αt)d/ 2 exp 
+
+
+
+− ∥xt∥2 + 2 √¯αt R ∥xt∥ + ¯ αtR2
+
+2(1 − ¯αt)
+
+
+
+. (40) The right-hand side is independent of x′
+
+> 0
+
+, so marginalizing gives the same lower bound for 
+
+pt(xt) = 
+
+Z
+
+> X
+
+pt(xt | x′
+
+> 0
+
+) p0(x′
+
+> 0
+
+) dx ′ 
+
+> 0
+
+≥ 1
+
+ 2π(1 − ¯αt)d/ 2 exp 
+
+
+
+− ∥xt∥2 + 2 √¯αt R ∥xt∥ + ¯ αtR2
+
+2(1 − ¯αt)
+
+
+
+. (41) 
+
+Bounding the ratio. The squared numerator is 
+
+pt(xt | x0)2 = 1
+
+ 2π(1 − ¯αt)d exp 
+
+
+
+− ∥xt − √¯αt x0∥2
+
+1 − ¯αt
+
+
+
+. (42) Expanding ∥xt − √¯αt x0∥2 = ∥xt∥2 − 2√¯αt x⊤ 
+
+> t
+
+x0 + ¯ αt∥x0∥2 and combining with the lower bound (41) , the Gaussian prefactors simplify and the exponent becomes 
+
+−∥ xt∥2 + 4 √¯αt x⊤ 
+
+> t
+
+x0 + 2 √¯αt R ∥xt∥ − 2¯ αt∥x0∥2 + ¯ αtR2
+
+2(1 − ¯αt) . (43) By Cauchy–Schwarz, x⊤ 
+
+> t
+
+x0 ≤ ∥ xt∥ ∥ x0∥ ≤ R ∥xt∥ for x0 ∈ X , and −2¯ αt∥x0∥2 ≤ 0, so 
+
+pt(xt | x0)2
+
+pt(xt) ≤ 1
+
+ 2π(1 − ¯αt)d/ 2 exp 
+
+ −∥ xt∥2 + 6 √¯αt R ∥xt∥ + ¯ αtR2
+
+2(1 − ¯αt)
+
+
+
+. (44) 14 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Completing the square. Writing u = ∥xt∥ and c = 3 √¯αt R, we have 
+
+−u2 + 6 √¯αt R u + ¯ αtR2 = −(u − c)2 + 9¯ αtR2 + ¯ αtR2 = −(u − c)2 + 10¯ αtR2. (45) To make the Gaussian integral tractable, we apply the bound (u − c)2 ≥ 12 u2 − c2, which follows from Young’s inequality with ϵ = 1 /2. This gives 
+
+−(u − c)2 + 10¯ αtR2 ≤ − 12 ∥xt∥2 + 9¯ αtR2 + 10¯ αtR2 = − 12 ∥xt∥2 + 19¯ αtR2. (46) Substituting into (44), 
+
+pt(xt | x0)2
+
+pt(xt) ≤ 1
+
+ 2π(1 − ¯αt)d/ 2 exp 
+
+ 19¯ αtR2
+
+2(1 − ¯αt)
+
+
+
+exp 
+
+
+
+− ∥xt∥2
+
+4(1 − ¯αt)
+
+
+
+. (47) 
+
+Concluding the bound. Integrating (47) over xt ∈ Rd yields the Gaussian integral 
+
+Z
+
+> Rd
+
+pt(xt | x0)2
+
+pt(xt) dx t ≤
+
+ 4π(1 − ¯αt)d/ 2
+
+ 2π(1 − ¯αt)d/ 2 exp 
+
+ 19¯ αtR2
+
+2(1 − ¯αt)
+
+
+
+= 2 d/ 2 exp 
+
+ 19¯ αtR2
+
+2(1 − ¯αt)
+
+
+
+=: C(t, R ). (48) The constant C(t, R ) is finite for every t > 0 and depends only on t, R, and the dimension d. Substituting back into (39), 
+
+∥Tt∥2HS ≤ C(t, R )
+
+Z
+
+> X
+
+p0(x0) dx 0 = C(t, R ) < ∞. (49) Since Tt has finite Hilbert–Schmidt norm, it is Hilbert–Schmidt and therefore compact. By proving compactness for Tt, we immediately have that the adjoint T ∗ 
+
+> t
+
+is compact. Consequently, the covariance operator 
+
+TtT ∗ 
+
+> t
+
+, being the composition of compact operators, is itself compact. 
+
+A.3. Singular Value Decomposition 
+
+Since Tt is compact (Theorem A.4), it admits a singular value decomposition (SVD). For any f ∈ L2(μ0),
+
+(Ttf )( xt) = 
+
+> ∞
+
+X
+
+> k=1
+
+σt,k ϕt,k (xt) ⟨ψt,k , f ⟩μ0 , (50) where the convergence is in L2(μt), {ψt,k }k≥1 ⊂ L2(μ0) and {ϕt,k }k≥1 ⊂ L2(μt) are orthonormal systems, and 
+
+σt, 1 ≥ σt, 2 ≥ · · · ≥ 0 are the singular values. In particular, 
+
+T ∗ 
+
+> t
+
+Tt ψt,k = σ2 
+
+> t,k
+
+ψt,k , T ∗ 
+
+> t
+
+ϕt,k = σt,k ψt,k . (51) 
+
+Proposition A.5 (Leading singular functions) . Let ψt, 1 ≡ 1 and ϕt, 1 ≡ 1 denote the constant functions equal to one. Then (ψt, 1, ϕ t, 1) is a singular pair of Tt with singular value σt, 1 = 1 . That is, 
+
+Tt ψt, 1 = ϕt, 1, T ∗ 
+
+> t
+
+ϕt, 1 = ψt, 1. (52) 
+
+Proof. We verify three facts: that Tt and T ∗ 
+
+> t
+
+each map 1 to 1, and that the singular functions have unit norm. For every xt,
+
+(Tt 1)( xt) = E[1(X0) | Xt = xt] = 
+
+Z
+
+> X
+
+pt(x0 | xt) dx 0 = 1 , (53) since p(· | xt) is a probability density over x0. Hence Tt 1 = 1.Similarly, for every x0,
+
+(T ∗ 
+
+> t
+
+1)( x0) = E[1(Xt) | X0 = x0] = 
+
+Z
+
+> Rd
+
+pt(xt | x0) dx t = 1 , (54) 15 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+since p(· | x0) is a probability density over xt. Hence T ∗ 
+
+> t
+
+1 = 1.The singular functions have unit norm in their respective spaces: 
+
+∥ψt, 1∥2 
+
+> μ0
+
+= EX0∼p0 [12] = 1 , ∥ϕt, 1∥2 
+
+> μt
+
+= EXt∼pt [12] = 1 . (55) Combining the above, Tt ψt, 1 = ϕt, 1 and T ∗ 
+
+> t
+
+ϕt, 1 = ψt, 1, so (ψt, 1, ϕ t, 1) is a singular pair with singular value σt, 1 = 1 .
+
+Proposition A.6 (Tt is a contraction) . For every f ∈ L2(μ0), ∥Ttf ∥μt ≤ ∥ f ∥μ0 . In particular, σt,k ≤ 1 for all k ≥ 1.
+
+Proof. Fix f ∈ L2(μ0). Applying Jensen’s inequality to the conditional expectation and then the tower property gives 
+
+∥Ttf ∥2 
+
+> μt
+
+= EXt∼pt
+
+E[f (X0) | Xt]2
+
+≤ EXt∼pt
+
+E[f (X0)2 | Xt] (Jensen) 
+
+= EX0∼p0 [f (X0)2] (tower property) 
+
+= ∥f ∥2 
+
+> μ0
+
+.
+
+Hence ∥Tt∥op ≤ 1, and since ∥Tt∥op = σt, 1 ≥ σt, 2 ≥ · · · , it follows that σt,k ≤ 1 for every k ≥ 1.
+
+Proposition A.7 (Non-trivial singular values vanish as ¯αt → 0). Let p0 have compact support X and let Xt =√¯αt X0 + √1 − ¯αt ϵ, with ϵ ∼ N (0 , I ). Then, for every k ≥ 2,
+
+σt,k → 0 as ¯αt → 0. (56) 
+
+Proof. Since σt, 1 = 1 with singular functions ψt, 1 ≡ 1, ϕt, 1 ≡ 1 (Proposition A.5), it suffices to show that the operator norm of Tt restricted to 1⊥ := {f ∈ L2(μ0) : Ep0 [f ] = 0 } vanishes as ¯αt → 0.
+
+Rewriting the operator on 1⊥. Fix f ∈ 1⊥, so that R f (x0) p0(x0) dx 0 = 0 . Applying Bayes’ rule, p(x0 | xt) = p(xt |
+
+x0) p0(x0)/p t(xt), and using the zero-mean condition to subtract the identity, 
+
+(Ttf )( xt) = 
+
+Z
+
+> X
+
+f (x0) pt(x0 | xt) dx 0
+
+=
+
+Z
+
+> X
+
+f (x0) pt(xt | x0)
+
+pt(xt) p0(x0) dx 0
+
+=
+
+Z
+
+> X
+
+f (x0)
+
+ pt(xt | x0)
+
+pt(xt) − 1
+
+
+
+p0(x0) dx 0, (57) where the last step uses R f dμ 0 = 0 .
+
+Pointwise and integrated bound. Applying Cauchy–Schwarz in L2(μ0) to (57) gives, for each xt,
+
+(Ttf )( xt) 2 ≤ ∥ f ∥2
+
+> μ0
+
+Z
+
+> X
+
+ pt(xt | x0)
+
+pt(xt) − 1
+
+2
+
+p0(x0) dx 0. (58) Integrating both sides against μt i.e. , multiplying by pt(xt) and integrating over xt,
+
+∥Ttf ∥2 
+
+> μt
+
+≤ ∥ f ∥2
+
+> μ0
+
+Z
+
+> X
+
+p0(x0)
+
+Z
+
+> Rd
+
+ pt(xt | x0) − pt(xt)2
+
+pt(xt) dx t dx 0 = ∥f ∥2 
+
+> μ0
+
+EX0∼p0
+
+χ2 pt(· | X0) pt
+
+ , (59) where χ2(q∥r) := R (q − r)2/r denotes the chi-squared divergence. 16 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Vanishing of the chi-squared divergence. As ¯αt → 0, the forward kernel pt(xt | x0) = N xt; √¯αt x0, (1 − ¯αt) I
+
+converges to N (xt; 0 , I ). Since X is compact, this convergence is uniform over x0 ∈ X : for every xt,
+
+sup 
+
+> x0∈X
+
+pt(xt | x0)
+
+pt(xt) − 1 −→ 0 as ¯αt → 0, (60) because both the numerator and the denominator pt(xt) = R 
+
+> X
+
+pt(xt | x′
+
+> 0
+
+) p0(x′
+
+> 0
+
+) dx ′ 
+
+> 0
+
+converge to the same standard Gaussian density. Therefore, 
+
+EX0∼p0
+
+χ2 pt(· | X0) pt
+
+ −→ 0 as ¯αt → 0. (61) 
+
+Conclusion. Taking the supremum of (59) over f ∈ 1⊥ with ∥f ∥μ0 = 1 gives 
+
+σ2 
+
+> t, 2
+
+= Tt 1⊥ 
+
+> 2op
+
+≤ EX0∼p0
+
+χ2 pt(· | X0) pt
+
+ −→ 0. (62) Since σt, 2 ≥ σt, 3 ≥ · · · , it follows that σt,k → 0 for all k ≥ 2.We conclude with the variational characterization of the SVD of Tt, which forms the basis of our learning algorithm. We first present the constrained formulation, based on the Courant-Fischer theorem and then the unconstrained approach. 
+
+Lemma A.8 (Constrained variational characterization of the leading eigenspace) . Let ζ denote the joint distribution of two independent noisy views of the same clean sample, 
+
+ζ(xt, ˜xt) := 
+
+Z
+
+> X
+
+pt(xt | x0) pt(˜ xt | x0) dμ 0(x0). (63) 
+
+Then the top-K left singular functions {ϕt,k }Kk=1 of Tt solve 
+
+max 
+
+> f1,...,f K
+> K
+
+X
+
+> k=1
+
+E(Xt, ˜Xt)∼ζ
+
+fk(Xt) fk( ˜Xt) s.t. ⟨fi, f j ⟩μt = δij . (64) 
+
+The maximum value is PKk=1 λt,k , where λt,k = σ2
+
+> t,k
+
+. Given any maximizer {ϕt,k }Kk=1 , the corresponding right singular functions are recovered as 
+
+ψt,k (x0) = 1
+
+σt,k 
+
+(T ∗ 
+
+> t
+
+ϕt,k )( x0) = 1
+
+σt,k 
+
+Eϕt,k (Xt) | X0 = x0
+
+. (65) 
+
+Proof. Since TtT ∗ 
+
+> t
+
+: Ht → H t is compact (Theorem A.4) and self-adjoint, the Courant–Fischer theorem gives 
+
+max    
+
+> f1,...,f K∈H t
+> ⟨fi,f j⟩μt=δij
+> K
+
+X
+
+> k=1
+
+⟨fk, T tT ∗ 
+
+> t
+
+fk⟩μt =
+
+> K
+
+X
+
+> k=1
+
+λt,k , (66) attained when span {f1, . . . , f K } = span {ϕt, 1, . . . , ϕ t,K }. It remains to show that the Rayleigh quotient equals the cross-view correlation. 
+
+Expanding the Rayleigh quotient. For f ∈ H t, we unwind the operator composition TtT ∗ 
+
+> t
+
+by first expanding the outer operator Tt (expectation over X0 | Xt), then the inner operator T ∗ 
+
+> t
+
+(expectation over ˜Xt | X0): 
+
+⟨f, T tT ∗ 
+
+> t
+
+f ⟩μt = EXt∼pt
+
+f (Xt) ( TtT ∗ 
+
+> t
+
+f )( Xt)
+
+= EXt∼pt
+
+h
+
+f (Xt) E(T ∗ 
+
+> t
+
+f )( X0) | Xt
+
+i
+
+(expanding Tt)
+
+= EXt∼pt
+
+h
+
+f (Xt) EE[f ( ˜Xt) | X0] Xt
+
+i
+
+(expanding T ∗ 
+
+> t
+
+)
+
+= EXt, X 0, ˜Xt
+
+f (Xt) f ( ˜Xt) (tower property) 
+
+= E(Xt, ˜Xt)∼ζ
+
+f (Xt) f ( ˜Xt), (67) 17 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+where the last equality follows because the marginal over (Xt, ˜Xt), obtained by integrating out X0, is precisely ζ. Substitut-ing (67) into (66) yields the variational problem (64). 
+
+Recovery of the right singular functions. The SVD relation T ∗ 
+
+> t
+
+ϕt,k = σt,k ψt,k (cf. Eq. (51) ) gives ψt,k = σ−1 
+
+> t,k
+
+T ∗ 
+
+> t
+
+ϕt,k ,and expanding the definition of T ∗ 
+
+> t
+
+yields (65). 
+
+Theorem A.9 (Variational characterization) . For any f = ( f1, . . . , f K )⊤ with Ept [fk] = 0 , define the K × K
+
+covariance matrix 
+
+Σt(f ) := Ept
+
+f (Xt) f (Xt)⊤ ≻ 0 (68) 
+
+and the cross-covariance 
+
+Ct(f ) := Eζ
+
+h
+
+f (Xt) f ( ˜Xt)⊤i
+
+. (69) 
+
+Then 
+
+max  
+
+> f
+
+Tr  Ct(f ) Σt(f )−1 =
+
+> K+1
+
+X
+
+> k=2
+
+σ2 
+
+> t,k
+
+(70) 
+
+and any maximizer f ⋆ satisfies span {f ⋆k }Kk=1 = span {ϕt,k }K+1  
+
+> k=2
+
+.
+
+Proof. For any valid f , let g := Σt(f )−1/2f . Then Ept [gg ⊤] = I, so g satisfies the L2(μt) orthonormality constraint of Lemma A.8. Using cyclicity of the trace, a direct calculation gives 
+
+Tr  Ct(f ) Σt(f )−1 = Tr 
+
+
+
+Σt(f )−1/2Ct(f ) Σt(f )−1/2
+
+= Tr( Ct(g)) = 
+
+> K
+
+X
+
+> k=1
+
+Eζ
+
+h
+
+gk(Xt) gk( ˜Xt)
+
+i
+
+. (71) Conversely, any g satisfying the orthonormality constraint is itself admissible in the unconstrained problem (with Σt(g) = I), and both objectives take the same value on such g. The map f 7 → g is therefore a bijection between admissible points of the two problems that preserves the objective, so they share the same supremum. By Lemma A.8, this common supremum equals PK+1  
+
+> k=2
+
+σ2 
+
+> t,k
+
+and is attained when {gk}Kk=1 is any orthonormal basis of span {ϕt,k }K+1  
+
+> k=2
+
+. Since f = Σt(f )1/2g is an invertible linear transformation, span {f ⋆k }Kk=1 = span {gk}Kk=1 = span {ϕt,k }K+1  
+
+> k=2
+
+, as claimed. 
+
+A.4. Spectral Guidance Proposition A.10 (Noisy posterior via the SVD) . Let h ∈ L2(μ0). Then 
+
+Ep(·| xt)[h(X0)] = 
+
+> ∞
+
+X
+
+> k=1
+
+ct,k ϕt,k (xt), ct,k := E(X0,X t)∼p(x0,x t)
+
+h(X0) ϕt,k (Xt). (72) 
+
+Proof. Since E[h(X0) | Xt = xt] = ( Tth)( xt), the SVD expansion gives 
+
+E[h(X0) | Xt = xt] = 
+
+> ∞
+
+X
+
+> k=1
+
+σt,k ϕt,k (xt) ⟨h, ψ t,k ⟩μ0 . (73) We rewrite the inner product using the SVD relation ψt,k = 1 
+
+> σt,k
+
+T ∗ 
+
+> t
+
+ϕt,k :
+
+σt,k ⟨h, ψ t,k ⟩μ0 = σt,k · 1
+
+σt,k 
+
+⟨h, T ∗ 
+
+> t
+
+ϕt,k ⟩μ0
+
+= EX0∼p0
+
+h(X0) ( T ∗ 
+
+> t
+
+ϕt,k )( X0)
+
+= EX0∼p0
+
+h
+
+h(X0) Eϕt,k (Xt) | X0
+
+i
+
+= E(X0,X t)∼p(x0,x t)
+
+h(X0) ϕt,k (Xt) =: ct,k , (74) 18 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+where the third line expands the definition of T ∗ 
+
+> t
+
+and the fourth applies the tower property. Substituting into (73) yields the result. We next quantify the error incurred by truncating the SVD expansion at rank K. Define the rank-K approximation 
+
+(Tt,K h)( xt) := 
+
+> K
+
+X
+
+> k=1
+
+σt,k ϕt,k (xt) ⟨h, ψ t,k ⟩μ0 , (75) and write λt,k := σ2 
+
+> t,k
+
+for the eigenvalues of TtT ∗ 
+
+> t
+
+.
+
+Proposition A.11 (SVD truncation error) . Let Tt,K be the rank-K approximation of Tt. For any h ∈ L2(μ0),
+
+∥Tth − Tt,K h∥2 
+
+> μt
+
+≤ λt,K +1 ∥h∥2 
+
+> μ0
+
+. (76) 
+
+Proof. By orthonormality of {ϕt,k }k≥1 in L2(μt), the squared error is the tail of the expansion 
+
+∥Tth − Tt,K h∥2 
+
+> μt
+
+=
+
+> ∞
+
+X
+
+> k=K+1
+
+σ2 
+
+> t,k
+
+⟨h, ψ t,k ⟩2 
+
+> μ0
+
+. (77) Since the singular values are ordered, σ2 
+
+> t,k
+
+≤ σ2 
+
+> t,K +1
+
+= λt,K +1 for all k ≥ K + 1 . Factoring out the leading term and applying Bessel’s inequality, 
+
+> ∞
+
+X
+
+> k=K+1
+
+σ2 
+
+> t,k
+
+⟨h, ψ t,k ⟩2 
+
+> μ0
+
+≤ λt,K +1 
+
+> ∞
+
+X
+
+> k=K+1
+
+⟨h, ψ t,k ⟩2 
+
+> μ0
+
+≤ λt,K +1 ∥h∥2 
+
+> μ0
+
+. (78) 
+
+A.5. Finite Sample Error Theorem A.12 (Finite-sample error of the variational objective) . Let f : X → RK with Ept [f (Xt)] = 0 and 
+
+∥f (Xt)∥2 ≤ M almost surely. Assume the population covariance Σt(f ) := Ept
+
+f (Xt) f (Xt)⊤ satisfies Σt(f ) ⪰ λ I
+
+for some λ > 0. Given B i.i.d. pairs (X(i) 
+
+> t
+
+, ˜X(i) 
+
+> t
+
+) Bi=1 ∼ ζ, define the symmetrized empirical estimators 
+
+ˆCt(f ) := 1
+
+B
+
+> B
+
+X
+
+> i=1 12
+
+
+
+f (X(i) 
+
+> t
+
+)f ( ˜X(i) 
+
+> t
+
+)⊤ + f ( ˜X(i) 
+
+> t
+
+)f (X(i) 
+
+> t
+
+)⊤
+
+, ˆΣt(f ) := 1
+
+B
+
+> B
+
+X
+
+> i=1
+
+f (X(i) 
+
+> t
+
+)f (X(i) 
+
+> t
+
+)⊤, (79) 
+
+and the population and empirical objectives 
+
+Jt(f ) := Tr  Ct(f ) Σt(f )−1, ˆJt(f ) := Tr   ˆCt(f ) ˆΣt(f )−1. (80) 
+
+Then for any δ ∈ (0 , 1) and any B satisfying B ≥ 32 M 4 log(4 K/δ )/λ 2, with probability at least 1 − δ,
+
+ˆJt(f ) − Jt(f ) ≤ 4 K M 4
+
+λ2
+
+r log(4 K/δ )
+
+B + 16 K M 4 log(4 K/δ )3 λ2 B . (81) 
+
+Proof. Let Hi := 12
+
+ f (X(i) 
+
+> t
+
+)f ( ˜X(i) 
+
+> t
+
+)⊤ + f ( ˜X(i) 
+
+> t
+
+)f (X(i) 
+
+> t
+
+)⊤ and Si := f (X(i) 
+
+> t
+
+)f (X(i) 
+
+> t
+
+)⊤, both self-adjoint K × K
+
+matrices. By exchangeability of (X(i) 
+
+> t
+
+, ˜X(i) 
+
+> t
+
+) under ζ, E[Hi] = Ct(f ); trivially E[Si] = Σt(f ). Define centered summands 
+
+Yi := Hi − Ct(f ) and Ti := Si − Σt(f ).Since ∥f ∥2 ≤ M a.s., ∥Hi∥, ∥Si∥ ≤ M 2, hence ∥Yi∥, ∥Ti∥ ≤ 2M 2. For the variance proxies, 
+
+E[Y2 
+
+> i
+
+] = E[H2 
+
+> i
+
+] − C2 
+
+> t
+
+⪯ E[H2 
+
+> i
+
+], (82) since C2 
+
+> t
+
+⪰ 0. By Jensen, ∥E[H2 
+
+> i
+
+]∥ ≤ E∥Hi∥2 ≤ M 4, so ∥E[Y2 
+
+> i
+
+]∥ ≤ M 4; the same bound applies to E[T2 
+
+> i
+
+].19 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Concentration of ˆCt and ˆΣt. Applying matrix Bernstein (Tropp, 2015) to P 
+
+> i
+
+Yi in its two-sided form, then to P 
+
+> i
+
+Ti,and union-bounding over both estimators (with δ/ 2 each), gives that with probability at least 1 − δ,
+
+max  ∥ ˆCt − Ct∥, ∥ ˆΣt − Σt∥ ≤ εB := M 2
+
+r 2 log(4 K/δ )
+
+B + 4 log(4 K/δ )3B
+
+!
+
+. (83) 
+
+Perturbation of the trace. Write ∆C := ˆCt − Ct and ∆Σ := ˆΣt − Σt. The hypothesis B ≥ 32 M 4 log(4 K/δ )/λ 2
+
+ensures εB ≤ λ/ 2, so ∥Σ−1 
+
+> t
+
+∆Σ∥ ≤ 1/2. The Neumann expansion of (Σt + ∆ Σ)−1 yields 
+
+ˆΣ−1 
+
+> t
+
+= Σ−1 
+
+> t
+
+− Σ−1 
+
+> t
+
+∆ΣΣ−1 
+
+> t
+
++ R, ∥R∥ ≤ 2 ε2
+
+> B
+
+λ3 . (84) Substituting and isolating leading terms, 
+
+ˆCt ˆΣ−1 
+
+> t
+
+− CtΣ−1 
+
+> t
+
+= ∆ C Σ−1 
+
+> t
+
+− Ct Σ−1 
+
+> t
+
+∆Σ Σ−1 
+
+> t
+
++ E, (85) where the residual E collects the second-order cross terms together with (Ct + ∆ C ) R. Using ∥∆C ∥, ∥∆Σ∥ ≤ εB and 
+
+∥Ct∥ ≤ M 2 gives ∥E∥ ≤ 4 M 2ε2 
+
+> B
+
+/λ 3.Taking trace and applying | Tr( A)| ≤ K ∥A∥op together with submultiplicativity of the operator norm, 
+
+ˆJt(f ) − Jt(f ) ≤ K
+
+ ∥∆C ∥
+
+λ + ∥Ct∥ ∥ ∆Σ∥
+
+λ2 + 4 M 2ε2
+
+> B
+
+λ3
+
+
+
+. (86) Since Ct = E[Hi] with ∥Hi∥ ≤ M 2, we have ∥Ct∥ ≤ M 2. Substituting (83) into (86), 
+
+ˆJt(f ) − Jt(f ) ≤ K ε B
+
+λ + K M 2 εB
+
+λ2 + 4 K M 2 ε2
+
+> B
+
+λ3 ≤ 2 K M 2 εB
+
+λ2
+
+
+
+1 + 2 εB
+
+λ
+
+
+
+, (87) where the second inequality uses λ ≤ M 2 (which follows from Σt ⪯ M 2 I). Expanding εB via (83) and absorbing the higher-order contributions into the second term yields the bound (81). 
+
+A.6. Eigenfunctions for Tractable Priors Proposition A.13 (Eigenfunctions of TtT ∗ 
+
+> t
+
+for Gaussian priors) . Let X0 ∼ N (0, Σ) with eigendecomposition Σ =
+
+Pdk=1 ρk uku⊤ 
+
+> k
+
+, ρ1 ≥ · · · ≥ ρd > 0, and let the forward process be Xt = at X0 + bt ϵ with ϵ ∼ N (0, I) (in the DDPM parameterization, at = √¯αt and bt = √1 − ¯αt). Then the linear functionals 
+
+ϕt,k (xt) := u⊤ 
+
+> k
+
+xt, k = 1 , . . . , d, (88) 
+
+are eigenfunctions of the covariance operator TtT ∗ 
+
+> t
+
+, with eigenvalues 
+
+λt,k = a2 
+
+> t
+
+ρk
+
+a2 
+
+> t
+
+ρk + b2
+
+> t
+
+. (89) 
+
+Proof. Since ϕt,k is linear, both conditional expectations in the composition TtT ∗ 
+
+> t
+
+reduce to matrix operations. 
+
+Inner step ( T ∗ 
+
+> t
+
+). Applying T ∗ 
+
+> t
+
+to ϕt,k and using linearity of conditional expectation, 
+
+(T ∗ 
+
+> t
+
+ϕt,k )( x0) = Eu⊤ 
+
+> k
+
+Xt | X0 = x0
+
+ = u⊤ 
+
+> k
+
+E[Xt | X0 = x0] = at u⊤ 
+
+> k
+
+x0. (90) 
+
+Outer step ( Tt). Applying Tt to the result and using the standard Gaussian conditioning identity E[X0 | Xt = xt] = 
+
+at Σ (a2 
+
+> t
+
+Σ + b2 
+
+> t
+
+I)−1xt,
+
+(TtT ∗ 
+
+> t
+
+ϕt,k )( xt) = Eat u⊤ 
+
+> k
+
+X0 | Xt = xt
+
+
+
+= a2 
+
+> t
+
+u⊤ 
+
+> k
+
+Σ (a2 
+
+> t
+
+Σ + b2 
+
+> t
+
+I)−1 xt. (91) 20 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Since uk is an eigenvector of both Σ (with eigenvalue ρk) and (a2 
+
+> t
+
+Σ + b2 
+
+> t
+
+I)−1 (with eigenvalue (a2 
+
+> t
+
+ρk + b2 
+
+> t
+
+)−1), this simplifies to 
+
+(TtT ∗ 
+
+> t
+
+ϕt,k )( xt) = a2 
+
+> t
+
+ρk
+
+a2 
+
+> t
+
+ρk + b2
+
+> t
+
+u⊤ 
+
+> k
+
+xt = λt,k ϕt,k (xt). (92) 
+
+Proposition A.14 (Eigenfunctions for the uniform prior on S1). Let p0 be the uniform distribution on the unit circle 
+
+S1 ⊂ R2, parameterized as x0(θ) = (cos θ, sin θ) for θ ∈ [0 , 2π), and let p(xt | x0) = N xt; √¯αt x0, (1 − ¯αt) I2
+
+.Then the eigenfunctions of T ∗ 
+
+> t
+
+Tt (equivalently, the right singular functions of Tt), expressed in angle coordinates, are the Fourier modes 
+
+ψt, 1(θ) = 1 , ψt, 2n(θ) = √2 cos( nθ ), ψt, 2n+1 (θ) = √2 sin( nθ ), n = 1 , 2, . . . (93) 
+
+Proof. We show that the kernel of T ∗ 
+
+> t
+
+Tt depends only on the angular difference, which identifies it as a convolution operator on S1 and fixes the eigenfunctions as Fourier modes. 
+
+Kernel of T ∗ 
+
+> t
+
+Tt. In angle coordinates, the operator T ∗ 
+
+> t
+
+Tt : L2(μ0) → L2(μ0) is an integral operator with kernel 
+
+k(θ, θ ′) = 
+
+Z
+
+> R2
+
+p xt | x0(θ) p xt | x0(θ′)
+
+pt(xt) dxt. (94) 
+
+Rotational invariance. We claim that k(θ + α, θ ′ + α) = k(θ, θ ′) for every α, so that k(θ, θ ′) = κt(θ − θ′). Let 
+
+Rα ∈ SO(2) denote rotation by angle α in R2. Since x0(θ + α) = Rα x0(θ) by definition of the angle parameterization, the change of variables xt = Rα u (with dxt = du, as rotations preserve Lebesgue measure) gives 
+
+k(θ + α, θ ′ + α) = 
+
+Z
+
+> R2
+
+p Rαu | Rαx0(θ) p Rαu | Rαx0(θ′)
+
+pt(Rαu) du. (95) We verify each factor separately. 
+
+Forward kernel. Since Rα is an isometry, ∥Rαu − √¯αt Rαv∥ = ∥u − √¯αt v∥, and therefore 
+
+p(Rαu | Rαx0(θ)) = N Rαu; √¯αt Rαx0(θ), (1 − ¯αt) I2
+
+ = p u | x0(θ). (96) 
+
+Marginal. Using the isometry property and the uniformity of p0 = 1 /(2 π),
+
+pt(Rαu) = 12π
+
+Z 2π
+
+> 0
+
+p Rαu | x0(θ′′ ) dθ ′′ = 12π
+
+Z 2π
+
+> 0
+
+p Rαu | Rα x0(θ′′ − α) dθ ′′ 
+
+= 12π
+
+Z 2π
+
+> 0
+
+p u | x0(θ′′ − α) dθ ′′ = pt(u), (97) where the last step uses 2π-periodicity of the integrand. Substituting into (95), 
+
+k(θ + α, θ ′ + α) = 
+
+Z
+
+> R2
+
+p u | x0(θ) p u | x0(θ′)
+
+pt(u) du = k(θ, θ ′). (98) Hence k(θ, θ ′) = κt(θ − θ′), with κt defined by 
+
+κt(∆ θ) := 
+
+Z
+
+> R2
+
+p xt | x0(0)  p xt | x0(∆ θ)
+
+pt(xt) dxt. (99) 21 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+Convolution structure and eigenfunctions. Since k(θ, θ ′) = κt(θ − θ′), the operator T ∗ 
+
+> t
+
+Tt acts on L2(S1) as circular convolution: 
+
+(T ∗ 
+
+> t
+
+Tt f )( θ) = 
+
+Z 2π
+
+> 0
+
+κt(θ − θ′) f (θ′) dθ ′
+
+2π . (100) By the spectral theorem for convolution operators on S1, the eigenfunctions are the Fourier modes {1, cos( nθ ), sin( nθ )}n≥1.Each cos( nθ ) and sin( nθ ) share the same eigenvalue λt,n because κt is real and even (the latter following from k(θ, θ ′) = 
+
+k(θ′, θ ) by symmetry of (94)). The √2 normalization in (93) ensures ∥ψt,k ∥μ0 = 1 .22 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 0 200 400 600 800 1000 
+
+> Diffusion time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Ground-truth eigenvalues
+> λ2
+> λ3
+> λ4
+
+(a) Ground-truth eigenvalues 0 200 400 600 800 1000  
+
+> Diffusion time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Estimated eigenvalues
+> λ2
+> λ3
+> λ4
+
+(b) Estimated eigenvalues 0 200 400 600 800 1000  
+
+> Diffusion time
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> Eigenvalue residuals  λ2
+> λ3
+> λ4
+
+(c) Eigenvalue residuals 0 200 400 600 800 1000  
+
+> Diffusion Time
+> 0.980
+> 0.985
+> 0.990
+> 0.995
+> 1.000
+> Cosine principal angles
+
+(d) Mean cos of principal angles 
+
+Figure 8. Spectral recovery on a centered Gaussian prior in R20 . (a) Closed-form ground-truth eigenvalues of TtT ∗ 
+
+> t
+
+from Proposi-tion A.13. (b) Monte-Carlo estimates produced by fϕ. (c) Absolute residuals between (a) and (b). (d) Mean cosine of the principal angles between the true and estimated leading K = 3 eigenspaces. 
+
+## B. Illustrative Examples 
+
+B.1. Gaussian Prior 
+
+We demonstrate our spectral learning framework on a centered Gaussian prior, where Proposition A.13 gives closed-form expressions for both the eigenvalues and eigenfunctions of TtT ∗ 
+
+> t
+
+, allowing direct comparison with our estimates. 
+
+Setup. The prior p0 is a centered Gaussian on R20 whose covariance spectrum has a geometric decay {40 · 0.7k−1}20 
+
+> k=1
+
+.The forward process follows a linear DDPM schedule with T = 1000 timesteps. We train the eigenfunction network fϕ
+
+(architecture and loss as described in §4.3, with ridge ξ = 0 .001 ) to recover the leading K = 3 non-trivial eigenfunctions of 
+
+TtT ∗ 
+
+> t
+
+, excluding the constant mode (the eigenfunction ϕt, 1 ≡ 1 with eigenvalue 1). 
+
+Results. Fig. 8 reports four diagnostics over diffusion time. Fig. 8(a) shows the leading three ground-truth eigenvalues 
+
+λt, 2, λ t, 3, λ t, 4 from Eq. (89) , and Fig. 8(b) the corresponding Monte-Carlo estimates produced by fϕ; the two curves match closely along the entire trajectory. Fig. 8(c) plots the absolute residuals, which remain below 0.06 and decay as the eigenvalues approach zero at large t. Fig. 8(d) shows the mean cosine of the principal angles between the true leading eigenspace and our estimate: it rises from 0.97 at small t to essentially 1 at large t. This is consistent with the structure of the operator: at small t, TtT ∗ 
+
+> t
+
+is close to identity and the eigengap is small, so the leading eigenspace is weakly identified, while over the second half of the trajectory the cosine stays above 0.995 , indicating near-perfect subspace recovery. 
+
+B.2. Eigenfunction Visualization 
+
+To build intuition for the singular functions learned by the spectral framework, we visualize the right singular functions of Tt on four simple priors: the unit circle S1 ⊂ R2, the uniform square [−0.5, 0.5] 2, the unit disk {x ∈ R2 : ∥x∥ ≤ 1},and an annulus {x ∈ R2 : rin ≤ ∥ x∥ ≤ rout }. In all cases, we train the eigenfunction network as described in §4.3 and visualize the learned right singular functions ψt,k (x0) by coloring each sample x0 from the prior according to the function value ψt,k (x0).For the circle prior , the support is a one-dimensional manifold, and the right singular functions of Tt are the Fourier basis (Proposition A.14). The learned modes, depicted in Figure 9(a), recover this structure: ψt, 2 exhibits two nodal points, and subsequent pairs display progressively higher-frequency oscillations along the circle (the constant eigenfunction is not shown). Modes appear in degenerate pairs, consistent with the rotational symmetry of the prior. For the square prior , the learned modes, shown in Figure 9(b), recover axis-aligned oscillatory patterns of increasing spatial frequency, akin to the Fourier basis. For the disk prior , the support is a two-dimensional manifold with a circular boundary. The learned modes, shown in Figure 9(c), separate into radial and angular components: angular oscillations along θ are modulated by a radial envelope. The rotational symmetry of the prior again yields degenerate pairs of angular modes. For the annulus prior , the learned modes, shown in Figure 9(d), again factor into radial and angular components, but the inner boundary modifies the radial envelope relative to the disk and the angular modes wrap continuously around the hole. Rotational symmetry continues to enforce degenerate pairs. 23 Spectral Guidance for Flexible and Efficient Control of Diffusion Models ψ2 ψ3 ψ4 ψ5 ψ6 ψ7 ψ8 ψ9
+
+> −1
+> 0
+> 1
+
+(a) Circle prior ψ2 ψ3 ψ4 ψ5 ψ6 ψ7 ψ8 ψ9
+
+> −2
+> −1
+> 0
+> 1
+> 2
+
+(b) Square prior ψ2 ψ3 ψ4 ψ5 ψ6 ψ7 ψ8 ψ9
+
+> −2
+> −1
+> 0
+> 1
+> 2
+
+(c) Disk prior ψ2 ψ3 ψ4 ψ5 ψ6 ψ7 ψ8 ψ9
+
+> −2
+> 0
+> 2
+
+(d) Annulus prior 
+
+Figure 9. Learned singular functions on simple manifolds ( t = 100 ). Each row shows the leading 8 right singular functions ψt,k , with samples from the prior colored by function value. On the unit circle, the modes recover the Fourier basis on S1 (Proposition A.14). On the uniform square, they recover axis-aligned oscillations of increasing spatial frequency. On the disk, modes factor into a radial envelope and angular harmonics. On the annulus, the additional inner boundary modifies the radial envelope and the angular modes wrap around the hole. In all cases, spatially smooth modes appear first, and rotationally symmetric priors yield degenerate angular pairs. 
+
+In all four cases, low-frequency (spatially smooth) modes appear first, corresponding to large singular values, while high-frequency modes appear later with diminishing singular values. 24 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+## C. Experiments 
+
+C.1. Training Setup 
+
+We employed a consistent backbone architecture across all datasets. The networks fϕ are parameterized as ResNets, incorporating time modulation via FiLM blocks to condition on the diffusion timestep. 
+
+Datasets and base models. 
+
+• CIFAR-10. We trained fϕ with an output dimension of K = 512 on the standard train split, comprising 50,000 
+
+32 × 32 images across 10 classes. For the diffusion backbone, we used the pre-trained unconditional DDPM pipeline 
+
+google/ddpm-cifar10-32 , available on HuggingFace. • CelebA-HQ. We trained fϕ with an output dimension of K = 512 on the full dataset of 30,000 images, resized to 
+
+256 × 256 . We used the pre-trained unconditional DDPM pipeline google/ddpm-ema-celebahq-256 , available on HuggingFace. • ImageNet. We trained fϕ with an output dimension of K = 2000 on the training split comprising 1,281,167 images, resized to 64 × 64 . We used a 64 × 64 improved-diffusion unconditional DDPM pipeline available on GitHub 1.
+
+Optimization. Training was performed using the Adam optimizer, with the loss described in Algorithm 1. We used an initial learning rate of 10 −4, which was decayed exponentially by a factor of 0.995 every epoch. The ridge parameter to compute the batch whitening matrices Wt was set to ξ = 0 .001 in all experiments. Training on CIFAR-10 and CelebA-HQ was conducted on a single NVIDIA GPU with 48GB of memory (batch size of 2048) while ImageNet training was performed on 4 NVIDIA GPUs with 48GB memory (batch size per GPU of 4096). 
+
+C.2. Label Guidance CIFAR-10. We generated 2,650 samples per class with a DDIM sampler (100 timesteps, η = 1 .0). We used a guidance strength of κ = 10 on Spectral Guidance and the implementations and hyperparameters of all baselines from Ye et al. (2024). Guidance was evaluated across all 10 classes, using an external ConvNext classifier 2. We report the average top-1 accuracy. 
+
+CelebA-HQ. Following the benchmarks established by Ye et al. (2024), we evaluated compositional attribute guidance. We tested two categories of combinations: 1. Gender × Hair Color: (Male/Female) × (Black/Blond Hair) 2. Gender × Age: (Male/Female) × (Young/Old) We generated 256 samples per combined target with a DDIM sampler (100 timesteps, η = 1 .0). We used a guidance strength of κ = 10 on Spectral Guidance. For the baselines, we used the the implementations 3 and hyperparameters from Ye et al. (2024). Accuracy was computed using three external classifiers for Gender 4, Age 5, and Hair Color 6. A generated sample is considered correct only if it satisfies both target attributes simultaneously. 
+
+ImageNet. We evaluated guidance of 4 labels: kuvasz, hamster, bicycle-built-for-two and nematode, following Ye et al. (2024). We generated 256 images per label with a DDIM sampler (400 timesteps, η = 1 .0). We used a guidance strength of 
+
+κ = 30 on Spectral Guidance. Guidance validity was evaluated with a pre-trained DeiT from HuggingFace 7. We report the average top-1 accuracy. 
+
+> 1https://github.com/openai/improved-diffusion
+> 2https://huggingface.co/ahsanjavid/convnext-tiny-finetuned-cifar10
+> 3https://github.com/YWolfeee/Training-Free-Guidance
+> 4https://huggingface.co/rizvandwiki/gender-classification
+> 5https://huggingface.co/ibombonato/swin-age-classifier
+> 6https://huggingface.co/londe33/hair_v02
+> 7https://huggingface.co/facebook/deit-small-patch16-224
+
+25 Spectral Guidance for Flexible and Efficient Control of Diffusion Models               
+
+> (a) Airplane (b) Car (c) Bird (d) Cat (e) Deer
+> (f) Dog (g) Frog (h) Horse (i) Boat (j) Truck
+> Figure 10. CIFAR-10 label-conditioned samples generated via Spectral Guidance ( K= 512 ,ξ= 0 .001 ,κ= 10 .0).
+
+C.3. CLIP Guidance 
+
+We benchmarked open-vocabulary guidance on CelebA-HQ using 15 natural language prompts, detailed in Table 4. These prompts encompass attributes from the original dataset as well as new features such as pose and background. We used the TFG (Ye et al., 2024) implementation of all baselines with the following hyperparameters, found via grid search: • DPS. Guidance strength = 10 .0
+
+• LGD. Guidance strength = 400 .0; Number of samples to estimate posterior: 10 
+
+• FreeDoM. Guidance strength = 20 .0; Nrecur = 2 
+
+• MPGD. Guidance strength = 20 .0;• UGD. Guidance strength = 20 .0; Niter = 5 ; Nrecur = 1 
+
+• TFG. ρ = 30 .0; μ = 1 .0, Nrecur = 2 , Niter = 5 , ¯γ = 0 .001 , Number of samples to estimate posterior: 1 We used a guidance strength of κ = 20 .0 for Spectral Guidance. For all methods, guidance was computed using CLIP ViT-B/32, via the cosine similarity between the predicted clean image and the target text prompt. We generated 100 images per prompt with a DDIM sampler (100 timesteps, η = 1 .0) and report the average VQAScore using llava-v1.5-7b .
+
+C.4. Mask Guidance 
+
+In the mask guidance experiment, we used 1,000 binary hair masks ( 256 × 256 ) from CelebAMask-HQ to guide the generation. Spectral Guidance uses the same model fϕ and precomputed singular functions {Φt}t∈T from the CLIP and label guidance experiments on CelebA-HQ. In contrast, all baselines rely on the BiSeNet 8 segmentation model for guidance. We used the TFG (Ye et al., 2024) implementation of all baselines with the following hyperparameters: • DPS. Guidance strength = 3 .0
+
+• LGD. Guidance strength = 400 .0; Number of samples to estimate posterior: 5
+
+• FreeDoM. Guidance strength = 30 .0; Nrecur = 1 
+
+> 8https://github.com/zllrunning/face-parsing.pytorch
+
+26 Spectral Guidance for Flexible and Efficient Control of Diffusion Models  
+
+> Table 4. Prompts used for CLIP Guidance.
+
+Prompt a man wearing sunglasses a dark haired man with a beard man with a goatee old man wearing sunglasses a woman with dark hair wearing sunglasses a woman with red hair a person with messy hair person with their mouth open person against a white background a young woman wearing a hat a studio headshot a woman wearing eye shadow three-quarter profile portrait a woman with brown hair smiling a man with a receding hairline and a beard • MPGD. Guidance strength = 30 .0;• UGD. Guidance strength = 50 .0; Niter = 5 ; Nrecur = 1 
+
+• TFG. ρ = 30 .0; μ = 1 .0, Nrecur = 1 , Niter = 5 , ¯γ = 0 .001 , Number of samples to estimate posterior: 1 We generated one image per target mask with a DDIM sampler (100 timesteps, η = 1 .0). Guidance validity was evaluated by feeding the generated image to an independent face parsing model from HuggingFace 9 and computing the IoU between the detected hair mask and the target one. Fidelity was assessed via the log KID between the generated images and 1,000 random images from the dataset. 
+
+> 9https://huggingface.co/jonathandinu/face-parsing
+
+27 Spectral Guidance for Flexible and Efficient Control of Diffusion Models 
+
+(a) Man and Old (b) Woman and Old (c) Man and Young (d) Woman and Young 
+
+(e) Man and Black Hair (f) Woman and Black Hair (g) Man and Blond (h) Woman and Blond 
+
+(i) Man and Bangs (j) Woman and Bangs (k) Man and Eyeglasses (l) Gray Hair 
+
+(m) Bald (n) Woman and Smiling (o) Woman and not Smiling (p) Wearing Necktie 
+
+Figure 11. CelebA-HQ attribute conditioned samples generated with Spectral Guidance ( K = 512 , ξ = 0 .001 , κ = 10 .0). 
+
+28
