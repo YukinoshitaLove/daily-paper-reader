@@ -1,0 +1,2625 @@
+Title: DiTTo: Scalable Order-aware All-in-One Image Restoration Agent
+
+URL Source: https://arxiv.org/pdf/2605.30915v1
+
+Published Time: Mon, 01 Jun 2026 00:54:19 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+# DiTTo: Scalable Order-aware All-in-One Image Restoration Agent 
+
+Seungho Choi Jihyong Oh †
+
+CMLab, Chung-Ang University 
+
+> {choiseungho1019,jihyongoh}@cau.ac.kr
+> https://cmlab-korea.github.io/DiTTo/
+
+Abstract 
+
+Real-world images rarely suffer from a single degradation, and the order in which degradations are removed substantially affects the final restora-tion quality, motivating agent-based image restoration (IR), where a vision-language model schedules a pool of pre-built restoration-experts. However, existing training-based agents require O(( N D)2) restoration-expert calls per image to construct the Optimal Restoration-action Trajectory Dataset (ORTD), where N D denotes the number of degradation types in the universe 
+
+D, and couple agent training to a fixed restoration-expert pool, prevent-ing extension to newly introduced restoration-experts without full retrain-ing. To overcome these efficiency and extensibility bottlenecks, we propose 
+
+DiTTo , a novel order-aware image restoration agent framework consisting of the DiTTo Simulator and the DiTTo Agent. The DiTTo Simulator com-bines ∪S-IR for single-step restoration-action simulation and AiO-IQA for per-action quality prediction, reducing ORTD construction to O(N D) simu-lator calls per image; the DiTTo Agent is trained by SFT on the simulator-generated ORTD, followed by Order-aware Restoration Alignment (ORA) 
+
+that aligns degradation identification, restoration-action-ordering, and out-put format along independent axes. This enables plug-and-play scalable extensibility : adding a new restoration-expert requires updating only the lightweight ORA stage. On the MiO-100 evaluation set with up to five concurrent degradations, our DiTTo Agent achieves state-of-the-art multi-degradation restoration quality among previous agent-based IR methods. 
+
+1 Introduction 
+
+Real-world images rarely suffer from a single degradation [10, 30, 32]. Photographs taken outdoors are often affected simultaneously by fog, rain, and sensor noise [8, 10, 37], while indoor or handheld photography commonly combines motion blur and defocus blur with compression artifacts [22, 23]. Despite this, most image restoration (IR) methods assume a single known degradation type [10, 30, 31], and all-in-one approaches [4, 14, 15, 25], although more general, often sacrifice peak performance for broader coverage. As shown in Fig. 1b, our DiTTo Agent removes multi-degradations more thoroughly than prior agent-based all-in-one IR methods. More fundamentally, these methods overlook a critical insight: the order in which degra-dations are removed matters [17, 33]. For example, applying low-light enhancement before de-noising can amplify noise, while performing de-fogging before de-raining can alter the apparent distribution of rain [14, 30]. This motivates an order-aware restoration paradigm that explicitly reasons about the restoration-action-ordering rather than treating degrada-tions as simultaneously addressable. This combinatorial nature naturally motivates agentic IR , in which a vision-language model (VLM) leverages a pool of pre-built restoration-experts          
+
+> †Corresponding author
+> arXiv:2605.30915v1 [cs.CV] 29 May 2026 0.5
+> 0.6
+> 0.7
+> AgenticIR
+> 4KAgent
+> ⋆DiTTo Agent
+> DiTTo Agent
+> JarvisIR
+> Reuse w!"##$
+> %&#
+> ~40x faster vs. JarvisIR
+> Training -free
+> Training -based
+> DiTTo Agent
+> ⋆DiTTo Agent
+> Restoration cost
+> 𝑂 (𝑁 !)
+> 𝑂 (𝑁 !")
+> Extension Time (lower is better)
+> Restoration quality
+> (higher is better)
+> NeurIPS ’25
+> ICL R’25
+> CVPR 25
+
+(a) Quality vs. adaptation cost. Input 4k Agent                              
+
+> JarvisIR ⋆DiTTo Agent
+> Input image with dark
+> and rain
+> DiTTo Agent
+> Input 4k Agent
+> JarvisIR ⋆DiTTo Agent
+> Input image with noise ,
+> dark ,haze ,blur and rain
+> DiTTo Agent
+> Input 4k Agent
+> JarvisIR ⋆DiTTo Agent
+> Input image with dark ,
+> blur and snow
+> DiTTo Agent
+> Input 4k Agent
+> JarvisIR ⋆DiTTo Agent
+> Input image with noise ,
+> dark ,blur and haze
+> DiTTo Agent
+
+(b) Qualitative comparison. 
+
+Figure 1: All-in-One (AiO) image restoration (IR) quality. (a) Reusing the our pre-trained DiTTo SFT checkpoint enables ∼40 × faster adaptation with higher IR quality than training-based JarvisIR [18] when adding a new restoration-expert, showing stronger plug-and-play scalable extensibility . (b) DiTTo Agent removes multi-degradations more thoroughly than prior agent-based AiO IR methods. and sequentially selects which restoration-expert to invoke at each step via structured tool calls, rather than learning a single monolithic restoration network itself. We formalize this setting using the notation in Appendix . B. Let D = {D1, . . . , D N D } de-note a predefined universe of N D degradation types. Given a clean image-state Iclean , a degradation-ordering δ induces a degradation-action-trajectory T δ and produces the ob-served multi-degraded input Iδ 
+
+> j
+
+. While T δ is known by construction during synthetic data generation, the inverse optimal restoration-action-trajectory T δ,∗ must be discovered. At restoration index iR, the optimal step is denoted by ρδ,∗ 
+
+> iR
+
+, and the Optimal Restoration-action Trajectory Dataset (ORTD) consists of restored image-state ( ˜Iδ,∗ 
+
+> iR
+
+) and optimal restoration-action ( ARρδ,∗
+
+> iR
+
+) pairs (˜Iδ,∗ 
+
+> iR
+
+, A Rρδ,∗
+
+> iR
+
+) along T δ,∗. As illustrated in Fig. 2. 1 ⃝, applying restoration-actions in a suboptimal restoration-action-ordering leads to measurably lower IQA scores at intermediate restored image-states, causing early errors to propagate into the final out-put. This challenge has motivated agentic IR [2, 11, 36], where an agent sequentially selects restoration-actions realized by restoration-experts to maximize final restoration quality. A fully capable restoration agent must address two complementary challenges: first, iden-tifying which degradations are present in the input, a capability we term Degradation Perception-Reasoning (Agent DP ); and second, determining their optimal restoration-action-ordering ρδ,∗, which we term Order-aware Restoration (Agent OR ). As shown in Fig. 2. 2 ⃝,the target system is the composition Agent DP +OR , which jointly performs both functions: it reasons over the detected involved type set Dδ ⊆ D and sequentially invokes restoration-actions ARρδ,∗
+
+> iR
+
+at each restoration index iR via structured tool calls to progressively restore the image. Recent agentic IR systems [2, 36, 11] similarly aim toward this combined capability. Although T δ is known when synthesizing training data, its inverse optimal restoration-action-trajectory T δ,∗ is not directly given: at each ˜Iδ 
+
+> iR
+
+, identifying ρδ,∗ 
+
+> iR
+
+requires eval-uating every candidate identifier ρ ∈ Aδ 
+
+> iR
+
+, i.e., applying the corresponding restoration-action ARρ (·) to the current restored image-state and IQA-scoring the resulting next re-stored image-state. Training-free agents perform this search at inference time, incur-ring O(( N D)2) real restoration-expert calls per image and often producing suboptimal restoration-action-trajectories when the search fails to faithfully track real restoration-expert behavior [36, 11]. Training-based agents avoid this inference-time search by transferring it to offline ORTD construction, training a policy on ground-truth image-state and optimal restoration-action pairs and reducing inference to O(N D) real restoration-expert calls. How-ever, existing training-based approaches still require expensive ORTD construction. Each 2Optimal Order                            
+
+> IQA: 0.5977 {D!,…,D",…,D#}IQA: 0.4117
+> Remove '!
+> $,*
+> …
+> Remove '"!
+> $,*
+> ✓Optimal action & expert selection
+> ✓Consistent quality gain
+> ✗Arbitrary action & expert selection
+> ✗Inconsistent quality gain Random Order
+> Restoration
+> IQA: 0.4456 {D!,…,D",…,D#}IQA: 0.3638
+> Remove
+> random '
+> …
+> Remove
+> random '
+> VLLM 𝐴𝑔𝑒𝑛 𝑡 !" DiTTo Agent
+> 𝐴𝑔𝑒𝑛 𝑡 !" #$%
+> Stage1
+> SFT
+> Stage2
+> ORA
+
+1 3 4  
+
+> New SOTA
+> Expert
+> 𝐴𝑔𝑒𝑛 𝑡 !" DiTTo Agent
+> 𝐴𝑔𝑒𝑛 𝑡 !" #$%
+> 𝒟 𝒪 ℛ𝒯 𝒟
+> &'( -*+,'-.
+> Only ORA
+
+5
+
+Importance of Optimal Restoration Order 
+
+Order -Aware Data Generation Pipeline Two -Stage Training for our D𝐢𝐓𝐓𝐨 𝐀𝐠𝐞𝐧𝐭 (𝐴𝑔𝑒𝑛 𝑡 !" #$% )
+
+Scalable Extension to New Experts        
+
+> Trained module
+> Frozen module
+> Repeat until fully restored
+> Union of Single -degradation IR
+> models
+> ∪S-IR
+> Degradation Perception -
+> Reasoning
+> 𝐷𝑃
+> Order -aware Restoration
+> 𝑂𝑅
+> Image Quality Assessment
+> Model
+> IQA
+> restoraDon -acDon pool for
+> degradaDon type 𝐷 !
+> 𝐀 !!
+> %
+> The Optimal Restoration -
+> action Trajectory Dataset
+> 𝒟 𝒪 ℛ𝒯 𝒟
+
+𝐀 &
+
+> %
+
+𝐀 '
+
+> %
+
+𝐀 !0           
+
+> %…
+> Poor result
+> Best result
+> Poor result
+> IQA
+> multi -degraded
+> image
+> Expert -based ORTD
+> (Optimal Restoration Trajectory Dataset)
+> …
+> 𝒟 𝒪 ℛ𝒯 𝒟
+> *+,'-.
+> AiO -IQA ∪S-IR Best result
+> ✓No real expert execution needed
+> ✓O( N) simulator rollouts
+> DiTTo Simulator -based ORTD
+> (Optimal Restoration Trajectory Dataset)
+> Can you clean up
+> this image?
+> I can identify the following degradations present in
+> the image:
+> sensor noise ,defocus blur ,low light degradation.
+> Based on analysis, …
+> {"action": " sensor_noise ", "model": " scunet "}
+> The previous step completed without issues.
+> The remaining degradations are: defocus blur ,low -
+> light degradation . ...
+
+User 
+
+> Sure, here you are
+
+𝐴𝑔𝑒𝑛 𝑡 !" #$% 
+
+2 𝐴𝑔𝑒𝑛 𝑡 !" #$% Inference on Image Restoration              
+
+> New Task
+> Expert
+> ✓Trajectory aligned
+> ✓Expert distribution
+> ✗Trajectory mismatch
+> ✗Simulator distribution
+> ✓Only ORA stage updated
+> ✓ImitAgent reused
+> 𝐷 1
+> n-th degradation type
+> ✗All candidate actions evaluated per step
+> ✗O( N²) exhaustive expert execution scalable approximation
+> of expert trajectories
+> 𝒟 𝒪 ℛ𝒯 𝒟
+> 23445
+> 𝒟 𝒪 ℛ𝒯 𝒟
+> 23445
+> 𝒟 𝒪 ℛ𝒯 𝒟
+> *+,'-. +𝒟 𝒪 ℛ𝒯 𝒟
+> 23445
+> 𝒟 𝒪 ℛ𝒯 𝒟
+> *+,'-. +𝒟 𝒪 ℛ𝒯 𝒟
+> 23445
+> All -in -One Image Quality
+> Assessment Model
+> AiO -IQA
+> Algo. 1 Algo. 2
+> Algo. 3
+> Fig. 3
+
+Figure 2: Overview of DiTTo , an order-aware image restoration agent framework. (1) The same involved degradation type set can yield substantially different IQA scores depending on the restoration-action-ordering, motivating order-aware restoration. (2) At inference time, 
+
+Agent DP +OR identifies the involved degradation types and sequentially invokes restoration-experts via JSON-based tool calls. (3) Prior training-based agents construct DExpert ORTD by evaluating all candidate restoration-actions with real restoration-experts at each restoration index, requiring O(( N D)2) real restoration-expert calls per image. The DiTTo Simulator 
+
+instead constructs DDiTTo ORTD with O(N D) simulator steps by using AiO-IQA to select the highest-scoring restoration-action identifier and ∪S-IR to produce the next restored image-state. (4) The DiTTo Agent is trained in two stages: SFT on DDiTTo ORTD yields checkpoint 
+
+W SFT DiTTo , followed by DPO-based Order-aware Restoration Alignment (ORA) on a small subset of DExpert ORTD to align simulator-generated restoration-action-trajectories with expert-executed restoration-action-trajectories, producing final checkpoint W ORA DiTTo . (5) When a new restoration-expert is added, DiTTo reuses ∪S-IR, AiO-IQA, and W SFT DiTTo , and updates only the efficient ORA stage. ground-truth pair (˜Iδ,∗
+
+iR , A Rρδ,∗
+
+iR
+
+) requires evaluating all candidates in Aδ
+
+iR with real restoration-experts [2, 18, 35] and IQA-scoring their resulting next restored image-states, yielding 
+
+O(( N D)2) real restoration-expert calls per image for offline ORTD pair generation. More-over, because ORTD pair generation is coupled with real restoration-expert calls, adding a new restoration-expert requires regenerating expert-based ORTD pairs and retraining the agent , making these approaches inherently non-modular, which limits their scalability as the restoration-expert pool grows (overview of the full ORTD pair generation is provided in 
+
+Appendix Fig. 5). To address the two bottlenecks of costly offline ORTD pair generation and non-modular restoration-expert extension, we propose DiTTo , an order-aware image restoration agent framework that leverages a learned simulator and a pool of pre-built restoration-experts to construct supervision and efficiently select restoration-actions without coupling agent training to real restoration-expert calls. This design targets two practical requirements for deployable restoration agents: scalable supervision construction and efficient adaptation to an expanding restoration-expert pool. DiTTo consists of the DiTTo Simulator , which con-structs DDiTTo ORTD using ∪S-IR and AiO-IQA, and the DiTTo Agent , which uses these simulator-generated ORTD pairs to learn Agent DP +OR through two-stage training. 
+
+DiTTo Simulator. As illustrated in Fig. 2. 3 ⃝, the DiTTo Simulator replaces O(( N D)2) real restoration-expert calls with O(N D) single-step simulator steps. We denote ORTDs con-3structed by real restoration-experts as DExpert ORTD and those approximated by our proposed sim-ulator as DDiTTo ORTD . The simulator combines ∪S-IR , which approximates the single-restoration effect of a restoration-action, and AiO-IQA , which predicts the quality of the next restored image-state induced by each candidate restoration-action identifier. At each restoration index iR, AiO-IQA selects the highest-scoring candidate as the simulator-approximated op-timal step ρδ,∗ 
+
+> iR
+
+, and ∪S-IR applies the corresponding restoration-action to produce the next restored image-state. The ∪S-IR is built on a novel adaptive frequency-band mixing mech-anism that performs action-conditioned mixing between clean-conditioned and degraded-conditioned features across separate frequency bands. 
+
+DiTTo Agent. Building on DDiTTo ORTD , the DiTTo Agent realizes Agent DP +OR through two-stage training. Stage 1 trains a vision-language model (VLM) via supervised fine-tuning (SFT) on DDiTTo ORTD , yielding the DiTTo-SFT checkpoint weight W SFT DiTTo . Since simulator-generated restoration-action-trajectories may diverge from expert-executed restoration-action-trajectories, Stage 2 applies efficient Order-aware Restoration Alignment (ORA) 
+
+using Direct Preference Optimization (DPO) [26] with a small subset of DExpert ORTD . This produces the final Agent DP +OR , our DiTTo Agent , with final checkpoint weight W ORA DiTTo .When a new restoration-expert is added, DiTTo can reuse ∪S-IR, AiO-IQA, and W SFT DiTTo ,and quickly updates W ORA DiTTo only with efficient ORA stage. As shown in Fig. 1a, this en-ables ∼40 × faster adaptation with higher IR quality than training-based JarvisIR [18] when a new restoration-expert is added. 
+
+Contributions. 
+
+• We propose DiTTo , a novel order-aware image restoration agent framework that decouples agent training from real restoration-expert calls through a learned sim-ulator, enabling scalable ORTD construction and plug-and-play restoration-expert extensibility. 
+
+• We introduce DiTTo Simulator , which combines ∪S-IR for single-degradation restoration-action simulation and AiO-IQA for IQA-based next-state scoring, reduc-ing ORTD pair generation from O(( N D)2) real restoration-expert calls to O(N D)
+
+simulator steps per image. 
+
+• We propose DiTTo Agent , trained by large-scale SFT on our efficiently constructed 
+
+DDiTTo ORTD followed by efficient DPO-based Order-aware Restoration Alignment (ORA) 
+
+on a small subset of DExpert ORTD , enabling fast plug-and-play adaptation to new restoration-experts. 
+
+• Extensive experiments show that our DiTTo Agent achieves state-of-the-art multi-degradation restoration quality, and is the only agentic IR framework that si-multaneously supports O(N D) ORTD pair generation and efficient plug-and-play restoration-expert extensibility. 
+
+Table 1: Comparison of image restoration approaches. Here, N D = |D| denotes the number of degradation types in the predefined degradation universe, and ORTD denotes the Optimal Restoration-action Trajectory Dataset used to supervise order-aware restoration agents.                            
+
+> Agent All-in-one Training-free Training-based DiTTo (ours)
+> Order-aware restoration ×△✓✓
+> Restoration inference cost O(1) O(( ND)2)O(ND)O(ND)
+> ORTD pair generation cost ––O(( ND)2)O(ND)
+> Plug-and-play extensibility ×△×✓
+> ✓: Supported △: Partial (fixed heuristics) ×: Not supported –: Not applicable
+
+Related Works. Tab. 1 summarizes how DiTTo differs from prior multi-degradation IR paradigms in terms of order-aware restoration, inference cost, ORTD pair generation cost, and plug-and-play extensibility; a detailed discussion of Related Works is deferred to Ap-pendix . A. 42 Method 
+
+2.1 Overview 
+
+As introduced in Sec. 1, the overall DiTTo framework (Fig. 2) consists of two components: the 
+
+DiTTo Simulator and the DiTTo Agent . The DiTTo Simulator scalably constructs DDiTTo ORTD 
+
+via two modules: ∪S-IR , which instantiates the single-step simulator Sθ , and AiO-IQA , which instantiates the IQA-based scoring model fψ over candidate identifiers in Aδ 
+
+> iR
+
+.The DiTTo Agent is then trained in two stages: Stage 1 performs SFT on DDiTTo ORTD to obtain the DiTTo-SFT checkpoint W SFT DiTTo , and Stage 2 applies Order-aware Restoration Alignment (ORA) via DPO [26] on a small subset of DExpert ORTD to obtain the final Agent DP +OR 
+
+checkpoint W ORA DiTTo , while ∪S-IR, AiO-IQA, and W SFT DiTTo remain reusable for plug-and-play restoration-expert adaptation. 
+
+Problem Formulation Following the notation in Sec. B and Sec. 1, we formulate multi-degradation IR as a sequential decision-making problem for order-aware restoration. Given an observed multi-degraded image-state Iδ 
+
+> j
+
+produced by a hidden degradation-ordering δ
+
+over Dδ ⊆ D, the restoration-action-trajectory T δ,ρδ
+
+removes the j = |Dδ | degradations step by step ( iR = j, j −1, . . . , 1). At restoration index iR, a step is specified by an identifier ρδ 
+
+> iR
+
+= ( Dδ 
+
+> iR
+
+, i EDδ
+
+> iR
+
+) ∈ Aδ 
+
+> iR
+
+, and the corresponding restoration-action ARρδ
+
+> iR
+
+(·) produces ˜Iδ  
+
+> iR−1
+
+= ARρδ
+
+> iR
+
+(˜Iδ 
+
+> iR
+
+), removing Dδ 
+
+> iR
+
+from the remaining-type set and determining the next candidate set Aδ 
+
+> iR−1
+
+. Given an image-quality score Q (higher is better) and the set Pδ of all valid restoration-action-orderings, the optimal restoration-action-ordering ρδ,∗ = ( ρδ,∗ 
+
+> iR
+
+)1  
+
+> iR=j
+
+is the element of Pδ whose induced 
+
+T δ,∗ attains the highest Q on ˜Iδ,∗ 
+
+> 0
+
+, and T δ,∗ induces DORTD = ⋃ 
+
+> δ
+
+{(˜Iδ,∗ 
+
+> iR
+
+, A Rρδ,∗
+
+> iR
+
+(·)) }1  
+
+> iR=j
+
+.As discussed in Sec. 1, constructing DExpert ORTD directly costs O(( N D)2) real restoration-expert calls per image and couples ORTD pair generation to a fixed restoration-expert set. DiTTo addresses these two bottlenecks by constructing a scalable DDiTTo ORTD with the DiTTo Simulator and using a small subset of DExpert ORTD only for our proposed ORA. 
+
+2.2 DiTTo Simulator 
+
+As shown in Fig. 3, the DiTTo Simulator consists of two complementary modules, ∪S-IR 
+
+and AiO-IQA . Together, these modules construct DDiTTo ORTD with only O(N D) simulator steps per image, avoiding exhaustive real restoration-expert calls. 
+
+2.2.1 ∪S-IR: Single-degradation Restoration Simulator 
+
+The purpose of ∪S-IR is not to serve as the final restoration model, but to provide a cheap single-restoration approximation of heterogeneous restoration-experts. Given a current re-stored image-state ˜Iδ 
+
+> iR
+
+and a candidate restoration-action identifier ρ ∈ Aδ 
+
+> iR
+
+, ∪S-IR predicts ̂
+
+Iδ  
+
+> iR−1,ρ
+
+= Sθ
+
+(˜Iδ 
+
+> iR
+
+, ρ 
+
+)
+
+, where the degradation type specified by ρ is removed while the other remaining degradations are preserved. This single-restoration is crucial for training AiO-IQA: obtaining candidate scores with real restoration-experts would require applying all candidates at each restoration index, reintroducing the O(( N D)2) real expert cost. By replacing these expert calls with inexpensive simulator steps, ∪S-IR makes large-scale can-didate supervision feasible. We implement ∪S-IR with action-conditioned clean/degraded feature mixing, where clean-conditioned features provide restoration cues for the target degradation and degraded-conditioned features help preserve non-target degradations. The architecture, conditioning scheme, frequency-band selective gating, and training objective of ∪S-IR are provided in 
+
+Appendix . D. 5AiO -IQA ∪S-IR                   
+
+> Current image -state
+> 𝐼 "!𝑹
+> 𝜹
+> degradation -action -trajectory
+> 𝑇 𝜹
+> Deblur
+> Denois e
+> Dehaze
+> Derain …
+> Predicts next -state quality
+> for all candidate actions
+> Approximates single -step restoration
+> while preserving remaining degradations
+> Single -restored image -state
+> 𝐼 "!𝑹 #$
+> 𝜹 ,*
+> 𝐼 "!𝑹
+> 𝜹
+> ①Trained first ②Trained with frozen ∪S-IR
+> Collections of ∪S-IR output (Restored candidates)
+> + IQA scores
+> Solid arrows: DiTTo -based ORTD construcKon
+> Dashed arrows: module training dependency
+> Best
+> restoration -action
+> ①
+> ②
+> 𝒟 𝒪 ℛ𝒯 𝒟
+> #$%%& =({𝐼 '!
+> 𝜹 ,∗+,𝐴 *"!
+> 𝜹 ,∗
+> +⋅}'!,-
+> .
+> 𝜹
+> ②
+> 𝒒 1'!
+> 𝜹
+> 𝒮 /
+> 𝑓 0
+
+Figure 3: Overview of the DiTTo Simulator , which constructs DDiTTo ORTD without exhaustive real restoration-expert calls. The simulator consists of two modules: ∪S-IR , instantiated as the single-degradation restoration simulator Sθ , and AiO-IQA , instantiated as the IQA-based scoring model fψ . ∪S-IR is first trained to approximate the next restored image-state induced by a candidate restoration-action identifier ρ ∈ Aδ 
+
+> iR
+
+, and is then frozen when training AiO-IQA. Given the current restored image-state ˜Iδ 
+
+> iR
+
+and the degradation-action-trajectory T δ , AiO-IQA predicts per-action quality scores ˆqδ 
+
+> iR
+
+over Aδ 
+
+> iR
+
+. The highest-scoring identifier ρδ 
+
+> iR
+
+is selected, and Sθ applies the corresponding restoration-action to produce 
+
+˜Iδ 
+
+> iR−1
+
+. Repeating this procedure from iR = j to 1 constructs DDiTTo ORTD with only O(N D)
+
+simulator steps per image. The training of ∪S-IR, training of AiO-IQA with frozen ∪S-IR, and construction of DDiTTo ORTD are detailed in Algorithms 1, 2, and 3, respectively. 
+
+2.2.2 AiO-IQA: All-in-One Restoration-Action Scoring 
+
+Although ∪S-IR makes single-restoration simulation cheap, using it to evaluate all candidate restoration-actions at every restoration index would still be inefficient for large-scale ORTD construction. AiO-IQA removes this remaining bottleneck by directly predicting per-action quality scores from the current restored image-state and the degradation-action-trajectory of the instance. Given ˜Iδ 
+
+> iR
+
+, T δ , and Aδ 
+
+> iR
+
+, AiO-IQA outputs ˆqδ 
+
+> iR
+
+= fψ
+
+(˜Iδ 
+
+> iR
+
+, T δ
+
+)
+
+∈ [0 , 1] |Aδ 
+
+> iR|
+
+,
+
+where each entry is aligned with one candidate restoration-action in Aδ 
+
+> iR
+
+under a fixed enumeration and estimates the quality of the next restored image-state induced by the cor-responding restoration-action ARρ (·). The simulator-approximated optimal step is selected as ρδ,∗ 
+
+> iR
+
+= argmax ρ∈Aδ
+
+> iR
+
+ˆqδ 
+
+> iR
+
+[ρ]. Only the corresponding restoration-action ARρδ,∗
+
+> iR
+
+is applied through ∪S-IR to produce the next restored image-state. Repeating this procedure from 
+
+iR = j to 1 constructs one DiTTo-based restoration-action-trajectory using O(N D) simula-tor steps per image. AiO-IQA is trained to approximate the IQA-based ranking of candidate restoration-actions. For supervision, ∪S-IR first generates one-step candidate next states, which are scored by a fixed ensemble of full-reference and no-reference IQA metrics. The model then learns to predict the relative quality of candidate restoration-actions directly from the current restored image-state and the degradation-action-trajectory T δ . The metric ensemble, score normalization, ranking objective, and architecture details of fψ are provided in Appendix . E. 
+
+2.3 Two-Stage DiTTo Agent Training 
+
+The DiTTo Agent is a VLM trained to perform Degradation Perception-Reasoning, Order-aware Restoration, and structured tool use, leveraging a pool of restoration-experts rather than learning a restoration network itself. It receives the observed multi-degraded image-state and produces a sequence of restoration-action tool calls, each specifying which degra-dation type to remove and which restoration-expert to invoke. We train the agent with Stage 1 SFT and Stage 2 ORA. 
+
+Stage 1: SFT on DiTTo-based ORTD. Using the trained DiTTo Simulator, we construct 
+
+DDiTTo ORTD by the procedure described in Sec. 2.2. The resulting image-state and optimal restoration-action pairs are converted into multi-turn tool-use conversations, in which the 6agent reasons about the current degradation state and produces a structured restoration-action call as a JSON-based tool call ( Appendix . F). SFT on these conversations yields the DiTTo-SFT checkpoint W SFT DiTTo , which acquires Degradation Perception-Reasoning, Order-aware Restoration, and structured tool use. 
+
+Stage 2: Order-aware Restoration Alignment (ORA). Stage 1 is supervised by simulator-generated restoration-action-trajectories from DDiTTo ORTD , whereas deployment relies on real restoration-experts whose single-restoration may differ from the simulator Sθ . To reduce this simulator-to-expert gap, Stage 2 refines the agent’s planning ability for order-aware restora-tion, including degradation perception, restoration-action-ordering, restoration-expert selec-tion, and JSON-based tool-call validity. A standard DPO objective treats each restoration-action-trajectory response as a single 
+
+chosen -versus-rejected sequence and optimizes one response-level preference margin. How-ever, in our setting, chosen and rejected responses often share most reasoning and JSON-template tokens, while differing only in trajectory-relevant parts, such as Dδ , πδ , πδ 
+
+> iR
+
+, and JSON-based tool-call validity. This can dilute the preference signal needed for order-aware restoration. To overcome this, ORA computes preference margins over decomposed planning axes rather than over the entire response at once. Specifically, we decompose each response into DP, OR, and tool-call axes, corresponding to Degradation Perception-Reasoning, Order-aware Restoration, and JSON-based tool use, respectively, and align chosen and rejected responses axis-wise. We construct a small expert-executed ORTD subset DExpert ORTD as chosen trajectories and pair them with simulator-generated or perturbed rejected trajectories for DPO-based ORA. The detailed DPO formulations, decomposed axes construction, weighting scheme for decomposed axes, and rejected-response variants are provided in Appendix . F. 
+
+Plug-and-Play Restoration-Expert Extensibility. The two-stage design decouples large-scale agent training from the concrete real restoration-expert set. When a new restoration-expert is added, DiTTo can reuse ∪S-IR, AiO-IQA, and W SFT DiTTo , and updates only the efficient ORA stage with a small Expert-based ORTD subset involving the new restoration-expert. Thus, DiTTo avoids rerunning the full ORTD pair generation pipeline, unlike prior training-based agents whose supervision is tied to a fixed restoration-expert set. 
+
+3 Experiments 
+
+The restoration-expert pool, training data construction, and implementation details (VLM backbone, LoRA configuration, optimizer, and training schedule for ∪S-IR, AiO-IQA, SFT, and ORA) are provided in Appendix .
+
+Evaluation Dataset. We evaluate all methods on the MiO-100 evaluation set introduced by MiOIR [14]. Following the standard multi-degradation IR protocol [14, 36], we synthesize multi-degraded inputs by injecting j ∈ { 2, 3, 4, 5} degradations from the involved type set D
+
+into each clean image, where D covers six degradation types: sensor noise, low-light degra-dation, fog, defocus blur, rain streaks, and snow. For each j, we sample six representative degradation-type combinations from D and apply each combination to all 100 clean images, yielding 600 multi-degraded test images per j and 2,400 in total. 
+
+Baselines and Restoration-Expert Pool. We compare DiTTo Agent against two categories of multi-degradation IR methods. The first is All-in-One IR : AirNet [15], PromptIR [25], MiOIR [14], DA-CLIP [20], InstructIR [4], and AutoDIR [12]. The second is agent-based IR : AgenticIR [36], 4KAgent [38], and JarvisIR [18]. For a fair head-to-head comparison, 
+
+DiTTo Agent uses the same restoration-expert pool as JarvisIR [18], while ⋆DiTTo Agent 
+
+extends this pool with recent state-of-the-art restoration-experts to demonstrate plug-and-play scalable extensibility. 
+
+Evaluation Metrics. We report four no-reference image-quality metrics on the final re-stored image-state ˜Iδ,∗ 
+
+> 0
+
+: MUSIQ [13], MANIQA [29], CLIP-IQA+ [27], and NIQE [21]. For each j, all numbers are averaged over the six combinations and 100 clean images per com-bination. 7Table 2: Quantitative comparison on the MiO-100 evaluation set with j ∈ { 2, 3, 4, 5} concur-rent degradations. We report no-reference image-quality metrics on the final restored image-state ˜Iδ,∗ 
+
+> 0
+
+. DiTTo Agent uses the same restoration-expert pool as JarvisIR, while ⋆DiTTo Agent uses the extended restoration-expert pool. We highlight the best , second-best , and third-best results. 2 Degradations 3 Degradations Method MUSIQ ↑ MANIQA ↑ CLIP-IQA+ ↑ NIQE ↓ MUSIQ ↑ MANIQA ↑ CLIP-IQA+ ↑ NIQE ↓                                                                                
+
+> All-in-One Methods
+> AirNet [15] 59.85 0.3980 0.5410 8.323 41.60 0.2887 0.4221 9.699 PromptIR [25] 62.95 0.3810 0.5441 5.823 53.38 0.2808 0.4078 6.162 MiOIR [14] 62.89 0.3906 0.5481 5.682 52.41 0.2815 0.4040 6.075 DA-CLIP [20] 57.12 0.3536 0.5470 7.737 46.78 0.2983 0.4714 9.016 InstructIR [4] 64.08 0.4139 0.4827 7.912 46.53 0.2697 0.3440 9.221 AutoDIR [12] 64.04 0.3667 0.5113 7.326 52.29 0.3184 0.3985 8.537
+> Agent-based Methods
+> AgenticIR [36] 63.10 0.5170 0.6595 6.038 61.20 0.4585 0.6010 6.587 4KAgent [38] 67.20 0.5640 0.7165 5.612 65.40 0.5025 0.6555 6.121 JarvisIR [18] 69.34 0.5973 0.7464 5.366 67.54 0.5331 0.6845 5.862 DiTTo Agent 69.40 0.6457 0.7762 5.475 67.09 0.5823 0.7126 5.962
+
+⋆DiTTo Agent 71.76 0.7127 0.8393 5.208 70.65 0.6855 0.8101 5.773 4 Degradations 5 Degradations Method MUSIQ ↑ MANIQA ↑ CLIP-IQA+ ↑ NIQE ↓ MUSIQ ↑ MANIQA ↑ CLIP-IQA+ ↑ NIQE ↓                                                                                
+
+> All-in-One Methods
+> AirNet [15] 42.98 0.3018 0.4361 9.946 46.81 0.3341 0.4922 11.346 PromptIR [25] 53.32 0.2721 0.4744 7.081 58.20 0.3028 0.5515 6.527 MiOIR [14] 54.16 0.2795 0.4850 6.688 58.99 0.3093 0.5528 6.430 DA-CLIP [20] 48.33 0.3119 0.4870 9.245 52.63 0.3453 0.5495 10.547 InstructIR [4] 48.07 0.2820 0.3554 9.455 52.35 0.3121 0.4011 10.787 AutoDIR [12] 54.03 0.3329 0.4118 8.755 58.83 0.3685 0.4646 9.988
+> Agent-based Methods
+> AgenticIR [36] 63.50 0.5145 0.6635 5.864 64.55 0.5325 0.6755 5.989 4KAgent [38] 67.95 0.5615 0.7225 5.428 69.10 0.5818 0.7355 5.547 JarvisIR [18] 70.25 0.5971 0.7535 5.167 71.36 0.6191 0.7677 5.292 DiTTo Agent 70.31 0.6402 0.7751 5.292 69.34 0.6270 0.7690 5.224
+
+⋆DiTTo Agent 71.84 0.7163 0.8443 5.160 72.27 0.7241 0.8509 5.188 
+
+3.1 Quantitative and Qualitative Comparison Quantitative results. Tab. 2 shows that agent-based IR methods consistently outperform All-in-One methods across different numbers of concurrent degradations, confirming the advantage of sequentially invoking restoration-experts for multi-degradation restoration. Among methods using the same restoration-expert pool, DiTTo Agent consistently out-performs previous agent-based IR methods on the final restored image-state ˜Iδ,∗ 
+
+> 0
+
+. This demonstrates that learning Agent DP +OR from simulator-generated ORTD pairs and further aligning it through Order-aware Restoration Alignment (ORA) yields more effective Order-aware Restoration and restoration-expert selection than existing agent-based IR pipelines. With the extended restoration-expert pool, ⋆DiTTo Agent further improves restoration qual-ity, validating the plug-and-play scalable extensibility of the proposed framework. 
+
+Qualitative results. Fig. 4 shows qualitative comparisons on challenging multi-degraded inputs containing haze, blur, rain, noise, and snow. Compared with 4K Agent and JarvisIR, DiTTo Agent more consistently removes mixed degradations while preserving semantic struc-tures and fine textures, producing clearer details, more natural colors, and sharper object boundaries. These results suggest that the proposed order-aware restoration policy effec-tively improves perceptual restoration quality. Additional qualitative comparisons are pro-vided in Appendix . I. 
+
+3.2 Ablation Studies Effect of Order-aware Restoration Alignment. Tab. 3a validates the effectiveness of ORA. Variant A, trained only with SFT on DDiTTo ORTD , performs the worst because it learns simulator-generated restoration-action-trajectories without alignment to real restoration-experts. Since this SFT-only agent cannot perform real restoration-expert selection, we 8Input 4k Agent 
+
+JarvisIR ⋆DiTTo Agent 
+
+Input image with noise ,
+
+haze , blur and snow 
+
+DiTTo Agent Input 4k Agent 
+
+JarvisIR ⋆DiTTo Agent 
+
+Input image with haze ,
+
+blur and rain 
+
+DiTTo Agent 
+
+Input 4k Agent 
+
+JarvisIR ⋆DiTTo Agent 
+
+Input image with noise ,
+
+blur and rain 
+
+DiTTo Agent Input 4k Agent 
+
+JarvisIR ⋆DiTTo Agent 
+
+Input image with haze 
+
+and blur 
+
+DiTTo Agent Figure 4: Qualitative comparison on multi-degraded images shows that DiTTo Agent more effectively removes mixed degradations while preserving natural textures and semantic de-tails. 
+
+Table 3: Ablation study on Order-aware Restoration Alignment (ORA). (a): Effect of ORA compared with SFT-only and Generic DPO. (b): Effect of each decomposed planning axis in ORA ((a).C). DP, OR, and Tool denote Degradation Perception-Reasoning, Order-aware Restoration, and JSON-based tool-call format, respectively. We report no-reference image-quality metrics on the final restored image-state ˜Iδ,∗ 
+
+> 0
+
+. We highlight the best and second-best results. 
+
+(a) Order-aware Restoration Alignment.                             
+
+> Variant Method MUSIQ ↑MANIQA ↑CLIP-IQA+ ↑NIQE ↓
+> AAgent DP (SFT only) 60.03 0.5083 0.5944 7.085 BAgent DP + Generic DPO [26] 67.21 0.5512 0.6984 5.157 CAgent DP +OR (ours) 69.40 0.6457 0.7762 5.475
+
+(b) Per-axis ablation of ORA.                                       
+
+> Variant DP OR Tool MUSIQ ↑MANIQA ↑CLIP-IQA+ ↑NIQE ↓
+> B.1 ×✓✓65.21 0.5735 0.6863 6.757 B.2 ✓×✓66.17 0.5958 0.7099 7.032 B.3 ✓✓×68.65 0.6504 0.7668 6.235 C✓✓✓69.40 0.6457 0.7762 5.475
+
+parse only the predicted degradation type and select the restoration-expert using IQA-best matching for evaluation. Variant B improves over Variant A, showing that DPO is useful for reducing the simulator-to-expert gap. However, Variant C achieves the best overall fi-nal restored image-state quality, demonstrating that ORA is more effective than Generic DPO by aligning chosen and rejected responses over decomposed planning axes rather than optimizing a single response-level margin. 
+
+Effect of each decomposed planning axis. Tab. 3b analyzes the contribution of each decomposed planning axis in ORA. Removing the DP axis in Variant B.1 substantially degrades final restoration quality, indicating that Degradation Perception-Reasoning is nec-essary for identifying the involved degradation type set Dδ before order-aware restoration. Removing the OR axis in Variant B.2 also leads to clear degradation, confirming that Order-aware Restoration is a core factor in multi-degradation restoration. Removing the Tool axis in Variant B.3 preserves relatively strong image-quality scores, but still underperforms the full ORA variant on most metrics, suggesting that JSON-based tool-call format mainly stabilizes structured tool use rather than replacing the need for DP and OR alignment. Variant C, which uses all three decomposed planning axes, achieves the best overall perfor-mance, demonstrating that Degradation Perception-Reasoning, Order-aware Restoration, and JSON-based tool-call format provide complementary alignment signals. 9Table 4: Per-stage adaptation cost on 2×B200. Both methods share the same SFT pipeline; the savings come from data generation and alignment. Stage JarvisIR [18] Speedup DiTTo (ours) Data generation ∼460 ∼45 × ∼10 SFT ∼37 1× ∼37 Alignment ∼410 ∼37 × ∼11    
+
+> End-to-end ∼907 ∼15 ×∼60
+
+Plug-and-Play Restoration-Expert Extensibility. Our two-stage design decouples agent training from the concrete real-expert set, enabling cheap adaptation when the expert pool changes. We measure adaptation speed , i.e., the wall-clock hours to produce a deployable agent for a new expert pool, on 2×B200 with training corpus, batch configuration, and hardware matched across both methods. We focus on speed alone, as restoration quality is confounded by model capacity and a full JarvisIR run is prohibitively slow. Tab. 4 decomposes the cost into three stages. (1) Data generation :JarvisIR enumerates real-expert chains per image with repeated expert execution and IQA scoring; DiTTo replaces this with a single greedy traversal of ∪S-IR ( ∼45 ×). (2) SFT :matched by construction. (3) Alignment : JarvisIR’s MRRHF [18] runs online beam-search, expert execution, and multi-metric IQA at every step; DiTTo’s ORA is offline DPO over pre-computed ORTD pairs, eliminating all three per-step costs ( ∼37 ×). End-to-end, adapting to a new expert costs ∼907h for JarvisIR versus ∼60h for DiTTo, a ∼15 ×
+
+reduction that validates the plug-and-play property. Restoration-quality results under both expert-pool and degradation-universe extensions are reported in Appendix . J. 
+
+4 Conclusion 
+
+We presented DiTTo , a scalable order-aware image restoration agent framework for multi-degradation All-in-One image restoration. DiTTo constructs DDiTTo ORTD with the DiTTo Sim-ulator , reducing ORTD pair generation from exhaustive real restoration-expert calls to 
+
+O(N D) simulator steps per image. The DiTTo Agent is then trained by Stage 1 SFT and Stage 2 Order-aware Restoration Alignment (ORA) , which aligns DP, OR, and tool-call axes to reduce the simulator-to-expert gap. This design enables plug-and-play scalable ex-tensibility by reusing ∪S-IR, AiO-IQA, and W SFT DiTTo when adding new restoration-experts. Experiments on MiO-100 validate the effectiveness of DiTTo for state-of-the-art agent-based multi-degradation restoration. A short demo video illustrating the end-to-end inference of DiTTo Agent on real multi-degraded images is included in the supplementary material. 
+
+References 
+
+[1] E. Agustsson and R. Timofte. Ntire 2017 challenge on single image super-resolution: Dataset and study. In Proceedings of the IEEE conference on computer vision and pattern recognition workshops , pages 126–135, 2017. [2] H. Chen, W. Li, J. Gu, J. Ren, S. Chen, T. Ye, R. Pei, K. Zhou, F. Song, and L. Zhu. Restoreagent: Autonomous image restoration agent via multimodal large language models. 
+
+Advances in Neural Information Processing Systems , 37:110643–110666, 2024. [3] I.-H. Chen, I. Hadji, E. Sanchez, A. Bulat, S.-Y. Kuo, R. Timofte, G. Tzimiropoulos, and B. Martinez. Restore, assess, repeat: A unified framework for iterative image restoration. 
+
+arXiv preprint arXiv:2603.26385 , 2026. [4] M. V. Conde, G. Geigle, and R. Timofte. Instructir: High-quality image restoration following human instructions. In European Conference on Computer Vision , pages 1–21. Springer, 2024. [5] Z. Duan, J. Zhang, X. Jin, Z. Zhang, Z. Xiong, D. Zou, J. S. Ren, C. Guo, and C. Li. Dit4sr: Taming diffusion transformer for real-world image super-resolution. arXiv preprint arXiv:2503.23580 , 2025. [6] P. Esser, S. Kulal, A. Blattmann, R. Entezari, J. Müller, H. Saini, Y. Levi, D. Lorenz, A. Sauer, F. Boesel, D. Podell, T. Dockhorn, Z. English, and R. Rombach. Scaling rectified flow trans-formers for high-resolution image synthesis. In Forty-first International Conference on Machine Learning , 2024. [7] S. Gu, A. Lugmayr, M. Danelljan, M. Fritsche, J. Lamour, and R. Timofte. Div8k: Diverse 8k resolution image dataset. In 2019 IEEE/CVF International Conference on Computer Vision Workshop (ICCVW) , pages 3512–3516. IEEE, 2019. 
+
+10 [8] K. He, J. Sun, and X. Tang. Single image haze removal using dark channel prior. IEEE transactions on pattern analysis and machine intelligence , 33(12):2341–2353, 2010. [9] M. Hodosh, P. Young, and J. Hockenmaier. Framing image description as a ranking task: Data, models and evaluation metrics. Journal of Artificial Intelligence Research , 47:853–899, 2013. [10] J. Jiang, Z. Zuo, G. Wu, K. Jiang, and X. Liu. A survey on all-in-one image restoration: Taxonomy, evaluation and future trends. IEEE Transactions on Pattern Analysis and Machine Intelligence , 47(12):11892–11911, 2025. [11] X. Jiang, G. Li, B. Chen, and J. Zhang. Multi-agent image restoration. arXiv preprint arXiv:2503.09403 , 2025. [12] Y. Jiang, Z. Zhang, T. Xue, and J. Gu. Autodir: Automatic all-in-one image restoration with latent diffusion. In European Conference on Computer Vision , pages 340–359. Springer, 2024. [13] J. Ke, Q. Wang, Y. Wang, P. Milanfar, and F. Yang. Musiq: Multi-scale image quality transformer. In Proceedings of the IEEE/CVF international conference on computer vision ,pages 5148–5157, 2021. [14] X. Kong, C. Dong, and L. Zhang. Towards effective multiple-in-one image restoration: Asequential and prompt learning strategy. arXiv preprint arXiv:2401.03379 , 2024. [15] B. Li, X. Liu, P. Hu, Z. Wu, J. Lv, and X. Peng. All-in-one image restoration for unknown corruption. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 17452–17462, June 2022. [16] B. Lim, S. Son, H. Kim, S. Nah, and K. Mu Lee. Enhanced deep residual networks for single image super-resolution. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshops , pages 136–144, 2017. [17] X. Lin, J. He, Z. Chen, Z. Lyu, B. Dai, F. Yu, Y. Qiao, W. Ouyang, and C. Dong. Diffbir: Toward blind image restoration with generative diffusion prior. In European conference on computer vision , pages 430–448. Springer, 2024. [18] Y. Lin, Z. Lin, H. Chen, P. Pan, C. Li, S. Chen, K. Wen, Y. Jin, W. Li, and X. Ding. Jarvisir: Elevating autonomous driving perception with intelligent image restoration. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 22369–22380, 2025. [19] J. Lu, Y. Wu, Z. Zhao, H. Wang, F. Jimenez, A. Majeedi, and Y. Fu. Simplecall: A lightweight image restoration agent in label-free environments with mllm perceptual feedback. arXiv preprint arXiv:2512.18599 , 2025. [20] Z. Luo, F. K. Gustafsson, Z. Zhao, J. Sjölund, and T. B. Schön. Controlling vision-language models for multi-task image restoration. In The Twelfth International Conference on Learning Representations , 2024. [21] A. Mittal, R. Soundararajan, and A. C. Bovik. Making a completely blind image quality analyzer. IEEE Signal processing letters , 20(3):209–212, 2012. [22] S. Nah, T. Hyun Kim, and K. Mu Lee. Deep multi-scale convolutional neural network for dynamic scene deblurring. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 3883–3891, 2017. [23] S. Nah, S. Son, S. Lee, R. Timofte, K. M. Lee, L. Chen, J. Zhang, X. Lu, X. Chu, C. Chen, et al. Ntire 2021 challenge on image deblurring. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 149–165, 2021. [24] E. Perez, F. Strub, H. De Vries, V. Dumoulin, and A. Courville. Film: Visual reasoning with a general conditioning layer. In Proceedings of the AAAI conference on artificial intelligence ,volume 32, 2018. [25] V. Potlapalli, S. W. Zamir, S. H. Khan, and F. Shahbaz Khan. Promptir: Prompting for all-in-one image restoration. In A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine, editors, Advances in Neural Information Processing Systems , volume 36, pages 71275–71293. Curran Associates, Inc., 2023. 
+
+11 [26] R. Rafailov, A. Sharma, E. Mitchell, C. D. Manning, S. Ermon, and C. Finn. Direct preference optimization: Your language model is secretly a reward model. Advances in neural information processing systems , 36:53728–53741, 2023. [27] J. Wang, K. C. Chan, and C. C. Loy. Exploring clip for assessing the look and feel of images. In Proceedings of the AAAI conference on artificial intelligence , volume 37, pages 2555–2563, 2023. [28] Z. Wang, A. C. Bovik, H. R. Sheikh, E. P. Simoncelli, et al. Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing , 13(4):600–612, 2004. [29] S. Yang, T. Wu, S. Shi, S. Lao, Y. Gong, M. Cao, J. Wang, and Y. Yang. Maniqa: Multi-dimension attention network for no-reference image quality assessment. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 1191–1200, 2022. [30] M. Yao, R. Xu, Y. Guan, J. Huang, and Z. Xiong. Neural degradation representation learning for all-in-one image restoration. IEEE Transactions on Image Processing , 33:5408–5423, 2024. [31] S. W. Zamir, A. Arora, S. Khan, M. Hayat, F. S. Khan, and M.-H. Yang. Restormer: Efficient transformer for high-resolution image restoration. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 5728–5739, 2022. [32] L. Zhai, Y. Wang, S. Cui, and Y. Zhou. A comprehensive review of deep learning-based real-world image restoration. IEEE Access , 11:21049–21067, 2023. [33] X. Zhang, W. Gao, G. Li, Q. Jiang, and R. Cong. Image quality assessmentdriven reinforcement learning for mixed distorted image restoration. ACM Trans. Multimedia Comput. Commun. Appl. , 19(1s), Feb. 2023. [34] Y. Zhang, G. Jia, H. Hu, S. Zhao, K. Zhao, L. Sun, X. Long, K. Tian, C. Jiang, Z. Liu, K. Wang, S. Lian, K. Zhang, and B. Zhou. Tir-agent: Training an explorative and efficient agent for image restoration. arXiv preprint arXiv:2603.27742 , 2026. [35] Y. Zhou, J. Cao, Z. Zhang, F. Wen, Y. Jiang, J. Jia, X. Liu, X. Min, and G. Zhai. Q-agent: Quality-driven chain-of-thought image restoration agent through robust multimodal large language model. arXiv preprint arXiv:2504.07148 , 2025. [36] K. Zhu, J. Gu, Z. You, Y. Qiao, and C. Dong. An intelligent agentic system for complex image restoration problems. In The Thirteenth International Conference on Learning Representations ,2025. [37] R. Zhu, Z. Tu, J. Liu, A. C. Bovik, and Y. Fan. Mwformer: Multi-weather image restoration using degradation-aware transformers. IEEE Transactions on Image Processing , 33:6790–6805, 2024. [38] Y. Zuo, Q. Zheng, M. Wu, X. Jiang, R. Li, J. Wang, Y. Zhang, G. Mai, L. Wang, J. Zou, X. Wang, M.-H. Yang, and Z. Tu. 4KAgent: Agentic any image to 4k super-resolution. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2026. 
+
+12 Appendix Contents 
+
+A Related Work 15 B Notation 15 C Algorithm 19 
+
+C.1 Training ∪S-IR . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19 C.2 Training AiO-IQA with Frozen ∪S-IR . . . . . . . . . . . . . . . . . . . . . . 20 C.3 Constructing DDiTTo ORTD . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 
+
+D ∪S-IR: Single-degradation Restoration Simulator Details 22 
+
+D.1 Architecture . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 D.2 Action-Conditioned Clean/Degraded Feature Mixing . . . . . . . . . . . . . . 23 D.3 Adaptive Frequency-Band Mixing . . . . . . . . . . . . . . . . . . . . . . . . . 23 D.4 Training Objective . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 D.5 Implementation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 D.6 Ablation: Number of Frequency Bands K . . . . . . . . . . . . . . . . . . . . 23 
+
+E AiO-IQA: All-in-One Restoration-Action Scoring Details 24 
+
+E.1 Architecture . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 E.2 IQA Metric Ensemble . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 E.3 Score Normalization and Ranking Objective . . . . . . . . . . . . . . . . . . . 25 E.4 Implementation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25 E.5 Validation: Per-Action Ranking Accuracy . . . . . . . . . . . . . . . . . . . . 25 
+
+F DiTTo Agent Training Details 26 
+
+F.1 VLM Backbone and LoRA Configuration . . . . . . . . . . . . . . . . . . . . 26 F.2 Multi-Turn Tool-Use Conversation Format . . . . . . . . . . . . . . . . . . . . 26 F.3 Stage 1 SFT . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 F.4 Stage 2 ORA (Order-aware Restoration Alignment) . . . . . . . . . . . . . . . 26 
+
+G Restoration-Expert Pool 27 H Training Data Construction 27 
+
+H.1 Clean Image-State Sources . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 H.2 Degradation Synthesis Pipeline . . . . . . . . . . . . . . . . . . . . . . . . . . 27 H.3 DDiTTo ORTD Statistics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 H.4 DExpert ORTD Subset for ORA . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 H.5 Dataset Release . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 H.6 ORTD Example . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 13 I Qualitative Comparison 30 J Extensibility Experiments 31 
+
+J.1 Adding a New Restoration-Expert . . . . . . . . . . . . . . . . . . . . . . . . 31 J.2 Adding a New Degradation Type . . . . . . . . . . . . . . . . . . . . . . . . . 31 
+
+K Project Page 32 L Limitations 32 M Broader Impacts 32 
+
+14 A Related Work 
+
+All-in-One Image Restoration. Early IR methods assume a single known degradation type [8, 22, 31], limiting applicability to real-world scenarios where multiple degradations co-occur. All-in-one IR addresses this by training a unified model across diverse degradations, using contrastive learning [15], prompt- or instruction-based conditioning [25, 4], or iterative re-assessment [3]. However, these methods learn a direct degraded-to-restored mapping without modeling a restoration-action-trajectory. As a result, they do not explicitly reason about the restoration-action-ordering, even though degradation removal order significantly affects restoration quality [33, 17]. They also lack a mechanism for sequentially selecting degradation-specific restoration-actions, motivating a shift toward agentic IR. 
+
+Training-free Agentic Image Restoration. Training-free agentic IR leverages pretrained vision-language models (VLMs) to select and invoke restoration-experts at inference time without training a dedicated order-aware policy [36, 11, 38]. While flexible, these methods must perform order search by applying candidate restoration-actions with real restoration-experts and evaluating the resulting next restored image states at inference time, requiring 
+
+O(( N D)2) real restoration-expert calls per image. Moreover, they often rely on fixed IQA-based heuristic search rather than a learned order-aware restoration policy, yielding only partial order-awareness (Tab. 1) and suboptimal restoration-action-trajectories when degra-dation compositions vary across images. In contrast, training-based agentic IR transfers this O(( N D)2) search cost from inference to offline ORTD construction, reducing inference to O(N D) real restoration-expert calls. 
+
+Training-based Agentic Image Restoration. Training-based agents distill order-aware restoration into a trained policy by supervising the policy with optimal restoration-action image-state pairs along optimal restoration-action-trajectories, reducing inference to O(N D)
+
+real restoration-expert calls. Recent training-based agentic IR methods scale this paradigm to richer degradations: RestoreAgent [2] and JarvisIR [18] apply SFT on exhaustively gener-ated restoration-action-trajectories; Q-Agent [35] uses quality-driven chain-of-thought (CoT) supervision; and TIR-Agent [34] reduces redundant restoration-expert evaluations via trajec-tory reuse, while SimpleCall [19] amortizes quality evaluation via actor-critic optimization. However, obtaining ground-truth optimal restoration-action image-state pairs requires eval-uating candidate restoration-actions at each restored image state, yielding an O(( N D)2)
+
+ORTD pair generation cost that trajectory reuse, e.g., TIR-Agent, only partially amor-tizes. Critically, because supervision is tied to a fixed restoration-expert set, adding a new restoration-expert requires regenerating expert-based ORTD pairs and retraining the agent. DiTTo removes this coupling by using the DiTTo Simulator for O(N D) ORTD pair gener-ation and a data-efficient DPO-based Order-aware Restoration Alignment (ORA) stage for plug-and-play adaptation to new restoration-experts without retraining ∪S-IR, AiO-IQA, or the DiTTo-SFT checkpoint. 
+
+B Notation 
+
+We use one primitive per degraded image instance, the degradation ordering δ, from which all instance-specific quantities (degradation types, image-states, trajectories, candi-date restoration-actions) are derived by index operations. Each entry is written so that every symbol on the right-hand side appears on the left-hand side, and every functional object is given with its input and output domains. A running example is fixed throughout. The universe D contains N D = 4 degradation types, D = {D1, D 2, D 3, D 4} = {rain , fog , noise , low-light }, with (N ED1 , N ED2 , N ED3 , N ED4 ) = (2 , 3, 2, 2) restoration-experts per type. A specific instance has degradation-ordering δ =(2 , 1, 4) (sequentially apply fog, then rain, then low-light) and restoration-action-ordering 
+
+ρδ = (( D4, 1) , (D2, 2) , (D1, 1)) (remove low-light first using its restoration-expert 1, then fog using its restoration-expert 2, then rain using its restoration-expert 1). 
+
+Conventions. Font. Bold (ex) D, δ, ρ, π, ˆq) marks sets, sequences and vectors; italic (ex) Dn, iD , iR,15 n, iEDn ) marks elements and indices; calligraphic (ex) T , D, S, P, I) marks trajectories, datasets, the simulator, the permutation set, and the image-state space. 
+
+Indices. iD ∈ { 0, . . . , j } is the degradation step (number of degradation-actions applied so far), counting upward. iR ∈ { 0, . . . , j } is the restoration index, counting the number of degradations still present in a restored image-state, so iR decreases as restoration progresses (j → 0). n ∈ { 1, . . . , N D} is the degradation-type index in D. iEDn ∈ { 1, . . . , N EDn } is the restoration-expert index inside the restoration-expert pool of degradation type Dn its range depends on the paired type, so we always write iEDn rather than a bare iE . The indices iD and 
+
+iR themselves are instance-independent; only the values they index are instance-dependent. 
+
+Side superscripts. D marks degradation, R marks restoration, E marks restoration-experts. The superscript δ on any symbol means “the value this symbol takes in the instance with degradation-ordering δ”; a trailing ∗ marks optimality; tildes ( ˜· ) mark restored image-states. 
+
+Order-awareness. Both δ and ρδ are ordered tuples, written with parentheses to dis-tinguish them from sets; permuting their entries yields a different instance or a different degradation-action- or restoration-action-trajectory, even when the underlying type sets co-incide. 
+
+Functional notation. Let I = RH×W ×C denote the space of image-states, where H, W, C ∈
+
+Z>0 are the height, width and number of channels of the image, fixed throughout an in-stance. Functions are declared with their input and output domains, e.g., ADDn (·) : I → I .Application fills the slot with a specific element I ∈ I , e.g., ADDn (I).
+
+Shorthand. When δ is unambiguous, its superscript is dropped. 
+
+Degradation universe and restoration-experts. 
+
+D = {D1, . . . , D N D }: The predefined universe of degradation types, fixed across all images, with cardinality |D| = N D. E.g., D = {rain , fog , noise , low-light } with N D = 4 .
+
+Dn, n ∈ { 1, . . . , N D}: The n-th degradation type itself; the symbol denotes the type and the subscript n is its index within D. E.g., D1 = rain, D2 = fog, D3 = noise, 
+
+D4 = low-light. 
+
+ADDn (·) : RH×W ×C → RH×W ×C : The degradation-action that applies degradation type Dn
+
+to its input image-state. E.g., ADD1 adds rain; ADD4 darkens the image. 
+
+AR 
+
+> (Dn,i EDn )
+
+(·) : RH×W ×C → RH×W ×C : The restoration-action realised by a specific restoration-expert, identified jointly by the degradation type Dn it specialises in and the restoration-expert index iEDn ∈ { 1, . . . , N EDn } within that type’s pool. Applied to an image-state, it removes degradation Dn and leaves any other degradations present in the input intact (single-degradation restoration) . E.g., 
+
+AR 
+
+> (D1,1)
+
+and AR 
+
+> (D1,2)
+
+are two specific de-rainers (e.g., Restormer , IDT ); AR 
+
+> (D2,3)
+
+is the third de-fogger in the pool of D2.
+
+ARDn = {AR 
+
+> (Dn,i EDn )
+
+(·) : iEDn ∈ { 1, . . . , N EDn }} : The restoration-action pool for degradation type Dn: the set of all restoration-actions indexed by iEDn for that type, with type-dependent cardinality |ARDn | = N EDn . E.g., ARD1 contains N ED1 = 2 de-raining restoration-actions; ARD2 contains N ED2 = 3 de-fogging restoration-actions. 
+
+Degradation process. 
+
+Iclean ∈ RH×W ×C : The universe-level clean reference image-state, shared across instances and serving as the start of every degradation-action-trajectory. 
+
+δ = ( δiD )jiD =1 , j ≥ 1: The degradation-ordering: an ordered tuple of j distinct entries δiD ∈{1, . . . , N D} indexed by iD ∈ { 1, . . . , j }, each entry being the index of a degradation type in D. The length j of the tuple is the number of degradations applied in this instance. E.g., δ = (2 , 1, 4) encodes fog, then rain, then low-light, with j = 3 .16 δiD , i D ∈ { 1, . . . , j }: The iD -th entry of δ, an integer in {1, . . . , N D}. The corresponding degradation type is DδiD and the corresponding degradation-action is ADDδiD
+
+(·).E.g., for δ = (2 , 1, 4) , δ2 = 1 , so Dδ2 = D1 = rain. 
+
+Dδ = {DδiD : iD ∈ { 1, . . . , j }} ⊆ D: The set of degradation types involved in this instance, obtained by collecting the types pointed to by the entries of δ, with cardinality 
+
+|Dδ | = j (entries are distinct). E.g., for δ = (2 , 1, 4) , Dδ = {D1, D 2, D 4}.
+
+Iδ
+
+iD ∈ RH×W ×C , i D ∈ { 0, . . . , j }: The degraded image-state after iD degradation-action steps in this instance: Iδ
+
+0 = Iclean and Iδ
+
+iD = ADDδiD
+
+(Iδ
+
+iD −1) for iD ≥ 1. At in-ference, only the final degraded image-state Iδ
+
+j (the observed multi-degradation input) is given; δ itself is hidden. E.g., for δ = (2 , 1, 4) , Iδ
+
+1 is foggy, Iδ
+
+2 adds rain on top, and Iδ
+
+3 further darkens it. 
+
+T δ = {(Iδ
+
+iD −1, A DDδiD
+
+(·), I δ
+
+iD )}jiD =1 : The degradation-action-trajectory of this instance: the sequence of (degraded image-state, degradation-action, next degraded image state) triples for iD = 1 , . . . , j in application order. Degradation Process (instance primitive 𝜹 )                                                                                             
+
+> 𝑫 =
+> 𝐷 !𝐷 "𝐷 #𝑫
+> …
+> 𝜹 =(2,1,𝑁 𝑫 ),(fog, rain, low light) Example 1:
+> 𝐼 "
+> 𝜹
+> 𝐴 $"#
+> $(𝐼 %
+> 𝜹 )
+> 𝐼 $
+> 𝜹 𝐼 %
+> 𝜹 𝐼 &
+> 𝜹
+> 𝐴 $"$
+> $(𝐼 !
+> 𝜹 )𝐴 $"%
+> $(𝐼 "
+> 𝜹 )
+> 𝜹 =(𝑁 𝑫 ,1,2),(low light, rain, fog) Example 2:
+> 𝐼 "
+> 𝜹
+> 𝐴 $"#
+> $(𝐼 %
+> 𝜹 )
+> 𝐼 $
+> 𝜹 𝐼 %
+> 𝜹 𝐼 &
+> 𝜹
+> 𝐴 $"$
+> $(𝐼 !
+> 𝜹 )𝐴 $"%
+> $(𝐼 "
+> 𝜹 )
+> Restoration Process (independent of 𝜹 )
+> 𝝆 𝜹 =((𝐷 '𝑫
+> 𝜹 ,3),(𝐷 %
+> 𝜹 ,1),(𝐷 $
+> 𝜹 ,4)),(de -low light, de -fog, de -rain) Example 1 :
+> 𝐼 .&
+> 𝜹
+> ℰ($&𝑫
+> 𝜹 ,))(𝐼 ')
+> 𝜹 )
+> 𝐼 .%
+> 𝜹 𝐼 .$
+> 𝜹 𝐼 ."
+> 𝜹
+> ℰ($$
+> 𝜹 ,!)(𝐼 '"
+> 𝜹 )ℰ($#
+> 𝜹 ,+)(𝐼 '!
+> 𝜹 )
+> 𝝆 𝜹 =((𝐷 $
+> 𝜹 ,1),(𝐷 '𝑫
+> 𝜹 ,2),(𝐷 %
+> 𝜹 ,2)),(de -rain, de -low light, de -fog) Example 2 :
+> 𝐼 .&
+> 𝜹
+> ℰ($#
+> 𝜹 ,!)(𝐼 ')
+> 𝜹 )
+> 𝐼 .%
+> 𝜹 𝐼 .$
+> 𝜹 𝐼 ."
+> 𝜹
+> ℰ($&𝑫
+> 𝜹 ,")(𝐼 ')
+> 𝜹 )ℰ($$
+> 𝜹 ,")(𝐼 ')
+> 𝜹 )
+> t=1t=2t=3
+> t=1t=2t=3
+> 𝑫 !
+> 𝜹 ={fog ,rain }𝑫 "
+> 𝜹 ={rain }
+> 𝑫 !
+> 𝜹 ={low light ,rain }𝑫 "
+> 𝜹 ={fog }
+> 𝑫 %
+> 𝜹 =𝑫 𝜹
+> 𝑫 %
+> 𝜹 =𝑫 𝜹
+> 𝑫 )
+> 𝜹 =∅
+> 𝑫 )
+> 𝜹 =∅
+
+Figure 5: Degradation process (left) and restoration process (right) for two instances sharing the type set Dδ = {D1, D 2, D N D } but using different degradation-orderings δ, so they are distinct instances. The degradation side is indexed by iD ∈ { 0, . . . , j } (counts degradation-actions applied); the restoration side is indexed by iR ∈ { 0, . . . , j } (counts degradations still present), so the restoration-action-trajectory runs from ˜Iδ
+
+j := Iδ
+
+j down to the restored clean image-state ˜Iδ
+
+0 . The restoration-action-ordering ρδ is independent of δ: the two examples share the same type set but choose different removal orders and different restoration-experts. Below each restored image-state ˜Iδ
+
+iR we show the remaining-type set Dδ
+
+iR .
+
+Restoration process. 
+
+The restoration-action-trajectory starts from the observed multi-degraded image-state ˜Iδ
+
+j := 
+
+Iδ
+
+j and ends at the restored clean image-state ˜Iδ
+
+0 ; the index iR counts degradations still present , decreasing by one per restoration-action step ( j → j−1 → · · · → 0). The restoration-action-ordering is not constrained by δ: any permutation of Dδ , paired with any restoration-expert per step, is allowed. 
+
+Dδ
+
+iR ∈ Dδ , iR ∈ { 1, . . . , j }: The degradation type chosen for removal at restoration-action index iR, i.e., at the transition ˜Iδ
+
+iR → ˜Iδ
+
+iR −1. E.g., for ρδ = (( D4, 1) , (D2, 2) , (D1, 1)) ,
+
+Dδ
+
+3 = D4, Dδ
+
+2 = D2, Dδ
+
+1 = D1.
+
+ρδ
+
+iR = ( Dδ
+
+iR , i EDδ
+
+> iR
+
+), i R ∈ { 1, . . . , j }: The restoration-action step at index iR: the chosen degradation type Dδ
+
+iR paired with a restoration-expert index iEDδ
+
+> iR
+
+within that type’s pool; the corresponding restoration-action is ARρδ
+
+> iR
+
+(·). E.g., ρδ
+
+3 = ( D4, 1) removes low-light using the first restoration-expert in the pool of D4.17 ρδ = ( ρδ 
+
+> iR
+
+)1  
+
+> iR=j
+
+: The restoration-action-ordering for this instance: an ordered tuple indexed by iR running from j down to 1, so that ρδ 
+
+> j
+
+is applied first and ρδ 
+
+> 1
+
+last. Valid if and only if the chosen types cover the involved type set, i.e., {Dδ 
+
+> iR
+
+: iR ∈ { 1, . . . , j }} =
+
+Dδ . E.g., ρδ = (( D4, 1) , (D2, 2) , (D1, 1)) for the running example. 
+
+˜Iδ 
+
+> iR
+
+∈ RH×W ×C , i R ∈ { 0, . . . , j }: The restored image-state with iR degradations still remain-ing: ˜Iδ 
+
+> j
+
+:= Iδ 
+
+> j
+
+and ˜Iδ  
+
+> iR−1
+
+= ARρδ
+
+> iR
+
+(˜Iδ 
+
+> iR
+
+) for iR ≥ 1. E.g., for the running example, ˜Iδ
+
+> 3
+
+is the observed input (rain + fog + low-light), ˜Iδ 
+
+> 2
+
+has low-light removed, ˜Iδ 
+
+> 1
+
+further has fog removed, and ˜Iδ 
+
+> 0
+
+is the final restored clean image-state. 
+
+Dδ 
+
+> iR
+
+= Dδ \ { Dδ 
+
+> iR′
+
+: iR′
+
+> i R}, i R ∈ { 0, . . . , j }: The remaining-degradation type set at restoration index iR, written in closed form as the involved type set minus the types already removed at later (higher-iR) steps. Boundaries: Dδ 
+
+> j
+
+= Dδ at the start and 
+
+Dδ 
+
+> 0
+
+= ∅ at the end. E.g., for ρδ = (( D4, 1) , (D2, 2) , (D1, 1)) : Dδ 
+
+> 3
+
+= {D1, D 2, D 4},
+
+Dδ 
+
+> 2
+
+= {D1, D 2}, Dδ 
+
+> 1
+
+= {D1}, Dδ 
+
+> 0
+
+= ∅.
+
+Aδ 
+
+> iR
+
+= {(D, i ED ) : D ∈ Dδ 
+
+> iR
+
+, i ED ∈ { 1, . . . , N ED }} , i R ∈ { 1, . . . , j }: The candidate restoration-action set at index iR: every (remaining degradation type, restoration-expert in-dex) pair available for selection, with cardinality |Aδ 
+
+> iR
+
+| = ∑
+
+> D∈Dδ
+> iR
+
+N ED summing the pool sizes of the still-remaining types. ρδ 
+
+> iR
+
+is selected from Aδ 
+
+> iR
+
+. E.g., at iR = 3 
+
+in the running example, |Aδ 
+
+> 3
+
+| = N ED1 + N ED2 + N ED4 = 2 + 3 + 2 = 7 ; after the first restoration-action removes D4, at iR = 2 we have |Aδ 
+
+> 2
+
+| = N ED1 + N ED2 = 2 + 3 = 5 .
+
+Pδ : The set of all valid restoration-action-orderings on Dδ : every permutation of the in-volved degradation types, paired step-by-step with any valid restoration-expert for that type, with cardinality |P δ | = j! ∏ 
+
+> D∈Dδ
+
+N ED . E.g., for the running example, 
+
+|P δ | = 3! · N ED1 · N ED2 · N ED4 = 6 · 2 · 3 · 2 = 72 .
+
+T δ,ρδ
+
+= {(˜Iδ 
+
+> iR
+
+, A Rρδ
+
+> iR
+
+(·), ˜Iδ 
+
+> iR−1
+
+)}1  
+
+> iR=j
+
+: The restoration-action-trajectory induced by ρδ : the sequence of (restored image-state, restoration-action, next restored image state) triples in application order ( iR = j first, iR = 1 last). 
+
+Optimal restoration. 
+
+Q(·) : RH×W ×C → R: An image-quality score (higher is better) on a given image, instanti-ated by an IQA metric (or a fixed scalar combination of several IQA metrics). 
+
+πδ = ( πδ 
+
+> iR
+
+)1  
+
+> iR=j
+
+: The optimal restoration-action-ordering for this instance: the element of 
+
+Pδ whose induced restoration-action-trajectory yields the highest quality score Q
+
+on the final restored image-state. πδ has the same loop format as ρδ ; each entry is denoted as πδ 
+
+> iR
+
+= ( Dδ 
+
+> iR
+
+, i E, ∗
+
+> Dδ
+> iR
+
+), where the asterisk marks joint optimality of the chosen type and restoration-expert. When the maximiser is non-unique, ties are broken by a fixed deterministic rule. 
+
+T δ,∗: The optimal restoration-action-trajectory: the trajectory induced by πδ in place of a generic ρ, i.e., T δ,∗ = T δ,πδ
+
+.
+
+Agents. 
+
+Agent DP (·) : RH×W ×C → 2D: The degradation-perception agent. Given the observed multi-degraded image-state Iδ 
+
+> j
+
+, it returns a subset of D: the involved degradation types 
+
+Dδ = Agent DP (Iδ 
+
+> j
+
+) (and hence j = |Dδ |); here 2D denotes the power set of D (the set of all subsets of D). Assumed perfect throughout the analysis. E.g., for the running example, given Iδ 
+
+> 3
+
+, Agent DP returns {D1, D 2, D 4}.
+
+Agent OR (·, ·) : RH×W ×C × 2D → ⋃ 
+
+> δ
+
+Pδ : The optimal-restoration agent. Given (Iδ 
+
+> j
+
+, Dδ ), it selects a restoration-action-ordering in Pδ , used as πδ = Agent OR (Iδ 
+
+> j
+
+, Dδ ) at infer-ence. 18 Agent DP +OR (·) : RH×W ×C → ⋃ 
+
+> δ
+
+Pδ : The DiTTo agent: the composition that runs 
+
+Agent DP on the observed input and then Agent OR on its result, defined by 
+
+Agent DP +OR (I) = Agent OR 
+
+(I, Agent DP (I)).
+
+ORTD and DiTTo simulator. 
+
+DORTD = ⋃ 
+
+> δ
+
+{(˜Iδ 
+
+> iR
+
+, A Rπδ
+
+> iR
+
+(·)) }1  
+
+> iR=j
+
+: The Optimal Restoration-action Trajectory Dataset: the union, over training instances δ, of all (restored image-state, restoration-action) pairs along the optimal restoration-action-trajectory T δ,∗. Two construction vari-ants: DExpert ORTD uses real restoration-experts ( O(( N D)2) restoration-expert calls per image); DDiTTo ORTD uses the simulator Sθ (O(N D) rollouts per image). 
+
+Sθ (·, ·) : RH×W ×C × (D × Z>0) → RH×W ×C : The single-step restoration simulator with pa-rameters θ. Input: a current restored image-state and a restoration-action specified by a (degradation type, restoration-expert index) pair; output: the restored image-state after that single restoration-action, with the specified degradation removed and the rest unchanged. Used in place of an actual restoration-expert during DDiTTo ORTD 
+
+construction. E.g., Sθ (˜Iδ 
+
+> 3
+
+, (D4, 1)) = ˜Iδ 
+
+> 2
+
+.
+
+fψ (·, ·) : RH×W ×C × {T δ }δ → [0 , 1] |Aδ 
+
+> iR|
+
+: The all-in-one IQA-style scoring model with pa-rameters ψ. Input: a current restored image-state and the degradation-action tra-jectory T δ of the instance; output: a score vector in [0 , 1] |Aδ  
+
+> iR|
+
+predicting the quality of all candidate restoration-actions at the current restoration indeX. 
+
+ˆqδ 
+
+> iR
+
+= fψ (˜Iδ 
+
+> iR
+
+, T δ ) ∈ [0 , 1] |Aδ 
+
+> iR|
+
+: The score vector at restoration index iR. Each entry of ˆqδ
+
+> iR
+
+is aligned one-to-one with a candidate restoration-action a ∈ Aδ 
+
+> iR
+
+under a fixed enu-meration, where a = ( D, i ED ) is a (remaining degradation type, restoration-expert index) pair; the entry’s value is the predicted quality of applying the correspond-ing restoration-action to the current restored image-state ˜Iδ 
+
+> iR
+
+, conditioned on the degradation-action-trajectory T δ that generated the observed multi-degraded in-stance. The vector therefore has one scalar entry per candidate, with total length 
+
+|Aδ 
+
+> iR
+
+|, and its entries are aligned one-to-one with the candidates in Aδ 
+
+> iR
+
+under a fixed enumeration. At inference, ρδ 
+
+> iR
+
+is the candidate whose aligned entry is the highest in ˆqδ 
+
+> iR
+
+(ties broken deterministically); no masking is needed because Aδ
+
+> iR
+
+already restricts candidates to the remaining types. 
+
+C Algorithm 
+
+This section provides the pseudo-code for the three core procedures that constitute the DiTTo Simulator pipeline introduced in Sec. 2 of the main paper: training ∪S-IR (Algo-rithm 1), training AiO-IQA on top of frozen ∪S-IR (Algorithm 2), and constructing DDiTTo ORTD 
+
+from the two trained modules (Algorithm 3). All three procedures share the notation in Sec. B: a degradation-ordering δ = ( δiD )jiD =1 instantiates a degradation-action-trajectory 
+
+T δ that produces the observed multi-degraded image-state Iδ 
+
+> j
+
+, and the restoration index 
+
+iR ∈ { 0, . . . , j } counts the degradations still present in the current restored image-state ˜Iδ 
+
+> iR
+
+.
+
+C.1 Training ∪S-IR 
+
+Algorithm 1 trains the single-degradation restoration simulator Sθ to approximate the effect of an arbitrary candidate restoration-action identifier ρ ∈ Aδ 
+
+> iR
+
+on the current restored image-state ˜Iδ 
+
+> iR
+
+. At every iteration we sample a clean image-state Iclean and a degradation-ordering 
+
+δ to construct T δ and the observed multi-degraded image-state Iδ 
+
+> j
+
+. We then sample one restoration index iR and one candidate identifier ρ ∈ Aδ 
+
+> iR
+
+, and build the supervision target 
+
+˜Iδ  
+
+> iR−1
+
+by removing only the degradation type D specified by ρ while preserving the other 
+
+19 remaining degradations in Dδ 
+
+> iR
+
+\ { D}. The model output ̂
+
+Iδ  
+
+> iR−1,ρ
+
+= Sθ
+
+(˜Iδ 
+
+> iR
+
+, ρ 
+
+)
+
+is the predicted next restored image-state in which D is removed while the remaining degradations are retained, and Sθ is updated by the SD3-style flow-matching objective [6] (Sec. D.4) between this prediction and ˜Iδ 
+
+> iR−1
+
+. The restoration index iR is uniformly sam-pled across {1, . . . , j } so that Sθ sees every stage of the restoration-action-trajectory during training. 
+
+Algorithm 1 Training ∪S-IR ( Sθ )
+
+Require: Clean image-states Iclean ; degradation universe D; degradation-actions 
+
+{ADDn (·)}Dn∈D; single-degradation restoration simulator Sθ ; total iterations T .
+
+Ensure: Trained Sθ . 
+
+> 1:
+
+Initialize Sθ . 
+
+> 2:
+
+for t = 1 , . . . , T do  
+
+> 3:
+
+Sample a clean image-state Iclean . 
+
+> 4:
+
+Sample a degradation-ordering δ = ( δiD )jiD =1 . 
+
+> 5:
+
+Construct the degradation-action-trajectory T δ by sequentially applying ADDδiD
+
+(·)
+
+to Iclean . 
+
+> 6:
+
+Obtain the observed multi-degraded image-state Iδ 
+
+> j
+
+and set ˜Iδ 
+
+> j
+
+:= Iδ 
+
+> j
+
+. 
+
+> 7:
+
+Sample a restoration index iR ∈ { 1, . . . , j }. 
+
+> 8:
+
+Construct the remaining-degradation type set Dδ 
+
+> iR
+
+and the candidate restoration-action set Aδ 
+
+> iR
+
+. 
+
+> 9:
+
+Sample a candidate restoration-action identifier ρ = ( D, i ED ) ∈ Aδ 
+
+> iR
+
+. 
+
+> 10:
+
+Construct the supervision target ˜Iδ  
+
+> iR−1
+
+by removing only the degradation type D
+
+while preserving the remaining degradations in Dδ 
+
+> iR
+
+\ { D}. 
+
+> 11:
+
+Predict the next restored image-state, in which D is removed while the remaining degradations are retained: ̂
+
+Iδ  
+
+> iR−1,ρ
+
+= Sθ
+
+(˜Iδ 
+
+> iR
+
+, ρ 
+
+)
+
+. 
+
+> 12:
+
+Sample σ ∼ LogitNormal and noise ϵ ∼ N (0 , I), and form zt = (1 − σ) ztarget + σ ϵ. 
+
+> 13:
+
+Update Sθ with the SD3-style flow-matching objective [6]: 
+
+LFM (Sθ ) = Eσ, ϵ
+
+[
+
+w(σ)
+
+√
+
+(̂ z0 − ztarget )2 + ϵ2
+
+]
+
+,
+
+where ̂ z0 = zt − σ vθ and ztarget is the VAE latent of ˜Iδ 
+
+> iR−1
+
+. 
+
+> 14:
+
+end for  
+
+> 15:
+
+return Sθ .
+
+C.2 Training AiO-IQA with Frozen ∪S-IR 
+
+Algorithm 2 trains the per-action scoring model fψ on top of a frozen Sθ . The key motiva-tion is that supervising fψ requires per-action quality labels at every restoration index, and obtaining such labels with real restoration-experts would re-introduce the O(( N D)2) cost discussed in Sec. 2. Algorithm 2 avoids this by using Sθ as a cheap surrogate: for every candi-date identifier ρ ∈ Aδ 
+
+> iR
+
+at the sampled iR, it produces a candidate next restored image-state via Sθ and labels it with the image-quality score Q(·), defined as a fixed scalar combination of full-reference (PSNR, SSIM [28]) and no-reference (MUSIQ [13], MANIQA [29], CLIP-IQA [27], NIQE [21]) IQA metrics (Sec. E.2). The model output 
+
+ˆqδ 
+
+> iR
+
+= fψ
+
+(˜Iδ 
+
+> iR
+
+, T δ )
+
+∈ [0 , 1] |Aδ 
+
+> iR|
+
+is then trained against these labels using the pairwise ranking objective Lrank in Sec. E.3, which matches both the rank ordering and the relative gaps between candidates rather than 20 absolute IQA values. Sθ is kept frozen throughout, so it acts purely as a generator of supervision signal for fψ .
+
+Algorithm 2 Training AiO-IQA ( fψ ) with frozen Sθ
+
+Require: Trained Sθ ; clean image-states Iclean ; degradation universe D; image-quality score 
+
+Q(·) (Sec. E.2); AiO-IQA model fψ ; total iterations T .
+
+Ensure: Trained fψ . 
+
+> 1:
+
+Freeze Sθ ; initialize fψ . 
+
+> 2:
+
+for t = 1 , . . . , T do  
+
+> 3:
+
+Sample a clean image-state Iclean . 
+
+> 4:
+
+Sample a degradation-ordering δ = ( δiD )jiD =1 . 
+
+> 5:
+
+Construct T δ and obtain Iδ 
+
+> j
+
+; set ˜Iδ 
+
+> j
+
+:= Iδ 
+
+> j
+
+. 
+
+> 6:
+
+Sample a restoration index iR ∈ { 1, . . . , j }. 
+
+> 7:
+
+Construct Dδ 
+
+> iR
+
+and the candidate restoration-action set Aδ 
+
+> iR
+
+. 
+
+> 8:
+
+for all ρ ∈ Aδ 
+
+> iR
+
+do  
+
+> 9:
+
+Generate the candidate next restored image-state with frozen Sθ :̂
+
+Iδ  
+
+> iR−1,ρ
+
+= Sθ
+
+(˜Iδ 
+
+> iR
+
+, ρ 
+
+)
+
+. 
+
+> 10:
+
+Compute its image-quality label Q(ρ) := Q(̂ Iδ 
+
+> iR−1,ρ
+
+) using the IQA ensemble of Sec. E.2.  
+
+> 11:
+
+end for  
+
+> 12:
+
+Predict per-action quality scores: 
+
+ˆqδ 
+
+> iR
+
+= fψ
+
+(˜Iδ 
+
+> iR
+
+, T δ )
+
+∈ [0 , 1] |Aδ 
+
+> iR|
+
+. 
+
+> 13:
+
+Update fψ by the pairwise ranking loss matching predicted gaps to IQA gaps: 
+
+Lrank (fψ ) = 1
+
+|C| 
+
+∑
+
+> (a,b )∈C
+
+((ˆ qδ 
+
+> iR
+
+[a] − ˆqδ 
+
+> iR
+
+[b]) − (Q(ρa) − Q(ρb)) )2,
+
+where C = {(a, b ) ∈ Aδ 
+
+> iR
+
+× Aδ 
+
+> iR
+
+: a̸ = b}. 
+
+> 14:
+
+Keep Sθ frozen.  
+
+> 15:
+
+end for  
+
+> 16:
+
+return fψ .
+
+C.3 Constructing DDiTTo ORTD 
+
+Algorithm 3 constructs the DiTTo-based Optimal Restoration-action Trajectory Dataset 
+
+DDiTTo ORTD by combining the two trained modules: fψ selects the simulator-approximated opti-mal candidate identifier 
+
+ρδ 
+
+> iR
+
+= argmax 
+
+> ρ∈Aδ
+> iR
+
+ˆqδ 
+
+> iR
+
+[ρ]
+
+at each restoration index, and Sθ applies the corresponding restoration-action to produce the next restored image-state. For each training image-state, the procedure starts from the observed multi-degraded image-state ˜Iδ 
+
+> j
+
+:= Iδ 
+
+> j
+
+with Dδ 
+
+> j
+
+:= Dδ and unrolls the restoration-action-trajectory from iR=j down to iR=1 , adding the pair (˜Iδ 
+
+> iR
+
+, A Rρδ
+
+> iR
+
+(·)) to DDiTTo ORTD at every step and shrinking Dδ 
+
+> iR
+
+by one type after each application. The crucial property is that the entire trajectory is unrolled with O(N D) simulator steps per image, namely one fψ call and one Sθ call per restoration index, without any real restoration-expert evaluation, which is what enables scalable supervision construction for the DiTTo Agent. 21 Algorithm 3 Constructing DDiTTo ORTD with Sθ and fψ
+
+Require: Trained Sθ ; trained fψ ; clean image-states Iclean ; degradation universe D; total instances M .
+
+Ensure: DDiTTo ORTD . 
+
+> 1:
+
+Initialize DDiTTo ORTD ← ∅. 
+
+> 2:
+
+for m = 1 , . . . , M do  
+
+> 3:
+
+Sample a clean image-state Iclean . 
+
+> 4:
+
+Sample a degradation-ordering δ = ( δiD )jiD =1 . 
+
+> 5:
+
+Construct T δ and obtain Iδ 
+
+> j
+
+. 
+
+> 6:
+
+Set ˜Iδ 
+
+> j
+
+:= Iδ 
+
+> j
+
+and Dδ 
+
+> j
+
+:= Dδ . 
+
+> 7:
+
+for iR = j, j − 1, . . . , 1 do ▷ |Dδ 
+
+> iR
+
+| shrinks by one each iteration  
+
+> 8:
+
+Construct the candidate restoration-action set: 
+
+Aδ 
+
+> iR
+
+= {(D, i ED ) : D ∈ Dδ 
+
+> iR
+
+, i ED ∈ { 1, . . . , N ED }} . 
+
+> 9:
+
+Predict per-action quality scores with fψ :
+
+ˆqδ 
+
+> iR
+
+= fψ
+
+(˜Iδ 
+
+> iR
+
+, T δ )
+
+. 
+
+> 10:
+
+Select the simulator-approximated optimal identifier: 
+
+ρδ 
+
+> iR
+
+= argmax 
+
+> ρ∈Aδ
+> iR
+
+ˆqδ 
+
+> iR
+
+[ρ]. 
+
+> 11:
+
+Add the ORTD pair: 
+
+DDiTTo ORTD ← D DiTTo ORTD ∪
+
+{( ˜Iδ 
+
+> iR
+
+, A Rρδ
+
+> iR
+
+(·)
+
+)} 
+
+. 
+
+> 12:
+
+Apply the selected restoration-action with Sθ :
+
+˜Iδ  
+
+> iR−1
+
+= Sθ
+
+(˜Iδ 
+
+> iR
+
+, ρ δ
+
+> iR
+
+)
+
+. 
+
+> 13:
+
+Update the remaining-degradation type set by removing the type Dδ 
+
+> iR
+
+specified by ρδ 
+
+> iR
+
+:
+
+Dδ  
+
+> iR−1
+
+= Dδ 
+
+> iR
+
+\ { Dδ 
+
+> iR
+
+}. 
+
+> 14:
+
+end for  
+
+> 15:
+
+end for  
+
+> 16:
+
+return DDiTTo ORTD .
+
+D ∪S-IR: Single-degradation Restoration Simulator Details 
+
+This section provides the implementation details deferred from Sec. 2 of the main paper. ∪S-IR is a single-degradation restoration simulator that approximates the effect of an arbitrary restoration-action without invoking real restoration-experts, enabling O(N D) construction of DDiTTo ORTD via Algorithm 3. 
+
+D.1 Architecture 
+
+∪S-IR is implemented as an action-conditioned latent diffusion model with an SD3-style flow-matching backbone [6]. Given the current restored image-state ˜Iδ 
+
+> iR
+
+and a candidate restoration-action identifier ρ = ( D, i ED ) ∈ Aδ 
+
+> iR
+
+, ∪S-IR predicts the next restored image-state ̂
+
+Iδ  
+
+> iR−1,ρ
+
+= Sθ (˜Iδ 
+
+> iR
+
+, ρ ). We use a pretrained SD3.5-medium VAE ( H=W =512 to 32 ×32 latent, 
+
+Cz =16 ) frozen throughout, and train a 12 -layer MM-DiT over the latent space (patch =2 ,heads =10 , head dim =64 , pos_embed_max =96 ). The candidate restoration-action identifier 
+
+ρ is embedded together with the indicator 1[Dδ 
+
+> iR
+
+] over remaining degradation types and the 22 order-rank vector oδ 
+
+> iR
+
+summarising T δ , and injected into every DiT block via cross-attention. The VAE remains frozen. 
+
+D.2 Action-Conditioned Clean/Degraded Feature Mixing 
+
+A naive single-degradation simulator that simply maps degraded to clean loses the non-target degradations that must be preserved. We therefore form two parallel feature streams: a clean-conditioned stream hclean that provides restoration cues for the target degradation type D, and a degraded-conditioned stream hdeg that preserves the remaining degradations 
+
+Dδ 
+
+> iR
+
+\ { D}. The simulator output is an action-conditioned mixture of the two, gated per frequency band as detailed below. 
+
+D.3 Adaptive Frequency-Band Mixing 
+
+We split each feature into K frequency bands using a 2D-DCT-based bandpass and assign band-wise gates g(k) 
+
+> ρ
+
+∈ [0 , 1] predicted from ρ:
+
+h(k) 
+
+> mix
+
+= g(k) 
+
+> ρ
+
+h(k) 
+
+> clean
+
++ (1 − g(k) 
+
+> ρ
+
+) h(k)
+
+> deg
+
+, k = 1 , . . . , K, 
+
+with g(k) 
+
+> ρ
+
+= σ(MLP (k) 
+
+> ρ
+
+([ eρ, eD ])) . The intuition is that different degradation types occupy different frequency bands (e.g., low-light dominantly affects illumination/low band, sensor noise the high band), so an action-conditioned band-wise gate can route restoration cues to the correct band while leaving the rest of the spectrum intact. We use K=4 throughout the main paper; the ablation in Sec. D.6 sweeps K.
+
+D.4 Training Objective 
+
+We adopt the SD3-style logit-normal sigma sampling and flow-matching weighting [6]. Let 
+
+zt = (1 − σ) ztarget + σ ϵ with ϵ ∼ N (0 , I), and ̂ z0 = zt − σ vθ the z0-prediction reconstructed from the predicted velocity. The base loss is a sigma-weighted Charbonnier on ̂ z0:
+
+Lbase = E
+
+[
+
+w(σ)
+
+√
+
+(̂ z0 − ztarget )2 + ϵ2
+
+]
+
+, ϵ=10 −3.
+
+The action-conditioned mixing in Sec. D.2 can collapse to either stream when one degrada-tion dominates the loss. To mitigate this, we additionally apply a small-active sparse mask: let ∆ = |ztarget −zdeg | be the per-pixel target-to-degraded delta in the latent. We mark a po-sition as “small-delta but active” if it lies in the lower-q quantile of ∆ and the upper-qa quan-tile of |ztarget | (q=0 .3, qa=0 .1). This gives a binary mask m that highlights regions which are visually content-rich but should not change under the chosen restoration-action (i.e., regions of non-target degradations that must be preserved). The sparse Charbonnier loss is 
+
+Lsparse = 1
+
+> ∥m∥1
+
+∑ w(σ) m ⊙ √(̂ z0 − ztarget )2 + ϵ2. The full objective is L = Lbase + λs Lsparse 
+
+with λs=1 .0.
+
+D.5 Implementation 
+
+We train ∪S-IR on the clean image-states described in Sec. H, with on-the-fly degradation synthesis (Sec. H.2). At each step we sample j ∈ { 2, . . . , 6}, build T δ by sequentially compos-ing the degradation-actions ADDδiD
+
+(·), then sample one iR ∈ { 1, . . . , j } and one candidate 
+
+ρ ∈ Aδ 
+
+> iR
+
+to form the prediction target ˜Iδ 
+
+> iR−1
+
+. We use AdamW ( β1=0 .9, β 2=0 .95 , weight decay 10 −2), peak LR 5×10 −4 with cosine decay to 5×10 −6, warmup ratio 1/5 , and gradient clipping at 1.0. Mixed precision (fp16) with FlowMatchEulerDiscrete scheduling is used throughout. Training runs on 2×B200. 
+
+D.6 Ablation: Number of Frequency Bands K
+
+The choice of K controls how finely ∪S-IR can route restoration cues across the spectrum. We sweep K ∈ { 1, 2, 4, 8} keeping all other settings fixed and evaluate the single-degradation 23 prediction ˜Iδ 
+
+> iR
+
+→ ˜Iδ  
+
+> iR−1
+
+on a held-out set, reporting PSNR / LPIPS / MANIQA / MUSIQ averaged over j ∈ { 2, . . . , 6} and all candidates ρ ∈ Aδ 
+
+> iR
+
+.Tab. 5 reveals a clear non-monotonic trend across all four metrics, confirming that frequency-band granularity must be matched to the spectral structure of the degradation universe. At 
+
+K=1 , the band-wise gate degenerates into a single global gate, which forces the simula-tor to apply the same clean/degraded mixing ratio to every frequency component. This is fundamentally misaligned with the degradation universe D, since low-frequency-dominant degradations (fog, low-light) and high-frequency-dominant degradations (sensor noise, defo-cus blur) require opposite mixing decisions. The result is a measurable drop in both PSNR and LPIPS, indicating that the simulator either under-restores the target degradation or over-modifies non-target frequency bands. Increasing K from 1 to 4 progressively allocates separate gates to each spectral region, al-lowing the simulator to leave non-target bands untouched while restoring the target. The improvement is most visible on no-reference metrics (MANIQA, MUSIQ), which are partic-ularly sensitive to spurious frequency-domain artifacts introduced by mismatched gates. At 
+
+K=4 , the four bands align well with the dominant spectral signatures of the six degradation types in D, and the simulator achieves the best trade-off across all metrics. Pushing further to K=8 over-fragments the spectrum: each band carries less restoration cue, and adjacent bands begin to compete for the same gate signal predicted from ρ. This is especially harmful for low-frequency restoration cues (fog removal, illumination correction), where the relevant signal spans a wide low-band region that K=8 splits into multiple sub-bands. PSNR drops accordingly, and LPIPS regresses as the simulator introduces band-boundary artifacts. K=4 therefore represents the operating point where spectral granularity matches degradation diversity in D without over-fragmenting the restoration signal. 
+
+Table 5: Ablation on the number of frequency bands K in ∪S-IR. We report single-degradation prediction quality ( ˜Iδ 
+
+> iR
+
+→ ˜Iδ 
+
+> iR−1
+
+) averaged over j ∈ { 2, . . . , 6} and all candidate identifiers ρ ∈ Aδ 
+
+> iR
+
+.                        
+
+> KPSNR ↑LPIPS ↓MANIQA ↑MUSIQ ↑
+> 121.69 0.2798 0.2109 38.48 222.31 0.2198 0.2160 39.20
+> 424.25 0.1891 0.2287 40.44 823.82 0.2034 0.2274 39.96
+
+E AiO-IQA: All-in-One Restoration-Action Scoring Details 
+
+E.1 Architecture 
+
+AiO-IQA fψ takes the current restored image-state ˜Iδ 
+
+> iR
+
+and the degradation-action-trajectory 
+
+T δ as input, and outputs a candidate-aligned score vector ˆqδ 
+
+> iR
+
+∈ [0 , 1] |Aδ  
+
+> iR|
+
+under a fixed enumeration of Aδ 
+
+> iR
+
+(Sec. B). Concretely, we encode the latent z = VAE (˜Iδ 
+
+> iR
+
+) with a multi-scale convolutional encoder (three scales pooled to {4×4, 2×2, 1×1}, each projected to 256 -dim and concatenated to a 768 -dim feature), condition it on a FiLM [24] produced from the concatenation of the indicator 1[Dδ 
+
+> iR
+
+] and the order-rank vector oδ (both summarising 
+
+T δ ), and decode to the candidate-aligned score with an MLP head. Entries corresponding to types not in Dδ 
+
+> iR
+
+are masked to −∞ at inference, which makes the argmax ρ∈Aδ 
+
+> iR
+
+in Algorithm 3 (line 10) safe. 
+
+E.2 IQA Metric Ensemble 
+
+The supervisory Q(·) in Algorithm 2 (line 12) is a fixed scalar combination of full-reference and no-reference IQA metrics computed on the ∪S-IR-generated next restored image-state 24 Sθ (˜Iδ 
+
+> iR
+
+, ρ ):
+
+Q = wNR ¯QNR + wPSNR QPSNR + wSSIM QSSIM , wNR =0 .5, w PSNR =wSSIM =0 .25 ,
+
+where ¯QNR is the mean of MANIQA, MUSIQ, CLIP-IQA, and a sigmoid-transformed NIQE 
+
+e−NIQE /10 , all normalised to [0 , 1] . QPSNR and QSSIM are computed against the synthetic reference ˜Iδ,∗  
+
+> iR−1
+
+which is known by construction during synthesis (see Sec. H). 
+
+E.3 Score Normalization and Ranking Objective 
+
+Because absolute IQA values vary across instances and restoration indices, we supervise fψ
+
+with a per-instance pairwise ranking objective rather than a regression to absolute scores. Let Q(ρa), Q (ρb) be the IQA scores of two candidates at the same (˜Iδ 
+
+> iR
+
+, T δ ). We minimise 
+
+Lrank = 1
+
+|C| 
+
+∑
+
+> (a,b )∈C
+
+((ˆ qδ 
+
+> iR
+
+[a] − ˆqδ 
+
+> iR
+
+[b]) − (Q(ρa) − Q(ρb)) )2,
+
+where C enumerates all candidate pairs (a, b ) ∈ Aδ 
+
+> iR
+
+× Aδ 
+
+> iR
+
+with a̸ = b. This pairwise regression loss matches both the rank ordering and the relative gaps between candidates, which is exactly what is needed by the argmax selection step in Algorithm 3. 
+
+E.4 Implementation 
+
+We train fψ with Sθ frozen (Algorithm 2), AdamW with peak LR 5×10 −4, cosine schedule on 2×B200, mixed precision fp16. We additionally apply a curriculum on j (2 to 6) and per-degradation severity to stabilise early training. 
+
+E.5 Validation: Per-Action Ranking Accuracy 
+
+We measure how well fψ recovers the Q-induced ordering on a held-out validation set, report-ing Recall@1, the fraction of instances where the AiO-IQA-selected ρδ 
+
+> iR
+
+= argmax ρ ˆqδ 
+
+> iR
+
+[ρ]
+
+matches argmax ρ Q(ρ), and the Spearman rank correlation ρs over Aδ 
+
+> iR
+
+. Tab. 6 reports both metrics, broken down by j = |Dδ | ∈ { 2, . . . , 6} to expose the difficulty of larger candidate sets. The two metrics together characterize complementary aspects of fψ : Recall@1 measures whether AiO-IQA picks the same top candidate as the IQA ensemble (the only choice that matters for Algorithm 3, which uses argmax selection), while Spearman captures how faith-fully fψ reproduces the full ranking over Aδ 
+
+> iR
+
+. Recall@1 stays above 0.80 for j ∈ { 2, 3, 4, 5},which directly validates the O(N D) ORTD construction in Algorithm 3: in over four out of five instances, fψ selects the same simulator-approximated optimal identifier ρδ 
+
+> iR
+
+that an exhaustive IQA-ensemble evaluation would have picked, but at a fraction of the cost. The drop at j=6 (Recall@1 from 0.803 to 0.758 ) reflects the combinatorial growth of the can-didate set Aδ 
+
+> iR
+
+: as more degradation types are present, more (degradation type, restoration-expert) pairs become viable at each restoration index, and small differences between top candidates become harder to discriminate. Importantly, Spearman remains essentially flat (0.747 at j=6 vs. 0.767 at j=2 ), indicating that fψ continues to reproduce the global IQA ordering even when the top-1 decision becomes harder. This is the desirable failure mode for ORTD construction: when the top-1 selection misses the IQA-best candidate, fψ tends to pick a near-best alternative rather than a low-quality one, so the resulting trajectory in 
+
+DDiTTo ORTD remains close to the optimal trajectory in IQA terms. The remaining gap at j=6 
+
+is one of the reasons for the Stage 2 ORA refinement, which corrects residual simulator-to-expert deviations on a small expert-executed subset. 25 Table 6: AiO-IQA per-action ranking accuracy on a held-out validation set. We report Recall@1 (top-1 match with the IQA-best candidate) and Spearman over Aδ 
+
+> iR
+
+, broken down by the number of involved degradations j = |Dδ |.                    
+
+> j23456avg. Recall@1 ↑0.823 0.810 0.805 0.803 0.758 0.736 Spearman ↑0.767 0.751 0.750 0.752 0.747 0.749
+
+F DiTTo Agent Training Details 
+
+F.1 VLM Backbone and LoRA Configuration 
+
+We instantiate Agent DP +OR on top of Qwen3-VL-8B-Thinking and fine-tune with LoRA on the attention and MLP projection modules ( r=16 , α=32 , dropout 0.05 ). To preserve 
+
+<think> blocks during multi-turn fine-tuning we bypass the default apply_chat_template 
+
+and construct training sequences manually so that reasoning traces are part of the supervised target. 
+
+F.2 Multi-Turn Tool-Use Conversation Format 
+
+Each instance in DDiTTo ORTD is converted into a multi-turn conversation in which, at each restora-tion index iR, the assistant (i) reasons about the remaining-degradation type set Dδ 
+
+> iR
+
+inside a <think> block, then (ii) emits a JSON-based tool call specifying the chosen restoration-action ρδ 
+
+> iR
+
+= ( Dδ 
+
+> iR
+
+, i EDδ
+
+> iR
+
+):
+
+{"action": "<degradation_type>", "model": "<expert_id>"} 
+
+The tool result (i.e., the next restored image-state ˜Iδ 
+
+> iR−1
+
+) is fed back as the next user turn, and the loop repeats until iR=0 .
+
+F.3 Stage 1 SFT 
+
+We train Stage 1 SFT on DDiTTo ORTD with AdamW (peak LR 1×10 −4, cosine to 1×10 −5, warmup ratio 0.05 ), batch size 1 per device with gradient accumulation 8, and max sequence length 
+
+8192 . We use greedy decoding at inference for structured-JSON parse stability. 
+
+F.4 Stage 2 ORA (Order-aware Restoration Alignment) Objective. ORA is a DPO-style objective applied to the decomposed planning axes (DP, OR, Tool) introduced in the main paper. Let πθ and πref be the policy and reference models, and let (yc, y r ) be a chosen/rejected response pair sharing the same prompt x.We define three disjoint token masks m(DP ), m(OR ), m(Tool ) that select tokens belonging to the Degradation Perception-Reasoning, Order-aware Restoration, and JSON-based tool-call axes of the response, respectively. The per-axis log-ratio is 
+
+r(a) 
+
+> θ
+
+(y | x) = ∑
+
+> t
+
+m(a)
+
+> t
+
+[log πθ (yt | x, y <t ) − log πref (yt | x, y <t )], a ∈ { DP , OR , Tool },
+
+and the ORA loss is a weighted sum of axis-wise DPO terms 
+
+LORA = − ∑
+
+> a∈{ DP ,OR ,Tool }
+
+λa log σ
+
+(
+
+β[r(a) 
+
+> θ
+
+(yc | x) − r(a) 
+
+> θ
+
+(yr | x)])
+
+,
+
+with β=0 .1 and (λDP , λ OR , λ Tool ) = (1 .0, 1.0, 0.5) . This decomposition addresses the dilu-tion problem of generic response-level DPO: chosen and rejected trajectories share most reasoning and JSON-template tokens, so a single response-level margin assigns most of the gradient to tokens that are not informative about Dδ or ρδ .26 Chosen / rejected construction. Chosen restoration-action-trajectories come from the small expert-executed subset DExpert ORTD produced by a greedy expert search described in Sec. H.4, where at each iR both the degradation type and the restoration-expert index are picked to maximise a combined IQA score using the real restoration-experts. Rejected 
+
+restoration-action-trajectories are generated by the DiTTo Simulator on the same input ˜Iδ
+
+> j
+
+using AiO-IQA-driven greedy ordering on Sθ rather than real restoration-experts, plus two augmentations: (i) a failure-injection variant that randomly perturbs the greedy choice with a small probability, and (ii) a format-violation variant that breaks the JSON-based tool-call schema. We crucially use the simulator-rendered restored image-state as the rejected context image even when the chosen trajectory uses an expert-rendered restored image-state, which prevents the chosen pair from trivially winning on log-prob due to higher visual quality of its conditioning image. Pairs are weighted equally; the format-violation pair contributes only to the Tool axis. 
+
+Hyperparameters. ORA is run on the small expert-executed subset DExpert ORTD (j ∈{2, 3, 4, 5}) with AdamW (LR 5×10 −6, cosine schedule, batch 1×accum 8), reference-model frozen at the WSFT DiTTo initialization. We monitor per-axis margins and select the final check-point as WORA DiTTo based on validation restoration quality on a held-out j ∈ { 2, . . . , 5} subset. 
+
+G Restoration-Expert Pool 
+
+DiTTo Agent uses the same restoration-expert pool as JarvisIR [18] (the configuration reported in Tab. 2 of the main paper). ⋆DiTTo Agent extends this pool with recent state-of-the-art restoration-experts ( ipcdehaze for fog and csud for rain streaks, both CVPR 2025) to demonstrate plug-and-play scalable extensibility. The full pool with per-type cardinalities 
+
+N EDn is listed in Tab. 7. All restoration-experts are loaded from official public weights and run at 512 ×512 unless their inference pipeline mandates otherwise. 
+
+Table 7: Restoration-expert pool. “DiTTo Agent” uses the same pool as JarvisIR; “ ⋆DiTTo Agent” is the extended pool used in Tab. 2 of the main paper. N EDn denotes the pool size of degradation type Dn.                               
+
+> DnRestoration-experts NEDn(DiTTo) NEDn(⋆DiTTo) fog (haze) ridcp, kanet, ipcdehaze 23rain streaks idt, turbo_rain, s2former, csud 34snow turbo_snow, snowmaster 22low-light enhance. retinexformer_fivek, hvicidnet, lightdiff 33sensor noise scunet 11super-resolution real_esrgan, AdcSR 12defocus blur drbnet 01
+
+H Training Data Construction 
+
+H.1 Clean Image-State Sources 
+
+We assemble training clean image-states Iclean from DIV2K-train [1], DIV8K [7], Flickr8K [9], Flickr2K [16], and NKUSR8K [5]. All images are randomly cropped to 512 ×512 (with bilinear up-sampling for sub-512 images) before degradation synthesis. 
+
+H.2 Degradation Synthesis Pipeline 
+
+For each clean image-state Iclean we sample a tuple length j ∼ U{ 2, . . . , 6}, sample δ as a random ordering of j distinct types from D (subject to the exclusion rule below), and construct the degradation-action-trajectory T δ by sequentially composing the degradation-actions ADDδiD
+
+(·). Per-degradation severity is sampled as ℓ ∼ U (0 .1, ℓ max (j)) with ℓmax (j)
+
+27 decreasing from 0.5 at j=2 to 0.2 at j=6 to keep visible content non-trivial under heavy com-positions. Tab. 8 summarises the parameter ranges. We additionally exclude two visually conflicting compositions: {snow , rain streaks } and {snow , low-light }.
+
+Table 8: Degradation synthesis parameter ranges. ℓ ∈ [0 .1, ℓ max (j)] is the per-degradation severity parameter passed to ADDn (·).
+
+Dn Internal parameter range driven by ℓ
+
+fog atmospheric light A ∈ [0 .7, 0.95] , transmission t ∈ [0 .3, 0.9] 
+
+rain streaks streak density / length / angle scaled by ℓ
+
+snow snow particle density / size scaled by ℓ
+
+low-light enhance. gamma γ ∈ [1 .5, 4.0] + multiplicative gain ∈ [0 .05 , 0.5] 
+
+sensor noise Gaussian σ ∈ [5 , 50]/255 + Poisson shot noise defocus blur disk-kernel radius ∈ [1 , 7] 
+
+H.3 DDiTTo ORTD Statistics 
+
+DDiTTo ORTD contains trajectories balanced across j ∈ { 2, 3, 4, 5, 6}, each yielding j ORTD pairs 
+
+(˜Iδ,∗ 
+
+> iR
+
+, A Rρδ,∗
+
+> iR
+
+(·)) . Trajectories are produced by Algorithm 3 with the trained Sθ and fψ .
+
+H.4 DExpert ORTD Subset for ORA 
+
+The ORA subset of DExpert ORTD is balanced across j ∈ { 2, 3, 4, 5}. For each instance, the chosen restoration-action-trajectory is produced by a greedy search over candidate identifiers ρ =(D, i ED ) ∈ Aδ 
+
+> iR
+
+at every iR on the real restoration-expert pool, scored by the combined IQA in Sec. E.2; the rejected restoration-action-trajectory is produced by the DiTTo Simulator on the same input with AiO-IQA-driven ordering, plus the failure-injection and format-violation augmentations described in Sec. F. 
+
+H.5 Dataset Release 
+
+For supplementary review, we include a small inspection subset of DDiTTo ORTD (approximately 100 trajectories balanced across j ∈ { 2, 3, 4, 5, 6}) under the NeurIPS 100 MB supplemen-tary limit, together with the corresponding multi-turn tool-use conversations described in Sec. F. This subset allows reviewers to verify the data format, ORTD pair structure, and SFT conversation template. A larger public release of DDiTTo ORTD and the full dataset used in our experiments will accompany the camera-ready version of this paper, alongside the trained Sθ and fψ checkpoints required to extend the dataset to new restoration-experts via Algorithm 3. 
+
+H.6 ORTD Example 
+
+Fig. 6 shows one sampled instance with j=3 , including the synthesised observed multi-degraded image-state Iδ 
+
+> 3
+
+, the simulator-generated optimal restoration-action-trajectory 
+
+(˜Iδ,∗ 
+
+> iR
+
+)0  
+
+> iR=3
+
+under ρδ,∗ = (( Dn1 , ·), (Dn2 , ·), (Dn3 , ·)) , and the corresponding multi-turn tool-use conversation that becomes the SFT target. 28 𝐼 !
+
+𝜹 𝐼 "#
+
+𝜹 𝐼 "$
+
+𝜹 𝐼 "%
+
+𝜹 
+
+Denoise Desnow Deblur 
+
+𝜌 !
+
+𝜹 𝜌 #
+
+𝜹 𝜌 $
+
+𝜹 
+
+𝐼 !
+
+𝜹 𝐼 "#
+
+𝜹 𝐼 "$
+
+𝜹 𝐼 "%
+
+𝜹 
+
+Denoise Desnow Deblur 
+
+𝜌 !
+
+𝜹 𝜌 #
+
+𝜹 𝜌 $
+
+𝜹 
+
+𝐼 !
+
+𝜹 𝐼 "#
+
+𝜹 𝐼 "$
+
+𝜹 𝐼 "%
+
+𝜹 
+
+Denoise Desnow Deblur 
+
+𝜌 !
+
+𝜹 𝜌 #
+
+𝜹 𝜌 $
+
+𝜹 
+
+> …
+
+(a) Optimal Restoration -action Trajectory Dataset (ORTD ) - 𝒟 𝒪 ℛ𝒯 𝒟 
+
+DiTTO 
+
+Let me analyze this degraded image careful ly .
+
+I can identify the following degradations present in the image: sensor noise, snow, defocus blur. 
+
+I will now plan the restoration order step by step, considering the frequency -domain interactions between degradations: 
+
+Step 1: Apply sensor noise removal using DiTTo simulator. This degradation is characterized by isotropic random noise across …
+
+Step 2: Apply snow removal using DiTTo simulator. This degradation is characterized by structured …
+
+Step 3: Apply defocus blur removal using DiTTo simulator. This degradation is characterized by low -pass filtering effect …
+
+<tool_calls >
+
+[
+
+{"action": " sensor_noise ", "model": "ditto"}, 
+
+{"action": "snow", "model": "ditto"}, 
+
+{"action": " defocus_blur ", "model": "ditto"} 
+
+]
+
+</ tool_calls >
+
+DP
+
+OR 
+
+Tool 
+
+Agent response construction 
+
+(b) Agent response template Figure 6: An ORTD example with j=3 . (a) The simulator-generated optimal restoration-action-trajectory (˜Iδ,∗
+
+iR )0
+
+iR =3 in DDiTTo ORTD . (b) The corresponding agent response, decomposed into DP (Degradation Perception-Reasoning), OR (Order-aware Restoration), and Tool (JSON-based tool call) axes used in ORA. 29 I Qualitative Comparison Input 4KAgent JarvisIR DiTTo Agent ⋆DiTTo Agent 
+
+Figure 7: Additional qualitative comparisons on multi-degraded inputs with j ∈ { 2, 3} con-current degradations. Input 4KAgent JarvisIR DiTTo Agent ⋆DiTTo Agent 
+
+Figure 8: Additional qualitative comparisons on multi-degraded inputs with j ∈ { 3, 4, 5}
+
+concurrent degradations. 30 J Extensibility Experiments 
+
+This section reports the two extensibility scenarios that motivate the plug-and-play design of DiTTo: extending the restoration-expert pool {iED } for an existing degradation type, and extending the degradation universe D with a new degradation type. In both scenarios, ∪S-IR, AiO-IQA, and WSFT DiTTo are reused, and only the efficient ORA stage is updated on a small expert-executed subset. 
+
+J.1 Adding a New Restoration-Expert 
+
+We start from the ⋆DiTTo Agent configuration (Tab. 7) and add one further restoration-expert per degradation type to evaluate scalability of the ORA-only update. We compare against a training-based agent baseline (JarvisIR) on the same held-out evaluation set, re-stricted to instances whose involved type set Dδ contains the affected degradation type so that the newly added restoration-expert is exercised. 
+
+J.2 Adding a New Degradation Type 
+
+We extend the degradation universe D with blur as an additional degradation type, moti-vated by the limitation discussion in Sec. L. Adding a new degradation type is strictly more demanding than adding a restoration-expert because it expands D itself, which in turn en-larges the candidate restoration-action set Aδ 
+
+> iR
+
+at every restoration index. Concretely, we (i) augment the degradation synthesis pipeline (Sec. H.2) with a blur degradation-action 
+
+AD
+
+> blur
+
+(·), (ii) add a corresponding restoration-expert into the pool, (iii) regenerate a small expert-executed subset that includes blur in its involved type sets, and (iv) update WORA DiTTo 
+
+via the same ORA procedure as the main experiments. 
+
+Baseline protocol. For both scenarios, JarvisIR shares the SFT stage with DiTTo for parity, since SFT is not the locus of our contribution. We run both JarvisIR and DiTTo under the same wall-clock budget on identical hardware ( 2×B200). Under this budget, DiTTo’s ORA converges to completion, whereas JarvisIR’s MRRHF alignment remains prohibitively slow due to repeated real-expert execution and multi-metric IQA scoring at every step. We therefore report the restoration quality achieved by each method within the same practical adaptation budget. 
+
+Table 9: Extensibility experiments. We compare DiTTo against a training-based baseline (JarvisIR) under two scenarios: (i) adding a new restoration-expert to an existing degrada-tion type, and (ii) adding a new degradation type (blur) to D. Both methods are evaluated under the same wall-clock adaptation budget on identical hardware ( 2×B200), since fully running JarvisIR’s MRRHF alignment under a changed expert pool is prohibitively slow. Higher is better for MUSIQ, MANIQA, CLIP-IQA; lower is better for NIQE.                            
+
+> Scenario Method MUSIQ ↑MANIQA ↑CLIP-IQA ↑NIQE ↓
+> Add a new restoration-expert JarvisIR 59.91 0.480 0.642 7.63
+> DiTTo Agent 66.03 0.579 0.751 5.36
+> Add a new degradation type (blur) JarvisIR 56.30 0.418 0.574 8.59
+> DiTTo Agent 62.93 0.530 0.697 5.84
+
+Discussion. Across both extensibility scenarios, DiTTo outperforms JarvisIR on every IQA metric. The gap is consistent in direction (DiTTo > JarvisIR) and substantial in magnitude on MUSIQ and CLIP-IQA, indicating that DiTTo’s plug-and-play update produces visibly cleaner restored image-states under the same hardware budget. The gap widens slightly in the harder scenario of adding a new degradation type, where JarvisIR drops on every metric while DiTTo retains most of its restoration quality. This is consistent with our design: JarvisIR’s online MRRHF alignment requires repeated real-expert execution and multi-metric IQA scoring at every step, so a fixed wall-clock budget covers fewer effective alignment updates as the candidate set Aδ 
+
+> iR
+
+enlarges. DiTTo’s ORA, by contrast, operates on pre-computed ORTD pairs and is unaffected by the per-step real-expert cost, so it converges 31 within the same budget regardless of whether the extension targets the expert pool or the degradation universe. The results validate the central claim of DiTTo: decoupling agent training from real-expert calls makes plug-and-play extension practical, both when the expert pool grows and when the degradation universe itself expands. 
+
+K Project Page 
+
+We provide an anonymous project page that presents the DiTTo Agent end-to-end inference pipeline in an interactive form. The page includes drag-to-compare sliders between multi-degraded inputs and DiTTo-restored outputs, a step-by-step visualization of the agent’s rea-soning (degradation identification, order-aware restoration-action planning as JSON-based tool calls, and sequential invocation of restoration-experts with their intermediate restored image-states), qualitative comparisons against prior agents, and short screen-recorded demo videos of the full restoration loop on real multi-degraded images. All visualizations use the same ⋆DiTTo Agent checkpoint reported in Tab. 2. The project page is available at 
+
+https://cmlab-korea.github.io/DiTTo/ .
+
+L Limitations 
+
+DiTTo decouples agent training from the real restoration-expert pool through ∪S-IR and AiO-IQA, but a residual simulator-to-expert distribution gap remains: ORA can only cor-rect the gap to the extent that DExpert ORTD covers it. Second, AiO-IQA mostly inherits its supervisory signal from NR-IQA metrics, which are correlated with but not identical to hu-man perceptual quality, so atypical degradations (severe motion blur, JPEG block artefacts beyond our universe D) are not directly handled. 
+
+M Broader Impacts 
+
+DiTTo improves the quality of multi-degradation image restoration, which has direct positive applications in autonomous driving perception, mobile photography, and historical photo restoration. Potential negative uses include enhancing surveillance imagery; we do not release any new weights tied to identifiable persons, and the training corpus consists only of public image datasets with permissive licences. The agent itself does not generate new content beyond restoring inputs, which limits misuse for synthetic-media generation. A specific privacy concern is the potential restoration of intentionally obfuscated regions such as heavy mosaicking or blurring applied to faces or license plates. We note, however, that such heavy obfuscation removes most of the underlying signal, so any output produced from such inputs is closer to model hallucination than to faithful recovery, and should not be treated as identifying evidence. DiTTo is trained on the degradation universe D defined in Sec. H.2, which does not include such severe privacy-protective obfuscation, and we do not advocate using DiTTo Agent in any identification or surveillance pipeline. 32
