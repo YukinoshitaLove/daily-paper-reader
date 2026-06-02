@@ -1,0 +1,466 @@
+Title: Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry
+
+URL Source: https://arxiv.org/pdf/2606.00094v1
+
+Published Time: Tue, 02 Jun 2026 00:06:30 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+# Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 
+
+Duoduo Xue, Zhiyu Zhu, Junhui Hou 
+
+City University of Hong Kong 
+
+Abstract. Image generative models aim to sample data points from the underlying data manifold, a task that requires learning and decoding a dense, low-dimensional, and compact parameterization space. To achieve this, we propose the Data Manifold-aware Image diffusioN moDel (MIND), a novel framework that explicitly models manifold geometry by integrating discrete patch tokenization into the score function of a continuous diffusion model. This approach successfully leverages both the structural quantification capabilities of discrete tokens and the parallel generation flexibility of continuous diffusion. Moreover, we enable end-to-end differentiable training via a novel soft top-k aggregation mechanism and introduce dual-branch high-frequency feature embedding layers to alleviate the spectral bias of transformer backbones on low-dimensional inputs. Furthermore, for inference, we design a multi-stage transition sampling scheme that dynamically adjusts the sampling scheme based on timestep. Extensive experiments on ImageNet 256 ×256 demonstrate the effectiveness of MIND. After 80-epoch training, our base model achieves an FID of 22.73 without guidance, nearly halving the 43.47 FID of the vanilla DiT-B/2 baseline. The proposed method reduces FID by 15.95 and 9.06 on average compared with the baselines DiT and SiT, respectively. For image generation on ImageNet-256 ×256 with guidance, the proposed MIND-B with only 130M parameters achieves an FID of 2.06, superpassing the LlamaGen-3B with 3.1B parameters. The proposed MIND-XL with 715M parameters further reduces the FID to 1.95. Our MIND introduces a fresh perspective on diffusion-based image generation, paving the way for future research and innovation in this community. The code will be publicly available. 
+
+Keywords: Image generation, Discrete diffusion model, Data manifold, Image tokenizer 
+
+# 1 Introduction 
+
+Deep generative models, encompassing generative adversarial networks, variational autoencoders, and normalizing flows, have fundamentally revolutionized image synthesis [18, 27, 28]. In recent years, con-tinuous diffusion models and score-based generative models [3, 13, 19, 25, 40, 50, 52], particularly latent diffusion models [4, 44] and Diffusion Transformers (DiT) [37, 42], have become the standard for high-fidelity image generation. Despite their impressive performance, these models typically operate within unbounded Euclidean spaces with infinite continuous states. While theoretical analyses heavily rely on the low-dimensional manifold hypothesis—which posits that high-dimensional natural images reside on a low-dimensional topological structure [2, 8, 10, 35, 43, 54, 56], existing continuous diffusion algorithms rarely model this geometric prior explicitly, aside from a few specialized Riemannian diffusion formula-tions [11, 29]. Consequently, image generation with standard continuous diffusion models is efficient but struggles to leverage the data manifold geometry optimally. Parallel to continuous diffusion models, discrete generation paradigms, e.g., next-token prediction [34, 53] or masked diffusion models [6, 59], compress images into discrete tokens via vector quantization [14, 41, 48, 58, 66]. Both of the methods (intentionally or unintentionally) set a decoding order onto the image generation process, e.g., the 1D generation order for the next-token prediction or random order for the discrete diffusion, which is constructed based on the assumption of causality among different patches. However, different from the language data, the success of vision diffusion models [6,19,42,65] has demonstrated that high-fidelity of generation relies on progressively and refining each token in parallel, which also stands for consistency-like models [51]. Furthermore, image generation models under the scheme of next-token prediction cannot utilize global bidirectional information during early sampling stages due to the inherent sequential generation scheme [58]. Explicitly constraining continuous diffusion processes to a low-dimensional geometric manifold is highly desirable but fundamentally challenging. As demonstrated by representation autoencoders (RAE) [65], low-dimensional latent spaces restrict information capacity, such that continuous diffusion models struggle  
+
+> arXiv:2606.00094v1 [cs.CV] 25 May 2026 2Duoduo Xue, Zhiyu Zhu, Junhui Hou
+
+to operate effectively within compact parameterized spaces and demands high-dimensional representations to achieve high-fidelity generation with a low FID inherently. As demonstrated by numerical experiments, projecting continuous latent features directly onto a strict topological bottleneck (e.g., a low-dimensional hypersphere surface) leads to catastrophic representation collapse. Because continuous autoencoders rely heavily on vector magnitude to encode structural information, the strict ℓ2-normalization inherent to hyperspherical manifolds destroys this information, resulting in severe perceptual distortion. In contrast, discrete token indices encode information categorically. When mapped to a low-dimensional manifold, discrete tokens rely entirely on angular separation rather than magnitude, demonstrating an innate im-munity to bottleneck degradation. See more analysis in Section 3.1. Motivated by this insight, we propose a novel and general generative framework named data Manifold-aware Image diffusioN moDel (MIND), which explicitly models the data manifold by leveraging the rep-resentational robustness of discrete tokenization with the sampling flexibility of continuous diffusion. Specifically, we first discretize images using a pre-trained tokenizer. The discrete tokens are then mapped onto a continuous low-dimensional hypersphere surface, upon which the forward and reverse diffusion processes are formulated. To enable end-to-end differentiable training between the unnormalized network logits output and the hyperspherical continuous latent, we introduce a soft top-k aggregation and pro-jection mechanism. Furthermore, to alleviate the spectral bias when processing low-dimensional inputs, we introduce a dual-branch feature projection module. This module injects Random Fourier Features to capture high-frequency details, stabilized by a zero-initialized deep residual sinusoidal pathway. During inference, we propose a multi-stage transition sampling scheme that dynamically adjusts the sampling method based on timestep. We evaluate the proposed method on the ImageNet 256 ×256 benchmark. Under a restricted compu-tational budget of 80 training epochs, our MIND-B (130M parameters) achieves an FID of 22.73, nearly halving the 43.47 FID of the vanilla DiT-B/2 baseline. In summary, our main contributions are three-fold: 
+
+– We analyze the representation collapse phenomenon when projecting continuous latent onto low-dimensional manifold, demonstrating the fundamental superiority of discrete tokens for low-dimensional manifold modeling. 
+
+– We propose a general data manifold-aware image diffusion model explicitly constrained to a hyper-sphere manifold. It features a differentiable soft top-k bridge for training and multi-stage transition sampling for inference. 
+
+– Extensive experiments demonstrate that MIND significantly improves generation quality, achieving average FID reductions of 15.95 and 9.06 over the DiT and SiT baselines, respectively, establishing it as a highly efficient generative paradigm. 
+
+# 2 Related Work 
+
+Diffusion Models. Diffusion models have beat GAN and achieved great success in image generation recently [13, 52]. Start from image generation in pixel space such as DDPM [19] and DDIM [50], latent diffusion models train diffusion models in latent space with much lower dimension by encoding images with an autoencoder to get continuous latent and enable high-resolution generation, the neural backbone is implemented with a time-dependent UNet in [44] and transformer in DiT [42]. A series of work are built on the pioneering work of DiT. Scalable Interpolant Transformers (SiT) [37] improves DiT with an inter-polant framework. REPresentation Alignment (REPA) [62] aligns the diffusion model representation with pretrained visual representation. REPA-E [32] proposes end-to-end training the variational autoencoder (VAE) and diffusion model based on representation-alignment loss. Representation autoencoders [65] pro-pose to replace the VAE in DiT with the well-developed and pretrained representation encoders to obtain a semantically rich latent space. Riemannian flow matching with Jacobi regularization [29] proposes to perform diffusion in the feature space of representation learning and constraint the generative process to the manifold geodesics. Deco [39] proposes to decouple the generation as generating high-frequency details and low-frequency semantics in pixel and latent spaces, respectively. To improve the efficiency of diffu-sion models, several works explore one-step or few step generation under the frameworks of consistency model [51], flow-matching [15, 16, 22] and distillation [46]. Conditional diffusion models on class labels are crucial to further improve the generation quality. Class information is incorporated into adaptive group normalization layers together with time step in [13]. Dhariwal et al. [13] proposed to train a classifier on noisy images and then use the gradient of the trained classifier to guide the generation model. The widely used classifier-free guidance [20] is proposed to avoid Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 3
+
+an extra classifier, which trains a single network to parameterize both the unconditional and conditional model and samples with the linear combination of the conditional and unconditional score estimations. Rombach et al. [44] proposed flexible conditional image generation by mapping the embedded class label to the intermediate layers of UNet with cross-attention layer. Karras et al. proposed autoguidance that guides the model with an inferior version of itself [26] rather than an unconditional model as in [20], which performs better but needs to train an additional guiding model. However, the diffusion models operator in the continuous space with infinite states and cannot incorporate the prior information of data manifold. 
+
+Image generation with Language Models. Parallel to diffusion models, popular language mod-els, such as autoregressive language models have been extended to image generation since the great success of large language models in natural language generation. Images are firstly tokenized to dis-crete tokens k based on well-developed visual tokenizer [61]. The autoregressive language models [53] predict the next token ki using previous tokens k1, k2, · · · , ki−1 and conditional information c. The training stage learns the categorical distribution pθ (ki|ki−1, c ) by minimizing the negative log-likelihood 
+
+L(θ) = − PNi=1 log pθ (ki|k1, k2, · · · , ki−1; c), where θ is the model parameters. The inference stage gen-erates discrete tokens sequentially based on next-token prediction. The masked language models [6] learns the distribution pθ (ki|kj , c ) in the training stage, where mask m ∈ { 0, 1}, m j = 1 , ∀j, m i = 0 , ∀i. Starts with a fully masked sequence, the inference stage alternatively samples the whole sequence with the given non-masked tokens and remasks the tokens with the lowest probability in decreasing mask ratio. eMIGM (effective and efficient Masked Image Generation Models) [59] unifies the masked diffusion mod-els [36, 49] and masked image generation [6], which systematically explores the design space of masked image generation models. More recently, the diffusion language models have combined the advantages of diffusion models and language generation, which can be generalized to image generation directly [1, 45] by tokenizing images into discrete tokens. However, these language models restrict the whole generation process to a finite discrete space and limit the generation ability. Several works try to combine the advantages of diffusion models and language models. The Riemannian diffusion language model [23] proposes a continuous diffusion model for language modeling and performs the diffusion process on the hypersphere surface, which is extended to image generation in the feature space of representation learning [29]. However, these methods cannot leverage the mature generation tools in the Eculidate space and require complex forward and reverse diffusion process. Our MIND is 
+
+fundamentally different from RDLM [23] and RJF [29]: Motivation : RJF aids convergence in high-dimensional representation spaces, whereas we embed a low-dimensional manifold prior. Input space :RJF is purely continuous; we process both discrete tokens and continuous latents. Trajectory : RDLM and RJF require complex, approximated formulations to strictly constrain trajectories to the hypersphere, while we allow off-sphere and exact trajectories, only requiring data points on the surface. 
+
+Image Tokenization is the first step for image generation with autoregressive and masked language models. Images can be represented as discrete variables at the pixel level, but this is redundant and has a quadratically increasing computational cost. Image tokenizers compress images into discrete tokens. The general pipeline maps the image to a latent feature map and then quantizes the continuous features as discrete codes. A representative work is VQ-GAN [14] that constructs a learned codebook and finds the nearest codebook entry for each spatial feature vector. VQ-GAN is built on the grounding study named VQ-VAE [41] and introduces discriminator loss into the training objective. A series of works have been proposed to improve the initialization rate and size of the codebook. VQGAN-LC [66] initializes the codebook entry with the feature of the pretrained vision encoder, then keeps the static codebook and optimized a projector. The Index Backpropagation Quantization (IBQ) updates all codebook em-beddings leveraging a soft one-hot categorical distribution [48]. The scale-based tokenizer named VAR proposes a multi-scale VQ autoencoder that quantizes residuals of feature maps recursively [55]. Recently, visual language models have also been incorporated into image tokenizers for extracting semantically rich features [64]. A complementary survey of image tokenizer can be referred to [58]. 
+
+# 3 Proposed Method 
+
+The low-dimensional manifold hypothesis is widely adopted in the theoretical analysis of image generation with diffusion models [2,8,35,43,54,56], but has not been explicitly utilized in modern generative models. In this paper, we leverage the image tokenization method as the quantification measurement of image 4 Duoduo Xue, Zhiyu Zhu, Junhui Hou Tokenizer           
+
+> Discrete
+> tokens Projection
+> Operator
+> Parameterization
+> manifold space
+> Forward
+> Diffusion
+> Gaussian noise
+> Noisy
+> latent
+> Denoising
+> network
+> (DiT )
+> Timestep,
+> Class
+> Differentiable Soft Sampling
+> Softmax Top -K
+> Weighted sum
+> Denoised
+> latent
+> MSE Loss
+> CE Loss
+> Total Loss
+> Initial Noise
+> Timestep
+> Class
+> Denoi
+> sing
+> net
+> Logits Discrete
+> tokens
+> Projection
+> Operator
+> Soft sampling
+> Greedy sampling
+> Denoised latent
+> Noise
+> estimation
+> and update Denoised
+> tokens
+> De
+> Tokenizer
+> (a) Training
+> (b) Inference
+> 𝑡 =0
+> Logits Manifold
+> projection
+> Entropy -driven
+> Hybrid Sampling
+> 𝑡 <𝜌 1
+> Data manifold
+
+Fig. 1: Illustration of the proposed MIND , an image generation framework with explicit modeling of data manifold geometry. 
+
+patch manifold structure and anchor those discrete points onto a simple and tackleable geometry, as illustrated in Fig. 1. 
+
+3.1 Effectively Parameterizing the Image Manifold Geometry 
+
+Mapping images or their continuous latent representations onto a compact topological manifold presents a fundamental challenge, as capturing diverse visual information requires highly complex features. Fur-thermore, facilitating an effective generation process necessitates that real data samples densely populate the parameterization space. This strict high-density requirement severely exacerbates the difficulty of the learning objective. To mitigate these challenges, we employ discrete tokenization to quantize the manifold structure, an approach that significantly reduces the reparameterization burden associated with continuous latent spaces. To validate this advantage, we empirically contrast two distinct methodologies: a continuous pro-jection that maps patchified VAE latents directly onto a L-dimensional hypersphere (where the exception-ally low dimensionality enforces a high-density space), and a discrete approach that projects VQ token in-dices into the identical manifold. VAE      
+
+> encoder
+> VAE
+> decoder
+> Encoder Decoder
+> Tokeni
+> zer
+> Detoke
+> nizer
+> Encoder Decoder
+> Continuous
+> Discrete
+> (a) Dim=8 (MIND-S) (b) Dim=16 (MIND-B)
+
+Fig. 2: Continuous (top) and discrete projection (bot-tom). The plot shows the LPIPS distance between the reconstructed and original images during optimization. Solid lines represent the models with manifold con-straints, whereas dashed lines indicate the unconstrained reconstruction. 
+
+For a rigorous and fair comparison, both methods are restricted to linear/MLP layers with same pa-rameter level and trained on the same randomly selected image, with carefully controlled optimiza-tion and architectural conditions (detailed in the supplementary material). By decoding the recon-structed bottleneck features back into the RGB domain, we measure the Learned Perceptual Im-age Patch Similarity (LPIPS) [63], as illustrated in Fig. 2. We experiment with our actual operat-ing range in this paper, our results indicate that the continuous latent formulation suffers from rep-resentation collapse due to its heavy reliance on feature magnitude to encode structural informa-tion. In contrast, the discrete token path encodes information categorically and relies entirely on an-gular separation. This grants it an innate robust-ness against the magnitude-destructive bottleneck, consistently yielding significantly lower perceptual distortion and demonstrating the inherent superi-ority of discrete tokens for manifold parameteriza-tion. Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 5
+
+3.2 Diffusion with Explicit Modeling of Data Manifold Formulation of Diffusion Process. Given an image I ∈ RC×H×W sampled from data distribution 
+
+pdata , it is tokenized as discrete token k ∈ RN using a tokenizer with vocabulary size V . The token 
+
+k ∈ RN is then mapped to the continuous latent feature by a projection operator Pθ (·) parameterized by θ to get a continuous representation of dimension L x0 ∈ RN ×L on the hypersphere surface satisfying PL−1 
+
+> l=0
+
+x20(n, l ) = R2 for all n = 0 , · · · , N − 1.The forward and reverse diffusion processes are performed based on the hypersphere surface with radius R. The forward diffusion process starts from the continuous representation x0 ∈ RN ×L and perturbs it to get noisy latent, 
+
+xt = c1
+
+√1 − t · w + c2
+
+√t · x0, (1) where w ∼ N (0, I),t ∈ [0 , 1] , the end of forward diffusion process is the Gaussian noise x1 = c1w. The reverse diffusion process starts from the sampled Gaussian noise x1 ∼ N (0, c 21I), the network sϕ(·, t )
+
+parametrized by ϕ gets noisy latent and outputs denoised logits ˜x0t = sϕ(xt, t ) ∈ RN ×V . The denoised latent ˙x0t is predicted by sampling discrete tokens from ˜x0t and then mapping the discrete tokens to continuous latent. 
+
+Training Pipeline. During the training stage, to maintain the differentiability of the discrete token sampling process while ensuring the output strictly resides on the target hypersphere manifold, we intro-duce a soft sampling mechanism. Let ˜x0t(n) ∈ RV denote the predicted logits of the n-th token over the vocabulary of size V . We first extract the set of indices corresponding to the top-k logit values, denoted as 
+
+Ik. The normalized soft weights αi are computed via the softmax function over these selected elements: 
+
+αi = exp( xi)/ X
+
+> j∈I k
+
+exp( xj ), ∀i ∈ I k, (2) where xi is the i-th element of ˜x0t(n). Subsequently, we aggregate the corresponding continuous latent using the weights αi. Since the convex combination of points on a hypersphere falls into the interior of the sphere, we explicitly project the aggregated feature onto the hypersphere surface via ℓ2-normalization: 
+
+˙x0t(n) = 
+
+P 
+
+> i∈I k
+
+αiPθ (i)
+
+P 
+
+> i∈I k
+
+αiPθ (i) 2
+
+, (3) where ˙x0t ∈ RN ×L is the denoised continuous latent at timestep t, seamlessly bridging the discrete token space and the continuous diffusion manifold. Based on the diffusion process formulated with the explicitly modeled hypersphere manifold prior, the neural network sϕ is optimized by minimizing the cross-entropy (CE) loss between denoised logits ˜x0t
+
+and the discrete tokens k and the mean squared error (MSE) loss between x0 and the denoised latent 
+
+˙x0t:
+
+L(sϕ, Pθ ) = Ek∼pdata ,t ∈[0 ,1] {CE(˜ x0t, k) + λ · MSE( ˙ x0t, x0)}, (4) where ˜x0t = sϕ(xt, t ), xt = c1
+
+√1 − t · w + c2
+
+√t · x0, x0 = Pθ (k), λ controls the strength of MSE loss. Algorithm 1 demonstrates the training pipeline of the proposed method. 
+
+Inference Pipeline. During the inference stage, the denoised logits are sampled to obtain the denoised latent ˙x0t = Pθ (S(˜ x0t)) . To ensure that the generated token sequences remain in the high-probability manifold of the codebook space while preserving diversity in the early stage of the generation, we propose a parameterized multi-stage transition sampling strategy with thresholds ρ1 and ρ2. In the initial phase (t < ρ 1), the operator P(S( ·)) inherits the soft sampling mechanism from the training stage in Eq. (3). During the middle phase ( ρ1 < t < ρ 2), the operator S( ·) is implemented by an entropy-aware discrete hybrid-filtering scheme. For the given distribution p = Softmax(˜ x0t), we compute the Shannon entropy 
+
+H. The sampling temperature is scaled adaptively: τadj = τ · (2 .5e−H/ 3 + 0 .6) following [38], forcing the model to perform confident sampling when the predictive entropy is high. The entropy-driven adaptive temperature is optional in practice. We then apply a hybrid filter combining Top-k and Nucleus (Top-
+
+p) constraints, drawing the discrete token from the renormalized distribution. In the terminal phase (t > ρ 2), the operator S( ·) collapses to greedy sampling to eliminate stochasticity and ensure maximal local consistency. The detailed sampling scheme is summarized in Algorithm 3. The denoised latent 
+
+˙x0t ∈ RN ×L is perturbed to get the input of the next timestep, 
+
+xt+∆t = c2
+
+√t + ∆t · ˙x0t + c1
+
+p1 − (t + ∆t ) · (ηwϕ(xt, t ) + (1 − η)w), (5) 6 Duoduo Xue, Zhiyu Zhu, Junhui Hou 
+
+Algorithm 1 Training Process of MIND 
+
+Input: Dataset pdata , pre-trained Tokenizer, initialized networks sϕ and Pθ , noise schedules c1, c 2, timestep range 
+
+[tmin , t max ].1: repeat 
+
+2: Sample image I ∼ pdata ;3: Extract discrete tokens: k = Tokenizer( I);4: Project to hypersphere manifold: x0 = Pθ (k);5: Sample timestep t ∼ U [tmin , t max ] and Gaussian noise w ∼ N (0, I);6: Compute noisy latent: xt = c1
+
+√1 − t · w + c2
+
+√t · x0;7: Predict unnormalized logits: ˜x0t = sϕ(xt, t );8: Obtain denoised latent ˙x0t via soft sampling over ˜x0t;9: Compute loss: L(sϕ, Pθ ) = CE(˜ x0t, k) + MSE( ˙ x0t, x0);10: Take gradient descent step on ∇θ,ϕL and update θ, ϕ;11: until network converges 
+
+Algorithm 2 Inference Process of MIND 
+
+Input: Trained networks sϕ and Pθ , noise schedules c1, c 2, variance control coefficient η ∈ [0 ,1] , sampling timestep schedule, thresholds ρ1, ρ 2.1: Sample initial noise: x0 ∼ N (0, c 21I);2: for t=0 to 1 do 
+
+3: Predict unnormalized logits: ˜x0t = sϕ(xt, t );4: if t < ρ 1 then 
+
+5: ˙x0t ← Soft sampling via Eq. (3); 6: else 
+
+7: Sample discrete tokens with Algorithm 3: ˆkt = S(˜ x0t);8: Project back to hypersphere manifold: ˙x0t = Pθ (ˆkt);9: end if 
+
+10: Estimate noise component: wϕ(xt, t ) = ( xt − c2
+
+√t · ˙x0t)/(c1
+
+√1 − t);11: Sample stochastic noise w ∼ N (0, I);12: Compute latent for the next timestep: 13: xt+∆t = c2
+
+√t + ∆t · ˙x0t + c1
+
+p1 − (t + ∆t ) ·  ηwϕ(xt, t ) + (1 − η)w;14: end for 
+
+15: Return DeTokenizer( ˆk1). 
+
+where wϕ(xt, t ) = ( xt −c2
+
+√t· ˙x0t)/(c1
+
+√1 − t), η ∈ [0 , 1] . Algorithm 2 demonstrates the inference pipeline of the proposed method. 
+
+Network Architecture. The projector operator Pθ extracts the continuous latent x0 ∈ RN ×L via an embedding layer, where each L-dimensional vector is factored into dsub -dimensional hyperspherical subspaces through sub-vector normalization. The geometrically constrained x0 is then perturbed to yield the noisy latent xt. The denoising network sϕ is implemented based on the DiT. Before feeding into the DiT backbone, the continuous latent is processed through two branches named base high-frequency mapper and residual sinusoidal projection module. The high-frequency mapper maps the input xt using a learnable projection matrix B ∈ RL×dmap , which is initialized from a Gaussian distribution N (0 , σ 2)
+
+with a large variance to amplify high-frequency signals. The projected features are then transformed by sine and cosine functions, 
+
+f base = [sin(2 πxtB), cos(2 πxtB)] . (6) The concatenated features f base ∈ R2dmap are subsequently passed through a shallow Multi-Layer Per-ceptron (MLP) with Layer Normalization (LN) and GELU activations to yield the base hidden states 
+
+hbase ∈ Rdhidden , matching the hidden dimension of the DiT backbone. The residual sinusoidal projection module expands the continuous latent xt using a deterministic sinusoidal positional encoding to get a high-dimensional vector f f req , which is passed through an MLP equipped with LN and SiLU activations. Crucially, to ensure stable gradient flow and prevent catastrophic divergence at initialization, the weight matrix of the final linear layer in this residual MLP is strictly initialized to zero. Finally, the outputs from both branches are aggregated via a residual addition hinput = hbase + hres before interacting with the timestep and class conditions. The backbone network utilizes the transformer-based diffusion architecture in DiT, which scales across multiple model capacities. Conditioning is handled via adaptive LayerNorm Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 7
+
+Algorithm 3 Multi-Stage Transition Sampling Operator S( ·)                                                            
+
+> 1: Input: Logits ˜x0t,t∈[0 ,1] , thresholds ρ1, ρ 2, base temperature τ, params p, k .2: Output: Sampled token ˆkt.3: if ρ1≤t < ρ 2then
+> 4: {Entropy-Driven Hybrid Sampling }5: Predict entropy: p←Softmax(˜ x0t),H← − Pplog p;6: Adaptive temperature: τadj ←τ·(2 .5·e−H/ 3+ 0 .6) ;7: V ← TopK(˜ x0t/τ adj , k )∩Nucleus( p, p );8: ˆkt∼Multinomial (Softmax(˜ x0t/τ adj |V )) ;9: else if t≥ρ2then
+> 10: Greedy sampling: ˆkt←arg max(˜ x0t);11: end if
+> 12: return ˆkt.
+
+that injects combined timestep and class label representations into each Transformer block, while spatial dependencies are modeled using rotary positional embeddings. 
+
+# 4 Experiments 
+
+4.1 Experimental Settings 
+
+To evaluate our proposed method, we followed the setup of DiT [42] and SiT [37] to perform experiments on the standard ImageNet dataset [12]. Each image was processed to the resolution of 256 × 256 and encoded into discrete token sequences of length 256 using the pre-trained tokenizer Index Backpropagation Quantization (IBQ) [48] with vocabulary size of V . These discrete tokens are mapped to continuous latent feature on the hypersphere surface. The model was trained within the continuous feature space using the forward noising formulation in Eq. (1) and the hybrid loss combining cross-entropy and MSE defined in Eq. (4). To enable classifier-free guidance during inference, we randomly replaced class labels with an unconditional token with a probability of pdrop = 0 .1 during training. All models were optimized using the AdamW optimizer, utilizing chunked gradient checkpointing to optimize memory consumption. Detailed training hyperparameters, including specific learning rates and batch sizes for each experimental setting, are comprehensively summarized in Table S-3 of the Supplementary material . During the inference phase, we employed a custom SDE solver in Algorithm 2 with 250 denoising steps to iteratively map Gaussian noise back to the data manifold. At each timestep t, the backbone network sϕ processed the continuous latent state to predict the unnormalized logit distribution over the discrete token vocabulary. We applied classifier-free guidance with scale cf g for condition alignment. 
+
+4.2 Performance Evaluation 
+
+We report standard generative metrics: Fréchet Inception Distance (FID), Inception Score (IS), Precision, and Recall on 50,000 samples that are generated with class-balanced sampling following [65]. 
+
+Image Generation without Guidance. We performed a comprehensive system-level evaluation com-paring our proposed model against the vanilla DiT baseline. To ensure a fair comparison under a con-strained computational budget, all models were evaluated after training for 80 epochs on the ImageNet 256 ×256 dataset without classifier-free guidance. Table S-3 of the Supplementary material summarizes the hyperparameters during inference. As shown in Table 1, the proposed MIND significantly outper-forms the vanilla DiT, demonstrating vastly superior performance. Specifically, at the small (S) scale, the proposed MIND-S achieves a remarkable FID of 40.72, yielding a massive absolute improvement of 27.68 over DiT-S/2 (68.40). This trend is further amplified at the base (B) scale, where the proposed MIND-B reaches an FID of 22.73, nearly halving the FID of DiT-B/2 (43.47). Furthermore, compared to more advanced frameworks such as the flow-based SiT and the discrete diffusion base model eMIGM [59], the proposed MIND establishes state-of-the-art FID while maintaining highly competitive diversity. It should be noted that the proposed method using 130M parameters even outperforms DiT-L with 458M parameters. 
+
+Image Generation with Guidance. Table 2 presents the quantitative results for class-conditional image generation with guidance on ImageNet 256 × 256 . In the absence of publicly available 80-epoch 8 Duoduo Xue, Zhiyu Zhu, Junhui Hou                                                      
+
+> Table 1: Class-conditional image generation without guidance on Imagenet 256 ×256. Bold values indicate the best performance. “N/A” denotes that the metric was not reported in the original publication. All models are trained for 80 epochs. #Params FID ↓IS ↑Precision ↑Recall ↑
+> DiT-S/2 [42] 33M 68.40 N/A N/A N/A SiT-S/2 [37] 33M 57.64 24.78 0.41 0.60 MIND-S(Our) ∼35M 40.72 31.51 0.48 0.61
+> eMIGM-S [59] 97M 44.47 19.82 0.49 0.57 DiT-B/2 [42] 130M 43.47 N/A N/A N/A SiT-B/2 [37] 130M 33.02 43.71 0.53 0.63
+> MIND-B(Our) ∼130M 22.73 56.17 0.55 0.58 DiT-L/2 [42] 458M 23.33 N/A N/A N/A SiT MIND (Ours)
+> Fig. 3: Visual comparison between our MIND-B and SiT-B/2 with cf g =2.0.
+
+performance and checkpoints for DiT, SiT, and eMIGM, we report results by our training from scratch following the default hyperparameter configurations specified in the original works. We sampled with different classifier-free guidance scale cf g and default hyperparameters in the original works. eMIGM was sampled with the recommended higher cf g since it adopts the time interval guidance strategy in default. The proposed MIND demonstrates superior generative performance across different model scales and classifier-free guidance scales. Under the small-scale setting ( ∼35M parameters), the proposed MIND-S significantly outperforms the baseline models. Specifically, at cf g = 1 .5, MIND-S improves the FID by 22.09 and 13.29 compared with DiT-S/2 and SiT-S/2, respectively. MIND-S surpasses eMIGM-S with only one-third of the parameters. Scaling up to the Base configuration ( ∼130M parameters), the proposed MIND-B consistently exhibits strong capabilities. At cf g = 1 .5, MIND-B reaches the best FID of 12.15 and the highest IS of 100.16. When the guidance scale is increased to 2.0, our model reduces FID by 2.98 and 1.1 compared with DiT-B/2 and SiT-B/2, respectively. Fig. 3 illustrates a qualitative comparison between SiT-B/2 and the proposed MIND-B, using the same class labels with cf g = 2 .0. Our method synthesizes significantly more realistic images with precise semantic alignment, effectively avoiding the structural distortions observed in SiT-B/2. These visual results align with our superior quantitative scores in FID, IS, and Precision, which demonstrates that prioritizing sample fidelity and precision over diversity (Recall) yields more visually compelling and structurally accurate generative outcomes. Fig. 4 provides some visual results from our MIND-B with 
+
+cf g =4.0. 
+
+4.3 System-level Comparisons with Prior Work 
+
+In this section, we present the ultimate performance evaluation of our model against existing state-of-the-art methods. The training and inference parameters remain consistent Table S-2 of the Supplementary material , except that the batch size is set to 2048, the learning rate is 3 × 10 −4 for MIND-B and 2 × 10 −4
+
+for MIND-XL. For inference, the classifier-free guidance scale is applied in a limited interval without entropy-driven adaptive temperature as proposed in [30]. The sampling parameters are summarized in Table S-4. MIND-B-G and MIND-XL are sampled with NPU-compatible code. As shown in Table 3, quantitative evaluations on ImageNet 256 × 256 demonstrate the exceptional parameter efficiency of the proposed method. Our MIND with about 130M parameters achieves a highly Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 9  
+
+> Fig. 4: Examples of visual results from our MIND-B with cf g =4.0.
+
+competitive FID of 2.06 (IS: 268.03, Precision: 0.78), successfully outperforming mainstream baselines that substantially larger across multiple generative paradigms. Specifically, MIND surpasses billion-parameter discrete models like LlamaGen-3B (3.1B, FID 2.18), RQTran. [31] (3.8B, FID 3.80), IBQ-XXL (2.1B, FID 2.05) [48], VAR [55] (1.0B, FID2.09). Furthermore, our method maintains a distinct advantage over continuous architectures. Specifically, compared with its baseline DiT-XL/2 [42], MIND improves the generation ability from FID=2.27 to 1.95. The proposed MIND using a stronger tokenizer named GigaTok [24], outperforms the 2B-parameter SimDiff [21] and SiT-XL/2 [37]. Compared with recent masked generative models that rely on contin-uous tokens, such as eMIGM-B [59] and MAR-B [33], the proposed MIND achieves comparable perfor-mance. We anticipate that the proposed framework can achieve even greater performance by introducing a residual term to mitigate the information loss inherent in vector quantization. Ultimately, our approach challenges the conventional reliance on massive parameter scaling, demonstrating that a compact ∼130M model can effectively match or exceed the performance of state-of-the-art architectures ranging from 300M to 3B parameters. Fig. 5 provides some visual results from our MIND-B. 10 Duoduo Xue, Zhiyu Zhu, Junhui Hou 
+
+Table 2: Class-conditional image generation with guidance on ImageNet 256 ×256. Bold values indicate the best performance. All models were trained for 80 epochs. Our method achieves a superior FID of 7.97, outperforming the baseline DiT (10.95) and flow-based SiT (9.07). #Params cf g FID ↓ IS ↑ Precision ↑ Recall ↑
+
+DiT-S/2 [42] 33M 1.5 44.42 34.57 0.47 0.56 SiT-S/2 [37] 33M 1.5 35.62 43.00 0.52 0.56 
+
+MIND-S(Our) ∼35M 1.5 22.33 60.32 0.63 0.52 DiT-S/2 [42] 33M 2.0 29.29 55.37 0.57 0.51 SiT-S/2 [37] 33M 2.0 22.96 67.81 0.62 0.51 
+
+MIND-S(Our) ∼35M 2.0 14.93 92.65 0.74 0.45 eMIGM-S [59] 97M 1.3 41.18 21.23 0.50 0.56 eMIGM-S [59] 97M 4.0 23.52 30.83 0.61 0.51 DiT-B/2 [42] 130M 1.5 20.01 73.00 0.65 0.56 SiT-B/2 [37] 130M 1.5 16.88 84.26 0.66 0.56 
+
+MIND-B(Our) ∼ 130M 1.5 12.15 100.16 0.71 0.51 DiT-B/2 [42] 130M 2.0 10.95 119.12 0.76 0.47 SiT-B/2 [37] 130M 2.0 9.07 137.07 0.77 0.47 
+
+MIND-B(Our) ∼ 130M 2.0 7.97 154.20 0.81 0.43 
+
+Fig. 5: Examples of visual results from our MIND-B with FID=2.21. Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 11 
+
+Table 3: Quantitative comparison of image generation models on ImageNet 256 × 256 . Models are categorized by their generation paradigm and sorted by parameter size ascendingly within each group. With only ∼130M parameters, our method achieves performance comparable to or exceeding discrete models with billions of param-eters and continuous models with hundreds of millions of parameters. Models with the suffix “-re" used rejection sampling, ∗: taken from VAR [55], -G: GigaTok. 
+
+Method Family #Params Epochs FID ↓ IS ↑ Prec. ↑ Rec. ↑
+
+Discrete Models 
+
+VQGAN [14] AR 1.4B N/A 15.78 74.3 N/A N/A VQGAN-re [14] AR 1.4B N/A 5.20 280.3 N/A N/A ViTVQ [60] AR 1.7B 360 4.17 175.1 N/A N/A ViTVQ-re [60] AR 1.7B 360 3.04 227.4 N/A N/A RQTran. [31] AR 3.8B N/A 7.55 134.0 N/A N/A RQTran.-re [31] AR 3.8B N/A 3.80 323.7 N/A N/A LlamaGen-B [53] AR 111M 300 5.46 193.61 0.83 0.45 LlamaGen-L [53] AR 343M 300 3.07 256.06 0.83 0.52 LlamaGen-XL [53] AR 775M 300 2.62 244.08 0.80 0.57 LlamaGen-XXL [53] AR 1.4B 300 2.34 253.90 0.80 0.59 LlamaGen-3B [53] AR 3.1B 300 2.18 263.33 0.81 0.58 VAR-d16 [55] VAR 310M 200-350 3.30 274.4 0.84 0.51 VAR-d20 [55] VAR 600M 200-350 2.57 302.6 0.83 0.56 VAR-d24 [55] VAR 1.0B 200-350 2.09 312.9 0.82 0.59 VAR-d30 [55] VAR 2.0B 200-350 1.92 323.1 0.82 0.59 IBQ-B [48] AR 342M 300 2.88 254.73 0.84 0.51 IBQ-L [48] AR 649M 350 2.45 267.48 0.83 0.52 IBQ-XL [48] AR 1.1B 400 2.14 278.99 0.83 0.56 IBQ-XXL [48] AR 2.1B 450 2.05 286.73 0.83 0.57 MaskGIT [7] Masked 227M 300 6.18 182.1 0.80 0.51 MaskGIT-re [7] Masked 227M 300 4.02 355.6 N/A N/A 
+
+MIND-B(Ours) Diff.+Dis. ∼130M 896 2.21 260.54 0.80 0.58 MIND-B(Ours) Diff.+Dis. ∼130M 1000 2.18 258.46 0.80 0.58 MIND-B-G(Ours) Diff.+Dis. ∼130M 1600 2.06 268.03 0.78 0.62 MIND-XL(Ours) Diff.+Dis. ∼715M 1000 1.97 297.93 0.78 0.61 MIND-XL-G(Ours) Diff.+Dis. ∼715M 1600 1.95 293.78 0.75 0.67 
+
+4.4 Ablation Study Hypersphere justification and ablation. The hypersphere constraint controls the magnitude of data components, which is essential to regulate the smooth signal-to-noise ratio variations . We train MIND-B with 32 epochs and sample 50K images without guidance using same parameters (linear timestep schedule, τ = 0 .99 , Top-k=100, Top-p=0.8, η = 0 .99 , ρ1 = 0 .1, ρ2 = 0 .9, sampling steps=250, without entropy). As listed in Table 4, (B) without the ℓ2-norm, the training loss fails to converge due to severe norm shrinkage (the average norm of the continuous latents ∥P θ ∥2 drops to 0.04). (C) Re-initializing of 
+
+Pθ to force convergence drops loss to near zero but collapses generative performance (FID 194.61), as the network amplifies latent magnitude ( ∥P θ ∥2 explodes to 9.68) to trivially overwhelm injected noise. (D) Even increasing the noise schedule ( c1 = 1 .0) fails, with a trivial solution of a larger latent (13.66) for diffusion. Thus, the hypersphere is a vital structural regularizer that anchors the data scale. 
+
+Ablation of components in MIND. We experiment with MIND-B using the same settings as Ta-ble 4. As shown in Table 5, the hypersphere constraint is crucial for valid generation, with soft top-k
+
+and advanced tokenizer offering further refinement, and the multi-stage sampling strategy is critical for generation with guidance. 
+
+Embedding Dimension and Noise Scaling. To systematically analyze the impact of the continuous embedding space capacity and the diffusion noise schedule, we conducted a comprehensive ablation study focusing on the embedding dimension ( L) and the diffusion coefficients ( c1 for noise, c2 for signal). We 12 Duoduo Xue, Zhiyu Zhu, Junhui Hou 
+
+Table 3: Quantitative comparison (continued). ∗∗ : Models used large-scale pre-trained representation network. 
+
+Method Family #Params Epochs FID ↓ IS ↑ Prec. ↑ Rec. ↑
+
+Continuous Models 
+
+BigGAN [5] GAN 112M N/A 6.95 224.5 0.89 0.38 GigaGAN [24] GAN 569M 124 3.45 225.5 0.84 0.61 StyleGan-XL [47] GAN 166M N/A 2.30 265.1 0.78 0.53 ADM-G [13] Diff. 554M 400 4.59 186.70 0.82 0.52 ADM-G, ADM-U [13] Diff. 554M 400 3.94 215.84 0.83 0.53 LDM-4-G [44] Diff. 400M 167 3.60 247.7 0.87 0.48 DiT-L/2 ∗ [42] Diff. 458M 1400 5.02 167.2 0.75 0.57 DiT-XL/2 [42] Diff. 675M 1400 2.27 278.2 0.83 0.57 SimDiff [21] Diff. 2B 800 2.77 211.8 N/A N/A SiT-XL/2 [37] Diff. 675M 1400 2.06 270.3 0.82 0.59 eMIGM-XS [59] Masked 69M 800 3.62 224.91 0.80 0.51 eMIGM-S [59] Masked 97M 800 2.87 254.48 0.80 0.54 eMIGM-B [59] Masked 208M 800 2.32 278.97 0.81 0.57 eMIGM-L [59] Masked 478M 800 1.72 304.16 0.80 0.60 eMIGM-H [59] Masked 942M 800 1.57 305.99 0.80 0.63 MAR-B [33] MAR 208M 800 2.31 281.7 0.82 0.57 MAR-L [33] MAR 479M 800 1.78 296.0 0.81 0.60 MAR-H [33] MAR 943M 800 1.55 303.7 0.81 0.62 RJF [29] Diff. 131M 20 3.37 180.26 0.80 0.56 RJF [29] Diff. 677M 80 2.81 201.22 0.82 0.56 
+
+MIND-B(Ours) Diff.+Dis. ∼130M 896 2.21 260.54 0.80 0.58 MIND-B(Ours) Diff.+Dis. ∼130M 1000 2.18 258.46 0.80 0.58 MIND-B-G(Ours) Diff.+Dis. ∼130M 1600 2.06 268.03 0.78 0.62 MIND-XL(Ours) Diff.+Dis. ∼715M 1000 1.97 297.93 0.78 0.61 MIND-XL-G(Ours) Diff.+Dis. ∼715M 1600 1.95 293.78 0.75 0.67 
+
+REPA ∗∗ [62] Diff. 675M 800 1.29 306.3 0.79 0.64 REPA-E ∗∗ [32] Diff. 675M 800 1.12 302.9 0.79 0.66 DDT ∗∗ [57] Diff. 675M 400 1.26 310.6 0.79 0.65 RAE ∗∗ [65] Diff. 839M 800 1.13 262.6 0.78 0.67 PixelFlow [9] Flow 677M 320 1.98 282.1 0.81 0.60 MeanFlow-XL/2 [15] Flow 676M 1000 2.20 N/A N/A N/A IMF-XL/2 [17] Flow 610M 800 1.54 N/A N/A N/A 
+
+perform experiments on MIND-B with 2K samples utilizing a fixed cf g =4.0. All models were trained for 12 epochs. As shown in Table 7, varying the embedding dimension explicitly controls the representational bottle-neck. A lower dimension overly compresses the topological structure, whereas an excessively high dimen-sion introduces spatial sparsity and complicates the continuous diffusion matching process. Concurrently, adjusting the noise scaling factor c1 and signal scaling factor c2 directly modulates the signal-to-noise ratio schedule during the forward noising process. Specifically, setting the noise scale c1 = 0 .6 effectively constrains the variance within the bounded ℓ2-normalized embedding space and significantly reduces the overall FID. 
+
+Residual Connection. To investigate the impact of the proposed residual sinusoidal projection module, we conducted ablation study across embedding dimensions L ∈ { 16 , 64 }. We perform experiments on MIND-B with 2K samples utilizing a fixed cf g =4.0. All models were trained for 12 epochs. As shown in Table 8, the residual connection generally enhances both the fidelity and diversity of the generated images. At L = 16 , the residual pathway reduces the FID from 34.91 to 33.91 and improves the IS from 119.14 to 120.56. This improvement becomes even more pronounced at a higher dimension ( L = 64 ), where the model with the residual connection achieves a substantial FID reduction of 2.46 and an IS increase of 8.43 compared to the baseline. The Recall metric consistently improves across all evaluated Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 13 
+
+Table 4: Hypersphere ablation. ||P θ || 2: the average norm of the continuous latents. 
+
+Method (A) MIND-B (Xavier init, c1 = 0 .6) (B) no ℓ2 (C) no ℓ2, Normal init (D) no ℓ2, Normal init, c1 = 1 .0
+
+Train Loss 4.02 9.57 0.007 0.04 
+
+||P θ || 2 2.00 0.04 9.68 13.66 
+
+FID ↓ 52.10 280.78 194.61 124.40 
+
+Table 5: Component ablation. 
+
+Model Variant FID ↓ (cf g = 1 .0 in default) (A) MIND-B w/o Hypersphere 280.78 (B) MIND-B w/o Soft top-k 53.03 (C) MIND-B (32 epochs) 52.10 (D) + Longer Training (200 epochs) 19.32 (E) + Advanced Tokenizer (GigaTok) 11.38, 6.42 ( cf g = 4 .0)(F) + Multi-stage Sampling Strategy 12.00, 2.64 ( cf g = 4 .0) 20 30 40 50 60 70 80 
+
+> Training Epochs
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> FID  (cfg=1.5)
+> SiT
+> DiT
+> eMIGM
+> Ours (MIND-B)
+
+Fig. 6: Convergence speed 
+
+Fig. 7: Hyperparameter robustness. 
+
+dimensions when the residual connection is applied. This consistent gain indicates that the residual mechanism effectively helps the model preserve high-frequency details and data distribution modes. Note that NPU-compatible code was used for the ablations on hypersphere justification, component analysis, and hyperparameter robustness and GPU-compatible for others. More ablation studies about sampling parameters can be referred to Table S-1 and Table S-2 of the Supplementary material .
+
+4.5 Efficiency and Robustness Analysis Inference efficiency and convergence speed. We conducted rigorous wall-clock profiling on a single NVIDIA-3090 GPU (Batch=1). The tokenizer in MIND-B does not need extra training latency using pre-encoded tokens, with decoding costs on par with VAEs in DiT/SiT architectures. MIND-B, implemented with CFG intervals like eMIGM, incurs a sampling cost that matches DiT and is significantly lower than eMIGM. Moreover, we test the convergence speed using the experiment settings in Table 2, MIND-B exhibits superior convergence speed as shown in Fig. 6. 
+
+Table 6: Inference latency comparison on a single NVIDIA-3090 GPU (Batch=1, 256 ×256). 
+
+Method Steps Sampling (s) Decoding (s) Total (s) 
+
+DiT-B/2 250 2.10 0.03 2.13 SiT-B/2 250 0.54 0.03 0.57 eMIGM 128 10.49 0.02 10.51 
+
+MIND-B 250 3.25 0.03 3.28 14 Duoduo Xue, Zhiyu Zhu, Junhui Hou                                                                                                               
+
+> Table 7: Ablation study embedding dimension ( L) and diffusion scaling coefficients ( c1, c 2). All models are evaluated on 2,000 generated samples at cf g = 4.0. Bold values indicate the best performance.
+> Ldsub c1(Noise) c2(Signal) FID ↓IS ↑Precision ↑Recall ↑
+> 820.6 1.0 125.40 17.21 0.26 0.29 821.0 1.0 206.19 7.52 0.26 0.28 16 40.6 1.0 34.91 119.14 0.81 0.56
+> 32 80.6 1.0 38.95 89.63 0.71 0.53 64 16 0.6 1.0 43.03 72.49 0.63 0.51 64 16 0.8 1.0 44.07 67.24 0.59 0.51 128 32 1.0 1.0 52.03 51.35 0.50 0.46
+> Table 8: Ablation study on the effectiveness of residual connection. All models are evaluated on 2,000 generated samples at cf g =4.0.
+> Ldsub c1c2FID ↓IS ↑Precision ↑Recall ↑
+> w/o res 16 40.6 1.0 34.91 119.14 0.81 0.56 w/ res 16 40.6 1.0 33.91 120.56 0.79 0.58
+> w/o res 64 16 0.6 1.0 43.03 72.49 0.63 0.51 w/ res 64 16 0.6 1.0 40.57 80.92 0.64 0.54
+
+Hyperparameter robustness. Extensive evaluations of MIND-B-G trained for 200 epochs with 768 sampling settings demonstrate strong hyperparameter robustness. Variations across most parameters ( p,
+
+k, τ , ρ2, cf g , and [cmin , c max ]) shift the average FID by ≤ 4.0% . While ρ1 and η are more sensitive, fixing η = 0 .99 and ρ1 = 0 .1 consistently yields excellent results across all our image generation with guidance. Consequently, adapting MIND to new datasets or resolutions circumvents the need for brittle hyperparameter tuning. 
+
+# 5 Conclusion and Discussion 
+
+In this paper, we introduced a novel generative framework that explicitly models the data manifold by bridging discrete image tokenization with continuous hyperspherical diffusion. To enable this discrete-continuous hybrid system, we proposed a differentiable soft top-k aggregation mechanism for stable train-ing and an entropy-driven hybrid sampling operator for robust inference. Furthermore, our dual-branch high-frequency feature mapper effectively resolves the spectral bias when processing low-dimensional in-puts. Extensive experiments on ImageNet demonstrate that our approach significantly outperforms the DiT baseline, flow-based continuous models, and discrete masked diffusion models. Note that while we instantiated our method on the basic DiT architecture to highlight its funda-mental superiority, our significant gains over DiT show its immense potential for image generation. We will integrate advanced trajectory formulations, such as mean flow and consistency models, to enhance sampling efficiency and enable high-fidelity, few-step, or single-step generation. Additionally, incorporat-ing self-supervised representation learning could further enrich feature expression and accelerate training convergence to get better performance. Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 15 
+
+# References 
+
+1. Austin, J., Johnson, D.D., Ho, J., Tarlow, D., van den Berg, R.: Structured denoising diffusion models in discrete state-spaces. In: NeurIPS. pp. 17981–17993 (2021) 2. Azangulov, I., Deligiannidis, G., Rousseau, J.: Convergence of diffusion models under the manifold hypothesis in high-dimensions. arXiv preprint arXiv:2409.18804 (2024) 3. Bao, F., Li, C., Zhu, J., Zhang, B.: Analytic-dpm: an analytic estimate of the optimal reverse variance in diffusion probabilistic models. In: ICLR (2022) 4. Blattmann, A., Rombach, R., Ling, H., Dockhorn, T., Kim, S.W., Fidler, S., Kreis, K.: Align your latents: High-resolution video synthesis with latent diffusion models. In: CVPR. pp. 22563–22575 (2023) 5. Brock, A., Donahue, J., Simonyan, K.: Large scale GAN training for high fidelity natural image synthesis. In: ICLR (2019) 6. Chang, H., Zhang, H., Jiang, L., Liu, C., Freeman, W.T.: Maskgit: Masked generative image transformer. In: CVPR (2022) 7. Chang, H., Zhang, H., Jiang, L., Liu, C., Freeman, W.T.: Maskgit: Masked generative image transformer. In: CVPR. pp. 11305–11315 (2022) 8. Chen, M., Huang, K., Zhao, T., Wang, M.: Score approximation, estimation and distribution recovery of diffusion models on low-dimensional data. In: ICML. pp. 4672–4712 (2023) 9. Chen, S., Ge, C., Zhang, S., Sun, P., Luo, P.: Pixelflow: Pixel-space generative models with flow. arXiv preprint arXiv:2504.07963 (2025) 10. Cui, H., Pehlevan, C., Lu, Y.M.: A solvable model of learning generative diffusion: theory and insights. In: NeurIPS (2025) 11. De Bortoli, V., Mathieu, E., Hutchinson, M., Thornton, J., Teh, Y.W., Doucet, A.: Riemannian score-based generative modelling. In: NeurIPS. pp. 2406–2422 (2022) 12. Deng, J., Dong, W., Socher, R., Li, L.J., Li, K., Fei-Fei, L.: Imagenet: A large-scale hierarchical image database. In: CVPR. pp. 248–255 (2009) 13. Dhariwal, P., Nichol, A.: Diffusion models beat gans on image synthesis. In: NeurIPS. pp. 8780–8794 (2021) 14. Esser, P., Rombach, R., Ommer, B.: Taming transformers for high-resolution image synthesis. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). pp. 12873–12883 (2021) 15. Geng, Z., Deng, M., Bai, X., Kolter, J.Z., He, K.: Mean flows for one-step generative modeling. In: The Thirty-ninth Annual Conference on NeurIPS (2025) 16. Geng, Z., Lu, Y., Wu, Z., Shechtman, E., Kolter, J.Z., He, K.: Improved mean flows: On the challenges of fastforward generative models. arXiv preprint arXiv:2512.02012 (2025) 17. Geng, Z., Lu, Y., Wu, Z., Shechtman, E., Kolter, J.Z., He, K.: Improved mean flows: On the challenges of fastforward generative models. arXiv preprint arXiv:2512.02012 (2025) 18. Goodfellow, I., Pouget-Abadie, J., Mirza, M., Xu, B., Warde-Farley, D., Ozair, S., Courville, A., Bengio, Y.: Generative adversarial networks. Commun. ACM 63 (11), 139–144 (2020) 19. Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models. In: NeurIPS. pp. 6840–6851 (2020) 20. Ho, J., Salimans, T.: Classifier-free diffusion guidance. In: NeurIPS 2021 Workshop on Deep Generative Models and Downstream Applications (2021) 21. Hoogeboom, E., Heek, J., Salimans, T.: simple diffusion: End-to-end diffusion for high resolution images. In: ICML. pp. 13213–13232 (2023) 22. Huang, Y., Wang, S.H., Bertozzi, A.L., Wang, B.: RMFlow: Refined mean flow by a noise-injection step for multimodal generation. In: ICLR (2026) 23. Jo, J., Hwang, S.J.: Continuous diffusion model for language modeling. In: NeurIPS (2025) 24. Kang, M., Zhu, J.Y., Zhang, R., Park, J., Shechtman, E., Paris, S., Park, T.: Scaling up gans for text-to-image synthesis. In: CVPR. pp. 10124–10134 (2023) 25. Karras, T., Aittala, M., Aila, T., Laine, S.: Elucidating the design space of diffusion-based generative models. In: NeurIPS. pp. 26565–26577 (2022) 26. Karras, T., Aittala, M., Kynkäänniemi, T., Lehtinen, J., Aila, T., Laine, S.: Guiding a diffusion model with a bad version of itself. In: NeurIPS. pp. 52996–53021 (2024) 27. Karras, T., Laine, S., Aila, T.: A style-based generator architecture for generative adversarial networks. In: CVPR. pp. 4396–4405 (2019) 28. Kobyzev, I., Prince, S.J., Brubaker, M.A.: Normalizing flows: An introduction and review of current methods. IEEE Transactions on Pattern Analysis and Machine Intelligence 43 (11), 3964–3979 (2021) 29. Kumar, A., Patel, V.M.: Learning on the manifold: Unlocking standard diffusion transformers with represen-tation encoders. arXiv preprint arXiv:2602.10099 (2026) 30. Kynkäänniemi, T., Aittala, M., Karras, T., Laine, S., Aila, T., Lehtinen, J.: Applying guidance in a limited interval improves sample and distribution quality in diffusion models. In: NeurIPS (2024) 31. Lee, D., Kim, C., Kim, S., Cho, M., Han, W.S.: Autoregressive image generation using residual quantization. In: CVPR. pp. 11523–11532 (2022) 32. Leng, X., Singh, J., Hou, Y., Xing, Z., Xie, S., Zheng, L.: Repa-e: Unlocking vae for end-to-end tuning with latent diffusion transformers. arXiv preprint arXiv:2504.10483 (2025) 16 Duoduo Xue, Zhiyu Zhu, Junhui Hou 33. Li, T., Tian, Y., Li, H., Deng, M., He, K.: Autoregressive image generation without vector quantization. In: NeurIPS. vol. 37, pp. 56424–56445 (2024) 34. Liu, Y., Qu, L., Zhang, H., Wang, X., Jiang, Y., Gao, Y., Ye, H., Li, X., Wang, S., Du, D.K., et al.: Detailflow: 1d coarse-to-fine autoregressive image generation via next-detail prediction. arXiv preprint arXiv:2505.21473 (2025) 35. Loaiza-Ganem, G., Ross, B.L., Hosseinzadeh, R., Caterini, A.L., Cresswell, J.C.: Deep generative models through the lens of the manifold hypothesis: A survey and new connections. Transactions on Machine Learning Research (2024) 36. Lou, A., Meng, C., Ermon, S.: Discrete diffusion modeling by estimating the ratios of the data distribution. In: ICML. pp. 32819–32848 (2024) 37. Ma, N., Goldstein, M., Albergo, M.S., Boffi, N.M., Vanden-Eijnden, E., Xie, S.: Sit: Exploring flow and diffusion-based generative models with scalable interpolant transformers. In: ECCV. pp. 23–40 (2024) 38. Ma, X., Zhao, F., Ling, P., Qiu, H., Wei, Z., Yu, H., Huang, J., Zeng, Z., Ma, L.: Towards better & faster autoregressive image generation: From the perspective of entropy. In: NeurIPS (2025) 39. Ma, Z., Wei, L., Wang, S., Zhang, S., Tian, Q.: Deco: Frequency-decoupled pixel diffusion for end-to-end image generation. arXiv preprint arXiv:2511.19365 (2025) 40. Nichol, A.Q., Dhariwal, P.: Improved denoising diffusion probabilistic models. In: ICML. pp. 8162–8171 (2021) 41. van den Oord, A., Vinyals, O., Kavukcuoglu, K.: Neural discrete representation learning. In: NeurIPS. pp. 6309–6318 (2017) 42. Peebles, W., Xie, S.: Scalable diffusion models with transformers. In: ICCV. pp. 4195–4205 (2023) 43. Pope, P., Zhu, C., Abdelkader, A., Goldblum, M., Goldstein, T.: The intrinsic dimension of images and its impact on learning. In: ICLR (2021) 44. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution image synthesis with latent diffusion models. In: CVPR. pp. 10684–10695 (2022) 45. Sahoo, S., Arriola, M., Schiff, Y., Gokaslan, A., Marroquin, E., Chiu, J., Rush, A., Kuleshov, V.: Simple and effective masked diffusion language models. In: NeurIPS. pp. 130136–130184 (2024) 46. Salimans, T., Ho, J.: Progressive distillation for fast sampling of diffusion models. In: ICLR (2022) 47. Sauer, A., Schwarz, K., Geiger, A.: Stylegan-xl: Scaling stylegan to large diverse datasets. In: ACM SIG-GRAPH 2022 Conference Proceedings (2022) 48. Shi, F., Luo, Z., Ge, Y., Yang, Y., Shan, Y., Wang, L.: Scalable image tokenization with index backpropagation quantization. In: ICCV. pp. 16037–16046 (2025) 49. Shi, J., Han, K., Wang, Z., Doucet, A., Titsias, M.K.: Simplified and generalized masked diffusion for discrete data. In: NeurIPS (2024) 50. Song, J., Meng, C., Ermon, S.: Denoising diffusion implicit models. In: ICLR (2021) 51. Song, Y., Dhariwal, P., Chen, M., Sutskever, I.: Consistency models. In: ICML. pp. 32211–32252 (2023) 52. Song, Y., Ermon, S.: Generative modeling by estimating gradients of the data distribution. In: NeurIPS. p. 11895–11907 (2019) 53. Sun, P., Jiang, Y., Chen, S., Zhang, S., Peng, B., Luo, P., Yuan, Z.: Autoregressive model beats diffusion: Llama for scalable image generation. arXiv preprint arXiv:2406.06525 (2024) 54. Tang, R., Yang, Y.: Adaptivity of diffusion models to manifold structures. In: Proceedings of The 27th International Conference on Artificial Intelligence and Statistics. pp. 1648–1656 (2024) 55. Tian, K., Jiang, Y., Yuan, Z., Peng, B., Wang, L.: Visual autoregressive modeling: scalable image generation via next-scale prediction. In: NeurIPS. pp. 84839–84865 (2024) 56. Wang, P., Zhang, H., Zhang, Z., Chen, S., Ma, Y., Qu, Q.: DIFFUSION MODELS LEARN LOW-DIMENSIONAL DISTRIBUTIONS VIA SUBSPACE CLUSTERING. In: ICLR 2025 Workshop on Deep Generative Model in Machine Learning: Theory, Principle and Efficacy (2025) 57. Wang, S., Tian, Z., Huang, W., Wang, L.: Ddt: Decoupled diffusion transformer. arXiv preprint arXiv:2504.05741 (2025) 58. Xiong, J., Liu, G., Huang, L., Wu, C., Wu, T., Mu, Y., Yao, Y., Shen, H., Wan, Z., Huang, J., et al.: Autoregressive models in vision: A survey. Transactions on Machine Learning Research (2025) 59. You, Z., Ou, J., Zhang, X., Hu, J., ZHOU, J., Li, C.: Effective and efficient masked image generation models. In: ICML (2025) 60. Yu, J., Li, X., Koh, J.Y., Zhang, H., Pang, R., Qin, J., Ku, A., Xu, Y., Baldridge, J., Wu, Y.: Vector-quantized image modeling with improved VQGAN. In: ICLR (2022) 61. Yu, L., Lezama, J., Gundavarapu, N.B., Versari, L., Sohn, K., Minnen, D., Cheng, Y., Gupta, A., Gu, X., Hauptmann, A.G., Gong, B., Yang, M.H., Essa, I., Ross, D.A., Jiang, L.: Language model beats diffusion -tokenizer is key to visual generation. In: ICLR (2024) 62. Yu, S., Kwak, S., Jang, H., Jeong, J., Huang, J., Shin, J., Xie, S.: Representation alignment for generation: Training diffusion transformers is easier than you think. In: ICLR (2025) 63. Zhang, R., Isola, P., Efros, A.A., Shechtman, E., Wang, O.: The unreasonable effectiveness of deep features as a perceptual metric. In: CVPR. pp. 586–595 (2018) 64. Zheng, A., Wen, X., Zhang, X., Ma, C., Wang, T., YU, G., Zhang, X., QI, X.: Vision foundation models as effective visual tokenizers for autoregressive generation. In: NeurIPS (2025) Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 17 65. Zheng, B., Ma, N., Tong, S., Xie, S.: Diffusion transformers with representation autoencoders. In: ICLR (2026) 66. Zhu, L., Wei, F., Lu, Y., Chen, D.: Scaling the codebook size of vqgan to 100,000 with a utilization rate of 99%. In: NeurIPS. pp. 12612–12635 (2024) 18 Duoduo Xue, Zhiyu Zhu, Junhui Hou                                                                                                                             
+
+> Table S-1: Ablation study of sampling configurations. All models are evaluated without guidance. Model Img-num Schedule Top-pTop-k ρ 1ρ2FID ↓IS ↑Prec. ↑Rec. ↑
+> MIND-B 2K Linear 0.3 200 0.0 0.9 41.06 54.02 0.538 0.635
+> MIND-B 2K Linear 0.3 100 0.0 0.9 41.13 54.46 0.546 0.635
+> MIND-B 2K Linear 0.8 100 0.0 0.9 44.10 46.91 0.502 0.630 MIND-B 2K Linear 0.8 200 0.0 0.9 45.32 46.33 0.504 0.631 MIND-B 2K Shift-Cos 0.3 200 0.0 0.9 43.23 50.67 0.519 0.632 MIND-B 2K Shift-Cos 0.3 100 0.0 0.9 44.55 50.05 0.511 0.624 MIND-B 2K Shift-Cos 0.8 100 0.0 0.9 45.10 47.65 0.478 0.623 MIND-B 2K Shift-Cos 0.8 200 0.0 0.9 45.15 46.59 0.495 0.631 MIND-B 2K Cosine 0.8 100 0.0 0.9 44.51 47.26 0.515 0.633 MIND-B 50K Linear 0.8 100 0.0 1.0 26.06 50.11 0.51 0.59 MIND-B 50K Linear 0.8 100 0.0 0.9 25.75 49.51 0.52 0.60
+> MIND-B 50K Linear 0.3 200 0.0 0.9 22.73 56.17 0.55 0.58 MIND-S 50K Linear 0.8 100 0.0 0.9 34.76 36.17 0.43 0.58 MIND-S 50K Linear 0.8 100 0.3 0.9 40.72 31.51 0.48 0.61
+
+# Supplementary Material 
+
+# S1 Ablation Study on Sampling Parameters 
+
+Table S-1 reports the performance of different sampling parameters by generating 2K and 50K images without classifier-free guidance. We perform inference with MIND-B model trained for 80 epochs. We fixed 
+
+ρ1 = 0 and investigated the impact of different sampling schedules, sampling thresholds (Top-p/Top-k), and ρ2. We find that the Linear schedule generally achieves superior FID and IS compared to cosine-based variants. Crucially, Top-p and Top-k are important parameters for performance. Expanding the active window (e.g., from Top-100 to Top-200) significantly impacts the FID and IS. This sensitivity confirms that our model maintains a healthy, broad utilization of the vocabulary without gradient starvation. Additionally, the 50K-image evaluation confirms that applying greedy sampling during the last 10% of the generative steps ( ρ2=0.9) effectively refines the final image details, improving FID from 26.06 to 25.75. Next, we generate 50K samples with MIND-S with different ρ1, which shows that the threshold ρ1
+
+serves as a balance of FID and recall. Disabling the soft phase ( ρ1 = 0 ) yields optimal standard FID and Inception scores, while enabling it ( ρ1 = 0 .3) drastically improves precision and recall by preserving diversity in early steps. This mechanism empowers users to flexibly control the trade-off between local sharpness and spatial coherence. Moreover, as shown in Table 7, our ablation studies across different embedding dimensions and dif-fusion scaling coefficients demonstrate that incorporating guidance at the logit level ( i.e. , the output of the network sϕ) yields superior generative performance compared to applying it at the intermediate feature level ( i.e. , the features extracted before the final DiT block). Since the “Feature" level inherently retains all continuous architectural benefits (including our dual-branch high-frequency embeddings), the strict superiority of “Logits" guidance confirms that explicitly modeling the discrete data manifold is the genuine driver of our performance breakthrough. 
+
+# S2 Experiment Settings 
+
+S2.1 Training Configurations of MIND 
+
+Table S-3 shows the network architecture, training and inference configurations of MIND. For inference, we consistently adopt the same 250 sampling steps as continuous baselines like DiT and SiT to ensure a strictly fair comparison of generative capability. Looking forward, we firmly believe that integrating advanced single-step or few-step generation frameworks, such as flow matching, into our discrete manifold formulation will drastically enhance the inference efficiency. Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry 19                                                                                                   
+
+> Table S-2: Ablation study on Guidance Space (Logits vs. Feature), embedding dimension ( L) and diffusion scaling coefficients ( c1, c 2). All models are evaluated on 2,000 generated samples at cf g = 4.0. Bold values indicate the best performance.
+> Ldsub c1(Noise) c2(Signal) Guidance Space FID ↓IS ↑Precision ↑Recall ↑
+> 820.6 1.0 Logits 125.40 17.21 0.26 0.29 Feature 122.71 18.87 0.26 0.26 821.0 1.0 Logits 206.19 7.52 0.26 0.28 Feature 233.21 8.30 0.30 0.23 16 40.6 1.0 Logits 34.91 119.14 0.81 0.56
+> Feature 37.62 100.91 0.76 0.51 32 80.6 1.0 Logits 38.95 89.63 0.71 0.53 Feature 42.90 70.55 0.66 0.49 64 16 0.6 1.0 Logits 43.03 72.49 0.63 0.51 Feature 48.41 56.79 0.56 0.45 64 16 0.8 1.0 Logits 44.07 67.24 0.59 0.51 Feature 49.89 50.87 0.53 0.45 128 32 1.0 1.0 Logits 52.03 51.35 0.50 0.46 Feature 61.24 37.93 0.42 0.39
+
+S2.2 Experiment Settings of Section 3.1 
+
+To ensure a rigorous and fair comparison, we strictly align the trainable parameters of both projection modules to approximately 196K. For the continuous projection, we employ a two-layer MLP with a hidden dimension of 4468 to map 16-dimensional VAE patch features to the 6-dimensional latent. The discrete path utilizes an embedding layer and a linear decoder operating over a vocabulary size of 16384. To enforce the hypersphere constraint, the 6-dimensional latent space is partitioned into three coordinate pairs, with 
+
+ℓ2-normalization applied independently within each 2D subspace. The optimization is conducted on a single ImageNet validation image, we apply random resized cropping (256 ×256) and horizontal flipping to generate a batch of 8 augmented views to prevent trivial memorization. Both models are trained for 1000 iterations using the AdamW optimizer with a learning rate of 0.01. The continuous projection minimizes the Mean Squared Error (MSE) against the target VAE latent, while the discrete projection is supervised via Cross-Entropy loss against the target token indices. 20 Duoduo Xue, Zhiyu Zhu, Junhui Hou 
+
+Table S-3: Summary of Training Configurations and Inference Parameters. 
+
+Category MIND-B MIND-S 1. Diffusion & Noise Settings 
+
+Noise Scale Factor c1 0.6 0.8 Signal Scale Factor c2 1.0 1.0 Training Timestep Range ( t) t ∈ [0 .2, 0.95] t ∈ [0 .2, 0.95] 
+
+2. Embedding & Vocabulary 
+
+Vocabulary Size V 16,384 8192 Embedding Dimension L 16 8Embedding Subspace 4 2
+
+3. Network Architecture 
+
+Total Parameters(M) 130.48 35.21 Number of Blocks 14 14 Hidden Size 768 384 Attention Heads 12 6Condition Embedding Dimension 128 128 
+
+4. Training & Optimization 
+
+Optimizer DeepSpeed AdamW Base Learning Rate 1.0 × 10 −3 1.0 × 10 −3
+
+Batch Size 1024 2048 Training Epochs 80 80 
+
+5. Inference 
+
+Timestep schedule Linear Linear Temperature τ 0.99 0.99 Sampling steps 250 250 
+
+η 0.99 0.99 (Top-p, Top-k, ρ1, ρ2)( cf g = 1 .0) (200, 0.3, 0, 0.9) (100, 0.8, 0.3, 0.9) (Top-p, Top-k, ρ1, ρ2)( cf g = 1 .5) (100, 0.8, 0.1, 0.9) (100, 0.8, 0.2, 0.99) (Top-p, Top-k, ρ1, ρ2)( cf g = 2 .0) (100, 0.8, 0.1, 0.9) (300, 0.8, 0.3, 0.9) 
+
+Table S-4: Inference Parameters in Quantitative Comparison. 
+
+Setting Top-K Top-P cf g CFG Interval ( Cmin − Cmax )
+
+MIND-B 100 0.8 5.0 0.4 - 0.7 MIND-B-G 100 0.8 3.0 0.2 - 0.6 MIND-XL 200 0.8 2.5 0.2 - 0.7 MIND-XL-G 100 0.8 2.25 0.2 - 0.7

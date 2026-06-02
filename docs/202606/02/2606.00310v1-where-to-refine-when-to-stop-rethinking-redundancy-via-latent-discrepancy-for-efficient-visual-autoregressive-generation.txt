@@ -1,0 +1,884 @@
+Title: Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation
+
+URL Source: https://arxiv.org/pdf/2606.00310v1
+
+Published Time: Tue, 02 Jun 2026 00:28:09 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+Changwang Mei 1 2 * Peisong Wang 2 * Zekun Li 2 3 Changsheng Li 4 Shuang Qiu 5 Qinghao Hu 2 Gang Li 2
+
+Yifan Zhang 2 Zhihui Wei 1 Jian Cheng 2
+
+## Abstract 
+
+Visual Autoregressive (VAR) models deliver high-quality image generation but suffer from signif-icant inference latency at high resolutions. Re-cent acceleration approaches most rely on heuris-tic measures with layer features to prune tokens. Such heuristics are sensitive to complex contex-tual semantics, leading to inaccurate identification of redundant computation and poor adaptability across prompts. We rethink redundancy in VAR from the perspective of its impact on pixel-space generation and introduce Latent Discrepancy .This unified metric quantifies a token’s contri-bution by measuring the change in model states during generation. Our analysis shows that redun-dancy is more accurately identified when guided by image latent or pixel-space signals. We further observed that in classifier-free guidance (CFG), the convergence trend of the discrepancy between conditional and unconditional branches exhibits high dynamics with different prompts. Based on these findings, we propose LD-Pruning (Latent 
+
+Discrepancy Pruning ), a training-free framework that removes redundancy via latent discrepancy by integrating decoding-free region selection and adaptive unconditional-branch skipping. Exten-sive experiments show that LD-Pruning substan-tially reduces inference latency while maintaining 
+
+high generation quality , achieving up to 2.35 ×
+
+speedup on Infinity-8B .
+
+> *
+
+Equal contribution 1Nanjing University of Science and Tech-nology 2C2DL , Institute of Automation, Chinese Academy of Sci-ences 3Beijing Academy of Artificial Intelligence 4Beijing Institute of Technology 5Department of Systems Engineering and Depart-ment of Computer Science, City University of Hong Kong. Cor-respondence to: Zhihui Wei <gswei@njust.edu.cn >, Jian Cheng 
+
+<jcheng@nlpr.ia.ac.cn >.VAR        
+
+> VAE  Decoder 【T】···
+> ···
+> ···
+> Sampling
+> ···  Upsampling
+> Accumulation
+> Semantic Aggregation Domain Image Latent Domain Pixel Domain
+
+Figure 1. Overview of the VAR inference pipeline. The Seman-tic Aggregation Domain integrates abstract text semantics and contextual information to generate features. These features are then converted into image-aligned latent representations within the Image Latent Domain. Finally, the Pixel Domain decodes these representations into the resulting image. 
+
+## 1. Introduction 
+
+Autoregressive (AR) models (Lee et al., 2022; Liu et al., 2024; Li et al., 2024) have unified visual understanding and generation (Shi et al., 2024; Sun et al., 2024; Qu et al., 2025; Wu et al., 2025) but suffer from prohibitive latency due to sequential token-by-token decoding. Visual Autoregressive (VAR) modeling addresses this by reframing generation as a coarse-to-fine next-scale prediction (Tian et al., 2024; Tang et al., 2024; Han et al., 2025), achieving diffusion-level zero-shot capabilities. However, despite this paradigm shift, VAR still faces substantial computational overhead as image resolution increases, creating a severe bottleneck for real-time applications. To address this issue, recent acceleration methods achieve substantial speedups via two routes: (i) prun-ing/approximating spatial tokens to reduce per-step com-putation, and (ii) skipping the unconditional branch in classifier-free guidance (CFG) to cut guidance overhead. However, both are still limited. 
+
+(1) Token selection for accelerated inference. As shown in Figure 1, VAR inference consists of the Semantic Ag-gregation Domain , the Image Latent Domain , and the 
+
+Pixel Domain . Most prior work performs token selection primarily based on signals in the Semantic Aggregation Domain . Concretely, FastVAR (Guo et al., 2025) retains Top-K tokens ranked by high-frequency responses and fills pruned positions with cached/interpolated tokens, while StageVAR (Li et al., 2025c) keeps representative tokens (selected in a low-rank subspace) and reconstructs the rest 1
+
+> arXiv:2606.00310v1 [cs.CV] 29 May 2026
+
+Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation Outline Generation Scale S = 0 S = k Detail Generation Scale S = 12         
+
+> prompt: A joyful golden retriever sitting on the grassy field in a sunny park.
+> |𝐈 𝐬 −𝐈 𝐬 "𝟏 |
+> Origin Skip Scale -12 Pixel Domain Semantic -Aggregation
+> Domain
+> Image Latent Domain
+> LD -Pruning
+> 28.94 / 0.9088
+> 0ms
+
+(a ) Visualization of Spatial Redundancy. 
+
+(b ) Comparison of acceleration results at the final scale .                 
+
+> 2.43s 1.53s Elapsed Time 1.07s 0.76s 0.58s
+> 16 ×16 32 ×32 64 ×64 96 ×96 128 ×128 192 ×192 256 ×256 320 ×320 384 ×384 512 ×512 640 ×640 768 ×768 1024 ×1024
+> PSNR / SSIM
+> Latency: 900ms
+> 32.25 /0.9424
+> 850ms
+> 27.87 / 0.8925
+> 630ms
+> 30.28 /0.9302
+> 440ms
+
+Figure 2. Analysis of spatial redundancy in VAR and comparison of acceleration schemes. (a) Sparse pixel updates ( |Ik − Ik−1|, where 
+
+Ik is the decoded image at scale k) in the detail-generation scales suggest later stages mainly refine high-frequency textures, revealing spatial redundancy; all latency results are measured on a single RTX 3090 GPU. (b) LD-Pruning uses decoding-free latent high-frequency energy to preserve fine details (e.g., fur) comparable to pixel-domain signals, while significantly accelerating inference. 
+
+from cached/upsampled features. Limitation 1: Due to interference from complex contextual semantics, they fail to identify redundant tokens accurately, leading to signif-icant degradation in image textures and fine details (see Figure 2(b), more details in section 4.1 ). 
+
+(2) Static unconditional-branch skipping in CFG. An-other line accelerates sampling by reducing CFG cost through unconditional-branch skipping/replacement, but typically with static schedules. For example, SkipVAR (Li et al., 2025a) makes a fixed decision at a pre-defined point (step 9) and applies unconditional-branch replacement only to a pre-defined set of late steps (typically 10 to 12), reusing the conditional output to bypass the unconditional branch. 
+
+Limitation 2: Such static strategies lack a reliable online, prompt-adaptive criterion for when guidance becomes un-necessary, which may terminate guidance too early for se-mantically complex prompts or incur unnecessary computa-tion for simpler ones (see Figure 3(b)). In this work, we fundamentally rethink redundancy in VAR inference by arguing that a truly redundant token or opera-tion is one that has a negligible impact on the pixel domain. We define this impact as latent discrepancy, which measures the necessity of computation by quantifying how much the model’s internal states change during generation. Through systematic analysis, we derive two key findings. (1) As shown in Figure 2(b), under the guidance of image-latent-or pixel-domain signals, the selected pruning masks be-come more accurate and yield better performance. (2) In CFG, the conditional–unconditional discrepancy exhibits an overall convergence trend as the scale increases, while the convergence speed varies across different prompts (see Figure 3(a)). Driven by these insights, we propose LD-Pruning (Latent 
+
+Discrepancy Pruning ), a training-free acceleration frame-work that selects tokens based on image-level features. As illustrated in Figure 2(b), although direct pixel-domain selec-tion yields high-quality tokens, it incurs substantial latency. In contrast, selection in the image latent domain achieves a more favorable trade-off between generation quality and efficiency. To this end, we introduce Latent High-Frequency Energy Pruning (LHEP), which approximates pixel-space refinement discrepancy with a decoding-free latent surro-gate. By measuring local directional variations in the latent residual map, LHEP identifies regions that are still likely to induce visible fine-scale changes after decoding. To further address the dynamic convergence behavior of CFG, we design a Semantic Adaptive Termination Strat-egy ( SATS ). Rather than relying on fixed schedules, SATS 2Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation Skip UB starting  
+
+> from Scale 6
+> Skip UB starting
+> from Scale 7
+> Skip UB starting
+> from Scale 8
+> Skip UB starting
+> from Scale 11
+> Skip UB starting
+> from Scale 12
+> SSIM  Change  Rate
+> SSIM  Value
+> prompt: A beautiful Chinese woman with graceful features, close -up portrait, long flowing black hair,
+> wearing a traditional silk cheongsam delicately embroidered with floral patterns, face softly illuminated by
+> ambient light, serene expression.
+> prompt: A pencil lies on the white paper.
+> (a) (b)
+
+·· ·
+
+·· ·
+
+Figure 3. Analysis of Guidance Redundancy. (a) Semantic-dependent convergence analysis. Left: conditional–unconditional discrepancy measured by MSE across scales. Right: generation quality under different unconditional-branch skipping scales, measured by SSIM and its change rate. (b) Generation results of skipping the unconditional branch (UB) starting from different scales. 
+
+dynamically monitors the discrepancy between conditional and unconditional branches and adaptively terminates the unconditional branch once it no longer provides meaningful guidance. Experiments demonstrate that the proposed LD-Pruning significantly accelerates VAR image generation. In summary, our main contributions are as follows: • We introduce a unified perspective, Latent Discrepancy, to characterize the inference dynamics of VAR, reveal-ing that redundancy manifests as sparse spatial refine-ment and prompt-dependent guidance convergence. • We propose LD-Pruning , a training-free acceleration framework incorporating LHEP and SATS. LHEP ap-proximates pixel-space refinement discrepancy with a decoding-free Image Latent Domain surrogate for region pruning, while SATS monitors conditional– unconditional discrepancy for adaptive guidance ter-mination, avoiding inconsistent localization and fixed skipping schedules. • Extensive experiments demonstrate that LD-Pruning achieves a superior efficiency–quality trade-off, deliv-ering up to 2.35 × inference speedup with negligible performance degradation on standard benchmarks. 
+
+## 2. Related Work 
+
+2.1. Autoregressive Visual Generation 
+
+Visual Autoregressive (VAR) models (Tian et al., 2024) depart from the sequential token-by-token prediction of traditional AR models (Sun et al., 2024; Yu et al., 2022), introducing a next-scale prediction paradigm. This process generates images by transitioning from coarse layouts to fine details, echoing the refinement patterns common in diffu-sion models (Chen et al., 2023; Feng et al., 2025; Couairon et al., 2022; Ho et al., 2022a;b; Ma et al., 2025). Building on this, Infinity (Han et al., 2025) implements a bitwise tok-enizer and classifier along with a self-correction mechanism to enhance detail accuracy. While Infinity scales compo-nents to expand model capacity, the exponential growth of tokens at finer resolutions creates significant computational and memory overhead. Consequently, current research em-phasizes minimizing redundant computation during these final refinement stages. 
+
+2.2. Efficient Visual Generation 
+
+Efficiency in diffusion models has been extensively studied through training-based (Salimans & Ho, 2022; Feng et al., 2024; Ma et al., 2024a; Shen et al., 2025) and training-free methods (Wang et al., 2024; Hu et al., 2024a; Ma et al., 2024b; Zou et al., 2024), though these methods do not di-rectly translate to the hierarchical generation of VAR. In the autoregressive domain, researchers have explored vari-ous efficient decoding strategies (Wang et al., 2025; Teng et al., 2024; Jang et al., 2024) to mitigate the latency of high-fidelity synthesis. However, the inherent sequential nature of traditional AR models remains a persistent bottleneck as image resolution and token counts increase. Recent research (Li et al., 2025b; Chen et al., 2025; Aiello et al., 2025) has begun to specifically address the computa-tional overhead of the VAR paradigm. FastVAR (Guo et al., 2025) applies post-training token pruning with cached token reuse but depends on a fixed pruning ratio. SkipVAR (Li et al., 2025a) introduces a learnable decision mechanism based on handcrafted frequency features to regulate step-skipping and branch replacement. However, SkipVAR’s acceleration remains coarse-grained as it operates primarily at the scale level, and its unconditional branch replacement strategy is fixed regardless of the dynamic generative state. In contrast, our LD-Pruning uses latent discrepancy to cou-ple acceleration decisions more directly with image-level changes. 
+
+## 3. Preliminary 
+
+We first summarize the VAR formulation used throughout the paper. VAR redefines AR for images by shifting from next-token prediction to next-scale prediction. In this frame-work, each autoregressive operation generates a token map 3Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+Figure 4. Domain-level alignment with the pixel-space reference signal. The reference regions are obtained from decoded image differences |Ik − Ik−1|. Attention score represents selection in the Semantic Aggregation Domain, while LHEP represents selection in the Image Latent Domain. 
+
+at a specific resolution scale rather than predicting individual tokens step by step. Given a continuous image feature map 
+
+F ∈ Rh×w×d, VAR first quantizes it into K multi-scale to-ken maps R = ( R1, R2, . . . , RK ) with increasingly larger predefined scale (hk, w k) for k = 1 , . . . , K . This sequence of residuals allows us to reconstruct the continuous feature 
+
+F as Fk = Pki=1 Up( Ri, (h, w )) , where Up( ·) represents the upsampling operation. The multi-scale token maps R
+
+allow the decomposition of the joint probability distribution in an autoregressive manner: 
+
+p(R1, R2, . . . , RK ) = 
+
+> K
+
+Y
+
+> k=1
+
+p(Rk | R1, R2, . . . , Rk−1),
+
+(1) where the initial token map R1 is derived from the text embeddings. For subsequent steps, the input feature eFk−1
+
+is first obtained by downsampling the previous accumulated feature: 
+
+eFk−1 = Down( Fk−1, (hk−1, w k−1)) , (2) where Down( ·) denotes the downsampling operation. Then, the VAR transformer ϕ predicts output features Fok, which are quantized via Q with codebook Z ∈ RV ×d:
+
+Fok = ϕ(eFk−1), (3) 
+
+Rk = Q(Fok). (4) Here, Fok ∈ RM ×d with M = hk × wk, and Rk consists of 
+
+hk × wk discrete tokens selected from a vocabulary of size 
+
+V at scale k. Finally, the updated feature Fk is obtained by adding the upsampled residual to the previous feature: 
+
+Fk = Fk−1 + Up( Rk, (hK , w K )) . (5) 
+
+Table 1. Comparison of token selection criteria from different domains on Infinity-2B.                                    
+
+> Criterion Domain GenEval ↑PSNR ↑SSIM ↑LPIPS ↓Speedup ↑
+> Attention Score Semantic Aggregation 0.7157 25.4434 0.8343 0.1810 1.34 ×
+> Token Variance Image Latent 0.7291 26.5492 0.8607 0.1487 1.73 ×
+> Feature Magnitude Image Latent 0.7308 27.0651 0.8687 0.1427 1.73 ×
+> LHEP Image Latent 0.7334 27.3853 0.8769 0.1348 1.64 ×
+
+We initialize F0 = 0 and eF0 = ⟨SOS ⟩ ∈ R1×1×d
+
+with ⟨SOS ⟩ being the start-of-sequence token. The VAR paradigm generates images in a coarse-to-fine manner with 
+
+K scale-up steps. 
+
+## 4. Rethinking Redundancy via Latent Discrepancy 
+
+Having established the VAR formulation, we introduce a unified perspective, Latent Discrepancy , to characterize the inference dynamics. It is defined as the magnitude of information update required by the model’s internal states to transition from scale k − 1 to k.Based on latent discrepancy, we systematically analyze redundancy in VAR from a more fundamental perspective. 
+
+4.1. Spatial Redundancy: Where to Refine? 
+
+Existing acceleration strategies typically rely on heuristics of the semantic-aggregation domain layer features to iden-tify spatial redundancy. Due to complex contextual rela-tionships, it is difficult to reliably identify truly redundant tokens from semantic-aggregation features alone. As shown in Figure 2(b), this mismatch leads to inconsistent local-ization: it may overlook regions that actually require the generation of texture details. To establish a reliable criterion for “where to refine,” we analyze the generative discrepancy observed in the de-coded pixel space. We approximate this discrepancy us-ing |Ik − Ik−1|. As shown in Figure 2(a), this metric re-veals a clear functional decoupling: early scales construct global geometry, while later scales focus predominantly on high-frequency texture refinement (e.g., fur, grass). These pixel-level updates directly reflect the actual accumulation of visual information. Therefore, we use them as a pixel-space reference signal for identifying spatial redundancy. An efficiency-oriented accelerator should aim to bypass regions where this visual update is negligible. Although the explicit pixel domain can offer precise guid-ance, accessing it requires full image decoding at every step, which incurs prohibitive computational overhead (see Figure 2(b)). Our goal is therefore not to infer token im-portance from the Semantic Aggregation Domain, but to estimate the pixel-space refinement discrepancy in the Im-age Latent Domain without decoding at every scale. Ideally, for a local region Ω, a direct pixel-level refinement score 4Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+can be defined as 
+
+Dk(Ω) = ∥D (Fk)Ω − D (Fk−1)Ω∥ , (6) where D denotes the image decoder. A large Dk(Ω) indi-cates that the region still produces visible image changes and should be refined, while a small value suggests that the region is likely redundant. Since computing this score requires decoding at every scale, we approximate it in the latent space. Because VAR updates the image representa-tion through residual accumulation, late-stage refinements mainly appear as localized residual changes in the latent feature map. These local high-frequency variations are more likely to induce visible fine-scale changes after decoding. Therefore, a suitable decoding-free proxy should preserve spatial locality and be sensitive to high-frequency residual variation. Motivated by this, we use Latent High-frequency Energy as a lightweight proxy for pixel-space refinement dis-crepancy. Unlike semantic-aggregation heuristics, it is com-puted in the Image Latent Domain and directly measures local activeness of undecoded features, enabling efficient localization of regions that still require texture refinement. We further quantify how well different domain signals align with the pixel-space reference signal. Using decoded im-age differences |Ik − Ik−1| as reference refinement regions, Figure 4 reports the IoU between the reference and selected regions under different pruning rates. LHEP shows higher overlap than attention-score selection, suggesting that Im-age Latent Domain cues better preserve the localization of refinement-critical regions than Semantic Aggregation Domain cues. This domain-level trend is also reflected in Table 1, where Image Latent Domain criteria consistently improve generation fidelity over the Semantic Aggregation Domain baseline, and LHEP achieves better overall quality while maintaining comparable efficiency. These observa-tions support latent high-frequency energy as a decoding-free proxy for pixel-space refinement discrepancy. 
+
+Insight 1: Spatial redundancy in fine-scale VAR generation should be identified by pixel-space refinement discrepancy rather than by token-importance cues from the Semantic Aggregation Domain. Since direct pixel-space measure-ment is expensive, latent high-frequency energy serves as a decoding-free Image Latent Domain surrogate that pre-serves locality and captures directional residual variations for fine visual refinement. 
+
+4.2. Guidance Redundancy: When to Stop? 
+
+High-quality visual generation typically requires comput-ing an unconditional branch alongside the text-conditional one, effectively doubling the per-step computation. Exist-ing acceleration methods address this overhead using static skipping schedules, such as terminating the unconditional branch after a fixed number of steps. However, this uni-form strategy overlooks semantic diversity across inputs. As shown in Figure 3(a) right, static schedules lead to a suboptimal trade-off: early termination degrades semanti-cally complex samples, while prolonged guidance wastes computation on simpler ones. To determine an appropriate termination scale, we define guidance discrepancy as the difference between the condi-tional and unconditional branches. As shown in Figure 3(a) left, this discrepancy is not strictly monotonic across scales, but shows a clear overall downward trend and stays close to zero after early coarse scales, with only small fluctuations caused by local refinements. We further test its impact on generation quality by terminating the unconditional branch from different scales. Figure 3(a) right shows that sim-ple prompts reach stable SSIM earlier, whereas complex prompts continue to benefit from guidance until later scales. These results indicate that guidance redundancy is seman-tically dependent rather than temporally fixed. Therefore, effective acceleration requires adaptive discrepancy moni-toring instead of fixed skipping schedules. 
+
+Insight 2: Guidance redundancy is semantically dependent rather than temporally fixed. The conditional–unconditional discrepancy exhibits an overall convergence trend, but it is not required to be strictly monotonic at every scale. The convergence state of this discrepancy provides a reliable real-time signal for adaptively terminating the unconditional branch once it provides negligible additional guidance. 
+
+## 5. Method 
+
+Based on the insights above, we propose LD-Pruning , a training-free acceleration framework. As illustrated in Fig-ure 5, it incorporates LHEP to eliminate spatial redundancy and SATS to remove guidance redundancy. 
+
+5.1. Latent High-frequency Energy Pruning (LHEP) 
+
+To effectively eliminate spatial redundancy without the computational overhead of pixel-space decoding, LHEP estimates pixel-space refinement discrepancy in the Im-age Latent Domain by measuring local high-frequency residual variations. This process involves three key steps: Haar wavelet decomposition, local energy aggregation, and distribution-adaptive selection. 
+
+Latent Haar Wavelet Decomposition. To capture the La-tent Discrepancy defined in Section 4.1, we focus on the quantized token map Rk−1 ∈ RC×hk−1×wk−1 from scale 
+
+k − 1. Since VAR generates images through residual accu-mulation, Rk−1 naturally reflects the incremental update from the previous scale. Regions with strong local residual variations are more likely to induce visible fine-scale refine-ments after decoding, whereas regions with weak variations 5Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation … …   
+
+> Outline Generation Scale
+> (Non -Prunable Tokens)
+> Detail Generation Scale
+> (LD -Pruning for Prunable Tokens)
+
+𝜹 
+
+Visual Autoregressive Model  
+
+> [T]
+> 1
+> 1
+> 2
+> 2
+
+··· 
+
+··· 8 
+
+> 8
+> 9
+> 9
+> 1
+> 1
+> 2
+> 2
+
+··· 
+
+··· 8 
+
+> 8
+> 9
+> 9
+> 1
+> 1
+> Eq.( 3)
+> 1
+> 1
+> 2
+> 2
+
+··· 
+
+··· 15  
+
+> 15
+> 16
+> 16
+> 14
+> 14
+> 3
+> 3
+> 4
+> 4
+> Apply Acceleration Strategy
+> Eq.( 4)
+> 1
+
+··· 16 4 
+
+> 1
+
+··· 16 4
+
+> Token Selection Update
+> [T]
+
+(a) 
+
+Start token from text Save for cache 
+
+Tokens from different scale 
+
+Conditional and unconditional tokens 
+
+Pruned tokens 𝐹 "!𝐹 "!"#
+
+𝐹 !"#
+
+> $
+
+𝐹 "!    
+
+> %
+> Latent High -frequency Energy Pruning ( LHEP )
+> 1
+> 1
+> 2
+> 2
+
+··· 
+
+··· 8
+
+> 8
+> 9
+> 9
+
+𝐹 !"#  
+
+> $
+> Eq.( 13 )
+> Skip
+> Unconditional Branch
+> Generate as usual
+> Semantic -Adaptive Termination Strategy ( SATS )
+> Haar -DWT
+> Eq.( 11 )
+> Acceleration Strategy
+> Apply Mask
+> Apply Acceleration Strategy
+
+𝐹 "! 
+
+> 1
+
+··· 16 
+
+𝐹 "!
+
+> %
+
+(b) 
+
+(c) 
+
+> Eq.( 4)
+> Eq.( 3)
+
+𝐹 !  
+
+> %
+> 12
+
+··· 93 4 1 2 ··· 16 15 3 4
+
+𝑅 !"# 𝑅 ! 
+
+> Acceleration Strategy Acceleration Strategy
+
+Figure 5. (a) Overall pipeline of the proposed LD-Pruning. (b) Overview of the proposed LD-Pruning framework. We gather active tokens for efficient sparse inference, then scatter the computed residuals back into the upsampled base map to reconstruct the full spatial state. (c) Core Mechanisms. SATS (left) monitors real-time guidance discrepancy to adaptively terminate the unconditional branch when convergence is detected. LHEP (middle) leverages Haar-DWT to extract latent high-frequency energy, generating a dynamic mask to precisely filter out spatially redundant tokens. 
+
+are more likely to have stabilized. Therefore, measuring lo-cal high-frequency residual energy provides a decoding-free estimate of where refinement is still necessary. To extract such local residual variations efficiently, we em-ploy the 2D discrete Haar Wavelet Transform (Haar-DWT). Haar-DWT provides a minimal local finite-difference basis for measuring residual variations within each latent patch. For each 2 × 2 latent patch, the Haar basis decomposes the signal into one low-frequency component and three direc-tional high-frequency components. Since our objective is region selection rather than full signal reconstruction, the low-frequency component mainly reflects the local aver-age state, while the high-frequency components measure whether the patch still contains directional residual changes. Moreover, Haar-DWT is static and parameter-free, avoiding additional inference branches or learned predictors. This approach utilizes four fixed kernels to disentangle the low-frequency approximation ( KLL ) from directional details (KLH , KHL , KHH ): 
+
+KLL = 12
+
+1 11 1
+
+
+
+, KLH = 12
+
+−1 1
+
+−1 1
+
+
+
+,
+
+KHL = 12
+
+−1 −11 1
+
+
+
+, KHH = 12
+
+−1 11 −1
+
+
+
+.
+
+(7) 
+
+These high-frequency kernels explicitly capture horizontal, vertical, and diagonal residual variations within the latent feature map. We compute the raw high-frequency energy map Eraw ∈ R hk−12 × wk−12 by aggregating the squared high-frequency responses across all channels: 
+
+Eraw = X
+
+> d∈{ LH,HL,HH }
+
+∥Rk−1 ∗ Kd∥22. (8) 
+
+Local Energy Aggregation. Raw high-frequency signals can be spatially fragmented. To ensure the spatial continu-ity of the selected regions and incorporate neighborhood 6Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+dependencies, we apply a local smoothing operation us-ing Average Pooling ( 3 × 3 kernel, stride=1, padding=1), followed by interpolation to match the target resolution: 
+
+Etarget = Interpolate(AvgPool2d( Eraw )) . (9) This step provides a coherent indication of generative ne-cessity, preventing isolated noise from triggering redundant computations. 
+
+Distribution-Adaptive Selection. A fixed pruning thresh-old is suboptimal due to the varying texture complexity across images. Instead, we propose a dynamic selection criterion based on the Cumulative Distribution Function (CDF) of the energy. We flatten Etarget into a vector v and sort it in descending order. We then determine the dynamic threshold τ that preserves the target energy ratio ρ:        
+
+> k∗= min
+> (
+> k|
+> kX
+> i=1
+> v(i)
+> sorted ≥ρ∥v∥1
+> )
+> ,τ=v(k∗)
+> sorted .(10)
+
+Based on τ , we generate the binary pruning mask M
+
+element-wise: 
+
+M(i,j ) =
+
+(
+
+1, if E(i,j ) 
+
+> target
+
+≥ τ
+
+0, otherwise. (11) This mask explicitly guides the sparse calculation for the next scale ˜Fk: only tokens corresponding to active regions (M(i,j ) = 1 ) are computed, whereas the remaining tokens are skipped to reduce redundancy (See Figure 5(c) middle). 
+
+5.2. Semantic-Adaptive Termination Strategy (SATS) 
+
+To address guidance redundancy, SATS dynamically ter-minates the unconditional branch based on the real-time monitoring of guidance discrepancy. 
+
+Guidance Convergence Monitoring. Instead of relying on static steps, we monitor the evolution of the guidance magnitude to determine its necessity. At each scale k, we first compute the absolute guidance magnitude ∆k as the 
+
+L2-norm distance between the conditional logits l(k) 
+
+> cond
+
+and unconditional logits l(k)
+
+> uncond
+
+:
+
+∆k = ∥l(k) 
+
+> cond
+
+− l(k)
+
+> uncond
+
+∥2. (12) To capture the dynamic behavior of this guidance, we com-pute the relative change rate γk between adjacent scales: 
+
+γk = |∆k − ∆k−1|
+
+∆k−1 + ϵ , (13) where ϵ is a small constant for numerical stability. This metric γk serves as a real-time indicator of guidance conver-gence (See Figure 5(c) left). 
+
+Adaptive Termination. We define a convergence toler-ance δ. Upon satisfying the condition γk < δ , we termi-nate the computation of the unconditional branch for all subsequent scales, effectively switching the model to single-branch inference to save computation. 
+
+5.3. Token Selection Update 
+
+Upon determining the pruning mask M, we gather the 
+
+r = P M(i,j ) active inputs into a sparse tensor ˜F rk . This compact representation undergoes sparse inference via the VAR transformer to predict output features Frk = ϕ( ˜F rk ),which are subsequently discretized into sparse residual to-kens Rrk = Q(Frk) via quantization. This selective compu-tation significantly reduces redundancy by processing only the regions requiring refinement. To reconstruct the full spatial token map Rk for the subse-quent scale, we approximate the skipped regions by upsam-pling the previous map Rbase = Up (Rk−1, (hk, w k)) using nearest-neighbor interpolation. As shown in Figure 5(b), the final state update is achieved by scattering the computed sparse residuals Rrk into this base map at active positions, ensuring both newly generated details and inherited global structures are preserved for the next iteration: 
+
+R(i,j ) 
+
+> k
+
+=
+
+(
+
+Rrk, if M(i,j ) = 1 
+
+R(i,j )
+
+> base
+
+, otherwise. (14) 
+
+## 6. Experiments 
+
+6.1. Experimental Setup Base Models. We apply our proposed LD-Pruning to rep-resentative VAR-based text-to-image baselines, Infinity-2B ,
+
+Infinity-8B , and HART , to validate its generality across model scales. For a fair comparison, we follow the official Infinity and HART implementations for all hyperparam-eters and configurations. We keep the original inference for scales 0 to 12 and accelerate only the detail-generation scales (scales {9, 10 , 11 , 12 }): SATS at scales 9 to 12 and 
+
+LHEP at scales 10 to 12. When comparing with FastVAR ,we use the same setting by skipping scales 11 to 12 for a fair efficiency comparison. Infinity baselines are evaluated with FlashAttention, and all experiments are run on a single NVIDIA H100 GPU. For reproducibility, we use the same fixed random seed for all methods in all experiments. 
+
+Evaluation Metrics. We evaluate the proposed method from two perspectives: generation quality and inference efficiency. For generation quality, we consider both high-level and low-level. High-level evaluation focuses on se-mantic alignment and human preference, measured using four popular benchmark–—GenEval (Ghosh et al., 2023), DPG-Bench (Hu et al., 2024b), ImageReward (Xu et al., 7Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+Table 2. Quantitative comparison on GenEval and DPG-Bench. Latency is measured on a single GPU with batch size 1. Methods GenEval DPG-Bench Latency(s) ↓ Speedup Two Obj. Position Color Attrs. Overall Global Entity Relation Overall Infinity-2B 83.59 44.50 84.57 58.25 0.74 88.50 88.12 88.77 82.84 0.90 1.00 ×
+
++FastVAR 82.83 44.75 81.91 54.50 0.71 81.42 88.27 90.13 82.65 0.62 1.45 ×
+
++SkipVAR 83.33 44.75 84.31 56.00 0.73 85.27 89.11 89.52 82.88 0.65 1.38 ×
+
++LD-Pruning 82.07 45.25 83.78 57.00 0.73 86.97 89.95 90.11 82.65 0.52 1.73 ×
+
+Infinity-8B 87.88 61.50 86.97 68.25 0.79 92.14 89.74 92.08 86.44 1.65 1.00 ×
+
++FastVAR 86.62 60.75 86.97 67.00 0.78 87.30 91.46 91.11 86.33 0.92 1.79 ×
+
++SkipVAR 87.88 61.00 85.11 66.75 0.78 92.64 90.59 90.09 86.29 0.97 1.71 ×
+
++LD-Pruning 87.63 61.00 86.44 67.00 0.79 91.56 89.61 94.45 86.34 0.70 2.35 ×
+
+HART 53.28 18.00 84.31 18.25 0.51 85.74 82.25 85.21 74.75 0.45 1.00 ×
+
++FastVAR 48.74 16.50 81.65 16.25 0.49 79.37 82.48 85.89 74.76 0.40 1.13 ×
+
++LD-Pruning 53.03 17.75 83.78 16.50 0.50 84.22 83.02 85.57 75.61 0.34 1.32 ×
+
+Table 3. Quantitative comparison on HPSv2.1, ImageReward, GenEval, PSNR, SSIM and LPIPS. Latency is measured on a single GPU with batch size 1. 1 denotes latency for preference benchmarks, 2 denotes latency for generation quality benchmarks. Methods HPSv2.1 ImgRw. ↑ Lat.(s) 1↓ Spd. 1 GenEv. PSNR ↑ SSIM ↑ LPIPS ↓ Lat.(s) 2↓ Spd. 2
+
+Photo C-Art Overall Infinity-2B 29.45 30.47 30.55 0.94 0.72 1.00 × 0.74 – – – 0.90 1.00 ×
+
++FastVAR 28.80 29.91 29.97 0.92 0.53 1.36 × 0.71 22.26 0.7787 0.2424 0.62 1.45 ×
+
++LD-Pruning 29.29 30.30 30.39 0.92 0.51 1.41 × 0.73 24.85 0.8239 0.1842 0.52 1.73 ×
+
++SkipVAR 29.31 30.38 30.47 0.94 0.57 1.26 × 0.73 26.47 0.8768 0.1416 0.65 1.38 ×
+
++LD-Pruning 29.35 30.39 30.47 0.94 0.55 1.31 × 0.73 27.42 0.8785 0.1350 0.64 1.41 ×
+
+Infinity-8B 29.49 31.28 31.00 1.05 1.47 1.00 × 0.79 – – – 1.65 1.00 ×
+
++FastVAR 28.72 30.26 30.09 1.02 0.76 1.93 × 0.78 22.66 0.7238 0.2166 0.92 1.79 ×
+
++LD-Pruning 28.92 30.45 30.24 1.03 0.69 2.13 × 0.79 23.82 0.7644 0.1726 0.70 2.35 ×
+
++SkipVAR 29.09 30.90 30.64 1.03 0.92 1.60 × 0.79 25.86 0.8540 0.1243 0.97 1.71 ×
+
++LD-Pruning 29.21 30.93 30.65 1.03 0.86 1.71 × 0.79 26.87 0.8622 0.1135 0.95 1.73 ×
+
+HART 27.62 29.00 29.07 0.66 0.35 1.00 × 0.51 – – – 0.45 1.00 ×
+
++FastVAR 26.26 27.66 27.68 0.60 0.30 1.17 × 0.49 20.85 0.7044 0.3161 0.40 1.13 ×
+
++LD-Pruning 27.13 28.76 28.84 0.64 0.27 1.30 × 0.50 22.15 0.7454 0.2325 0.34 1.32 ×
+
+Table 4. Ablation study of LHEP and SATS on Infinity-2B in terms of GenEval and efficiency. Method Latency(s) ↓ Speed ↑ GenEval ↑
+
+Infinity-2B 0.90 1.00 × 0.7385 ++ LHEP 0.55 1.64 × 0.7334 ++ SATS 0.73 1.23 × 0.7352 ++ LHEP & SATS 0.52 1.73 × 0.7302 
+
+2023) and HPSv2.1 (Wu et al., 2023). For low-level evalua-tion, we take the baseline model’s outputs as the reference and employ PSNR, SSIM (Wang et al., 2004), and LPIPS (Zhang et al., 2018) to quantitatively assess the preservation of high-frequency textures and visual fidelity. 
+
+6.2. Main Results Quantitative Comparison on GenEval and DPG. Ta-ble 2 shows that LD-Pruning consistently offers the best speed–quality trade-off across Infinity (2B/8B) and HART. On Infinity-8B, it cuts latency from 1.65s to 0.70s ( 2.35 ×)while keeping GenEval Overall = 0 .79 and DPG Over-all = 86 .34 , both nearly unchanged from the baseline. On HART, LD-Pruning similarly delivers a clear speedup (1.32 ×) with competitive GenEval/DPG. 
+
+Quantitative Comparison on HPSv2 and ImageReward. 
+
+Table 3 confirms that LD-Pruning preserves preference-aligned quality on both Infinity and HART. For Infinity-8B, LD-Pruning achieves a 2.13 × speedup (1.47s → 0.69s) while keeping HPSv2.1 Overall and ImageReward Overall close to the baseline. On HART, LD-Pruning also maintains strong preference scores with meaningful latency reduction. 
+
+Quantitative Comparison on Visual Fidelity. Table 3 further evaluates LD-Pruning better preserves fine details, as reflected by higher PSNR/SSIM and lower LPIPS compared with attention-based pruning. For example, on Infinity-2B, LD-Pruning improves PSNR/SSIM from 22.26/0.7787 (FastVAR) to 27.42/0.8785, and reduces LPIPS from 0.2424 to 0.1350, indicating substantially closer outputs to the base-line. Besides, Figure 7 visually shows that LD-Pruning retains high-frequency textures in complex regions where heuristic baselines often blur or lose fine structures. More visual fidelity comparisons are in Appendix D. 8Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation Origin Haar FFT Laplacian Sobel 
+
+> PSNR/SSIM
+> LPIPS
+> 28.21/0.8863
+> 0.1309
+> 27.42/0.8743
+> 0.1420
+> 27.17/0.8707
+> 0.1397
+> 27.62/0.8767
+> 0.1380
+
+Figure 6. Left: Ablation on LHEP threshold ρ and SATS threshold δ. Right: Ablation on high-frequency extraction operators. Origin FastVAR 
+
+> Speedup:  1.45x
+> LD -Pruning
+> Speedup:  1.73x
+
+Infinity -2B Infinity -8B 
+
+> Origin FastVAR
+> Speedup:  1.79x
+> LD -Pruning
+> Speedup:  2.35x
+
+Figure 7. Qualitative comparison of various methods. 
+
+Table 5. Consumer-GPU speed evaluation on Infinity-2B. 
+
+Methods GenEval Latency(s) ↓ Speedup ↑
+
+Infinity-2B 0.73 2.43 1.00 ×
+
+FastVAR 0.72 0.96 2.53 ×
+
+SkipVAR 0.72 1.21 2.01 ×
+
+LD-Pruning 0.72 0.81 3.00 ×
+
+6.3. Ablation Study Ablation of LHEP and SATS Table 4 indicates that LHEP introduces only 0.4ms overhead per execution, which is negligible in practice. Moreover, adding SATS on top of LHEP further reduces latency while keeping GenEval essentially stable. 
+
+Ablation Studies on High-frequency Extraction Opera-tors. To identify the optimal energy extractor for LHEP, we compare Haar-DWT with FFT, Laplacian, and Sobel operators. As shown in Figure 6 (Right), Haar-DWT yields the superior reconstruction quality, achieving a PSNR of 28.21 and SSIM of 0.8863. We attribute this success to the Haar-DWT’s inherent capacity to capture local directional gradients precisely with zero parameter overhead. 
+
+Sensitivity Analysis of LHEP Threshold ( ρ). We inves-tigate the energy preservation ratio ρ, which governs the sparsity of our spatial mask. As plotted in Figure 6 (Left), the GenEval remains stable ( ≈ 0.73 ) for ρ ≥ 0.5, suggest-ing that the pruned high-frequency components have limited impact on overall generation quality. When ρ < 0.4, quality drops sharply (down to ≈ 0.720 ), so we set ρ = 0 .5 as a reliable operating point. More hyperparameter sensitivity re-sults on Infinity-8B and HART are provided in Appendix C. 
+
+Sensitivity Analysis of SATS Threshold ( δ). We further analyze the convergence tolerance δ in SATS. Figure 6 (Left) shows that increasing δ makes SATS skip more uncondi-tional branches, improving efficiency, while excessive skip-ping harms quality. We choose δ = 0 .15 , which skips the unconditional branch for about 115 samples while keeping GenEval comparable to the conservative setting. 
+
+Consumer-GPU Speed Evaluation (RTX 3090). Beyond the H100 profiling in the main experiments, we conduct an additional speed test on a consumer-grade NVIDIA RTX 3090 to evaluate the practical acceleration benefits of LD-Pruning. As reported in Table 5, LD-Pruning achieves a 9Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+3.00 × speedup over Infinity-2B (2.43s → 0.81s) while keep-ing GenEval essentially unchanged (0.73 → 0.72). This sug-gests it remains effective on commodity GPUs, offering a strong efficiency–quality trade-off for practical deployment. 
+
+## 7. Conclusion 
+
+In this paper, we rethink redundancy in VAR generation from its impact on image-level outputs and introduce La-tent Discrepancy to quantify token contribution via state changes. Our analysis shows that redundancy is more re-liably characterized by its image-level impact rather than heuristic measures based on layer features. The CFG branch discrepancy converges at a semantic-dependent rate, moti-vating adaptive unconditional-branch skipping. Based on these findings, we propose LD-Pruning , a training-free framework with two components: LHEP for decoding-free region selection using latent high-frequency energy, and 
+
+SATS for adaptive unconditional-branch skipping. Experi-ments on Infinity-2B/8B and HART show that LD-Pruning substantially reduces latency while preserving generation quality, achieving up to 2.35 × speedup on Infinity-8B with negligible degradation on standard benchmarks. 
+
+## References 
+
+Aiello, E., Michieli, U., Valsesia, D., Ozay, M., and Magli, E. Dreamcache: Finetuning-free lightweight personalized image generation via feature caching. In Proceedings of the Computer Vision and Pattern Recognition Conference ,pp. 12480–12489, 2025. Chen, S., Xu, Q., Ma, Y., Qiao, Y., and Wang, Y. Attentive snippet prompting for video retrieval. IEEE Transactions on Multimedia , 26:4348–4359, 2023. Chen, Z., Fan, J., Yu, Z., Zhuang, B., and Tan, M. Frequency-aware autoregressive modeling for efficient high-resolution image synthesis. In Proceedings of the IEEE/CVF International Conference on Computer Vision ,pp. 17140–17149, 2025. Couairon, G., Verbeek, J., Schwenk, H., and Cord, M. Diffedit: Diffusion-based semantic image editing with mask guidance. arXiv preprint arXiv:2210.11427 , 2022. Feng, K., Ma, Y., Wang, B., Qi, C., Chen, H., Chen, Q., and Wang, Z. Dit4edit: Diffusion transformer for image edit-ing. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 39, pp. 2969–2977, 2025. Feng, W., Yang, C., An, Z., Huang, L., Diao, B., Wang, F., and Xu, Y. Relational diffusion distillation for effi-cient image generation. In Proceedings of the 32nd ACM international conference on multimedia , pp. 205–213, 2024. Ghosh, D., Hajishirzi, H., and Schmidt, L. Geneval: An object-focused framework for evaluating text-to-image alignment. Advances in Neural Information Processing Systems , 36:52132–52152, 2023. Guo, H., Li, Y., Zhang, T., Wang, J., Dai, T., Xia, S.-T., and Benini, L. Fastvar: Linear visual autoregres-sive modeling via cached token pruning. arXiv preprint arXiv:2503.23367 , 2025. Han, J., Liu, J., Jiang, Y., Yan, B., Zhang, Y., Yuan, Z., Peng, B., and Liu, X. Infinity: Scaling bitwise autoregressive modeling for high-resolution image synthesis. In Pro-ceedings of the Computer Vision and Pattern Recognition Conference , pp. 15733–15744, 2025. Ho, J., Chan, W., Saharia, C., Whang, J., Gao, R., Gritsenko, A., Kingma, D. P., Poole, B., Norouzi, M., Fleet, D. J., et al. Imagen video: High definition video generation with diffusion models. arXiv preprint arXiv:2210.02303 ,2022a. Ho, J., Salimans, T., Gritsenko, A., Chan, W., Norouzi, M., and Fleet, D. J. Video diffusion models. Advances in neural information processing systems , 35:8633–8646, 2022b. Hu, T., Li, L., van de Weijer, J., Gao, H., Shahbaz Khan, F., Yang, J., Cheng, M.-M., Wang, K., and Wang, Y. Token merging for training-free semantic binding in text-to-image synthesis. Advances in Neural Information Pro-cessing Systems , 37:137646–137672, 2024a. Hu, X., Wang, R., Fang, Y., Fu, B., Cheng, P., and Yu, G. Ella: Equip diffusion models with llm for enhanced semantic alignment. arXiv preprint arXiv:2403.05135 ,2024b. Jang, D., Park, S., Yang, J. Y., Jung, Y., Yun, J., Kundu, S., Kim, S.-Y., and Yang, E. Lantern: Accelerating visual autoregressive models with relaxed speculative decoding. 
+
+arXiv preprint arXiv:2410.03355 , 2024. Langley, P. Crafting papers on machine learning. In Langley, P. (ed.), Proceedings of the 17th International Conference on Machine Learning (ICML 2000) , pp. 1207–1216, Stan-ford, CA, 2000. Morgan Kaufmann. Lee, D., Kim, C., Kim, S., Cho, M., and Han, W.-S. Autore-gressive image generation using residual quantization. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 11523–11532, 2022. Li, J., Ma, Y., Zhang, X., Wei, Q., Liu, S., and Zhang, L. Skipvar: Accelerating visual autoregressive modeling via adaptive frequency-aware skipping. arXiv preprint arXiv:2506.08908 , 2025a. 10 Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+Li, K., Chen, Z., Yang, C.-Y., and Hwang, J.-N. Memory-efficient visual autoregressive modeling with scale-aware kv cache compression. arXiv preprint arXiv:2505.19602 ,2025b. Li, S., Wang, K., Khan, S., Khan, F. S., Yang, J., and Wang, Y. Stagevar: Stage-aware acceleration for visual autoregressive models. arXiv preprint arXiv:2512.16483 ,2025c. Li, T., Tian, Y., Li, H., Deng, M., and He, K. Autoregressive image generation without vector quantization. Advances in Neural Information Processing Systems , 37:56424– 56445, 2024. Liu, D., Zhao, S., Zhuo, L., Lin, W., Xin, Y., Li, X., Qin, Q., Qiao, Y., Li, H., and Gao, P. Lumina-mgpt: Illu-minate flexible photorealistic text-to-image generation with multimodal generative pretraining. arXiv preprint arXiv:2408.02657 , 2024. Ma, X., Fang, G., Bi Mi, M., and Wang, X. Learning-to-cache: Accelerating diffusion transformer via layer caching. Advances in Neural Information Processing Systems , 37:133282–133304, 2024a. Ma, X., Fang, G., and Wang, X. Deepcache: Acceler-ating diffusion models for free. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 15762–15772, 2024b. Ma, Y., Feng, K., Zhang, X., Liu, H., Zhang, D. J., Xing, J., Zhang, Y., Yang, A., Wang, Z., and Chen, Q. Follow-your-creation: Empowering 4d creation through video inpainting. arXiv preprint arXiv:2506.04590 , 2025. Qu, L., Zhang, H., Liu, Y., Wang, X., Jiang, Y., Gao, Y., Ye, H., Du, D. K., Yuan, Z., and Wu, X. Tokenflow: Unified image tokenizer for multimodal understanding and gener-ation. In Proceedings of the Computer Vision and Pattern Recognition Conference , pp. 2545–2555, 2025. Salimans, T. and Ho, J. Progressive distillation for fast sampling of diffusion models. arXiv preprint arXiv:2202.00512 , 2022. Shen, X., Song, Z., Zhou, Y., Chen, B., Li, Y., Gong, Y., Zhang, K., Tan, H., Kuen, J., Ding, H., et al. Lazydit: Lazy learning for the acceleration of diffusion transform-ers. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 39, pp. 20409–20417, 2025. Shi, W., Han, X., Zhou, C., Liang, W., Lin, X. V., Zettle-moyer, L., and Yu, L. Lmfusion: Adapting pretrained lan-guage models for multimodal generation. arXiv preprint arXiv:2412.15188 , 2024. Sun, P., Jiang, Y., Chen, S., Zhang, S., Peng, B., Luo, P., and Yuan, Z. Autoregressive model beats diffusion: Llama for scalable image generation. arXiv preprint arXiv:2406.06525 , 2024. Tang, H., Wu, Y., Yang, S., Xie, E., Chen, J., Chen, J., Zhang, Z., Cai, H., Lu, Y., and Han, S. Hart: Efficient visual generation with hybrid autoregressive transformer. 
+
+arXiv preprint arXiv:2410.10812 , 2024. Teng, Y., Shi, H., Liu, X., Ning, X., Dai, G., Wang, Y., Li, Z., and Liu, X. Accelerating auto-regressive text-to-image generation with training-free speculative jacobi decoding. 
+
+arXiv preprint arXiv:2410.01699 , 2024. Tian, K., Jiang, Y., Yuan, Z., Peng, B., and Wang, L. Visual autoregressive modeling: Scalable image generation via next-scale prediction. Advances in neural information processing systems , 37:84839–84865, 2024. Wang, H., Liu, D., Kang, Y., Li, Y., Lin, Z., Jha, N. K., and Liu, Y. Attention-driven training-free efficiency en-hancement of diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 16080–16089, 2024. Wang, J., Tian, Z., Wang, X., Zhang, X., Huang, W., Wu, Z., and Jiang, Y.-G. Simplear: Pushing the frontier of autoregressive visual generation through pretraining, sft, and rl. arXiv preprint arXiv:2504.11455 , 2025. Wang, Z., Bovik, A. C., Sheikh, H. R., and Simoncelli, E. P. Image quality assessment: from error visibility to struc-tural similarity. IEEE transactions on image processing ,13(4):600–612, 2004. Wu, C., Chen, X., Wu, Z., Ma, Y., Liu, X., Pan, Z., Liu, W., Xie, Z., Yu, X., Ruan, C., et al. Janus: Decoupling visual encoding for unified multimodal understanding and generation. In Proceedings of the Computer Vision and Pattern Recognition Conference , pp. 12966–12977, 2025. Wu, X., Hao, Y., Sun, K., Chen, Y., Zhu, F., Zhao, R., and Li, H. Human preference score v2: A solid benchmark for evaluating human preferences of text-to-image synthesis. 
+
+arXiv preprint arXiv:2306.09341 , 2023. Xu, J., Liu, X., Wu, Y., Tong, Y., Li, Q., Ding, M., Tang, J., and Dong, Y. Imagereward: Learning and evaluat-ing human preferences for text-to-image generation. Ad-vances in Neural Information Processing Systems , 36: 15903–15935, 2023. Yu, J., Xu, Y., Koh, J. Y., Luong, T., Baid, G., Wang, Z., Va-sudevan, V., Ku, A., Yang, Y., Ayan, B. K., et al. Scaling autoregressive models for content-rich text-to-image gen-eration. arXiv preprint arXiv:2206.10789 , 2(3):5, 2022. 11 Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+Zhang, R., Isola, P., Efros, A. A., Shechtman, E., and Wang, O. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 586–595, 2018. Zou, C., Liu, X., Liu, T., Huang, S., and Zhang, L. Ac-celerating diffusion transformers with token-wise feature caching. arXiv preprint arXiv:2410.05317 , 2024. 12 Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+## A. Derivation of LHEP as a Decoding-free Approximation of Pixel-space Refinement 
+
+We further elaborate on the pixel-level refinement score introduced in Eq. (6) , and show how it leads to a decoding-free latent approximation. Let PΩ denote the spatial restriction operator that extracts a local image region Ω. In the pixel domain, the direct refinement magnitude between two consecutive scales can be measured as 
+
+Dk(Ω) = ∥P Ω (D(Fk) − D (Fk−1)) ∥2 , (15) where D is the image decoder. According to the residual accumulation rule of VAR, the latent state satisfies 
+
+Fk = Fk−1 + Uk, Uk = Up( Rk), (16) where Uk denotes the upsampled residual update at scale k. Therefore, the decoded refinement can be written as 
+
+D(Fk) − D (Fk−1) = D(Fk−1 + Uk) − D (Fk−1). (17) Assume that the decoder is locally differentiable around Fk−1. Applying a first-order Taylor expansion yields 
+
+D(Fk−1 + Uk) − D (Fk−1) = JD (Fk−1)Uk + Rk, (18) where JD (Fk−1) is the decoder Jacobian and Rk denotes the higher-order remainder. If the decoder Jacobian is locally Lipschitz with constant LD , the remainder is bounded by 
+
+∥R k∥2 ≤ LD
+
+2 ∥Uk∥22 . (19) In the late detail-generation stages, Uk mainly represents local refinement updates and is typically small compared with the accumulated latent state. Consequently, the first-order term dominates the decoded image change, and Eq. (15) can be approximated as 
+
+Dk(Ω) ≈ ∥P ΩJD (Fk−1)Uk∥2 . (20) For convolutional or locally structured decoders, the decoded response in Ω is primarily affected by latent updates in a finite neighborhood N (Ω) around the corresponding latent region. Thus, the pixel-space refinement score is mainly controlled by local latent residual changes: 
+
+Dk(Ω) ≲ CΩ PN (Ω) Uk 2 + O  ∥Uk∥22
+
+ , (21) where CΩ depends on the local decoder sensitivity. This relation does not imply that latent residual magnitude is identical to pixel-space refinement; rather, it indicates that local latent residual variation provides an informative decoding-free signal for estimating where visible refinement may occur. However, the local residual magnitude in Eq. (21) contains both low-frequency and high-frequency components. In late VAR scales, the global layout and coarse color structure have largely been established, while visible changes are dominated by local texture, boundary, and detail refinements. Therefore, for region selection, the high-frequency component of the local residual is more informative than the local average component. Let H denote a local high-pass operator. We use the following decoding-free latent refinement score: 
+
+bDk(Ω) = HP N (Ω) Uk 
+
+> 22
+
+. (22) In practice, when selecting tokens for the next scale, the future residual Uk is not available before computing scale k. LHEP therefore uses the latest available residual token map Rk−1 as a predictive signal of the local refinement state. The practical score is written as 
+
+bDk−1(Ω) = 
+
+> C
+
+X
+
+> c=1
+
+HP N (Ω) R(c)
+
+> k−1
+> 22
+
+, (23) where c indexes the latent channels. This score measures whether the current local latent region still contains directional residual variations. Regions with larger bDk−1(Ω) are more likely to induce visible fine-scale changes after decoding and are therefore retained for computation, whereas regions with small scores are treated as spatially redundant. In the proposed LHEP module, H is instantiated by the directional high-frequency components of the 2 × 2 Haar-DWT. This choice provides a minimal local finite-difference basis for estimating the high-frequency residual energy in Eq. (23) ,while avoiding explicit decoding at every scale. 13 Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation  
+
+> Table 6. Kernel-size ablation for Haar-based latent high-frequency energy on Infinity-2B.
+
+Method GenEval ↑ PSNR ↑ SSIM ↑ LPIPS ↓ Speedup ↑
+
+8 × 8 0.7311 23.9812 0.8749 0.1352 1.64 ×
+
+6 × 6 0.7309 26.1954 0.8751 0.1355 1.64 ×
+
+4 × 4 0.7320 26.1759 0.8746 0.1359 1.64 ×
+
+2 × 2 0.7334 27.3853 0.8769 0.1348 1.64 ×
+
+## B. Haar-DWT High-frequency Energy and Kernel-size Analysis in LHEP 
+
+We first clarify how Haar-DWT computes the local high-frequency energy used in LHEP. For a local 2 × 2 latent patch from one channel, 
+
+P =
+
+a bc d
+
+
+
+, (24) the Haar basis decomposes P into one low-frequency component and three directional high-frequency components: 
+
+zLL = 12 (a + b + c + d),zLH = 12 (−a + b − c + d),zHL = 12 (−a − b + c + d),zHH = 12 (−a + b + c − d),
+
+(25) where zLL denotes the local average component, and zLH , zHL , and zHH denote the horizontal, vertical, and diagonal high-frequency components, respectively. Since our LHEP aims to select regions that still require local refinement rather than reconstruct the full latent signal, we discard the low-frequency component and define the local high-frequency energy as 
+
+EHF (P ) = z2 
+
+> LH
+
++ z2 
+
+> HL
+
++ z2 
+
+> HH
+
+. (26) For a multi-channel latent feature map, the same decomposition is applied to each channel and the energy is accumulated across channels: 
+
+Eraw (i, j ) = 
+
+> C
+
+X
+
+> c=1
+
+X
+
+> d∈{ LH,HL,HH }
+
+
+
+R(c) 
+
+> k−1
+
+∗ Kd
+
+2
+
+> i,j
+
+. (27) This corresponds to Eq. (8) in the main paper. The resulting energy map measures whether each local latent patch still contains directional residual variations that may lead to visible fine-scale refinement after decoding. Table 6 further analyzes the kernel size of the Haar-based high-frequency operator used in LHEP. Under the same speedup of 1.64 ×, the fixed 2 × 2 filters achieve the best overall quality across GenEval, PSNR, SSIM, and LPIPS. Increasing the kernel size to 4 × 4, 6 × 6, or 8 × 8 does not bring additional benefits, indicating that larger kernels are less favorable for preserving localized high-frequency responses. These results support our design choice that, for LHEP-based region selection in late-stage VAR generation, a minimal local Haar basis is sufficient to capture directional residual variations while preserving well-localized refinement cues. 
+
+## C. Additional Hyperparameter Sensitivity Analysis 
+
+We provide additional hyperparameter sensitivity analysis for the two key hyperparameters in LD-Pruning: the energy preservation ratio ρ in LHEP and the convergence tolerance δ in SATS. The parameter ρ controls the sparsity of the spatial pruning mask, while δ controls how aggressively SATS terminates the unconditional branch. As shown in Figure 8, both Infinity-8B and HART exhibit stable performance within a reasonably wide range of hyperpa-rameters. For ρ, the GenEval score changes smoothly as the pruning ratio varies. Performance remains stable when ρ is set within a moderate range, while overly aggressive pruning leads to a gradual decrease in generation quality. This indicates that LHEP is not highly sensitive to the exact choice of ρ and only requires mild tuning to balance quality and efficiency. 14 Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation    
+
+> Figure 8. Hyperparameter sensitivity analysis of LD-Pruning on Infinity-8B and HART. Left: sensitivity to the LHEP energy preservation ratio ρ. Right: sensitivity to the SATS convergence tolerance δ, where the blue curve denotes GenEval score and the red curve denotes the number of skipped samples.
+
+For δ, increasing the threshold leads to more skipped samples, improving efficiency but gradually reducing GenEval when the termination becomes too aggressive. Nevertheless, both backbones maintain comparable performance to the static schedule over a broad range of δ. These results suggest that SATS is robust to the threshold choice and can achieve a favorable speed–quality trade-off without careful model-specific tuning. Overall, the sensitivity analysis demonstrates that LD-Pruning is not strongly dependent on hyperparameter choices and can be transferred across different VAR backbones with only minor adjustment. 
+
+## D. Additional Qualitative Results on Visual Fidelity 
+
+Figure 9 and Figure 10 report qualitative comparisons on the HPSv2.1 benchmark, with zoom-in views for fine-detail inspection. 
+
+Fine-detail preservation. Across diverse complex scenes, LD-Pruning better preserves high-frequency textures in the zoomed regions, such as thin structures, subtle edges, and dense textured areas (e.g., hair/fur-like patterns or fine fabric/contour details). This observation is consistent with our main-body claim that LD-Pruning retains high-frequency textures in challenging regions where heuristic pruning baselines tend to blur or lose fine structures. 
+
+Comparison to fixed-ratio token pruning. In contrast, FastVAR—using a fixed pruning behavior—often yields over-smoothed details or weakened local contrasts in the same zoomed regions, especially when the scene contains intricate semantics and cluttered textures (Figure 9/10). These qualitative results corroborate that identifying redundancy purely from 15 Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+earlier, semantically entangled representations can be unreliable for texture-heavy regions, whereas LD-Pruning—guided by latent discrepancy closer to the image/pixel domains—more reliably avoids pruning tokens that are crucial for visual fidelity. 
+
+## E. Algorithm Detail of LD-Pruning 
+
+Algorithm 1 summarizes the inference procedure of LD-Pruning . It takes a pretrained VAR model, the input prompt, and inference hyperparameters (e.g., target scales and guidance scale) as input, and outputs the final image. At each generation scale, we compute the latent discrepancy from intermediate representations as an online signal to quantify the marginal impact of computation on the pixel-domain output. Guided by this signal, LD-Pruning performs two complementary actions: (i) LHEP keeps a sparse set of tokens at detail generation scales and prunes the rest, while recovering pruned positions using cached/upsampled features; (ii) SATS detects stable convergence (i.e., sufficiently small discrepancy) and early-terminates subsequent refinement to avoid redundant computation. Overall, LD-Pruning enables adaptive, sample-wise acceleration without a fixed skipping schedule, and integrates into standard VAR inference by applying pruning/termination only at designated scales. 16 Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation Infinity -2B ×1.00 FastVAR ×1.45 LD - Pruning ×1.73 Infinity -2B ×1.00 FastVAR ×1.45 LD - Pruning ×1.73 
+
+Figure 9. Qualitative comparison of complex scene generation on HPSv2.1 (Wu et al., 2023) benchmark. Zoom in for fine-detail visualization. 
+
+17 Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation Infinity -8B ×1.00 FastVAR ×1.79 LD - Pruning ×𝟐 .35 Infinity -8B ×1.00 FastVAR ×1.79 LD - Pruning ×𝟐 .35 
+
+Figure 10. Qualitative comparison of complex scene generation on HPSv2.1 (Wu et al., 2023) benchmark. Zoom in for fine-detail visualization. 
+
+18 Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation 
+
+Algorithm 1 LD-Pruning Inference for VAR with CFG 
+
+Input: scale steps {1, 2, . . . , K } with resolutions (hk, w k); semantic/outline scales {1, . . . , K − m}; detail scales {K −
+
+m + 1 , . . . , K };VAR model ϕ; quantizer Q; decoder D; CFG logits l(k)
+
+> cond
+
+, l (k) 
+
+> uncond
+
+(when computed); SATS scales SSATS (e.g., {9, 10 , 11 , 12 }); LHEP scales SLHEP (e.g., {10 , 11 , 12 }); thresholds δ, ρ ; ϵ for stability. 
+
+Output: final generated image I.
+
+1: F0 ← 0; R0 ← ⟨ SOS ⟩; stopUB ← false ; ∆0 ← 0
+
+2: // (I) Semantic & structure establishment stages (standard VAR) 
+
+3: for k = 1 , 2, . . . , K − m do 
+
+4: ˜Fk−1 ← Down (Fk−1, (hk−1, w k−1)) 
+
+5: F ok ← ϕ( ˜Fk−1)
+
+6: Rk ← Q(F ok )
+
+7: Fk ← Fk−1 + U p (Rk, (hK , w K )) 
+
+8: end for 
+
+9: // (II) Detail refinement stages: SATS + LHEP + sparse update 
+
+10: for k = K − m + 1 , . . . , K do 
+
+11: if (k ∈ S SATS ) ∧ (stopUB = false ) then 
+
+12: ∆k ← ∥ l(k) 
+
+> cond
+
+− l(k)
+
+> uncond
+
+∥2
+
+13: γk ← |∆k −∆k−1|
+
+> ∆k−1+ϵ
+
+14: if γk < δ then 
+
+15: stopUB ← true {stop unconditional branch for subsequent detail scales }
+
+16: end if 
+
+17: end if 
+
+18: if k ∈ S LHEP then 
+
+19: M ← LHEP M ASK (Rk−1, ρ ) {latent HF energy → dynamic mask }
+
+20: else 
+
+21: M ← 1
+
+22: end if 
+
+23: ˜Fk−1 ← Down (Fk−1, (hk−1, w k−1)) 
+
+24: ˜F rk ← GATHER ( ˜Fk−1, M ) {active tokens only }
+
+25: F rk ← ϕ( ˜F rk ) {sparse inference; UB used only if ¬stopUB }
+
+26: Rrk ← Q(F rk )
+
+27: Rbase ← U p (Rk−1, (hk, w k)) {reuse previous residual on skipped regions }
+
+28: Rk ← SCATTER (Rbase , R rk, M )
+
+29: Fk ← Fk−1 + U p (Rk, (hK , w K )) 
+
+30: end for 
+
+31: I ← D (FK )
+
+32: return I
+
+33: Subroutine: LHEP M ASK (Rk−1, ρ )
+
+34: Eraw ← P 
+
+> d∈{ LH,HL,HH }
+
+∥Rk−1 ∗ Kd∥22 {Haar-DWT energy }
+
+35: Etarget ← INTERPOLATE (AVG POOL (Eraw )) 
+
+36: v ← SORT (VEC (Etarget )) (desc); find smallest k⋆ s.t. Pk⋆ 
+
+> i=1
+
+vi ≥ ρ∥v∥1
+
+37: τ ← vk⋆ ; M (i, j ) ← I[Etarget (i, j ) ≥ τ ]
+
+38: return M
+
+19
