@@ -6,73 +6,65 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-02
-- 运行时间：2026-06-02 22:14:53 UTC
+- 最新运行日期：2026-06-03
+- 运行时间：2026-06-03 22:07:13 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：15
+- 精读区：4
 - 速读区：11
 
 ### 今日简报（AI）
-1) 今日推荐17篇论文，聚焦图像超分辨率与扩散模型。
-2) 重点精读VICR（10分）和HiTokSR（9分）两篇真实世界超分辨率新方法，性能突出。
-3) 若主攻图像修复，建议优先精读这两篇；此外CV-Arena提出的人机协作基准也值得速读。
-- 详情：[/202606/02/README](/202606/02/README)
+今日推荐15篇论文，精读2篇高分研究。最值得关注的是图像扫描显微镜的自调优正则化和基于扩散Transformer的细粒度图像生成，均获9.0分。建议深入理解自调优技术原理，并关注细粒度生成在实际场景的应用。
+- 详情：[/202606/03/README](/202606/03/README)
 
 ### 精读区论文标签
-1. [VICR: Visual In-Context Restoration for Real-World Image Super-Resolution](/202606/02/2606.00704v1-vicr-visual-in-context-restoration-for-real-world-image-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：基于扩散Transformer的真实图像超分辨率
-2. [HiTokSR: A Coarse-to-Fine Tokenizer with Hierarchical Codebooks for High-Fidelity Real-World Image Super-Resolution](/202606/02/2606.01157v1-hitoksr-a-coarse-to-fine-tokenizer-with-hierarchical-codebooks-for-high-fidelity-real-world-image-super-resolution)  
+1. [Self-Tuning Regularization for Image Scanning Microscopy](/202606/03/2605.31426v1-self-tuning-regularization-for-image-scanning-microscopy)  
    标签：评分：9.0/10、query:real-ir
-   evidence：使用层次化码本的真实世界图像超分辨率VQ生成模型
-3. [TECCI: Tricky Edits of Collected and Curated Images](/202606/02/2606.01213v1-tecci-tricky-edits-of-collected-and-curated-images)  
+   evidence：超分辨率显微镜重建
+2. [FocusDiT: Masking Queries in Diffusion Transformers for Fine-grained Image Generation](/202606/03/2606.02090v1-focusdit-masking-queries-in-diffusion-transformers-for-fine-grained-image-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：针对生成式图像编辑器的基准测试
-4. [Training-free image inversion for one-step diffusion models](/202606/02/2606.01380v1-training-free-image-inversion-for-one-step-diffusion-models)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：面向一步扩散模型的免训练反转，支持真实图像编辑
-5. [Hallucination-Aware Diffusion Sampling for Inverse Problems via Robust Prior Updates](/202606/02/2606.02331v1-hallucination-aware-diffusion-sampling-for-inverse-problems-via-robust-prior-updates)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散的逆问题求解器用于图像恢复
-6. [Diffusion Image Generation with Explicit Modeling of Data Manifold Geometry](/202606/02/2606.00094v1-diffusion-image-generation-with-explicit-modeling-of-data-manifold-geometry)  
+   evidence：扩散Transformer掩码查询用于细粒度生成
+3. [Qwen-Image-Flash: Beyond Objective Design](/202606/03/2606.03746v1-qwen-image-flash-beyond-objective-design)  
    标签：评分：8.0/10、query:real-ir
-   evidence：显式建模数据流形几何的扩散图像生成
+   evidence：少步蒸馏用于文本到图像生成和指令引导图像编辑
+4. [Bootstrap Your Generator: Unpaired Visual Editing with Flow Matching](/202606/03/2606.03911v1-bootstrap-your-generator-unpaired-visual-editing-with-flow-matching)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于流匹配和循环一致性的无配对视觉编辑
 
 ### 速读区论文标签
-1. [CV-Arena: An Open Benchmark for Instructional Computer Vision Problem Solving with Human-AI Collaborative Preferences](/202606/02/2606.00931v1-cv-arena-an-open-benchmark-for-instructional-computer-vision-problem-solving-with-human-ai-collaborative-preferences)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：面向指令引导图像编辑的基准，包含真实图像任务
-2. [Decoupled Residual Denoising Diffusion Models for Unified and Data Efficient Image-to-Image Translation](/202606/02/2606.01048v1-decoupled-residual-denoising-diffusion-models-for-unified-and-data-efficient-image-to-image-translation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：用于统一图像到图像翻译的解耦残差去噪扩散模型
-3. [Equilibrated Diffusion: Frequency-aware Textual Embedding for Equilibrated Image Customization](/202606/02/2606.02129v1-equilibrated-diffusion-frequency-aware-textual-embedding-for-equilibrated-image-customization)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：使用扩散模型的图像定制
-4. [Where to Refine, When to Stop: Rethinking Redundancy via Latent Discrepancy for Efficient Visual Autoregressive Generation](/202606/02/2606.00310v1-where-to-refine-when-to-stop-rethinking-redundancy-via-latent-discrepancy-for-efficient-visual-autoregressive-generation)  
+1. [Flexible Control of 3D CT Generation via Text and Semantically-Defined Segmentation Prompts](/202606/03/2606.00967v1-flexible-control-of-3d-ct-generation-via-text-and-semantically-defined-segmentation-prompts)  
    标签：评分：7.0/10、query:real-ir
-   evidence：高效的视觉自回归生成
-5. [Collaborative Few-Step Distillation and Low-Bit Quantization for Wan2.2 Dual-Expert Video Diffusion Models](/202606/02/2606.00658v1-collaborative-few-step-distillation-and-low-bit-quantization-for-wan22-dual-expert-video-diffusion-models)  
+   evidence：使用文本和分割提示灵活控制3D CT生成
+2. [Strong Stochastic Flow Maps](/202606/03/2606.01086v1-strong-stochastic-flow-maps)  
    标签：评分：7.0/10、query:real-ir
-   evidence：扩散模型压缩
-6. [Wavelet-Fusion Diffusion Model for Multimodal Brain MRI Synthesis with Modality and Metadata Conditioning](/202606/02/2606.00689v1-wavelet-fusion-diffusion-model-for-multimodal-brain-mri-synthesis-with-modality-and-metadata-conditioning)  
+   evidence：强随机流映射用于扩散模型采样
+3. [AlbedoEdit: Unified Instance-Level Video Editing with Albedo Guidance](/202606/03/2606.01362v1-albedoedit-unified-instance-level-video-editing-with-albedo-guidance)  
    标签：评分：7.0/10、query:real-ir
-   evidence：小波融合扩散模型用于多模态脑MRI合成
-7. [DeblurNVS: Geometric Latent Diffusion for Novel View Synthesis from Sparse Motion-Blurred Images](/202606/02/2606.01315v1-deblurnvs-geometric-latent-diffusion-for-novel-view-synthesis-from-sparse-motion-blurred-images)  
+   evidence：基于反照率引导的统一实例级视频编辑框架
+4. [Drifting Preference Optimization for One-Step Generative Models](/202606/03/2606.02521v1-drifting-preference-optimization-for-one-step-generative-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：使用几何潜在扩散从稀疏运动模糊图像去模糊并合成新视图
-8. [Exploiting Semantic and Pixel Representations for Ultra-Low Bitrate Image Compression](/202606/02/2606.01608v1-exploiting-semantic-and-pixel-representations-for-ultra-low-bitrate-image-compression)  
+   evidence：一步生成模型的偏好优化
+5. [An Attention-Based Denoising Model for Diffusion Weighted Imaging](/202606/03/2606.03903v1-an-attention-based-denoising-model-for-diffusion-weighted-imaging)  
    标签：评分：7.0/10、query:real-ir
-   evidence：提出SPRDiff，一种利用语义和像素表示的扩散型压缩方法。
-9. [Generate in Reconstruction Space, Match in Semantic Space: Transport Geometry for One-Step Generation](/202606/02/2606.00514v1-generate-in-reconstruction-space-match-in-semantic-space-transport-geometry-for-one-step-generation)  
+   evidence：去噪扩散加权成像用于图像修复
+6. [A Unifying View of Variational Generative Wasserstein Flows](/202606/03/2605.31369v1-a-unifying-view-of-variational-generative-wasserstein-flows)  
    标签：评分：6.0/10、query:real-ir
-   evidence：结合自监督表示的一步生成模型
-10. [Improving Visual Representation Alignment Generation with GRPO](/202606/02/2606.00583v1-improving-visual-representation-alignment-generation-with-grpo)  
+   evidence：生成瓦瑟斯坦流的统一理论框架
+7. [Do Text Edits Generalize to Visual Generation? Benchmarking Cross-Modal Knowledge Editing in UMMs](/202606/03/2606.00477v1-do-text-edits-generalize-to-visual-generation-benchmarking-cross-modal-knowledge-editing-in-umms)  
    标签：评分：6.0/10、query:real-ir
-   evidence：使用GRPO改进视觉表示对齐生成
-11. [ProductWebGen: Benchmarking Multimodal Product Webpage Generation](/202606/02/2606.01022v1-productwebgen-benchmarking-multimodal-product-webpage-generation)  
+   evidence：统一多模态模型中跨模态知识编辑的基准
+8. [Hist2Style: Histogram-Guided Stylization with Bilateral Grids](/202606/03/2606.01819v1-hist2style-histogram-guided-stylization-with-bilateral-grids)  
    标签：评分：6.0/10、query:real-ir
-   evidence：使用图像编辑和多模态生成模型对产品网页生成进行基准测试。
+   evidence：基于直方图引导的双边网格风格化，实现高效真实感风格迁移
+9. [Text-to-Image Models Need Less from Text Encoders Than You Think](/202606/03/2606.03715v1-text-to-image-models-need-less-from-text-encoders-than-you-think)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：文本到图像扩散模型中文本编码器的分析
+10. [Training-Free Multi-Concept LoRA Composition with Prompt-Aware Weighting](/202606/03/2606.03792v1-training-free-multi-concept-lora-composition-with-prompt-aware-weighting)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：多概念LoRA组合用于文本到图像生成
+11. [DiffUNet^2: Bidirectional Prediction, Probabilistic Generation and Collaborative Visual Discovery for Scientific Data](/202606/03/2606.03926v1-diffunet2-bidirectional-prediction-probabilistic-generation-and-collaborative-visual-discovery-for-scientific-data)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：面向科学数据的条件扩散模型
 
 
 <div class="dpr-home-promo-card">

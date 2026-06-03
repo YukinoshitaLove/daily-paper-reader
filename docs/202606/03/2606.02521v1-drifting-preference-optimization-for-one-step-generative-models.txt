@@ -1,0 +1,1071 @@
+Title: Drifting Preference Optimization for One-Step Generative Models
+
+URL Source: https://arxiv.org/pdf/2606.02521v1
+
+Published Time: Tue, 02 Jun 2026 03:19:30 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+# Drifting Preference Optimization for One-Step Generative Models 
+
+Zhou Jiang 1 Yandong Wen 1 Zhen Liu 2∗
+
+> 1
+
+Westlake University 2The Chinese University of Hong Kong, Shenzhen 
+
+## Abstract 
+
+One-step text-to-image generators are attractive for deployment because they gen-erate an image with a single forward pass, but preference finetuning them remains difficult: standard alignment methods often rely on policy likelihoods, denoising trajectories, differentiable reward gradients, or test-time optimization. We propose Drifting Preference Optimization (DrPO), an online preference-finetuning method for deterministic one-step generators. For each prompt, DrPO samples candidates from the current generator, ranks them with a target reward, and uses high- and low-scoring samples to synthesize a feature-space update direction. The update is a non-parametric dipole preference field plus a reference drift estimated from the frozen base generator, and is optimized through a detached feature-space re-gression target. The target reward is used only for ranking, so DrPO can train with large, black-box, or non-differentiable rewards while inference remains a single generator call. We evaluate DrPO on SD-Turbo and SDXL-Turbo with multiple target rewards and benchmarks, including HPSv3 and GenEval. DrPO improves alignment over reward-gradient-free one-step preference baselines and reduces HPSv3 training computation by 3.51 × under the matched effective-batch setting by removing reward-model backpropagation. Initial offline experiments suggest that sample-based gradient synthesis can also be used beyond online reward ranking. The project is available at https://ugvly.github.io/DrPO/. 
+
+## 1 Introduction 
+
+Recent text-to-image systems increasingly target low-latency generation through one-step generative training [Deng et al., 2026, Geng et al., 2025, Sauer et al., 2023] and diffusion distillation [Song et al., 2023, Luo et al., 2023, Sauer et al., 2024, Yin et al., 2024b]. Compared with multi-step diffusion samplers, these models generate an image with a single forward pass, making them useful for interactive and resource-constrained deployment. Deployment, however, also requires generators to produce images that better match human preferences and task-specific criteria. Following the success of reinforcement learning from human feedback (RLHF) in language and diffusion models, it is natural to post-train one-step generators with reward models so that their outputs better align with such preferences. Reward-based post-training is nontrivial for one-step generators. Standard RLHF and preference-optimization methods typically rely on stochastic policy probabilities, density ratios, or denoising trajectories to construct policy updates. Directly backpropagating a differentiable reward through the generated image avoids these requirements and can be effective for lightweight rewards, but it follows the local gradient of the reward model and requires differentiating through that reward. This becomes costly for large VLM-based rewards and impossible for black-box or discrete evaluators. We therefore seek a reward-driven, reference-aware update direction that can be recovered from samples and reward evaluations alone.          
+
+> ∗Corresponding Author. Preprint.
+> arXiv:2606.02521v1 [cs.LG] 1 Jun 2026 Number of Finetuning Steps Figure 1: Overview of DrPO. Left: construction of the drift field used to finetune the network. For an on-policy sample (black dot), Nrandom pairs are collected. In each pair, the sample with the higher reward is labeled as positive (red dot), while the other is labeled as negative (blue dot). Together with the self-repulsion and attraction forces induced by pθand pref ,respectively, these components synthesize the final regression target z∗(brown dot). The contours indicate reward magnitudes. Right: qualitative samples from fixed test prompts along the online finetuning trajectory.
+
+We take inspiration from Drifting Models [Deng et al., 2026], which train one-step generators by constructing feature-space drift fields from finite batches of samples. In preference finetuning, reward-ranked candidates naturally define such a field: high-scoring samples provide attractive fields, while low-scoring samples provide repulsive fields. DrPO turns these fields into a non-parametric dipole preference field and independently estimates a reference drift from samples of the frozen base generator. The combined field gives a detached feature-space target for updating the current generator. Since the target reward is used only to rank generated candidates, DrPO supports expensive, black-box, or discrete rewards while preserving one-step inference. We evaluate DrPO across multiple reward models and one-step generators built on SD1.5 and SDXL. On HPSv3 and GenEval, DrPO improves preference alignment without differentiating through the target reward. We also report ablations on candidate count, feature choice, kernel choice, velocity scale, and reference regularization, along with initial results on offline preference finetuning. Our core contributions are: • We propose DrPO, an online preference-finetuning method that converts reward-ranked on-policy samples into a detached drifting update for one-step generators while keeping inference to one forward pass. • We introduce a dipole preference field that builds latent-space update directions from positive and negative samples, replacing target-reward gradients with sample-based drifting updates. • We validate DrPO on SD-Turbo and SDXL-Turbo across multiple rewards, where it gives the largest gains among reward-gradient-free one-step preference baselines. • We show that DrPO works with large and non-differentiable rewards, including HPSv3 and GenEval-style rewards, and provide preliminary results on offline preference finetuning. 
+
+## 2 Related Work 
+
+One-step generative models. Fast image generators often compress iterative sampling into one or a few network evaluations through diffusion distillation [Yin et al., 2024b,a], consistency training [Lu and Song, 2024], adversarial objectives, flow distillation [Nguyen and Tran, 2024], or related mechanisms. Sampling then requires only a single forward pass, but many structures used by standard alignment methods are no longer available, including denoising trajectories, timestep-wise scores, sampler likelihoods, and tractable policy log probabilities. Existing fast-diffusion alignment methods often retain some diffusion-specific structure during training, for example through score regularization, pairwise margins, or step-level win–lose construction [Luo, 2025, Luo et al., 2025a, Miao et al., 2025, Croitoru et al., 2025, Luo et al., 2025b,c]. 2Preference alignment. RLHF aligns generative policies by learning a reward model from compar-isons and updating a policy with PPO-style objectives under reference or KL control [Stiennon et al., 2020, Schulman et al., 2017, Ouyang et al., 2022]. DPO and related objectives remove the explicit RL loop by fitting likelihood-ratio preferences against a reference policy [Rafailov et al., 2023]; RLAIF and group-relative variants change the feedback source or normalization scheme while retaining a policy-optimization view [Bai et al., 2022, Shao et al., 2024]. In image generation, reward-gradient and preference methods adapt these ideas to diffusion or sampler structure: DRaFT backpropagates differentiable rewards through a sampler [Clark et al., 2024], diffusion-DPO adapts preference mar-gins to diffusion likelihood bounds [Wallace et al., 2024], and ReNO or PAHI optimize sampling variables or prompt-specific noise distributions at test time [Eyring et al., 2024, Kim et al., 2024]. Recent preference-guidance methods also cast diffusion alignment as classifier-free-guidance-style inference [Jiang et al., 2026]. DrPO differs by estimating the update direction directly in feature space from reward-ranked samples and reference samples, without reward backpropagation, policy likelihoods, denoising trajectories, or test-time search. 
+
+Drifting models. Drifting Models introduce a likelihood-free training mechanism for one-step generators, where finite-batch drift in feature space replaces explicit density estimation or adversarial discrimination [Deng et al., 2026]. In their original formulation, the drift is used for distribution matching between generated samples and data samples. We use the same drifting view for reward-based post-training: the drift is defined by condition-specific preference information, while a frozen reference generator supplies the stability direction. 
+
+## 3 Preliminaries 
+
+3.1 Drifting Models 
+
+Drifting Models [Deng et al., 2026] train one-step generators by assigning a feature-space drift direction to each generated sample. For a condition c and noise ϵ, let yθ = Gθ (ϵ, c ) and let fθ (ϵ, c )
+
+be its feature representation. For a generated feature x, the drift moves the sample toward positive anchors and away from negative anchors: 
+
+Vν+,ν − (x) = Eb+∼ν+
+
+k(x, b +)( b+ − x) − Eb−∼ν−
+
+k(x, b −)( b− − x) , (1) where k measures feature similarity, ν+ denotes the positive distribution, and ν− denotes the negative distribution. Given this field, the generator is trained against a detached drifted feature target: 
+
+Ldrift (θ) = 12 Eϵ,c 
+
+h
+
+fθ (ϵ, c ) − sg  fθ (ϵ, c ) + Vν+,ν − (fθ (ϵ, c ))  22
+
+i
+
+, (2) where sg( ·) denotes stop-gradient. Since the target is detached, this loss gives 
+
+∇θ Ldrift = −Eϵ,c 
+
+Vν+,ν − (fθ (ϵ, c )) ∇θ fθ (ϵ, c ) . (3) Thus the drifting loss can be read as a deterministic policy-gradient update whose feature-space velocity is synthesized from samples. For minibatch training, Drifting Models approximate the drift field with mean shift. Given a support batch B = {bi}Bi=1 , kernel weights are normalized within the batch: 
+
+wi(x; B) = k(x, b i)
+
+P 
+
+> j
+
+k(x, b j ) , bμB(x) = X
+
+> i
+
+wi(x; B)bi. (4) With positive and negative batches B+ and B−, the approximate drift field is 
+
+bV(x) = bμB+ (x) − bμB− (x). (5) With an RBF kernel k(x, b ) = exp( −s(x, b )/τ ), wi is the softmax weight over negative similarities. 
+
+3.2 Reinforcement Learning from Human Feedback 
+
+RLHF first trains a reward model from pairwise preferences. Given comparisons (c, y +, y −), where 
+
+y+ is preferred to y− under condition c, the reward model rψ (c, y ) is commonly trained with 
+
+LRM (ψ) = −E(c,y +,y −) log σ rψ (c, y +) − rψ (c, y −) . (6) 3After reward learning, a common reference-regularized target is the tilted distribution 
+
+q∗(y | c) = qref (y | c) exp( rψ (c, y )/β KL ) /Z (c), (7) where Z(c) is the normalizing constant. Fitting qθ to this target is equivalent to the soft RL objec-tive [Haarnoja et al., 2018] 
+
+max 
+
+> qθ
+
+EcEy∼qθ (·| c) [rψ (c, y )] − βKL Ec [KL( qθ (· | c) ∥ qref (· | c))] . (8) This formulation contains the two forces used in preference alignment: reward improvement and reference control. For deterministic one-step generators, policy likelihoods and density ratios are not available in closed form, motivating sample-based estimates of the corresponding update direction. 
+
+## 4 Method 
+
+4.1 Dipole Reward Model 
+
+Let x = gθ (ϵ, c ) and z = ϕ(x), where ϵ is the input noise, x is the generated image, and ϕ is a fixed feature extractor. Given positive and negative feature samples A+ and A−, we define a non-parametric reward in feature space: 
+
+Rdipole (z) = exp( E(z)) , E(z) = γ
+
+> M
+
+X
+
+> j=1
+
+k(z, a + 
+
+> j
+
+) − k(z, a − 
+
+> j
+
+) , (9) where a+ 
+
+> j
+
+∈ A + and a− 
+
+> j
+
+∈ A − index equal-size positive and negative samples, k is a feature-space kernel, and γ > 0 sets the dipole strength. Differentiating Eq. 9 gives 
+
+∇z log Rdipole (z) = γ
+
+> M
+
+X
+
+> j=1
+
+k(z, a + 
+
+> j
+
+)∇z log k(z, a + 
+
+> j
+
+) − k(z, a − 
+
+> j
+
+)∇z log k(z, a − 
+
+> j
+
+) . (10) The induced field is kernel-weighted and local: points near positive samples are strongly attracted, points near negative samples are strongly repelled, and points far from the observed samples receive negligible update since when E(z) → 0 we have Rdipole (z) → 1. This locality is important for one-step finetuning because it lets the reward signal guide nearby samples while reducing extrapolated reward gradients far from the evidence in the current batch. 
+
+4.2 Drifting Preference Optimization 
+
+For a differentiable, non-negative reward R(z), let x = gθ (ϵ, c ) and z = ϕ(x). The pathwise gradient of the reference-regularized soft RL objective is 
+
+∇θ J = Eϵ [( ∇z log R(z) + λ (∇z log pbase (z) − ∇ z log pθ (z))) ∇θ z] , (11) where ∇θ z = ∇xϕ(x)∇θ gθ (ϵ, c ).Given an on-policy candidate batch B = {xi}Ki=1 from xi = gθ (ϵi, c ), ϵi ∼ N (0 , I ), we evaluate the target reward and sample M reward-ordered pairs Dθ = {(x+ 
+
+> j
+
+, x − 
+
+> j
+
+)}Mj=1 with R(z+ 
+
+> j
+
+) ≥ R(z− 
+
+> j
+
+) and 
+
+zj = ϕ(xj ). The positive and negative samples are 
+
+A+ = {ϕ(x+ 
+
+> j
+
+)}Mj=1 , A− = {ϕ(x− 
+
+> j
+
+)}Mj=1 . (12) The reward-score term in Eq. 11 is replaced by the dipole preference field (Eq. 9): 
+
+∇z log R(z) ≈ Vpref (z) = ∇z log Rdipole (z; A+, A−). (13) By treating samples for ∇z log pbase and ∇z log pθ (z) as positive and negative terms, respectively, we use the mean-shift estimate in Eq. 5 and write (with R and Z being independent sample sets from the two terms): 
+
+Vref (zi) = bμR(zi) − bμZ (zi). (14) The final DrPO field is 
+
+VDrPO (zi) = Vpref (zi) + λV ref (zi). (15) 4For zi = ϕ(gθ (ϵi, c )) , the detached target is 
+
+z⋆i = sg ( zi + ηV DrPO (zi)) , (16) with loss 
+
+LDrPO (θ) = 12K
+
+> K
+
+X
+
+> i=1
+
+∥zi − z⋆i ∥22 . (17) The reward model, reference generator, and feature extractor are used only during training; the deployed model remains the same one-step generator. 
+
+Non-differentiable rewards. DrPO only requires the target reward R to rank generated samples. Therefore, the same construction applies when R is non-differentiable, such as rule-based evaluators or task-specific correctness checks: we use R to form A+ and A−, and the subsequent dipole drift is computed entirely in feature space. 
+
+Offline variant. We also make a naive attempt to extend DrPO to offline preference finetuning. Given offline preference pairs, we replace the online feature sets A+ and A− with chosen and rejected features from the dataset; the reference term and detached feature regression remain unchanged. This removes the online reward-ranking step while keeping the same drifting update. 
+
+Algorithm 1 DrPO (Online) 
+
+Require: Generator gθ , frozen reference model gref , feature map ϕ, reward model R, drift radii Ω,reference weight λ 
+
+> 1:
+
+for each optimization step do  
+
+> 2:
+
+Sample condition c and noises {ϵi}Ki=1  
+
+> 3:
+
+Generate current samples xi = gθ (ϵi, c ) and reference samples xref  
+
+> i
+
+= gref (ϵi, c ) 
+
+> 4:
+
+Compute features Z = {ϕ(xi)}Ki=1 and R = {ϕ(xref  
+
+> i
+
+)}Ki=1  
+
+> 5:
+
+Rank {xi}Ki=1 with R and form preference pairs Dθ = {(x+ 
+
+> j
+
+, x − 
+
+> j
+
+)}Mj=1  
+
+> 6:
+
+Set A+ = {ϕ(x+ 
+
+> j
+
+)}Mj=1 and A− = {ϕ(x− 
+
+> j
+
+)}Mj=1  
+
+> 7:
+
+Construct drift field: Vpref ← DRIFT FIELD (Z, A+, A−, Ω)  
+
+> 8:
+
+Construct drift field: Vref ← DRIFT FIELD (Z, R, sg( Z), Ω)  
+
+> 9:
+
+VDrPO ← Vpref + λV ref  
+
+> 10:
+
+Z⋆ ← sg( Z + ηV DrPO ) 
+
+> 11:
+
+Update θ with LDrPO = 1
+
+> K
+
+P 
+
+> i
+
+∥zi − z⋆i ∥22 
+
+> 12:
+
+end for 
+
+## 5 Experiments 
+
+5.1 Experimental Setup Base models. We use SD-Turbo [Sauer et al., 2024] ( license: Stability AI Community License ) as the main one-step text-to-image base model, and evaluate SDXL-Turbo [Podell et al., 2024, Sauer et al., 2024] ( license: Stability AI Community License ) in the base-model ablation. The two models use different architectures and latent spaces, so the SDXL-Turbo experiment tests whether the same dipole-drift update transfers beyond the SD-Turbo setting. 
+
+Target reward models. The default target reward is PickScore [Kirstain et al., 2023] ( license: MIT ). We also use HPSv3 [Ma et al., 2025] ( license: MIT ) to test training with a large VLM-based reward. In the target-reward ablation, we replace or combine PickScore with Aesthetic Score (AES) [Schuhmann, 2022] ( license: MIT ), HPSv2 [Wu et al., 2023] ( license: Apache-2.0 ), ImageReward (IR) [Xu et al., 2023] ( license: Apache-2.0 ), and CLIP [Radford et al., 2021] ( license: MIT ). AES is unconditional, while the other rewards are text-conditioned. 
+
+Prompts and evaluation sets. Online experiments use prompts from the Pick-a-Pic v2 training split [Kirstain et al., 2023]. The primary evaluation uses the Pick-a-Pic v2 test split with 424 prompts and five matched seeds. We also evaluate on Parti-Prompts [Yu et al., 2022], which contains 1,632 
+
+prompts. For non-differentiable reward experiments, we use 553 GenEval prompts covering object presence, counting, color, position, and attribute binding [Ghosh et al., 2023]. 5Method Inference Steps Reward Grad Pick-a-Pic v2 Test Parti-Prompts PS ↑ AES ↑ IR ↑ PS ↑ AES ↑ IR ↑                                                                                 
+
+> SDXL base 50 –22.15 6.104 6.85 22.64 5.761 7.24 SDXL-DPO 50 –22.57 6.076 9.38 22.95 5.811 10.66 SDXL-Turbo (base) 1–22.45 6.059 9.36 22.77 5.693 9.13 DRaFT 1Yes 24.45 6.712 12.70 24.34 6.485 12.66
+> VGG -Flow 1-step 1Yes 24.27 6.490 12.19 23.98 6.200 11.40 DPO 1-step 1No 22.77 6.227 10.44 22.85 6.019 11.25 PSO 1No 22.56 6.092 8.97 22.87 5.744 9.17 GRPO 1-step 1No 22.50 6.077 9.57 22.80 5.710 9.27
+> DrPO 1No 23.66 6.717 12.46 23.71 6.665 12.60 Table 1: Results on SDXL-Turbo. We report test-time generator calls as inference steps and indicate whether each method backpropagates through the target reward during training. For multi-step SDXL baselines, 50 ×2denotes classifier-free guidance with two model evaluations per denoising step. PS denotes PickScore ×100 and IR denotes ImageReward ×10 .
+
+Baselines. We compare with two groups of finetuning methods: (1) reward-gradient-based methods ,including DRaFT and VGG -Flow 1-step [Clark et al., 2024, Liu et al., 2025]; and (2) reward-gradient-free methods , including DPO 1-step , PSO, and GRPO 1-step [Rafailov et al., 2023, Wallace et al., 2024, Shao et al., 2024]. For methods not originally designed for deterministic one-step generators, we adapt their core objectives to the same finetuning setting and evaluate with matched prompts and seeds. Details of the one-step adaptations are given in the appendix. 
+
+Metrics. We evaluate text-to-image generation with scalar preference and quality metrics, including PickScore, AES, HPSv2, HPSv3, and ImageReward. FID is reported when matched references are available [Heusel et al., 2017]; GenEval uses the standard compositional scores [Ghosh et al., 2023]. We also report pairwise win rates using Qwen3-VL [Qwen Team, 2025] as an external VLM judge, following recent VQA/MLLM-based evaluation protocols [Hu et al., 2023, Lin et al., 2024, Ku et al., 2024, Lee et al., 2024]. Qwen3-VL compares image pairs generated from the same prompt and outputs A, B, or tie ; we randomize order to reduce position bias [Zheng et al., 2023, Shi et al., 2025] and aggregate parsed JSON decisions into win/loss/tie rates. Details are provided in Appendix B.4. 
+
+Feature extractors. Our default feature extractor is the 340M-parameter latent-MAE encoder from Drifting Models [Deng et al., 2026]. We ablate this choice against raw latent features and DINOv2 features extracted from VAE-decoded images. We also compare multi-layer latent-MAE variants: latent-MAE 1 is the default multi-feature variant, latent-MAE 2 uses the last three layers, and latent-MAE 3 uses only the final layer. For SDXL-Turbo, where the SD-VAE-specific latent-MAE is not directly applicable, we use decoded image-space MAE features [He et al., 2022]. 
+
+Construction of the drift field. Following Deng et al. [2026], we estimate the drift field from mini-batches by combining attraction toward positive samples and repulsion from negative samples across multiple neighborhood scales. We adopt their normalization and stabilization techniques for improved optimization. Implementation details are provided in Appendix A. 
+
+Implementation details. We finetune LoRA parameters [Hu et al., 2022] with rank 16 . Unless otherwise specified, training uses a per-GPU mini-batch size of 24 on 4 GPUs with 8 gradient-accumulation steps, giving an effective batch size of 768 . Each DrPO mini-batch uses one prompt to generate 24 candidates; the reward model samples 12 reward-ordered pairs to construct A+ and A−.We use AdamW with learning rate 1 × 10 −4. For HPSv3 experiments, we use learning rate 3 × 10 −5
+
+and reduce the number of candidate images per prompt to 16 . For the DRaFT+HPSv3 baseline, we use mini-batch size 2 with 64 gradient-accumulation steps to avoid out-of-memory errors while keeping the same effective batch size. 
+
+5.2 Results Reward      
+
+> DRaFT
+> DPO1step
+> PSO
+> GRPO1step
+> DrPO 0200 400 600 800 1000
+> Update Step
+> 22.0
+> 22.5
+> 23.0
+> 23.5
+> 24.0
+> 24.5
+> Reward
+> Figure 3: Reward curves on SD-Turbo.
+
+Main results. Table 1 evaluates SDXL-Turbo, a SDXL-family one-step backbone. DrPO improves PickScore, AES, and ImageReward over the base model on both Pick-a-Pic v2 and Parti-Prompts while using the target reward only for ranking. Direct reward-gradient methods such as DRaFT and VGG -Flow 1-step still lead several scalar-reward columns, but require backpropagation through the 60 20 40 60 80 100        
+
+> Preference [%]
+> DrPO
+> DrPO
+> DrPO
+> DrPO
+> DrPO
+> Pick-a-Pic v2 DrPO Baseline
+> SDXL-Turbo
+> DPO
+> GRPO
+> DRaFT
+> VGGFlow 020 40 60 80 100
+> Preference [%]
+> DrPO
+> DrPO
+> DrPO
+> DrPO
+> DrPO
+> Parti-Prompts DrPO Baseline
+> SDXL-Turbo
+> DPO
+> GRPO
+> DRaFT
+> VGGFlow
+
+Figure 2: Qwen3-VL pairwise preference evaluation. For each prompt, Qwen3-VL compares two matched generations under the same prompt and selects the cleaner, more coherent prompt realization; ties are allowed and A/B order is randomized. Red indicates DrPO preference, blue indicates the compared baseline preference, and the vertical line marks 50%. The full judge prompt is provided in Appendix B.4. Method Inference Steps Reward Grad Pick-a-Pic v2 Test Parti-Prompts PS ↑ AES ↑ IR ↑ PS ↑ AES ↑ IR ↑
+
+SD1.5 50 – 20.79 5.455 1.22 21.49 5.358 2.25 LCM-SD1.5 4 – 20.50 5.497 -3.08 21.15 5.396 -1.94 SD2.1 50 – 21.09 5.645 2.49 21.77 5.547 3.97 SD-Turbo (base) 1 – 21.88 6.054 5.75 22.29 5.758 5.37 DRaFT 1 Yes 24.69 6.820 9.63 23.07 6.516 7.72 
+
+VGG -Flow 1-step 1 Yes 23.73 6.378 7.74 22.99 6.027 6.50 DPO 1-step 1 No 22.02 6.080 5.95 22.39 5.793 5.21 PSO 1 No 21.88 6.059 5.80 22.29 5.763 5.42 GRPO 1-step 1 No 21.98 6.077 6.08 22.35 5.779 5.65 
+
+DrPO 1 No 23.49 6.485 9.54 22.99 6.284 7.46 Table 2: Results on SD-Turbo. We report test-time generator calls as inference steps and indicate whether each method backpropagates through the target reward during training. PS denotes PickScore ×100 and IR denotes ImageReward ×10 .
+
+target reward. Among reward-gradient-free one-step preference methods, DrPO gives the largest gains. Table 2 shows that DrPO can be generalized to different base models. Qualitative results are shown in Fig. 4, Fig. 6, and Fig. A4. 
+
+Qwen3-VL pairwise preference. Figure 2 reports pairwise judgments from Qwen3-VL for matched generations under the same prompt. Unlike scalar reward metrics, this evaluation asks a VLM judge to compare two complete images with respect to prompt fidelity, visual coherence, artifacts, and aesthetics. The judge outputs A, B, or tie ; A/B order is randomized, and decisions are aggregated into win/loss/tie rates. The red bars show that DrPO is consistently preferred over one-step baselines on both Pick-a-Pic v2 and Parti-Prompts, indicating better prompt realization under an external VLM evaluator. The judge prompt is provided in Appendix B.4.                  
+
+> Metric DRaFT DrPO
+> Reward grad Yes No Effective batch 192 192 Update time (s) ↓21.62 6.17
+> Speedup ↑1.00 ×3.51 ×
+> Backward (s) 9.99 0.34 0246
+> Wall-clock time (hours)
+> 6
+> 7
+> 8
+> 9
+> 10
+> Eval HPSv3
+> DrPO
+> DRaFT
+
+Figure 5: Efficiency comparison on HPSv3. 
+
+Efficiency with large reward models. Figure 5 profiles training with HPSv3. Under the matched effective-batch setting, DrPO removes HPSv3 reward-model backpropagation and reduces update time from 21 .62 s to 6.17 s, giving a 3.51 × speedup. 
+
+Non-differentiable rewards. Figure 8 evalu-ates DrPO with GenEval scores as the target re-ward. GenEval provides non-differentiable task-level scores for compositional constraints such as counting, color, position, and attribute bind-ing [Ghosh et al., 2023]. DrPO uses these scores to rank candidates and form A+ and A−, with no change to the feature-space drift update. 
+
+Ablation on target rewards. Figure 7 and Table A6 show DrPO results with different target reward models. The drift estimator and optimization objective are kept fixed, suggesting that DrPO is robust to the choice of reward model. 
+
+Ablation on drift design. Table 4 ablates candidate count, feature extractor, kernel choice, and velocity scale. Increasing the candidate count improves PickScore and AES, suggesting that a larger on-policy pool gives more stable pairwise estimates. Latent-MAE features outperform raw latent 7Figure 4: Qualitative comparison on Pick-a-Pic v2 prompts for SDXL-Turbo. Rows compare the SDXL-Turbo base, one-step preference baselines, and DrPO variants under matched prompts and seeds. The examples complement the SDXL-Turbo quantitative comparison in Table 1. 
+
+Candidates PS ↑ AES ↑
+
+SD-Turbo 21.88 6.054 
+
+K = 16 23.24 6.409 
+
+K = 24 23.53 6.552 
+
+K = 32 23.57 6.599                 
+
+> (a) Batch generation
+> Feature PS ↑AES ↑
+> SD-Turbo 21.88 6.054 latent-MAE 123.55 6.513 latent-MAE 223.50 6.526
+> latent-MAE 323.48 6.506 Latent 20.52 4.543 VAE-dec.+DINOv2 22.28 6.252
+> (b) Feature map
+
+Kernel PS ↑ AES ↑
+
+SD-Turbo 21.88 6.054 Cosine 23.63 6.509 RBF 23.50 6.590 Exponential 23.53 6.594 
+
+Laplacian 23.51 6.515                    
+
+> (c) Kernel
+> Weight PS ↑AES ↑
+> SD-Turbo 21.88 6.054
+> β= 1000 23.51 6.510
+> β= 3000 23.53 6.542
+> β= 5000 23.51 6.485
+> β= 10000 23.46 6.444
+> (d) Velocity scale η
+
+Table 4: Ablations on different design choices. 
+
+features, while raw latents substantially degrade performance; the drift benefits from a representation whose local neighborhoods track semantic image changes. DrPO is not highly sensitive to the kernel choice in this range. For the velocity scale η, larger values do not necessarily improve performance. 
+
+Ablation on reference regularization. Table 5 compares the proposed reference drift with a perceptual regularization baseline. Perceptual loss anchors each generated sample to its paired reference image, while reference drift uses local neighborhoods from the base and current generators in the same feature geometry. Reference drift gives small but consistent gains over the perceptual baseline on most alignment metrics. 0 200 400 600 800  
+
+> Training Step
+> 21.8
+> 22.0
+> 22.2
+> PickScore
+> DrPO
+> DPO 1step w/ MAE
+> DPO 1step
+
+Figure 10: Offline DrPO Convergence. 
+
+Offline preference setting. Figure 10 compares a naive offline extension of DrPO with offline DPO 1-step variants using the same SD-Turbo base and Pick-a-Pic v2 test protocol. Here A+ and A−
+
+come from fixed preference pairs rather than online reward ranking. Offline DrPO improves over the base model, while the adapted DPO 1-step variants remain closer to SD-Turbo. This separates the effect of the feature-drift update from online candidate selection. 8Figure 6: Qualitative headline comparison on selected Pick-a-Pic v2 prompts for SD-Turbo. The grid follows the same row-caption layout as the SDXL-Turbo qualitative comparison. DrPO improves preference-aligned visual quality over the SD-Turbo base while preserving one-step inference. CLIP+AES+PS AES+PS CLIP+PS 
+
+> Image
+> Reward HPS CLIP PickScore SD-Turbo
+> P4
+> P3
+> P2
+> P1
+
+Figure 7: Qualitative comparison across reward models. Each row generated with identical prompt; metrics in Table A6. 
+
+## 6 Discussions 
+
+Assumption on the dipole reward model. The dipole reward model is compatible with the Bradley– Terry view used in RLHF, where pairwise preferences are induced by scalar reward differences. In DrPO, this scalar reward is constructed non-parametrically from the current preference pairs: preferred samples define attraction and rejected samples define repulsion under the same feature-space kernel. This makes the feature map important. If ϕ does not encode the attribute being optimized, such as counting, layout, typography, or fine-grained identity, the resulting drift may be smooth in feature space but weakly aligned with the target preference. 9Metric SD-Turbo +DrPO 
+
+Single ↑ 98.8 100.0 
+
+Two ↑ 46.5 55.6 
+
+Count ↑ 33.8 42.5 
+
+Colors ↑ 83.8 87.2 
+
+Position ↑ 8.0 13.0 
+
+Color Attr. ↑ 9.0 13.0 
+
+Table 3: Performance of DrPO on GenEval tasks. a photo of three cups a photo of a blue clock and a white cup  
+
+> a photo of two sheep a photo of four apples
+
+Figure 8: Generated images for DrPO on GenEval prompts.                     
+
+> Objective PickScore ↑CLIP ↑AES ↑HPSv2 ↑
+> No reference 23.55 25.88 6.603 34.85 Perceptual loss 23.42 25.98 6.455 34.90
+> Ref. drift loss (ours) 23.49 26.22 6.485 35.07
+
+Table 5: Reference-objective comparison on Pick-a-Pic v2 test prompts. w/o ref. 
+
+> w/ ref.
+> Number of Finetuning Steps
+
+Figure 9: Effect of the reference term during finetuning. 
+
+Challenges in offline finetuning. Our offline experiment is a naive extension of the online update. In the online setting, preference pairs are sampled from the current generator, so the dipole field is built near the distribution being updated. In the offline setting, the chosen and rejected samples can be off-policy and sparse, and many preference datasets contain only one pair per prompt. This makes the local non-parametric field more fragile. Better offline variants may need larger pair neighborhoods, prompt-conditioned retrieval, or an aggregated field over multiple preference pairs. 
+
+Limitations and future work. DrPO inherits the limitations of the target reward used for ranking. If a reward misses prompt attributes or encodes undesirable aesthetic tradeoffs, the resulting preference field can steer the generator in that direction. Training also still requires candidate generation, reward scoring, and feature extraction, so the computational advantage is largest when reward-model backpropagation is expensive or unavailable. The current implementation uses LoRA finetuning and finite candidate batches; scaling candidate selection, feature maps, and reward mixtures are useful directions for future work. 
+
+## 7 Concluding Remarks 
+
+We presented DrPO, a preference-finetuning method for one-step text-to-image generators that avoids reward backpropagation. DrPO ranks on-policy samples with a target reward, converts reward-ordered pairs into a feature-space drift field, and stabilizes the update with a reference drift from the frozen base generator. Training requires neither policy likelihoods nor denoising trajectories and supports large or non-differentiable reward models, while inference remains a single generator call. Empirical results show that DrPO enables efficient reward-gradient-free finetuning and achieves higher preference win rates. Our initial experiments also suggest a promising path toward extending DrPO to offline settings. 
+
+## References 
+
+Yuntao Bai, Saurav Kadavath, Sandipan Kundu, Amanda Askell, Jackson Kernion, Andy Jones, Anna Chen, Anna Goldie, Azalia Mirhoseini, Cameron McKinnon, et al. Constitutional AI: Harmlessness from AI feedback. arXiv preprint arXiv:2212.08073 , 2022. 3 Kevin Clark, Paul Vicol, Kevin Swersky, and David J. Fleet. Directly fine-tuning diffusion models on differentiable rewards. In ICLR , 2024. 3, 6, 16 Florinel-Alin Croitoru, Vlad Hondru, Radu Tudor Ionescu, Nicu Sebe, and Mubarak Shah. Curriculum direct preference optimization for diffusion and consistency models. In CVPR , 2025. 2 Mingyang Deng, He Li, Tianhong Li, Yilun Du, and Kaiming He. Generative modeling via drifting. arXiv preprint arXiv:2602.04770 , 2026. 1, 2, 3, 6 
+
+10 Luca Eyring, Shyamgopal Karthik, Karsten Roth, Alexey Dosovitskiy, and Zeynep Akata. ReNO: Enhancing one-step text-to-image models through reward-based noise optimization. In NeurIPS , 2024. 3 Zhengyang Geng, Mingyang Deng, Xingjian Bai, J Zico Kolter, and Kaiming He. Mean flows for one-step generative modeling. 
+
+arXiv preprint arXiv:2505.13447 , 2025. 1 Dhruba Ghosh, Hannaneh Hajishirzi, and Ludwig Schmidt. GenEval: An object-focused framework for evaluating text-to-image alignment. In NeurIPS , 2023. 5, 6, 7 Tuomas Haarnoja, Aurick Zhou, Pieter Abbeel, and Sergey Levine. Soft actor-critic: Off-policy maximum entropy deep reinforcement learning with a stochastic actor. In ICML , 2018. 4 Kaiming He, Xinlei Chen, Saining Xie, Yanghao Li, Piotr Dollár, and Ross Girshick. Masked autoencoders are scalable vision learners. In CVPR , 2022. 6 Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. GANs trained by a two time-scale update rule converge to a local Nash equilibrium. In NeurIPS , 2017. 6 Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. LoRA: Low-rank adaptation of large language models. In ICLR , 2022. 6 Yushi Hu, Benlin Liu, Jungo Kasai, Yizhong Wang, Mari Ostendorf, Ranjay Krishna, and Noah A. Smith. Tifa: Accurate and interpretable text-to-image faithfulness evaluation with question answering. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 20406–20417, October 2023. 6 Zhou Jiang, Yandong Wen, and Zhen Liu. Rethinking preference alignment for diffusion models with classifier-free guidance. 
+
+arXiv preprint arXiv:2602.18799 , 2026. 3 Jeeyung Kim, Ze Wang, and Qiang Qiu. Model-agnostic human preference inversion in diffusion models. arXiv preprint arXiv:2404.00879 , 2024. 3 Yuval Kirstain, Adam Polyak, Uriel Singer, Shahbuland Matiana, Joe Penna, and Omer Levy. Pick-a-pic: An open dataset of user preferences for text-to-image generation. In NeurIPS , 2023. 5 Max Ku, Dongfu Jiang, Cong Wei, Xiang Yue, and Wenhu Chen. VIEScore: Towards explainable metrics for conditional image synthesis evaluation. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 12268–12290, Bangkok, Thailand, August 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.acl-long.663. 6 Seongyun Lee, Seungone Kim, Sue Park, Geewook Kim, and Minjoon Seo. Prometheus-vision: Vision-language model as a judge for fine-grained evaluation. In Findings of the Association for Computational Linguistics: ACL 2024 , pages 11286–11315, Bangkok, Thailand, August 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024. findings-acl.672. 6 Zhiqiu Lin, Deepak Pathak, Baiqi Li, Jiayao Li, Xide Xia, Graham Neubig, Pengchuan Zhang, and Deva Ramanan. Evaluating text-to-visual generation with image-to-text generation. arXiv preprint arXiv:2404.01291 , 2024. 6 Zhen Liu, Tim Z Xiao, Carles Domingo-Enrich, Weiyang Liu, and Dinghuai Zhang. Value gradient guidance for flow matching alignment. arXiv preprint arXiv:2512.05116 , 2025. 6, 16 Cheng Lu and Yang Song. Simplifying, stabilizing and scaling continuous-time consistency models. arXiv preprint arXiv:2410.11081 , 2024. 2 Simian Luo, Yiqin Tan, Longbo Huang, Jian Li, and Hang Zhao. Latent consistency models: Synthesizing high-resolution images with few-step inference. arXiv preprint arXiv:2310.04378 , 2023. 1 Weijian Luo. Diff-Instruct++: Training one-step text-to-image generator model to align with human preferences. Transactions on Machine Learning Research , 2025. 2 Weijian Luo, Colin Zhang, Debing Zhang, and Zhengyang Geng. David and goliath: Small one-step model beats large diffusion with score post-training. In ICML , 2025a. 2 Yihong Luo, Tianyang Hu, Weijian Luo, Kenji Kawaguchi, and Jing Tang. Reward-instruct: A reward-centric approach to fast photo-realistic image generation. In NeurIPS , 2025b. 2 Yihong Luo, Tianyang Hu, Yifan Song, Jiacheng Sun, Zhenguo Li, and Jing Tang. Adding additional control to one-step diffusion with joint distribution matching. In ICCV , 2025c. 2 Yuhang Ma, Xiaoshi Wu, Keqiang Sun, and Hongsheng Li. HPSv3: Towards wide-spectrum human preference score. In 
+
+ICCV , 2025. 5 Zichen Miao, Zhengyuan Yang, Kevin Lin, Ze Wang, Zicheng Liu, Lijuan Wang, and Qiang Qiu. Tuning timestep-distilled diffusion model using pairwise sample optimization. In ICLR , 2025. 2, 16 
+
+11 Thuan Hoang Nguyen and Anh Tran. Swiftbrush: One-step text-to-image diffusion model with variational score distillation. In CVPR , 2024. 2 Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow instructions with human feedback. In NeurIPS , 2022. 3Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe Penna, and Robin Rombach. SDXL: Improving latent diffusion models for high-resolution image synthesis. In ICLR , 2024. 5 Qwen Team. Qwen3-VL technical report. arXiv preprint arXiv:2511.21631 , 2025. 6, 15 Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervision. In ICML , 2021. 5Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D. Manning, Stefano Ermon, and Chelsea Finn. Direct preference optimization: Your language model is secretly a reward model. In NeurIPS , 2023. 3, 6 Axel Sauer, Tero Karras, Samuli Laine, Andreas Geiger, and Timo Aila. Stylegan-t: Unlocking the power of gans for fast large-scale text-to-image synthesis. In ICML , 2023. 1 Axel Sauer, Dominik Lorenz, Andreas Blattmann, and Robin Rombach. Adversarial diffusion distillation. In ECCV , 2024. 1, 5 Christoph Schuhmann. LAION-Aesthetics. https://laion.ai/blog/laion-aesthetics/ , 2022. 5 John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy optimization algorithms. 
+
+arXiv preprint arXiv:1707.06347 , 2017. 3 Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. DeepSeekMath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. 3, 6 Lin Shi, Chiyu Ma, Wenhua Liang, Xingjian Diao, Weicheng Ma, and Soroush Vosoughi. Judging the judges: A systematic study of position bias in LLM-as-a-judge. In Proceedings of the 14th International Joint Conference on Natural Language Processing and the 4th Conference of the Asia-Pacific Chapter of the Association for Computational Linguistics , pages 292–314, Mumbai, India, December 2025. The Asian Federation of Natural Language Processing and The Association for Computational Linguistics. doi: 10.18653/v1/2025.ijcnlp-long.18. 6 Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. In ICML , 2023. 1 Nisan Stiennon, Long Ouyang, Jeffrey Wu, Daniel M. Ziegler, Ryan Lowe, Chelsea Voss, Alec Radford, Dario Amodei, and Paul F. Christiano. Learning to summarize with human feedback. In NeurIPS , 2020. 3 Bram Wallace, Meihua Dang, Rafael Rafailov, Linqi Zhou, Aaron Lou, Senthil Purushwalkam, Stefano Ermon, Caiming Xiong, Shafiq Joty, and Nikhil Naik. Diffusion model alignment using direct preference optimization. In CVPR , 2024. 3, 6 Xiaoshi Wu, Yiming Hao, Keqiang Sun, Yixiong Chen, Feng Zhu, Rui Zhao, and Hongsheng Li. Human preference score v2: A solid benchmark for evaluating human preferences of text-to-image synthesis. arXiv preprint arXiv:2306.09341 , 2023. 5 Jiazheng Xu, Xiao Liu, Yuchen Wu, Yuxuan Tong, Qinkai Li, Ming Ding, Jie Tang, and Yuxiao Dong. ImageReward: Learning and evaluating human preferences for text-to-image generation. In NeurIPS , 2023. 5 Tianwei Yin, Michaël Gharbi, Taesung Park, Richard Zhang, Eli Shechtman, Fredo Durand, and William T Freeman. Improved distribution matching distillation for fast image synthesis. In NeurIPS , 2024a. 2 Tianwei Yin, Michaël Gharbi, Richard Zhang, Eli Shechtman, Fredo Durand, William T Freeman, and Taesung Park. One-step diffusion with distribution matching distillation. In CVPR , 2024b. 1, 2 Jiahui Yu, Yuanzhong Xu, Jing Yu Koh, Thang Luong, Gunjan Baid, Zirui Wang, Vijay Vasudevan, Alexander Ku, Yinfei Yang, Burcu Karagol Ayan, et al. Scaling autoregressive models for content-rich text-to-image generation. Transactions on Machine Learning Research , 2022. 5 Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, and Ion Stoica. Judging llm-as-a-judge with mt-bench and chatbot arena. In Advances in Neural Information Processing Systems , volume 36, 2023. 6 
+
+12 Appendix 
+
+## Table of Contents 
+
+A Construction of Drift Field 13 B Experimental Details 14 
+
+B.1 Target Reward Models . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14 B.2 Data and Evaluation Sets . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15 B.3 Sampling and Reproducibility . . . . . . . . . . . . . . . . . . . . . . . . . . 15 B.4 Qwen3-VL Pairwise Evaluation Prompt . . . . . . . . . . . . . . . . . . . . . 15 
+
+C Baselines and Ablations 16 
+
+C.1 DRaFT Reward-Gradient Baseline . . . . . . . . . . . . . . . . . . . . . . . . 16 C.2 VGG -Flow 1-step Reward-Gradient Target Baseline . . . . . . . . . . . . . . . . 16 C.3 DPO 1-step Pairwise Baselines . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 C.4 GRPO 1-step Policy-Gradient Baseline . . . . . . . . . . . . . . . . . . . . . . . 17 
+
+D Additional Qualitative Results 19 
+
+## A Construction of Drift Field 
+
+Algorithm A2 Construction of Drift Field 
+
+Require: Query set Z, positive set B+, negative set B−, drift radii Ω 
+
+> 1:
+
+function DRIFT FIELD (Z, B +, B −, Ω) 
+
+> 2:
+
+Normalize query and support features by Eq. 19  
+
+> 3:
+
+V ← 0 
+
+> 4:
+
+for ρ ∈ Ω do  
+
+> 5:
+
+Compute joint double-softmax affinities and split them into A+,ρ and A−,ρ by Eq. 22  
+
+> 6:
+
+Compute the cross-mass field V (ρ) by Eq. 24  
+
+> 7:
+
+V ← V + RMSNorm( V (ρ)) 
+
+> 8:
+
+end for  
+
+> 9:
+
+return V 
+
+> 10:
+
+end function Feature normalization. Each call to DRIFT FIELD (Z, B +, B −, Ω) forms a support batch by con-catenating the negative and positive support lists, B = [ B−; B+]. If a sample appears in multiple preference pairs, we keep each occurrence in the batch. Let wj denote the weight of support bj . We use wj = 1 for all support entries in our experiments, so repeated entries contribute repeated support mass. For each call, we compute distances using detached queries, 
+
+∆ij = ∥ sg( zi) − bj ∥2, (18) and estimate a batch feature scale 
+
+s = max 
+
+
+
+ϵs, Mean i,j (wj ∆ij )Mean j (wj )
+
+
+
+. (19) Before constructing the drift field, we normalize feature coordinates by 
+
+sz = max 
+
+
+
+ϵz , s/ √d
+
+
+
+, ezi = zi/s z , ebj = bj /s z , (20) where d is the feature dimension. This per-call normalization makes the estimator less sensitive to the absolute scale of the frozen feature. 13 Double-softmax affinity. For each radius ρ, let Dij = ∆ ij /s . By default, we use the Gaussian RBF logits 
+
+L(ρ) 
+
+> ij
+
+= − D2
+
+> ij
+
+2ρ2 . (21) We compute affinities jointly over the concatenated support batch B = [ B−; B+]:
+
+A(ρ) 
+
+> ij
+
+=
+
+r
+
+softmax j
+
+
+
+L(ρ)
+
+> ij
+
+
+
+softmax i
+
+
+
+L(ρ)
+
+> ij
+
+
+
+wj . (22) The first softmax normalizes supports for each query, while the second normalizes queries for each support. Their geometric mean gives the double-softmax affinity. We split the resulting affinity matrix into A+,ρ and A−,ρ only after both softmax operations. We use the Gaussian RBF kernel by default and evaluate alternative radial kernels in our ablation. 
+
+Cross-mass drift. For each query, define the positive and negative affinity masses 
+
+m+,ρ i = X
+
+> j∈B+
+
+A+,ρ ij , m−,ρ i = X
+
+> j∈B−
+
+A−,ρ ij . (23) The radius-specific drift field is 
+
+V (ρ) 
+
+> i
+
+= m−,ρ i
+
+X
+
+> j∈B+
+
+A+,ρ ij eb+ 
+
+> j
+
+− m+,ρ i
+
+X
+
+> j∈B−
+
+A−,ρ ij eb− 
+
+> j
+
+. (24) Thus, positive supports attract a query in proportion to its negative mass, while negative supports repel it in proportion to its positive mass. This is the finite-batch cross-mass construction used for both drift branches. 
+
+RMS normalization and multi-radius aggregation. Each radius-specific field is normalized by its RMS magnitude over particles and feature coordinates, 
+
+bV (ρ) = V (ρ)
+
+r
+
+max 
+
+
+
+Mean i,c 
+
+
+
+(V (ρ) 
+
+> i,c
+
+)2
+
+
+
+, ϵ v
+
+ . (25) The final field is 
+
+V = X
+
+> ρ∈Ω
+
+bV (ρ). (26) The detached target in Eq. 16 is constructed from this aggregated field. Both the preference and reference branches use the same estimator, with different positive and negative support batches. 
+
+## B Experimental Details 
+
+B.1 Target Reward Models 
+
+DrPO only requires the target reward to rank candidate images for the same prompt. We therefore instantiate the online preference construction with several reward backends, including PickScore, CLIP, AES, HPS-family rewards, ImageReward, and mixtures of these scores. Table A6 shows that the optimized model moves toward the chosen target reward: PickScore training gives the largest PickScore gain, CLIP training gives the largest CLIP gain, HPS training gives the largest HPS gain, and ImageReward training gives the largest ImageReward gain.                                                    
+
+> Table A6: Target-reward-conditioned online DrPO on Pick-a-Pic v2 test prompts. Entries except AES and ImageReward are multiplied by 100 .
+> Target reward model PickScore ↑CLIP ↑AES ↑IR ↑HPSv2 ↑
+> SD-Turbo 21.88 26.47 6.054 5.75 35.80 PickScore 23.40 26.28 6.390 10.09 35.24 CLIP 21.04 28.62 5.491 3.31 36.82 HPS 21.13 27.82 5.396 5.60 39.42
+> IR 21.54 23.98 6.314 16.25 32.56 CLIP+PickScore 23.01 28.60 6.328 10.08 37.36 AES+PickScore 22.78 23.61 7.429 8.51 31.38 CLIP+AES+PickScore 22.94 27.18 7.064 10.70 35.08
+
+14 B.2 Data and Evaluation Sets Online training. For online DrPO, each training example contains only a prompt. At each update, the current generator samples a candidate batch for the prompt, the target reward ranks the candidates, and the ordered candidates are used to form preference pairs. Each online method is trained for the same optimization steps with the same prompt-sampling protocol. 
+
+Offline preference data. For the offline variant, each record contains a prompt and one or more chosen/rejected image pairs. The chosen and rejected images replace the online ranked candidates when constructing the preference pairs; the reference drift and training loss are unchanged. 
+
+GenEval. For GenEval experiments, prompts are paired with structured compositional constraints such as object category, count, color, position, and attribute binding. The GenEval evaluator returns task-level correctness scores, which are used only to rank candidate images during online training. 
+
+Evaluation. The main scalar-metric evaluations use the Pick-a-Pic v2 test prompts. Unless other-wise stated, one-step models are evaluated with deterministic sampling and guidance scale 0.0. We report one image per prompt for PickScore, CLIP, AES, HPSv2, HPSv3, and ImageReward; standard errors are estimated by bootstrapping prompts. 
+
+B.3 Sampling and Reproducibility 
+
+Evaluation supports three sampling modes: the original SD-Turbo checkpoint, a finetuned U-Net checkpoint, and a LoRA adapter. For structured compositional benchmarks, the same harness reads the benchmark metadata and runs the corresponding evaluator. All paper-facing comparisons fix prompt sets, random seeds, sampling configuration, and the distinction between target rewards used for training and metrics used only for evaluation. 
+
+B.4 Qwen3-VL Pairwise Evaluation Prompt 
+
+For the pairwise preference results in Figure 2, we use Qwen3-VL [Qwen Team, 2025] as a strict text-to-image judge. Each comparison shows two images generated from the same prompt, and the judge returns a JSON decision with ties allowed. The prompt template is: 
+
+> You are a strict text-to-image judge comparing two generated images. You will see Image A and Image B. They were generated from the same text prompt. Text prompt: """{prompt}""" Choose the image that is better as a clean, coherent realization of the prompt. Rubric, in order: 1. Semantic fidelity: prefer the image where the prompt 's main subject is immediately recognizable and the requested attributes, relations, actions, and scene are correctly expressed. ,→
+> 2. Global coherence: prefer one integrated scene over a collage-like, over-stylized, or visually confused image. Objects should have plausible shape, scale, pose, and spatial relation. ,→
+> 3. Artifact avoidance: strongly penalize malformed bodies, fused objects, duplicated parts, warped geometry, messy textures, unreadable required text, and unnatural distortions. ,→
+> 4. Aesthetic quality: after the above, prefer tasteful lighting, color harmony, composition, and detail. Do not choose an image only because it is sharper, glossier, more saturated, or more dramatic. ,→
+> Decision rule: - Major semantic or structural errors should usually lose, even if the image looks polished. - If both satisfy the text similarly, choose the more coherent and artifact-free image. - If both are genuinely comparable, answer tie. - Do not prefer A or B because of position or label. - Return only valid JSON. Output schema: {"winner":"A"|"B"|"tie","confidence":0.0-1.0,"reason":"12 words or fewer"}
+
+15 C Baselines and Ablations 
+
+This section describes the one-step preference baselines used in our comparisons. All baselines use the same prompt sets, one-step sampler, and evaluation suite as DrPO. 
+
+PSO baseline. PSO is a preference-finetuning method for timestep-distilled diffusion models [Miao et al., 2025]. It optimizes pairwise preferences by increasing the relative margin between preferred images and reference images sampled from the distilled model. We include it as a native pairwise baseline for one-step distilled generators. 
+
+C.1 DRaFT Reward-Gradient Baseline 
+
+DRaFT directly optimizes a differentiable image reward through the generator and decoder [Clark et al., 2024]. In our one-step setting, the U-Net predicts a clean latent 
+
+μθ = T (z, f θ (z, t, c )) ,
+
+which is decoded and scored by a differentiable reward model R. We use the same one-step sampler, LoRA parameterization, prompt batches, and evaluation protocol as DrPO. The training objective is 
+
+LDRaFT = − 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+R(D(μθ,k ), p ) + λref 
+
+1
+
+K
+
+> K
+
+X
+
+> k=1
+
+∥μθ,k − μref ,k ∥22,
+
+where D is the VAE decoder and μref ,k is the frozen base-model prediction for the same prompt and noise. This baseline represents the standard reward-backpropagation regime: it can exploit the local gradient of a differentiable reward, but it requires storing and backpropagating through the reward network. For SD-Turbo and SDXL-Turbo, the implementation evaluates generated samples in chunks to keep the effective generated batch size matched to DrPO while controlling memory. 
+
+C.2 VGG -Flow 1-step Reward-Gradient Target Baseline 
+
+VGG -Flow 1-step adapts value-gradient guidance for flow matching alignment to the one-step latent prediction setting [Liu et al., 2025]. Rather than directly maximizing the scalar reward as in DRaFT, it first differentiates the reward with respect to the generated clean latent and then constructs a target latent around the frozen reference prediction: 
+
+μtarget  
+
+> k
+
+= μref ,k + η(t)λr clip  ∇μθ,k R(D(μθ,k ), p ) .
+
+The student is trained by latent target matching, 
+
+LVGG -Flow 1-step = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+∥μθ,k − μtarget  
+
+> k
+
+∥22 + λref 
+
+1
+
+K
+
+> K
+
+X
+
+> k=1
+
+∥μθ,k − μref ,k ∥22.
+
+Here η(t) is fixed in the one-step experiments because the generation timestep is fixed, and the reward gradient is norm-clipped before constructing the target. This implementation preserves the one-step deployment interface but keeps the defining reward-gradient path of VGG-Flow. We omit the multi-step value-network consistency branch from the original flow-matching setting, since SD-Turbo and SDXL-Turbo expose only a single distilled transition in our experiments. 
+
+C.3 DPO 1-step Pairwise Baselines 
+
+We adapt DPO to one-step generation by defining the preference margin on the clean latent predicted from a fixed noisy latent and prompt. For text embedding c, timestep t = 999 , and initial noise z, the student and reference U-Nets produce 
+
+μθ = T (z, f θ (z, t, c )) , μref = T (z, f ref (z, t, c )) ,
+
+where T (·) is the deterministic SD-Turbo one-step conversion. Given chosen and rejected targets y+
+
+and y− mapped into a preference space ψ, we define 
+
+gθ = s ψ(μθ ), ψ (y+) − s ψ(μθ ), ψ (y−) ,
+
+and define gref analogously using μref . The loss is 
+
+LDPO 1-step = − log σ(β[gθ − gref ]) + λref ∥μθ − μref ∥22.
+
+We use β = 30 and λref = 0 in the reported runs. We test two choices of ψ: raw VAE latent space and frozen MAE-latent feature space. 16 Algorithm A3 DPO 1-step baseline 
+
+Require: Student U-Net fθ , frozen reference fref , offline triples (p, y +, y −), text encoder Etext ,one-step transform T , preference map ψ, inverse temperature β 
+
+> 1:
+
+for each optimization step do  
+
+> 2:
+
+Sample (p, y +, y −) and noise latent z; set c = Etext (p) 
+
+> 3:
+
+μθ ← T (z, f θ (z, t, c )) , μref ← T (z, f ref (z, t, c ))  
+
+> 4:
+
+Compute hθ = ψ(μθ ), href = ψ(μref ), h+ = ψ(y+), h− = ψ(y−) 
+
+> 5:
+
+Define s(a, b ) = −∥ a − b∥22 
+
+> 6:
+
+gθ ← s(hθ , h +) − s(hθ , h −) 
+
+> 7:
+
+gref ← s(href , h +) − s(href , h −) 
+
+> 8:
+
+L ← − log σ(β(gθ − gref )) + λref ∥μθ − μref ∥22 
+
+> 9:
+
+Update θ by descending ∇θ L 
+
+> 10:
+
+end for C.4 GRPO 1-step Policy-Gradient Baseline 
+
+We include GRPO 1-step as a policy-gradient-style comparison for one-step generators. Since a one-step model has no denoising trajectory, the policy action is defined in clean latent space. For a prompt embedding c and a group of initial noises {zk}Kk=1 ,
+
+μθ,k = T (zk, f θ (zk, t, c )) , μref ,k = T (zk, f ref (zk, t, c )) .
+
+The action is a perturbed clean latent, 
+
+ak = sg( μold 
+
+> θ,k
+
+) + σauk, uk = zk − mean( zk)std( zk) + ϵ .
+
+After decoding ak and scoring the image, rewards are normalized within the same prompt group: 
+
+Ak = clip 
+
+
+
+αadv 
+
+rk − mean( r)std( r) + ϵr
+
+, −Amax , A max 
+
+
+
+.
+
+The current policy mean is recomputed and assigned a Gaussian-style log probability 
+
+ℓθ (ak) = − 12 mean 
+
+" ak − μθ,k 
+
+σa
+
+2#
+
+,
+
+where the mean is over latent dimensions. With 
+
+ρk = exp(clip( ℓθ (ak) − ℓold (ak), −M, M )) ,
+
+we use the clipped policy-gradient objective 
+
+Lpolicy = − 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+min ( ρkAk, clip( ρk, 1 − ϵ, 1 + ϵ)Ak) .
+
+The total loss is 
+
+L = Lpolicy + λref 
+
+1
+
+K
+
+> K
+
+X
+
+> k=1
+
+∥μθ,k − μref ,k ∥22 + βkl 
+
+1
+
+K
+
+> K
+
+X
+
+> k=1
+
+(ρk − 1 − log ρk).
+
+In the reported setting, σa = 0 .05 , ϵ = 0 .2, M = 10 , αadv = 1 , Amax = 5 , λref = 0 .05 , and 
+
+βkl = 0 .17 Algorithm A4 GRPO 1-step baseline 
+
+Require: Student U-Net fθ , frozen reference fref , reward model R, text encoder Etext , decoder D,one-step transform T , group size K 
+
+> 1:
+
+for each prompt do  
+
+> 2:
+
+c ← Etext (p); sample {zk}Kk=1  
+
+> 3:
+
+for k = 1 , . . . , K do  
+
+> 4:
+
+μold  
+
+> k
+
+← T (zk, f θ (zk, t, c )) without gradient  
+
+> 5:
+
+ak ← sg( μold  
+
+> k
+
+) + σa normalize( zk) 
+
+> 6:
+
+xk ← D(ak); rk ← R(xk, c ) 
+
+> 7:
+
+end for  
+
+> 8:
+
+Normalize rewards within the prompt group to obtain {Ak} 
+
+> 9:
+
+for k = 1 , . . . , K do  
+
+> 10:
+
+Recompute μk ← T (zk, f θ (zk, t, c )) and μref  
+
+> k
+
+← T (zk, f ref (zk, t, c ))  
+
+> 11:
+
+Compute ρk from the Gaussian log-probability ratio of ak 
+
+> 12:
+
+end for  
+
+> 13:
+
+Update θ with the clipped policy-gradient loss and reference latent anchor  
+
+> 14:
+
+end for 
+
+18 D Additional Qualitative Results 
+
+Figures A4 and A3 provide the full qualitative grids corresponding to the compact examples in the main text. All samples use matched seed 42 .
+
+Reward-model prompts. The compact reward-model matrix in Figure 7 uses four Pick-a-Pic v2 test prompts: “Cyberpunk cat”; “astronaut in space with a two handed sword in plate armor in front of the earth”; “An mystical owl sitting on a tree branch in a magical Forest, art style of nicoletta ceccoli”; and “Gothic cathedral in a stormy night”. The full matrix in Figure A3 additionally includes “smily french fries” and “Raindrop, macro photograph, colorful, reflections, HD, 4k”. SD-Turbo PickScore CLIP HPS Image   
+
+> Reward
+> CLIP+PS AES+PS CLIP+AES+PS
+> P1
+> P2
+> P3
+> P4
+> P5
+> P6
+
+Figure A3: Full reward-model qualitative matrix corresponding to Figure 7. Rows are prompts, columns are target reward models, and all samples use matched seed 42 .
+
+19 Figure A4: Full qualitative comparison corresponding to Figure 6. The grid uses a larger selected prompt set with matched seed 42 .
+
+20 Figure A5: Pairwise examples from the Qwen3-VL presentation-quality evaluation. Each row contains two matched-seed pairs. 
+
+21 Figure A6: Additional pairwise examples from the Qwen3-VL presentation-quality evaluation. 
+
+22 Figure A7: Additional pairwise examples from the Qwen3-VL presentation-quality evaluation. 
+
+23 Figure A8: Additional pairwise examples from the Qwen3-VL presentation-quality evaluation. 
+
+24
