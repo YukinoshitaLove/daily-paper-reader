@@ -6,50 +6,42 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-05
-- 运行时间：2026-06-05 21:58:10 UTC
+- 最新运行日期：2026-06-06
+- 运行时间：2026-06-06 20:52:13 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：6
-- 速读区：4
+- 本次总论文数：6
+- 精读区：4
+- 速读区：2
 
 ### 今日简报（AI）
-今日日报共10篇，精读6篇，重点聚焦于无监督图像编辑与一步生成模型优化两大方向。最值得精读的是高分论文《SAM-Flow: Source-Anchored Masked Flow for Training-Free Image Editing》（9.0分）提出的源锚定掩码流实现免训练编辑，以及《Drifting Preference Optimization for One-Step Generative Models》（8.0分）的一步生成模型偏好优化策略。建议普通读者优先关注SAM-Flow的无监督、无需额外训练的图像编辑方法。
-- 详情：[/202606/05/README](/202606/05/README)
+今日重点解读4篇精读与2篇速读论文，聚焦水下图像增强的自监督学习与大模型时代低层视觉评估新基准。
+
+最值得关注的方向：RQUL-UIE提出的数据集内自监督方法有效修复质量不稳定标签（9.0分）；LL-Bench重新定义了大规模生成模型下的低层视觉评估标准（8.0分）。
+
+对于普通读者，建议优先精读高分论文，并思考其自监督策略和评估框架能否迁移至自身图像处理任务中。
+- 详情：[/202606/06/README](/202606/06/README)
 
 ### 精读区论文标签
-1. [SAM-Flow: Source-Anchored Masked Flow for Training-Free Image Editing](/202606/05/2606.06228v1-sam-flow-source-anchored-masked-flow-for-training-free-image-editing)  
+1. [RQUL-UIE: Revitalizing Quality-Unstable Labels for Underwater Image Enhancement via In-Dataset Self-Supervision](/202606/06/2606.06176v1-rqul-uie-revitalizing-quality-unstable-labels-for-underwater-image-enhancement-via-in-dataset-self-supervision)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散/流匹配模型的无训练图像编辑
-2. [Drifting Preference Optimization for One-Step Generative Models](/202606/05/2606.02521v3-drifting-preference-optimization-for-one-step-generative-models)  
+   evidence：基于扩散的水下图像增强自监督方法
+2. [LL-Bench: Rethinking Low-Level Vision Evaluation in the Era of Large-Scale Generative Models](/202606/06/2606.02535v1-ll-bench-rethinking-low-level-vision-evaluation-in-the-era-of-large-scale-generative-models)  
    标签：评分：8.0/10、query:real-ir
-   evidence：一步生成式文本到图像模型
-3. [GeM-NR: Geometry-Aware Multi-View Editing for Nonrigid Scene Changes](/202606/05/2606.05142v1-gem-nr-geometry-aware-multi-view-editing-for-nonrigid-scene-changes)  
+   evidence：评估大规模生成模型在低级视觉任务（包括修复）上的基准
+3. [UniCanvas: A Diffusion-base Unified Model for Text-in-Image Joint Generation](/202606/06/2606.04264v1-unicanvas-a-diffusion-base-unified-model-for-text-in-image-joint-generation)  
    标签：评分：8.0/10、query:real-ir
-   evidence：非刚性场景变化的多视图图像编辑
-4. [TextWand: A Unified Framework for Scene Text Editing](/202606/05/2606.05730v1-textwand-a-unified-framework-for-scene-text-editing)  
+   evidence：提出基于扩散的统一模型用于文本与图像联合生成
+4. [Adapting Diffusion Language Models for Lossless Pixel-Level Image Transmission](/202606/06/2606.06273v1-adapting-diffusion-language-models-for-lossless-pixel-level-image-transmission)  
    标签：评分：8.0/10、query:real-ir
-   evidence：统一场景文本编辑包括移除、生成、替换
-5. [Diff-CA: Separating Common and Salient Factors with Diffusion Models](/202606/05/2606.06120v1-diff-ca-separating-common-and-salient-factors-with-diffusion-models)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于扩散模型的对比分解实现高保真图像生成与编辑
-6. [Geodesic Flow Matching on a Riemannian Degradation Manifold for Blind Image Restoration](/202606/05/2606.06278v1-geodesic-flow-matching-on-a-riemannian-degradation-manifold-for-blind-image-restoration)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：通过退化流形上的测地流匹配进行盲图像复原
+   evidence：使用扩散语言模型进行无损像素级图像传输与恢复
 
 ### 速读区论文标签
-1. [Pixel Cube: Diffusion-based Portrait Video Relighting Through Realistic Lighting Reproduction](/202606/05/2606.02919v2-pixel-cube-diffusion-based-portrait-video-relighting-through-realistic-lighting-reproduction)  
+1. [Can We Predict The Human Preference For Text-to-Image Content Prior To Generation And Is It Even Useful To Do So?](/202606/06/2606.05478v1-can-we-predict-the-human-preference-for-text-to-image-content-prior-to-generation-and-is-it-even-useful-to-do-so)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于扩散的人像视频重光照方法，使用HDR环境图控制
-2. [GenED-SC: Generative Editing Semantic Communication with Integrated Multi-Modal LLMs](/202606/05/2606.04015v1-gened-sc-generative-editing-semantic-communication-with-integrated-multi-modal-llms)  
+   evidence：预测文本到图像生成输出的人类偏好
+2. [Parallel Jacobi Decoding for Fast Autoregressive Image Generation](/202606/06/2606.05703v1-parallel-jacobi-decoding-for-fast-autoregressive-image-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：结合多模态大语言模型的生成式编辑用于语义通信
-3. [Structured drift design for denoising diffusion models](/202606/05/2606.03360v1-structured-drift-design-for-denoising-diffusion-models)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：为去噪扩散模型设计结构化漂移以保持数据几何结构
-4. [Knowledge Distillation for Visual Autoregressive Models](/202606/05/2606.06078v1-knowledge-distillation-for-visual-autoregressive-models)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：自回归图像生成的知识蒸馏
+   evidence：快速自回归图像生成
 
 
 <div class="dpr-home-promo-card">
