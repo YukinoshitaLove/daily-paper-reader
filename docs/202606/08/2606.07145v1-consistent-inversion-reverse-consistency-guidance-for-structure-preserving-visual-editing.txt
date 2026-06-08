@@ -1,0 +1,882 @@
+Title: Consistent-Inversion: Reverse Consistency Guidance for Structure-Preserving Visual Editing
+
+URL Source: https://arxiv.org/pdf/2606.07145v1
+
+Published Time: Mon, 08 Jun 2026 00:45:28 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+> IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 1
+
+# Consistent-Inversion: Reverse Consistency Guidance for Structure-Preserving Visual Editing 
+
+Xiaocheng Lu, Jingcai Guo, Senior Member, IEEE , and Song Guo, Fellow, IEEE 
+
+Abstract —Text-guided diffusion models have become effective tools for real-image visual editing, where the edited image must follow a target instruction while preserving editing-irrelevant structure. Most training-free editors rely on inversion: a source image is mapped to a noisy latent trajectory and the terminal latent is reused for target-prompt denoising. This reuse is useful for preservation, but it also couples source reconstruction and target editing. The resulting trajectory mismatch may either damage background/layout details or over-constrain the intended edit. This paper presents Consistent-Inversion, a training-free reverse consistency guidance framework for structure-preserving visual editing. Instead of treating the inverted source latent as a fixed initialization, Consistent-Inversion checks whether an intermediate target trajectory can be reversed toward the source inversion trajectory under the source prompt. To make this check well-defined, we construct an auxiliary target-side noise representation, perform source-guided reverse denoising, and use the resulting reverse consistency discrepancy as a correction signal for selected early target denoising steps. The method does not update model parameters, is compatible with inversion-based editors, and introduces only a small inference overhead when applied sparsely. Experiments on PIE-Bench show that Consistent-Inversion improves background and structural fidelity under a unified SD3.5 protocol while maintaining target-prompt alignment, and compatibility experiments further verify the same correction principle on classical Stable-Diffusion inversion pipelines. 
+
+Index Terms —Diffusion models, image editing, visual editing, DDIM inversion, structure preservation, training-free editing. 
+
+I. I NTRODUCTION 
+
+Text-guided visual editing modifies objects, attributes, styles, or backgrounds according to natural-language instruc-tions while preserving content that should remain unchanged. It is an important capability for multimedia content production, media post-processing, and interactive image manipulation systems. Diffusion models provide strong realism and seman-tic controllability, making them attractive backbones for text-based editing [1]–[3]. However, real-image editing differs from text-to-image generation: the editor must first recover a latent trajectory for the source image and then guide that trajectory toward the target prompt without damaging editing-irrelevant structure. 
+
+This work has been submitted to the IEEE for possible publication. Copyright may be transferred without notice, after which this version may no longer be accessible. Xiaocheng Lu and Song Guo are with the Hong Kong Univer-sity of Science and Technology, Hong Kong SAR, China. E-mails: xi-aochenglu1997@gmail.com; songguo@ust.hk. Jingcai Guo is with The Hong Kong Polytechnic University, Hong Kong SAR, China. E-mail: jc-jingcai.guo@polyu.edu.hk. Corresponding author: Song Guo (songguo@ust.hk). 
+
+A widely used training-free solution is inversion-based editing. Given a source image and a source prompt, DDIM inversion maps the image from z0 to a noisy latent zT [2]. The target prompt is then used during reverse denoising to synthe-size the edited image. Existing methods improve this pipeline through attention replacement [4]–[6], latent replacement [7]– [9], prompt optimization [10], [11], or exact/coupled inver-sion [12]. These techniques have made training-free editing practical, but they still inherit a trajectory mismatch: the same inverted source latent is used both as a source reconstruction state and as the initial state of target editing. This mismatch matters because the noised source latent is not pure Gaussian noise. It contains source-specific structural cues, especially at the early denoising stages. Reusing it helps preserve layout, but it can also bias the target branch toward the source distribution. Conversely, aggressive target guidance may destroy background details and global structure. Current training-free editors usually control this tradeoff with guidance scale, attention injection windows, or manually selected latent replacement steps. These controls are useful but indirect: they do not explicitly ask whether the edited trajectory is still consistent with the source trajectory. We propose Consistent-Inversion, a reverse consistency guidance method for correcting this mismatch. Our central observation is that a structurally reliable target edit should remain approximately reversible with respect to the source condition. If an intermediate target state is mapped back to a source-guided trajectory, it should return near the corre-sponding source inversion state. The discrepancy between this reversed state and the source trajectory estimates structural drift in the target branch. We construct an auxiliary target-side noise representation, compute the reverse consistency discrepancy, and inject the resulting offset into selected early denoising steps. Since global layout is largely determined early in denoising, this selected-timestep design captures the main preservation benefit while keeping the additional cost limited. For visual editing systems, efficiency, controllability, and compatibility are critical. Consistent-Inversion is training-free, does not optimize model parameters for each image, and can be attached to inversion-based editors such as Prompt-to-Prompt, Plug-and-Play, and Direct Inversion. It also provides an interpretable correction signal, making the preservation mechanism easier to diagnose than purely heuristic guidance schedules. The contributions are summarized as follows:  
+
+> •
+
+We identify a trajectory mismatch in inversion-based diffusion editing: the source inversion trajectory and the target editing trajectory are coupled through the same  
+
+> arXiv:2606.07145v1 [cs.CV] 5 Jun 2026 IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 2
+
+… …
+
+… …
+
+…
+
+…
+
+…
+
+…  
+
+> Source Prompt: A cat wearing a pink hat
+> Target Prompt: A tiger wearing a pink hat
+> Source Prompt: A cat wearing a pink hat
+> Target Prompt: A tiger wearing a pink hat
+> (a) Previous Methods (b) Our Method
+> Consistent-Correction
+> Fig. 1. Motivation and comparison with conventional inversion-based editing. The upper branch denotes DDIM inversion of the source image, and the lower branch denotes target-prompt denoising. Existing methods mainly preserve source content through attention or latent reuse. Consistent-Inversion additionally checks whether the target branch can be reversed toward the source trajectory and uses the resulting discrepancy to correct early denoising.
+
+noised source latent, which can cause structural drift or over-preservation.  
+
+> •
+
+We propose a bidirectional reverse consistency correction that estimates editing-induced structural discrepancy by source-guided reverse denoising from an auxiliary target-side noise representation.  
+
+> •
+
+We develop an efficient selected-timestep implementa-tion that improves structure preservation with limited additional inference cost and remains compatible with existing training-free editing pipelines.  
+
+> •
+
+We provide a unified SD3.5 evaluation, classical-backbone compatibility results, ablation studies, and runtime analysis demonstrating improved preservation-fidelity tradeoffs. II. R ELATED WORK 
+
+A. Training-Based and Optimization-Based Editing 
+
+Diffusion models have achieved strong performance in image generation and editing [1], [2], [13]. Text-guided editing methods can be roughly grouped into training-based, test-time optimization, and training-free approaches. Training-based methods learn editing behavior from supervised or weakly supervised data. InstructPix2Pix [3], SmartEdit [14], and instruction-oriented editing models directly learn to fol-low textual commands. Domain-specific or attribute-driven methods, such as DiffusionCLIP [15] and StyleDiffusion [16], provide stronger control in constrained domains such as face or style manipulation. These methods are powerful when training data is available, but they require model training and may not transfer well to arbitrary real images or open-ended prompts. Test-time optimization methods adapt the model, text em-bedding, or latent representation to a particular source im-age [10], [11], [17], [18]. Imagic [17] optimizes image-specific representations and model parameters. Null-text in-version [10] optimizes unconditional embeddings to improve reconstruction before editing. Prompt tuning inversion [11] similarly improves alignment by adapting prompt representa-tions. DragDiffusion [18] optimizes latent variables for point-based manipulation. Such methods often improve reconstruc-tion and controllability, but their per-image optimization cost limits interactive use. 
+
+B. Training-Free Attention and Feature Control 
+
+Training-free editing avoids model tuning and instead ma-nipulates the denoising process. Prompt-to-Prompt [4] shows that cross-attention maps can control the spatial binding between prompt tokens and generated content. Plug-and-Play [19] injects intermediate diffusion features to preserve source structure. MasaCtrl [5] uses mutual self-attention con-trol to improve consistency in image synthesis and editing. ProxEdit [20] introduces proximal guidance for tuning-free real-image editing, and LEDITS++ [21] improves textual im-age manipulation with efficient inversion and implicit masking. These methods show that internal diffusion features contain rich layout information. However, attention and feature con-trols are usually indirect: they preserve selected representations but do not explicitly verify whether the target trajectory remains consistent with the source trajectory. 
+
+C. Inversion and Trajectory Control 
+
+DDIM inversion [2] maps a real image into the latent space of a deterministic diffusion sampler. However, the inversion and denoising trajectories are only approximately reversible for finite timesteps and conditional diffusion models. Recent work has improved inversion through exact coupled transformations [12], negative-prompt guidance [22], prompt tuning [11], source trajectory reuse [23], iterative noising [24], and region- or time-dependent stochasticity [25]. Tight Inver-sion [26] studies image-conditioned inversion, and DCI [27] jointly conditions on source prompt and reference image to improve reconstruction and editability. These newer methods make the experimental comparison more demanding than ear-lier DDIM/NTI-based baselines. Our method takes a different view: instead of only improving reconstruction or initial noise quality, we use the discrepancy between source-guided reverse editing and the source inversion path as an online diagnostic signal for target-branch structural drift. 
+
+D. Recent Flow and Few-Step Editing 
+
+Recent generative backbones have shifted from classical multi-step diffusion models toward rectified flows and one-step/few-step models. RF Inversion [28] formulates inversion IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 3
+
+and editing for rectified flow models through stochastic differ-ential equations and dynamic optimal control. FlashEdit [29] emphasizes real-time localized editing through one-step inver-sion and editing. SteerFlow [30] studies faithful flow-based trajectory steering with adaptive masking. TFinv [31] studies training-free inversion for one-step diffusion models and re-ports strong PIE-Bench efficiency. These methods highlight a broader trend: modern visual editing increasingly depends on efficient trajectories, accurate inversion, and controllable correction. Consistent-Inversion is complementary to this trend because it improves an existing trajectory rather than requiring additional model training. 
+
+E. Structure Preservation and Consistency 
+
+Structure preservation is often handled by attention replace-ment, feature injection, masks, or latent blending [4], [5], [8], [9]. DiffEdit [9] estimates masks to localize semantic changes, while Blended Diffusion [8] combines masked image regions during diffusion. These methods preserve background regions effectively when masks are accurate, but they may struggle when edit-relevant and edit-irrelevant structures are entangled. Consistent-Inversion is complementary: it estimates preservation at the trajectory level, where both background layout and object posture are encoded in intermediate latents. The resulting offset can be combined with mask or attention controls rather than replacing them. III. P RELIMINARIES 
+
+A. Problem Formulation 
+
+Given a source image xs, a source prompt S, and a target prompt T , text-guided real-image editing synthesizes an edited image xt that satisfies two requirements. First, xt should align with the target prompt in the edited region. Second, content irrelevant to the edit should remain close to xs. With an optional editing mask M , this tradeoff can be conceptually written as 
+
+min 
+
+> xt
+
+Dedit (M ⊙xt, T )+ βDpres ((1 −M ) ⊙xt, (1 − M )⊙ xs),
+
+(1) where Dedit measures target alignment, Dpres measures source preservation, and β controls their tradeoff. Training-free dif-fusion editors do not directly optimize Eq. (1); instead, they manipulate the latent denoising trajectory through prompt guidance, attention control, feature injection, or inversion trajectory reuse. Consistent-Inversion can be interpreted as adding an implicit trajectory-level preservation constraint: the edited latent should remain reversible toward the source inversion trajectory under the source condition. 
+
+B. DDIM Sampling and Inversion 
+
+Let zt denote the latent at timestep t, αt the noise schedule, and ϵθ (zt, t, C) the noise predicted by a pretrained conditional diffusion model under condition C. DDIM sampling generates 
+
+zt−1 from zt as 
+
+zt−1 =
+
+r αt−1
+
+αt
+
+zt +
+
+s
+
+1
+
+αt−1
+
+− 1 −
+
+r 1
+
+αt
+
+− 1
+
+!
+
+ϵθ (zt, t, C).
+
+(2) DDIM inversion approximates the reverse mapping from zt to 
+
+zt+1 :
+
+zt+1 =
+
+r αt+1 
+
+αt
+
+zt +
+
+s
+
+1
+
+αt+1 
+
+− 1 −
+
+r 1
+
+αt
+
+− 1
+
+!
+
+ϵθ (zt, t, C).
+
+(3) 
+
+C. Classifier-Free Guidance 
+
+For text-guided diffusion models, classifier-free guidance combines conditional and unconditional predictions: 
+
+ϵθ (zt, t, C, ∅) = wϵ θ (zt, t, C) + (1 − w)ϵθ (zt, t, ∅), (4) where w is the guidance scale and ∅ denotes the null condition. IV. M ETHOD 
+
+A. Trajectory Mismatch in Inversion-Based Editing 
+
+Let S and T denote the source and target prompts. In a standard inversion-based editing pipeline, the source image latent z− 
+
+> 0
+
+is inverted under S:
+
+z− 
+
+> t+1
+
+= Inv( z− 
+
+> t
+
+, t, S), (5) where Inv( ·) denotes Eq. (3). Editing then starts from z− 
+
+> T
+
+and denoises under T :
+
+z+ 
+
+> t−1
+
+= Sam( z+ 
+
+> t
+
+, t, T ), z+ 
+
+> T
+
+= z− 
+
+> T
+
+, (6) where Sam( ·) denotes Eq. (2). This formulation couples two different goals. The source branch seeks faithful reconstruc-tion, while the target branch seeks semantic modification. Because z− 
+
+> T
+
+still carries source information, target denoising may over-preserve source semantics. Conversely, when the target condition dominates, editing-irrelevant background and layout may drift. The key question is therefore how to preserve the source-consistent part of the trajectory without preventing the intended edit. 
+
+B. Bidirectional Reverse Consistency 
+
+We estimate structural drift by asking whether the current target state can be reversed back to the source trajectory. Consider an early denoising step that produces z+ 
+
+> k
+
+from z+
+
+> k+1
+
+.We first construct an auxiliary target-side noise representation by inverting the current target state back toward T under the target prompt: 
+
+ˆz+ 
+
+> T
+
+= Inv k→T (z+ 
+
+> k
+
+, T ). (7) Starting from ˆz+ 
+
+> T
+
+, we then perform source-guided denoising back to timestep k:
+
+z∗ 
+
+> k
+
+= Sam T →k(ˆ z+ 
+
+> T
+
+, S). (8) If the target edit preserves essential source structure, z∗ 
+
+> k
+
+should be close to the source inversion state z− 
+
+> k
+
+. We define the reverse consistency offset as 
+
+O− 
+
+> k
+
+= z− 
+
+> k
+
+− z∗ 
+
+> k
+
+. (9) The corrected target latent is then 
+
+z+ 
+
+> k
+
+← z+ 
+
+> k
+
++ λkO− 
+
+> k
+
+, (10) where λk controls the correction strength. IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 4
+
+> 1T
+
+z
+
+> *
+> 1T
+
+z
+
+> 
+> T
+
+z
+
+> 
+> 1T
+
+z
+
+> 
+> T
+
+z
+
+> 
+> T
+
+z
+
+> 
+> 1T
+
+z
+
+offset 
+
+> 
+> 0
+
+z
+
+> 
+> 1
+
+z
+
+> 
+> 2
+
+z
+
+> 
+> 1
+
+z
+
++S 
+
++T+T
+
++S
+
+> 
+> 2
+
+z
+
+> *
+> 1
+
+z
+
+> 
+> 1
+
+z
+
+> 
+> 0
+
+z
+
+> 
+> 0
+
+z
+
+> ②
+> ③
+> ④
+> ⑤
+> ①
+
+Consistent Inversion Consistent Correction 
+
+Source Latent 
+
+Auxiliary Latent 
+
+Direct Inversion 
+
+Latent 
+
+Consistent 
+
+Inversion Latent 
+
+①-⑤ Consistent 
+
+Correction Process     
+
+> Fig. 2. Overall pipeline of Consistent-Inversion. The source trajectory z−
+> tis obtained by DDIM inversion under the source prompt. The target trajectory
+> z+
+> tis denoised under the target prompt. At selected early timesteps, an auxiliary target-side noise representation is constructed and source-guided reverse denoising estimates the reverse consistency discrepancy, which is then injected into the target branch as a correction offset.
+
+C. Step-Wise Construction of Consistent Correction 
+
+We now instantiate the above idea at a single early denoising step and then extend it to multiple selected timesteps. For clarity, consider the first target denoising step from T to T −1.The target prompt first guides the source-side terminal latent 
+
+z− 
+
+> T
+
+into a target-side intermediate latent: 
+
+z+  
+
+> T−1
+
+=
+
+r αT −1
+
+αT
+
+z−
+
+> T
+
++
+
+s
+
+1
+
+αT −1
+
+− 1 −
+
+r 1
+
+αT
+
+− 1
+
+!
+
+ϵθ (z− 
+
+> T
+
+, T, T , ∅).
+
+(11) In a conventional editor, z+  
+
+> T−1
+
+is directly passed to the fol-lowing denoising steps. Consistent-Inversion instead evaluates whether this newly edited latent remains reversible under the source condition. Since z+  
+
+> T−1
+
+is not naturally paired with a known terminal target latent, we first construct an auxiliary target-side noise representation: 
+
+ˆz+ 
+
+> T
+
+=
+
+r αT
+
+αT −1
+
+z+ 
+
+> T−1
+
++
+
+r 1
+
+αT
+
+− 1 −
+
+s
+
+1
+
+αT −1
+
+− 1
+
+!
+
+ϵθ (z+ 
+
+> T−1
+
+, T − 1, T ).
+
+(12) Then we reverse-denoise this auxiliary representation with the source prompt: 
+
+z∗  
+
+> T−1
+
+=
+
+r αT −1
+
+αT
+
+ˆz+
+
+> T
+
++
+
+s
+
+1
+
+αT −1
+
+− 1 −
+
+r 1
+
+αT
+
+− 1
+
+!
+
+ϵθ (ˆ z+ 
+
+> T
+
+, T, S, ∅).
+
+(13) The source trajectory already contains z−  
+
+> T−1
+
+from DDIM inversion. Therefore, the reverse consistency offset at this step is 
+
+O−  
+
+> T−1
+
+= z−  
+
+> T−1
+
+− z∗ 
+
+> T−1
+
+. (14) Finally, the target latent is corrected by 
+
+z+  
+
+> T−1
+
+← z+  
+
+> T−1
+
++ λT −1O− 
+
+> T−1
+
+. (15) The same construction applies to any selected timestep k.When k < T − 1, the method inverts z+ 
+
+> k
+
+back to the terminal auxiliary representation and source-denoises it back to k. This is more expensive than a one-step check, which motivates our selected-timestep implementation. 
+
+D. Efficient Selected-Timestep Correction 
+
+Computing Eq. (7) and Eq. (8) at every timestep is unnec-essary and inefficient. Diffusion denoising tends to establish global layout and low-frequency structure in earlier stages, while later stages refine local appearance and texture. We therefore apply correction only at a small set of early timesteps 
+
+K:
+
+K = {T − ∆1, T − ∆2, . . . , T − ∆m}, m ≪ T. (16) This selected-timestep strategy preserves the main structural benefit while keeping runtime close to the underlying editor. 
+
+E. Computational Cost 
+
+Let T be the number of DDIM sampling steps and m = |K| 
+
+the number of corrected timesteps. A standard inversion-based editor requires one source inversion pass and one target denoising pass, giving approximately 2T denoising-network evaluations, excluding editor-specific attention or feature operations. Consistent-Inversion adds one auxiliary inversion path and one source-guided reverse path for each corrected timestep. Dense correction would be expensive, but the selected-timestep configuration keeps m small and places corrections near the beginning of denoising, where structural information is most influential. Empirically, the default setting increases single-image runtime only slightly over Direct Inver-sion while improving reverse structural consistency, as shown in Sec. V-J. This design is suitable for practical visual editing systems, where users often prefer a controllable quality-speed tradeoff IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 5
+
+Algorithm 1: Consistent-Inversion 
+
+Input: Source latent z− 
+
+> 0
+
+, source prompt S, target prompt T , timesteps T , correction set K, scale schedule λk
+
+Output: Edited latent z+0 
+
+> 1
+
+for t = 0 to T − 1 do  
+
+> 2
+
+z− 
+
+> t+1
+
+← Inv( z− 
+
+> t
+
+, t, S); 
+
+> 3
+
+z+ 
+
+> T
+
+← z− 
+
+> T
+
+; 
+
+> 4
+
+for t = T to 1 do  
+
+> 5
+
+z+ 
+
+> t−1
+
+← Sam( z+ 
+
+> t
+
+, t, T ); 
+
+> 6
+
+if t − 1 ∈ K then  
+
+> 7
+
+ˆz+ 
+
+> T
+
+← Inv t−1→T (z+
+
+> t−1
+
+, T ); 
+
+> 8
+
+z∗ 
+
+> t−1
+
+← Sam T →t−1(ˆ z+ 
+
+> T
+
+, S); 
+
+> 9
+
+O− 
+
+> t−1
+
+← z− 
+
+> t−1
+
+− z∗
+
+> t−1
+
+; 
+
+> 10
+
+z+ 
+
+> t−1
+
+← z+ 
+
+> t−1
+
++ λt−1O−
+
+> t−1
+
+;rather than uniformly expensive correction at every timestep. The correction set K and scale schedule λk can be configured according to latency budget, desired preservation strength, and availability of editing masks. 
+
+F. Compatibility with Existing Editors 
+
+Consistent-Inversion operates at the latent trajectory level and does not alter the pretrained diffusion network. It can therefore be combined with attention-based editors such as Prompt-to-Prompt [4], feature-injection editors such as Plug-and-Play [19], and trajectory-based methods such as Direct Inversion [23]. In our implementation, the base editor performs its original target denoising step, after which Consistent-Inversion applies the reverse consistency correction at selected timesteps. 
+
+G. Design Rationale 
+
+The auxiliary target-side noise in Eq. (7) is necessary because z+ 
+
+> k
+
+and z− 
+
+> k
+
+lie on different conditional trajectories. Directly subtracting them would mix target-guided semantic change with source-guided preservation error. By first mapping the target state to an auxiliary noise representation and then denoising it under the source prompt, Consistent-Inversion compares the two branches through the same DDIM geom-etry used by inversion and sampling. The resulting offset is therefore a prompt-aware trajectory discrepancy rather than a fixed pixel-space or latent-space residual. The correction assumes that, during early denoising, reverse consistency discrepancy and target-branch structural drift have approximately aligned directions. This assumption is most reliable when source and target prompts share scene layout and differ mainly in object category, texture, color, material, or style. For edits involving large viewpoint changes, object count changes, or global spatial rearrangement, the correction should be applied more conservatively. This observation motivates sparse early-timestep correction with moderate scales rather than exact cycle consistency throughout the whole trajectory. V. E XPERIMENTS 
+
+A. Experimental Setup 
+
+We evaluate Consistent-Inversion on PIE-Bench [23], which contains 700 images and ten prompt-based editing types: random editing, object change, object addition, object deletion, object content modification, object pose alteration, object color change, object material change, background change, and image style change. Each image is associated with a source prompt, a target prompt, an editing instruction, editing subjects, and an editing mask. This benchmark is suitable for our study because it explicitly measures both target edit fidelity and preservation of editing-irrelevant regions. We organize the experiments into two protocols. The pri-mary protocol uses a unified SD3.5 setting on the full PIE-Bench benchmark. In this setting, all rows in the main table are evaluated with the same model family, prompt set, image set, and metric code, so the comparison isolates the effect of the inversion or correction strategy. The secondary protocol follows the classical Stable-Diffusion-v1.4, Prompt-to-Prompt, and 50-step DDIM setting used by Direct Inversion [23]. We use this protocol only as compatibility evidence for earlier inversion backbones, not as a direct ranking against SD3.5 results. Unless otherwise stated, the default correction scale is 0.5, and the number of corrected timesteps is set to a small fraction of the denoising trajectory to balance preservation and efficiency. The correction is applied at early timesteps, where latent trajectories mainly determine global layout and editing-irrelevant structure. 
+
+B. Evaluation Metrics 
+
+Following prior work, we report background LPIPS [32], DINO-ViT structure distance, LPIPS, MSE, PSNR, SSIM [33], and CLIP similarity. Background LPIPS and DINO-ViT dis-tance measure preservation of editing-irrelevant regions and semantic layout. LPIPS, MSE, PSNR, and SSIM evalu-ate reconstruction-level fidelity. CLIP image-image similarity measures source-image preservation, while CLIP text-image and directional CLIP similarities evaluate target-prompt align-ment. For runtime analysis, we measure wall-clock inference time per image on a single GPU. We also report reverse SSIM (R-SSIM), a cycle-inspired consistency metric. Given an edited image xt, we reverse-edit it back to the source prompt and obtain ˜xs. R-SSIM is defined as 
+
+R-SSIM = SSIM(˜ xs, x s). (17) This metric does not replace target-prompt fidelity metrics; instead, it measures whether the edited result still contains enough source-consistent structure to be reversed back. A higher R-SSIM indicates better trajectory-level preservation, which directly matches the motivation of Consistent-Inversion. Since a structure-preserving editor should not be judged by a single scalar, we make paired claims throughout the exper-iments: preservation-sensitive metrics should improve while CLIP-based prompt alignment remains close to the underlying editor. IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 6
+
+C. Per-Type SD3.5 Analysis 
+
+PIE-Bench mixes local object edits, attribute edits, back-ground changes, and global style edits, whose annotated edit regions range from small object-deletion masks to nearly full-image style changes. To address whether the average gain in Table II comes from only a few easy categories, we aggregate the full 700-image SD3.5 results by editing type. Table I compares Direct Inversion and Consistent-Inversion on representative preservation and editability metrics. Consistent-Inversion improves BG-LPIPS in nine out of ten categories and LPIPS in all ten categories. The only exception on BG-LPIPS is image style change, where background-only metrics become less diagnostic; even in this category, LPIPS still improves from 0.4647 to 0.4292. The per-type results support the intended behavior of the method. Larger gains appear for color change and background change, where target semantics often leak into surrounding texture and illumination. Local deletion and object change also benefit, indicating that the correction helps keep unedited context stable. CLIP-T remains close to Direct Inversion across categories, with a slight improvement for object deletion. This confirms that the method mainly reduces editing-irrelevant drift rather than obtaining preservation by suppressing the target edit. 
+
+D. Main Comparison on PIE-Bench 
+
+Table II reports the main SD3.5 comparison on the full 700-image PIE-Bench protocol. Because recent editors often use different backbones, samplers, acceleration strategies, and code assumptions, we avoid mixing incompatible settings into one leaderboard. Instead, the main table uses a unified SD3.5 setting and evaluates all entries with the same PIE-Bench metric code. Euler Flow Inversion corresponds to DDIM-style inversion, Negative-Prompt Flow Inversion corresponds to NPI, and Direct Inversion denotes the direct trajectory-reuse baseline. We then insert the proposed reverse consistency correction into Direct Inversion. The simple flow-inversion controls obtain competitive CLIP text or directional scores, but they substantially degrade preser-vation. Direct Inversion is the strongest of these controls, and adding reverse consistency correction consistently im-proves preservation metrics: BGLPIPS decreases from 0.2194 to 0.2051, DINO distance from 0.0656 to 0.0631, LPIPS from 0.4409 to 0.4122, and MSE from 0.03859 to 0.03062. Reconstruction-oriented metrics show the same trend, with PSNR increasing from 15.19 dB to 16.06 dB, SSIM from 0.6318 to 0.6578, and CLIP image similarity from 0.8375 to 0.8437. The CLIP text and directional scores remain close to the Direct Inversion baseline, indicating that the correction improves structure preservation without simply suppressing the edit. Since many PIE-Bench edits occupy only a modest fraction of the image, unnecessary changes outside the target region are heavily penalized by BG-LPIPS, DINO distance, and reconstruction metrics. Direct Inversion already reduces this drift compared with generic flow-inversion controls, but it still reuses a forward trajectory that may not be reversible under the source prompt after target-conditioned denoising. Consistent-Inversion directly targets this failure mode, so its largest relative gain appears on MSE and LPIPS rather than on CLIP-T. This is the desired behavior: the method should reduce editing-irrelevant distortion while preserving the original editor’s semantic change. For completeness, Table III keeps the original SD-v1.4 com-parison against DDIM Inversion, NPI, ProxNPI, and Direct Inversion. We report it separately because those methods use a different diffusion backbone and DDIM-style sampler; mixing them with SD3.5 rows in a single ranking would conflate method improvements with model changes. This separation lets the main table support the current-backbone comparison while the classical table demonstrates that the same correction mechanism also benefits earlier inversion pipelines. 
+
+E. Preservation-Editability Profile 
+
+To make the preservation-editability tradeoff easier to inspect, Fig. 3 summarizes the relative SD3.5 gains of Consistent-Inversion over Direct Inversion. The largest im-provements appear on background and reconstruction metrics, especially MSE, LPIPS, and BG-LPIPS. At the same time, CLIP-T and CLIP-Dir remain close to the Direct Inversion baseline. This profile is consistent with the goal of reverse consistency correction: it should reduce structural drift without turning the target branch into a source reconstruction process. The profile also helps distinguish our contribution from a simple prompt-strength or guidance-scale adjustment. In-creasing guidance often improves target-prompt scores but can amplify geometric drift, texture leakage, or background changes. In contrast, the reverse consistency correction pro-duces a preservation-heavy gain profile while leaving CLIP-T nearly unchanged and slightly improving CLIP-I. This suggests that the correction acts mainly on source-consistent trajectory geometry rather than on the semantic direction of the edit. 
+
+F. Mechanism Ablation under SD3.5 
+
+To verify that the improvement comes from bidirectional reverse consistency rather than from simply adding a residual latent offset, we conduct a mechanism ablation on the full 700-image SD3.5 benchmark. Table IV compares Direct Inversion, a residual-only control using the same correction scale, and the proposed cycle-based reverse consistency correction. The residual-only control is almost indistinguishable from Direct Inversion across preservation and prompt-alignment metrics. In contrast, the cycle-based variant substantially reduces BG-LPIPS, DINO distance, LPIPS, and MSE, while improving PSNR and SSIM. This confirms that the auxiliary target-side noise representation and source-guided reverse pass are necessary for obtaining an informative correction direction. 
+
+G. Ablation Study 
+
+We ablate the correction steps and correction scale in Table V. Increasing the number of corrected timesteps gen-erally improves background preservation, while overly many IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 7
+
+TABLE I PER -TYPE SD3.5 COMPARISON ON PIE-B ENCH . D DENOTES DIRECT INVERSION AND O DENOTES DIRECT INVERSION + C ONSISTENT -I NVERSION .
+
+Editing type Images BG-LPIPS ↓ LPIPS ↓ CLIP-T ↑
+
+D O D O D ORandom editing 140 0.2348 0.2182 0.4562 0.4239 0.3244 0.3244 Object change 80 0.3114 0.2909 0.4406 0.4193 0.3244 0.3238 Object addition 80 0.1410 0.1345 0.3725 0.3493 0.3309 0.3303 Object deletion 80 0.3390 0.3170 0.4342 0.4106 0.3153 0.3161 
+
+Content modification 40 0.2401 0.2312 0.3899 0.3760 0.3186 0.3159 Pose alteration 40 0.2354 0.2259 0.3739 0.3616 0.3249 0.3245 Color change 40 0.2996 0.2722 0.4446 0.4071 0.3336 0.3303 Material change 40 0.2718 0.2557 0.4295 0.4099 0.3380 0.3335 Background change 80 0.1874 0.1708 0.5290 0.4792 0.3282 0.3277 Style change 80 0.0069 0.0071 0.4647 0.4292 0.3440 0.3405 All 700 0.2194 0.2051 0.4409 0.4122 0.3278 0.3267 
+
+TABLE II UNIFIED SD3.5 COMPARISON ON THE FULL PIE-B ENCH BENCHMARK . O URS INSERTS REVERSE CONSISTENCY CORRECTION INTO DIRECT INVERSION .
+
+Method Preservation / structure Background fidelity CLIP alignment BG-LPIPS ↓ DINO ↓ LPIPS ↓ MSE ↓ PSNR ↑ SSIM ↑ I↑ T↑ Dir ↑
+
+Euler Flow Inv. (DDIM analogue) 0.3241 0.0884 0.6015 0.08706 11.67 0.4857 0.8024 0.3266 0.0563 Negative-Prompt Flow Inv. (NPI analogue) 0.3706 0.0981 0.6747 0.11365 10.57 0.3981 0.7243 0.2963 0.0615 
+
+Direct Inversion 0.2194 0.0656 0.4409 0.03859 15.19 0.6318 0.8375 0.3278 0.0528 Direct Inversion + Consistent-Inversion 0.2051 0.0631 0.4122 0.03062 16.06 0.6578 0.8437 0.3267 0.0515 
+
+TABLE III COMPATIBILITY COMPARISON UNDER THE CLASSICAL SD-V1.4, P ROMPT -TO -P ROMPT , AND 50-STEP DDIM PROTOCOL .
+
+Method Preservation / structure Background fidelity CLIP alignment BG-LPIPS ↓ DINO ↓ LPIPS ↓ MSE ↓ PSNR ↑ SSIM ↑ I↑ T↑ Dir ↑
+
+DDIM Inv. 0.2494 0.0699 0.4660 0.03472 15.11 0.5555 0.8452 0.3098 0.0201 NPI [22] 0.0833 0.0200 0.1939 0.00897 21.76 0.7185 0.9002 0.3047 0.0460 
+
+ProxNPI [20] 0.0786 0.0190 0.1781 0.00788 22.30 0.7294 0.9058 0.3031 0.0432 Direct Inv. [23] 0.0633 0.0124 0.1581 0.00754 22.31 0.7367 0.9291 0.3092 0.0296 Ours-Direct-3 0.0602 0.0122 0.1501 0.00653 22.91 0.7435 0.9306 0.3089 0.0288 Ours-Direct-5 0.0584 0.0120 0.1449 0.00600 23.27 0.7475 0.9316 0.3083 0.0281 Ours-ProxNPI-3 0.0469 0.0101 0.1250 0.00567 23.98 0.7608 0.9277 0.3050 0.0329 
+
+TABLE IV MECHANISM ABLATION ON THE FULL 700-IMAGE SD3.5 BENCHMARK . A RESIDUAL -ONLY OFFSET DOES NOT PROVIDE THE PRESERVATION GAIN OBTAINED BY THE FULL CYCLE -BASED REVERSE CONSISTENCY CORRECTION .
+
+Variant Images Preservation / structure Background fidelity CLIP BG-LPIPS ↓ DINO ↓ LPIPS ↓ MSE ↓ PSNR ↑ SSIM ↑ T↑
+
+Direct Inversion 700 0.2194 0.0656 0.4409 0.03859 15.19 0.6318 0.3278 
+
+Residual-only, s=0 .3 700 0.2194 0.0656 0.4409 0.03859 15.19 0.6318 0.3277 Cycle reverse consistency, s=0 .3 700 0.2051 0.0631 0.4122 0.03062 16.06 0.6578 0.3267 
+
+correction steps may slightly reduce edit fidelity. This supports the selected-timestep design: applying correction only to early structural stages gives a better efficiency-fidelity balance than dense correction. When the correction scale is fixed at 0.5, increasing the number of corrected steps from 1 to 20 gradually improves structure distance, PSNR, LPIPS, MSE, and SSIM. However, CLIP similarity peaks around three correction steps and then slightly decreases. This confirms that excessive preservation can suppress target-prompt changes. When the number of corrected steps is fixed to one, increasing the scale generally improves preservation metrics up to a moderate level, but an overly large scale does not further improve CLIP similarity. We therefore use a moderate default scale and a small correc-tion set in the main experiments. 
+
+H. Backbone Compatibility 
+
+We further test whether the correction is tied to Direct Inversion. Table VI inserts the same consistency correction into two classical inversion backbones while keeping Prompt-to-Prompt fixed. The paired gains on both Direct Inversion and ProxNPI show that Consistent-Inversion acts as a trajectory-level module rather than a special case of one editor. IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 8(a) Preservation and reconstruction 
+
+relative improvement over Direct Inversion (%) 
+
+0 5 10 15 20 
+
+BG-LPIPS +6.5 
+
+DINO +3.8 
+
+LPIPS +6.5 
+
+MSE +20.7 
+
+PSNR +5.7 
+
+SSIM +4.1 
+
+CLIP-I +0.7 
+
+(b) Editability metrics 
+
+absolute scores 
+
+Metric Direct Ours ∆
+
+CLIP-T 0.3278 0.3267 -0.3% 
+
+CLIP-Dir 0.0528 0.0515 -2.5% 
+
+CLIP-I 0.8375 0.8437 +0.7% 
+
+Fig. 3. Relative SD3.5 preservation gains over Direct Inversion on the full PIE-Bench benchmark. Consistent-Inversion improves structure and background fidelity while keeping prompt-alignment metrics close to the base editor. TABLE V ABLATION ON CORRECTION STEPS AND CORRECTION SCALE WITH 20 DENOISING STEPS . T HE DAGGER MARKS THE DEFAULT SETTING USED FOR BALANCED PRESERVATION AND EDITABILITY .                                                                                               
+
+> Correction Structure Background preservation CLIP similarity Steps Scale Dist. ×10 3↓PSNR ↑LPIPS ×10 3↓MSE ×10 4↓SSIM ×10 2↑Whole ↑Edited ↑
+> Varying correction steps with scale fixed to 0.5
+> 0010.6 27.49 51.80 30.62 84.94 24.73 21.75 10.5 9.1 27.85 49.80 28.21 85.41 24.94 21.81 3†0.5 8.7 27.96 49.20 27.59 85.47 24.96 21.82
+> 50.5 8.5 28.01 48.90 27.33 85.49 24.93 21.79 10 0.5 8.4 28.08 48.50 27.03 85.52 24.92 21.77 20 0.5 8.2 28.15 47.90 26.67 85.57 24.88 21.74
+> Varying correction scale with one corrected step
+> 10.1 9.8 27.65 50.93 29.61 85.29 24.95 21.80 10.3 9.5 27.76 50.40 28.82 85.35 24.94 21.79 10.8 8.8 27.94 49.43 27.70 85.47 24.95 21.81
+> 11.0 8.8 27.96 49.33 27.75 85.48 24.92 21.79
+
+TABLE VI COMPACT COMPATIBILITY TEST UNDER THE CLASSICAL 700-IMAGE 
+
+PIE-B ENCH PROTOCOL .                    
+
+> Backbone Corr. BG-LPIPS ↓LPIPS ↓CLIP-I ↑
+> Direct Inv. No 0.0633 0.1581 0.9291 Direct Inv. Yes 0.0584 0.1449 0.9316
+> ProxNPI No 0.0786 0.1781 0.9058 ProxNPI Yes 0.0469 0.1250 0.9277
+
+I. Qualitative Results 
+
+Fig. 4 shows representative qualitative comparisons on prompt-based image editing. Consistent-Inversion better pre-serves editing-irrelevant regions while allowing the target semantic change. For object replacement and attribute edits, it maintains the original pose and background layout more reliably; for texture or pattern edits, it avoids unnecessary deformation of nearby structures. 
+
+J. Runtime and Reverse Consistency 
+
+Table VII shows that Consistent-Inversion introduces asmall overhead over Direct Inversion in the classical SD-v1.4 implementation while improving reverse structural con-sistency. This is important for practical visual editing systems, 
+
+TABLE VII RUNTIME AND REVERSE -CONSISTENCY COMPARISON .Method Time (s) ↓ R-SSIM ↑
+
+DDIM 5.16 49.65 Direct Inversion 5.85 68.86 Consistent-Inversion 6.05 69.30 
+
+where per-image optimization methods may be too slow for interactive use. The runtime overhead is modest because correction is applied to only a small number of timesteps. Compared with DDIM, Consistent-Inversion increases runtime by less than one second in the current setting, while R-SSIM improves from 49.65 to 69.30. Compared with Direct Inversion, the runtime increases from 5.85s to 6.05s, but R-SSIM still improves. This supports the claim that the method provides a practical efficiency-preservation tradeoff rather than relying on expensive per-image optimization. 
+
+K. Offset Trajectory Analysis 
+
+We also inspect the latent offset produced by reverse con-sistency. In the early denoising stage, the offset magnitude is IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 9Source Image DDIM+P2P NT+P2P NP+P2P StyleD +P2P Ours +P2P 
+
+# A cat wearing a pink hat → A tiger wearing a pink hat 
+
+Instruct +P2P DI +P2P 
+
+# A dog is laying down on a white background → A lion is laying down on a white background 
+
+# A chair sits in front of a wall with a floral pattern → A chair sits in front of a wall with a spot pattern  
+
+> Fig. 4. Qualitative comparison on prompt-based image editing. Consistent-Inversion preserves source layout and editing-irrelevant details more faithfully while keeping the target edit visible.
+
+concentrated on low-frequency structure and editing-irrelevant regions, which agrees with the observation that global layout is determined before local texture refinement. After the correc-tion is injected, the later reverse discrepancy decreases rather than merely shifting to adjacent timesteps. This indicates that the correction changes the subsequent trajectory in a persistent way, instead of acting as a transient residual perturbation. This analysis clarifies why sparse correction is sufficient. If the offset were only a local numerical residual, correcting one or a few timesteps would have little effect after several denois-ing updates. In practice, early reverse consistency correction alters the source-compatible component of the target trajectory, and the following denoising steps inherit this improved geome-try. This is also why the method improves preservation metrics more strongly than CLIP-T: it mainly regularizes where and how the edit evolves, not what semantic direction the target prompt requests. VI. D ISCUSSION AND LIMITATIONS 
+
+The reverse consistency offset is useful because it is com-puted in the same latent space and under the same pretrained denoising network as the editing trajectory. Unlike pixel-space preservation losses or attention replacement heuristics, it estimates whether an intermediate target latent remains compatible with the source inversion path. The correction is also prompt-aware: the reverse path is conditioned on the source prompt, so the offset reflects how the pretrained diffusion model interprets the current target latent when asked to recover source semantics. Consistent-Inversion assumes that source-to-target editing and target-to-source reversal have approximately aligned dis-crepancy directions during early denoising. This assumption is most suitable for edits that preserve scene layout while changing object identity, texture, material, style, or local attributes. When source and target prompts require different layouts, object counts, or viewpoints, overly strong correction may suppress the intended change. The method also adds inference overhead if correction is applied densely. These cases can be addressed by moderate correction scales, sparse timestep selection, and mask-aware schedules for complex edits. The same principle can support more adaptive multime-dia editing systems. The correction strength can depend on timestep, discrepancy magnitude, and optional editing masks, so background regions receive stronger preservation while the edited region remains flexible. Frequency-aware correction is also possible: low-frequency components can be corrected more aggressively to preserve layout, while high-frequency components remain available for texture and appearance changes. For lightweight video editing, reverse consistency offsets could be propagated across neighboring frames with optical flow or latent correspondences, encouraging source preservation within each frame and temporal stability across frames. These variants do not change the central mechanism; they expose additional controls for practical editing scenarios. From a reproducibility perspective, the method has few moving parts: it uses the pretrained editor without finetuning and only adds a correction scale and a small set of early timesteps. The paired protocol uses the same prompts, metric code, and sampler for the base and corrected editors, isolating the effect of reverse consistency. The quantitative evaluation is centered on PIE-Bench, which IEEE TRANSACTIONS ON MULTIMEDIA, VOL. XX, NO. XX, 2026 10 
+
+is widely used for prompt-based real-image editing and pro-vides masks, prompt pairs, editing types, and preservation met-rics. Broader user studies and stronger vision-language metrics would further clarify fine-grained instruction following and the preservation-editing tradeoff. These evaluation extensions are complementary to the central mechanism studied in this work. VII. C ONCLUSION 
+
+We presented Consistent-Inversion, a training-free reverse consistency guidance framework for structure-preserving dif-fusion editing. By constructing an auxiliary target-side noise representation and measuring reverse consistency against the source inversion trajectory, the method obtains an interpretable correction signal for target denoising. Experiments on PIE-Bench show improved structure and background preserva-tion with small runtime overhead, and ablations confirm the value of selected-timestep correction. The results suggest that trajectory-level reversibility is a useful principle for practical visual editing systems and can be further extended with adaptive schedules, mask-aware correction, and temporal con-sistency constraints. REFERENCES [1] J. Ho, A. Jain, and P. Abbeel, “Denoising diffusion probabilistic models,” 
+
+Advances in neural information processing systems , vol. 33, pp. 6840– 6851, 2020. [2] J. Song, C. Meng, and S. Ermon, “Denoising diffusion implicit models,” 
+
+arXiv preprint arXiv:2010.02502 , 2020. [3] T. Brooks, A. Holynski, and A. A. Efros, “Instructpix2pix: Learning to follow image editing instructions,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2023, pp. 18 392–18 402. [4] A. Hertz, R. Mokady, J. Tenenbaum, K. Aberman, Y. Pritch, and D. Cohen-Or, “Prompt-to-prompt image editing with cross attention control.(2022),” URL https://arxiv. org/abs/2208.01626 , 2022. [5] M. Cao, X. Wang, Z. Qi, Y. Shan, X. Qie, and Y. Zheng, “Masactrl: Tuning-free mutual self-attention control for consistent image synthesis and editing,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2023, pp. 22 560–22 570. [6] G. Parmar, K. Kumar Singh, R. Zhang, Y. Li, J. Lu, and J.-Y. Zhu, “Zero-shot image-to-image translation,” in ACM SIGGRAPH 2023 Conference Proceedings , 2023, pp. 1–11. [7] C. Meng, Y. He, Y. Song, J. Song, J. Wu, J.-Y. Zhu, and S. Ermon, “Sdedit: Guided image synthesis and editing with stochastic differential equations,” arXiv preprint arXiv:2108.01073 , 2021. [8] O. Avrahami, D. Lischinski, and O. Fried, “Blended diffusion for text-driven editing of natural images,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2022, pp. 18 208–18 218. [9] G. Couairon, J. Verbeek, H. Schwenk, and M. Cord, “Diffedit: Diffusion-based semantic image editing with mask guidance,” arXiv preprint arXiv:2210.11427 , 2022. [10] R. Mokady, A. Hertz, K. Aberman, Y. Pritch, and D. Cohen-Or, “Null-text inversion for editing real images using guided diffusion models,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2023, pp. 6038–6047. [11] W. Dong, S. Xue, X. Duan, and S. Han, “Prompt tuning inversion for text-driven image editing using diffusion models,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2023, pp. 7430–7440. [12] B. Wallace, A. Gokul, and N. Naik, “Edict: Exact diffusion inversion via coupled transformations,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2023, pp. 22 532–22 541. [13] P. Dhariwal and A. Nichol, “Diffusion models beat gans on image synthesis,” Advances in neural information processing systems , vol. 34, pp. 8780–8794, 2021. [14] Y. Huang, L. Xie, X. Wang, Z. Yuan, X. Cun, Y. Ge, J. Zhou, C. Dong, R. Huang, R. Zhang et al. , “Smartedit: Exploring complex instruction-based image editing with multimodal large language models,” arXiv preprint arXiv:2312.06739 , 2023. [15] G. Kim, T. Kwon, and J. C. Ye, “Diffusionclip: Text-guided diffusion models for robust image manipulation,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2022, pp. 2426–2435. [16] Z. Wang, L. Zhao, and W. Xing, “Stylediffusion: Controllable dis-entangled style transfer via diffusion models,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2023, pp. 7677–7689. [17] B. Kawar, S. Zada, O. Lang, O. Tov, H. Chang, T. Dekel, I. Mosseri, and M. Irani, “Imagic: Text-based real image editing with diffusion models,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2023, pp. 6007–6017. [18] Y. Shi, C. Xue, J. Pan, W. Zhang, V. Y. Tan, and S. Bai, “Dragdiffusion: Harnessing diffusion models for interactive point-based image editing,” 
+
+arXiv preprint arXiv:2306.14435 , 2023. [19] N. Tumanyan, M. Geyer, S. Bagon, and T. Dekel, “Plug-and-play diffusion features for text-driven image-to-image translation,” in Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2023, pp. 1921–1930. [20] L. Han, S. Wen, Q. Chen, Z. Zhang, K. Song, M. Ren, R. Gao, A. Stathopoulos, X. He, Y. Chen et al. , “Proxedit: Improving tuning-free real image editing with proximal guidance,” in Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision ,2024, pp. 4291–4301. [21] M. Brack, F. Friedrich, K. Kornmeier, L. Tsaban, P. Schramowski, K. Kersting, and A. Passos, “Ledits++: Limitless image editing using text-to-image models,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2024. [22] D. Miyake, A. Iohara, Y. Saito, and T. Tanaka, “Negative-prompt inversion: Fast image inversion for editing with text-guided diffusion models,” arXiv preprint arXiv:2305.16807 , 2023. [23] X. Ju, A. Zeng, Y. Bian, S. Liu, and Q. Xu, “Direct inversion: Boosting diffusion-based editing with 3 lines of code,” arXiv preprint arXiv:2310.01506 , 2023. [24] D. Garibi, O. Patashnik, A. Voynov, H. Averbuch-Elor, and D. Cohen-Or, “Renoise: Real image inversion through iterative noising,” arXiv preprint arXiv:2403.14602 , 2024. [25] W. Kang, K. Galim, and H. I. Koo, “Eta inversion: Designing an optimal eta function for diffusion-based real image editing,” in European Conference on Computer Vision , 2024. [26] E. Kadosh, N. Goren, O. Patashnik, D. Garibi, and D. Cohen-Or, “Tight inversion: Image-conditioned inversion for real image editing,” arXiv preprint arXiv:2502.20376 , 2025. [27] Z. Li, H. Wang, W. Wang, C. Tan, Y. Wei, and Y. Zhao, “Dci: Dual-conditional inversion for boosting diffusion-based image editing,” arXiv preprint arXiv:2506.02560 , 2025. [28] L. Rout, Y. Chen, N. Ruiz, C. Caramanis, S. Shakkottai, and W.-S. Chu, “Semantic image inversion and editing using rectified stochastic differential equations,” arXiv preprint arXiv:2410.10792 , 2024. [29] J. Wu, Z. Li, H. Qin, X. Liu, L. Kong, Y. Zhang, and X. Yang, “Flashedit: Decoupling speed, structure, and semantics for precise image editing,” 
+
+arXiv preprint arXiv:2509.22244 , 2025. [30] T. Dao, Z. Wang, K. T. Pham, and L. Chen, “Steerflow: Steering rectified flows for faithful inversion-based image editing,” arXiv preprint arXiv:2604.01715 , 2026. [31] T. Wu, S. Li, Y. Wang, S. Yang, K. Wang, and J. van de Weijer, “Training-free image inversion for one-step diffusion models,” Pattern Recognition , 2026. [32] R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, “The unreasonable effectiveness of deep features as a perceptual metric,” in 
+
+Proceedings of the IEEE conference on computer vision and pattern recognition , 2018, pp. 586–595. [33] Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli, “Image quality assessment: from error visibility to structural similarity,” IEEE transactions on image processing , vol. 13, no. 4, pp. 600–612, 2004.
