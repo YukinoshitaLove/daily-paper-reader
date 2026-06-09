@@ -1,0 +1,936 @@
+Title: Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge
+
+URL Source: https://arxiv.org/pdf/2606.08048v1
+
+Published Time: Tue, 09 Jun 2026 00:33:16 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+Juntong Shi 1 Brian L. Trippe 1 Jure Leskovec 1 Stefano Ermon 1 Minkai Xu 1
+
+## Abstract 
+
+Diffusion language models (DLMs) offer substan-tial speed advantages through parallel decoding, but the lack of token dependencies limits gen-eration quality compared to autoregressive (AR) models. Recent progress attempts to bridge the gap via importance sampling, with DLM being the proposal and AR being the target. However, due to the huge gap between their distributions, the sampling requires a large number of parti-cles and is thus expensive to compute. In this pa-per, we introduce PoE-Bridge , a novel decoding framework that drastically improves generation speed and accuracy by introducing an intermedi-ate distribution to bridge the gap. The distribution is constructed as a Product-of-Experts (PoE) of the DLM proposal and the AR target. With the intermediate distribution, we first use the DLM to draft multiple continuations in parallel, then apply rejection sampling to verify the drafted to-kens and move the resulting candidates toward the PoE. We then use importance sampling to further correct the PoE-aligned candidates toward the AR target. We further propose several improved tech-niques, including mixed-temperature sampling for enhanced diversity and elastic rejection windows for reducing wasted verification. Empirically, PoE-Bridge achieves significantly improved ac-curacy with 5× speedup over the standard DLM decoding approach, and recovers at least 95% of the target AR model’s performance, efficiently advancing most of the quality gap on challenging mathematical reasoning and coding tasks. Our code is available at https://github.com/ juntongshi48/poe-bridge .
+
+BT, JL, and SE co-supervised the project, secured resources, and contributed to the conceptualization and critical revision of the manuscript. 1Stanford University. Correspondence to: Juntong Shi <juntong@stanford.edu>, Minkai Xu <minkai@cs.stanford.edu>. 
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+## 1. Introduction 
+
+Autoregressive (AR) language models remain the dominant approach to text generation (Vaswani et al., 2017; Wolf et al., 2020; Touvron et al., 2023), achieving strong performance on challenging tasks such as mathematical reasoning (Wei et al., 2022; Trinh et al., 2024; Yang et al., 2024) and code synthesis (Roziere et al., 2023; Hui et al., 2024). However, AR decoding is inherently sequential—generating tokens one by one in a strict left-to-right order. This sequential dependency inherently limits inference-time parallelism and makes latency and throughput a major bottleneck. Diffusion language models (DLMs) (Sahoo et al., 2024; Shi et al., 2024; Ye et al., 2025; Nie et al., 2025), derived from the broader discrete diffusion framework (Austin et al., 2021b; Campbell et al., 2022; Lou et al., 2024), provide an appealing alternative by enabling parallel decoding. By gen-erating and refining multiple tokens simultaneously, DLM can, in principle, produce entire sequences in a fraction of the sequential steps required by AR models. In practice, however, DLMs still lag behind strong AR models in gener-ation quality. This gap largely stems from the conditional independence assumptions used to enable parallel decod-ing, under which tokens generated within the same step are modeled independently rather than jointly. As a result, the anticipated speedups from parallel generation are difficult to realize without incurring substantial degradation in output quality. This gap suggests that effective parallel decoding requires a mechanism to inject inter-token dependencies into DLM drafts while preserving their parallel sampling efficiency. Notably, while sampling is expensive, AR models are com-paratively efficient at scoring candidate continuations given a prefix. This asymmetry points out a natural direction to combine DLM’s parallel decoding capacity with an external AR that evaluates candidate continuations and guides decod-ing toward faithful, high-quality generations. Recent efforts in this direction have resorted to Monte Carlo methods, such as rejection sampling (RS) and importance sampling (IS) (Is-rael et al., 2025; Xu et al., 2025). In these setups, a DLM acts as a fast proposal distribution whose outputs are subse-quently verified or corrected by a stronger AR target model. However, in practical language generation tasks, both naive approaches break down due to the same fundamental reason: 1
+
+> arXiv:2606.08048v1 [cs.CL] 6 Jun 2026
+
+Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge Prompt: "Solve: 12 + 7 = "       
+
+> Legend: DLM draft token accepted by RS rejected → correction discarded suffix appended chunk selected candidate / IS weight
+
+(A) Direct DLM → AR correction                                        
+
+> Naive speculative sampling (equivalent to PoE-Bridge with K=1, w=0.0)
+> Step 1
+> DLM draft: 19 since 12 plus 7equals 19 .<EOS>
+> RS → AR: 19 ✓since ✓12 ✓plus ✗→ + ★discarded...
+> Append: 19 since 12 +
+> Step 2
+> DLM draft: 7equals 19 .<EOS>
+> RS → AR: 7✓equals ✗→ = ★discarded...
+> Append: 7=
+> Step 3
+> DLM draft: 19 .<EOS>
+> RS → AR: 19 ✓.✓<EOS> ✓
+> Append: 19 .<EOS>
+> Final output: "19 since 12 + 7 = 19. <EOS>"
+> Outcome: short accepted chunks → high latency
+
+(B) PoE-Bridge two-step correction                                                            
+
+> Parallel DLM drafts, RS toward PoE, then IS toward AR
+> Step 1
+> Parallel DLM drafts: k=1 19 since 12 plus 7equals 19 .<EOS>
+> k=2 19 since 12 +7equals 19 .<EOS>
+> k=3 9because 2plus 7equals 9.<EOS>
+> RS → PoE: k=1 19 ✓since ✓12 ✓plus ✗→ + ★discarded...
+> k=2 ★19 ✓since ✓12 ✓+✓7✓equals ✓19 ✓.✓<EOS> ✓
+> k=3 9✗→ 19 ★discarded...
+> IS → AR: w1 = 0.12 w2 = 0.81 ★w3 = 0.07
+> Append: 19 since 12 +7equals 19 .<EOS>
+> Final output: "19 since 12 + 7 equals 19. <EOS>"
+> Outcome: longer accepted chunks + closer-to-AR IS candidates → high quality + low latency
+
+Figure 1. Comparison between naive speculative sampling and PoE-Bridge . (A) Naive speculative sampling directly corrects DLM drafts from pD to the AR target pAR . Due to the large proposal–target mismatch, direct verification often accepts only short prefixes, resulting in limited throughput gains. (B) PoE-Bridge splits this difficult correction into two easier stages: speculative rejection sampling first moves DLM drafts toward the intermediate bridge distribution pPoE , and importance sampling then refines the accepted candidates toward 
+
+pAR . Because pPoE is closer to both the DLM proposal and the AR target, PoE-Bridge achieves longer accepted chunks and more stable importance weights, enabling high generation quality and low latency. 
+
+the distribution mismatch between a parallel DLM proposal and a strong AR target is large. In rejection sampling, this mismatch leads to frequent rejection, causing the decoding process to collapse into near-sequential generation. While in importance sampling, it requires an impractically large number of candidates to obtain a good candidate; with a small candidate budget, resampling often selects merely the least implausible DLM continuation rather than a truly faithful AR sample. In this work, we introduce PoE-Bridge , a novel decoding framework that can produce generations as faithful as AR decoding while preserving the parallel decoding advantages of DLMs. Our key innovation is to reduce the mismatch faced by Monte Carlo correction by introducing an interme-diate bridge distribution between the DLM proposal and the AR target. Figure 1 illustrates this idea: instead of directly correcting DLM drafts toward the AR target, PoE-Bridge decomposes the difficult pD → pAR correction into two eas-ier transitions through a PoE bridge distribution. Intuitively, this bridge is a Product-of-Experts (PoE) interpolation of the form (the precise, tractable definition over text sequences is given in Section 4.2): 
+
+pPoE (x) = 1
+
+Zw
+
+pD (x)wpAR (x)1−w,
+
+where w ∈ [0 , 1] controls the position of the bridge. When 
+
+w is close to 1, the bridge stays close to the DLM proposal; when w is close to 0, it approaches the AR target. In the method section, we instantiate this idea with a tractable token-level PoE definition that supports efficient speculative verification and importance weighting. The bridge splits the difficulty DLM-to-AR correction into two easier steps: 
+
+pD → pPoE → pAR .Leveraging this bridge, PoE-Bridge first filters candidate continuations generated by the DLM in parallel toward the PoE distribution using speculative rejection sampling. Since the bridge is deliberately constructed to be closer to the DLM proposal, it enables a large fraction of DLM-generated tokens to be accepted and thus preserving high parallel decoding throughput. Next, PoE-Bridge applies importance resampling to refine the filtered candidate con-tinuations toward the AR target. Since the first stage already moves candidates closer to the AR distribution, the final importance-resampling step serves as a final lightweight refinement step rather than a primary mechanism for cor-recting the proposal–target mismatch, making it effective under realistic candidate budgets. To fully realize the potential of PoE-Bridge , we incorpo-rate several novel mechanisms tailored for practical LLM inference. First, to address the diversity-quality tradeoff in importance sampling, we introduce Mixed-Temperature Sampling . By stratifying proposal entropy across candi-dates, this strategy actively prevents mode collapse and ensures a diverse coverage of the target distribution, sig-nificantly improving the effective sample size. Second, to reduce wasted verification compute caused by fixed-length drafting windows, we propose an Elastic Rejection Window ,2Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+which adaptively adjusts the proposal and verification scope based on the observed acceptance lengths. This mechanism reduces verification over tokens that are unlikely to be ac-cepted, which is especially helpful in our high-throughput decoding setting where multiple candidates are processed in parallel. Empirically, PoE-Bridge demonstrates a "best-of-both-worlds" performance. On challenging mathematical reason-ing and coding benchmarks, PoE-Bridge achieves substan-tially higher accuracy while delivering up to a 5× speedup over standard DLM decoding. Meanwhile, it recovers at least 95% of the target AR model’s accuracy while achieving 
+
+2× the throughput of AR decoding. Our results demonstrate that AR-level faithfulness can be approached without giving up the parallel decoding benefits of diffusion models. 
+
+## 2. Related Works 
+
+Rejection-based decoding acceleration. Speculative decoding (Leviathan et al., 2023; Chen et al., 2023; Narasimhan et al., 2025) uses a fast draft model to pro-pose multiple tokens that are verified by a stronger AR model, yielding samples faithful to the target distribution. Extensions consider alternative draft models, including any-order AR and diffusion LMs (Guo & Ermon, 2025; Christo-pher et al., 2025; Xiao et al., 2024), but do not address the regime where a large DLM is the primary parallel proposal, with substantial mismatch and verification overhead. Adap-tive Parallel Decoding (APD) (Israel et al., 2025) adopts a rejection-style procedure for large DLMs with a lightweight verifier, but its design targets speed rather than faithful sampling from a strong AR expert, leaving performance bounded by the DLM. Liu et al. (2025); Kumar et al. (2026) primarily accelerate speculative sampling by overlapping drafting and verification, while PoE-Bridge improves effi-ciency by increasing acceptance through mixing probabil-ities. These directions are complementary and could be combined to further improve throughput. 
+
+Importance sampling and reranking for correcting par-allel generation. A complementary line of work applies importance sampling (IS), reranking, or energy-based cor-rections to mitigate independence-induced errors in non-autoregressive or diffusion-style generation (Xu et al., 2025; Gu et al., 2018; Ghazvininejad et al., 2019; Gu & Kong, 2021; Savinov et al., 2022; Zheng et al., 2023). These methods use IS-style corrections to encourage token de-pendencies during parallel decoding, but generally provide only approximate alignment to the target distribution and are sensitive to proposal–target mismatch and limited com-pute. Moreover, existing studies on diffusion language mod-els (Xu et al., 2025) focus on relatively small models and do not examine settings where a large DLM performs most of the generation in parallel. 
+
+## 3. Preliminaries 
+
+3.1. Discrete Diffusion Language Models 
+
+Discrete diffusion models (DLMs) (Austin et al., 2021a; Campbell et al., 2022; Lou et al., 2024) offer an alternative to the autoregressive generation by producing text through iterative refinement of a partially corrupted sequence, rather than committing tokens one by one sequentially. Among them, masked diffusion models show the most impressive results. They define a forward noising process that gradually replaces tokens with the special mask token m, and learn a reverse model that recovers the masked content. 
+
+Masked Discrete Diffusion. Let x = ( x1, . . . , xn) be a sequence of n tokens and x0 the clean sequence. The forward diffusion process q independently masks each token with probability 1 − α(t) at time t, where α : [0 , 1] → [0 , 1] 
+
+is a monotonically decreasing noise schedule with α(0) = 1 
+
+and α(1) = 0 . The resulting distribution factorizes as q(xt |
+
+x0) = Qni=1 q(xti | x0 
+
+> i
+
+), with 
+
+q(xti | x0 
+
+> i
+
+) = 
+
+(
+
+1 − α(t), if xti = m
+
+α(t), if xti = x0 
+
+> i
+
+. (1) The denoising network μθ (x | xt; θ) is trained to predict the masked tokens from the visible context. It adopts a mean-field parameterization, predicting each position in-dependently: μθ (x | xt; θ) = Q 
+
+> i
+
+μθ (xi | xt; θ). Let pD
+
+denote the induced generation distribution by running the DLM decoder with μθ . Training maximizes a variational lower bound (Shi et al., 2024; Sahoo et al., 2024): 
+
+log pD (x0) ≥ Et∼U (0 ,1) ,xt∼q(xt|x0)w(t)
+
+h
+
+log μθ (x0   
+
+> {i:xti=m}
+
+| xt  
+
+> {i:xti̸=m}
+
+; θ)
+
+i
+
+, (2) where w(t) = −α′(t)1−α(t) is a known reweighting term deter-mined by the noise schedule. To generate, DLMs start from a fully masked sequence and progressively unmask tokens. Progressing from time t to 
+
+s < t , already-unmasked tokens are kept fixed, while each masked token is either kept masked or revealed using the model prediction. Formally, for each position i,                              
+
+> pD(xsi|xt) =
+> 
+> 1−αs
+> 1−αt,if xti=m,xsi=m,
+> αs−αt
+> 1−αtμθ(xsi|xt;θ),if xti=m,xsi̸=m,δ(xsi=xti),if xti̸=m.
+> (3)
+
+Decoding Order. The generic DLM decoder above allows arbitrary subsets of masked positions to be revealed at each step. In this work, we instead use a semi-autoregressive left-to-right decoding order at inference time, so that each DLM draft forms a contiguous continuation from the current prefix. This choice makes the DLM draft probabilities token-wise comparable with standard autoregressive left-to-right 3Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+likelihoods, which will be useful for the decoding procedure introduced later. It is also consistent with prior observations that practical DLM decoding heuristics (Ye et al., 2025; Nie et al., 2025) often induce approximately left-to-right generation patterns in practice (Gong et al., 2025), and that explicitly enforcing such an order can improve generation quality (Israel et al., 2025). Conceptually, we define pD as the autoregressive distribu-tion induced by decoding the DLM one token at a time: 
+
+pD (xi | x<i ) := μθ (xi | x<i ),pD (x) := 
+
+> n
+
+Y
+
+> i=1
+
+pD (xi | x<i ). (4) This definition places the DLM distribution in the same left-to-right factorized form as a standard autoregressive language model. For comparison, we denote the distri-bution of the target autoregressive model by pAR (x) = Qni=1 pAR (xi | x<i ).
+
+Importantly, pD is only a conceptual definition. Sampling from and evaluating the exact conditional pD (xi | x<i )
+
+requires rerunning the DLM after every newly generated token. To obtain an efficient decoding procedure, we instead approximate the sequential autoregressive DLM distribution using DLM’s mean-field chunk parameterization. Let ct
+
+denote the index of the first token decoded at step t, with 
+
+c1 = 1 and cT +1 = n + 1 . At decoding step t, we run the DLM once conditioned on the current prefix x<c t , and predict the entire chunk xct:ct+1 −1 in parallel. For each to-ken i ∈ [ct, c t+1 ), we approximate the exact autoregressive conditional with 
+
+pD (xi | x<i ) ≈ ˜pD (xi | x<i ) := μθ (xi | x<c t ). (5) That is, instead of conditioning on the progressively ex-tended prefix x<i , all tokens within the chunk share the same conditioning prefix x<c t .Under this approximation, the chunk probability becomes: 
+
+pD (xct:ct+1 −1 | x<c t ) ≈ ˜pD (xct:ct+1 −1 | x<c t ):= 
+
+> ct+1 −1
+
+Y
+
+> i=ct
+
+μθ (xi | x<c t ). (6) which can be sampled from and evaluated in parallel using a single DLM forward pass. We use these tractable approximations throughout our de-coding method. 
+
+3.2. Product of Experts 
+
+Product of Experts (PoE) (Hinton, 1999) combines multi-ple probabilistic “experts” by multiplying their densities with different weights and renormalizing. Given experts 
+
+{pj (x)}nj=1 and non-negative weights {wj }nj=1 , the PoE distribution is 
+
+pPoE (x) = 1
+
+Z
+
+> m
+
+Y
+
+> j=1
+
+pj (x)wj , Z =
+
+Z mY
+
+> j=1
+
+pj (x)wj dx.
+
+(7) PoE models are often easy to evaluate up to a normalizing constant but nontrivial to sample from. A common strategy is to first sample from a tractable proposal distribution and use Monte Carlo correction to move samples toward the tar-get PoE distribution. Two common correction mechanisms are (i) rejection sampling or (ii) importance sampling. 
+
+Rejection Sampling. Let q(x) be a tractable proposal dis-tribution and π(x) be the target distribution. Classical re-jection sampling assumes the existence of a domination constant M such that π(x) ≤ M q (x) for all x. It draws a proposal sample x ∼ q and accepts it with probability 
+
+a(x) = π(x)
+
+M q (x) . (8) When such an M is available, accepted samples are exactly distributed according to π. However, finding a tight and valid M is often difficult in high-dimensional sequence spaces, and a loose M leads to low acceptance. A common rejection-style alternative is acceptance-complement sampling (Devroye, 1986), which avoids the need for a global domination constant. Instead, it accepts samples according to the direct proposal–target density ratio and compensates for the resulting bias by drawing a cor-rection sample from a residual distribution upon rejection. Importantly, this residual distribution depends on the target density, which is typically more expensive to evaluate or sample from than the proposal. 
+
+Importance Sampling. Importance sampling offers an al-ternative correction mechanism that avoids rejection. Given candidate samples x(k) ∼ q, importance sampling assigns each sample a weight proportional to π(x(k))/q (x(k)) and uses these weights to resample from the candidate set. This procedure ensures that candidates are selected in proportion to their likelihood under the target distribution π. Unlike rejection sampling, which guarantees exact samples from π,importance sampling is only asymptotically correct. With a finite candidate set, the resampling step introduces bias, whose magnitude depends on the proposal–target mismatch and the available sample budget. 
+
+## 4. Method 
+
+4.1. Overview Problem statement. We consider the following problem setting. We are given two language model experts: a diffu-4Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+Algorithm 1 PoE-Bridge Decoding 
+
+1: Input: DLM denoiser μθ , AR model pAR , PoE weight 
+
+w, #candidates K, proposal temperatures {τk}, target temperature τ⋆, elastic rejection window size V , max length n, prompt p
+
+2: x ← p
+
+3: while |x| < n and EOS /∈ x do 
+
+4: pD 
+
+> |x|+1: n
+
+← μθ (xD 
+
+> |x|+1: n
+
+| x≤| x|)
+
+5: while |x| < n and EOS /∈ x do 
+
+▷ {c: next position; m: true window size} 
+
+6: c, m ← | x| + 1 , min( V, n − | x|)
+
+7: r ← c + m − 1
+
+▷ {Draw K candidates in parallel} 
+
+8: for k = 1 , . . . , K in parallel do 
+
+9: ˆx(k) 
+
+> c:r
+
+← sample (pDc:r , τ k)
+
+10: pAR ,(k) 
+
+> c:r
+
+← pAR (ˆ x(k) 
+
+> c:r
+
+| x<c )
+
+11: pPoE ,(k) 
+
+> c:r
+
+←
+
+norm 
+
+
+
+(pDc:r )w ⊙ (pAR ,(k) 
+
+> c:r
+
+)1−w, dim =−1
+
+
+
+12: (ˆ x(k) 
+
+> c:c+ak−1
+
+, a k) ←
+
+SpecReject  ˆx(k) 
+
+> c:r
+
+, p Dc:r , p PoE ,(k)
+
+> c:r
+
+
+
+▷ {SpecReject follows Eqs. 11 and 12} 
+
+▷ {Compute importance sampling weights} 
+
+13: p(k)AR ← Qc+ak −1 
+
+> i=c
+
+pAR ,(k) 
+
+> i
+
+[ˆ x(k) 
+
+> i
+
+]
+
+14: p(k)PoE ← Qc+ak −1 
+
+> i=c
+
+pPoE ,(k) 
+
+> i
+
+[ˆ x(k) 
+
+> i
+
+]
+
+15: wk ←
+
+
+
+p(k)AR 
+
+1/τ ⋆
+
+/
+
+
+
+p(k)PoE 
+
+1/τ k
+
+16: end for 
+
+17: k⋆ ∼ Cat( norm ([ w1, . . . , w K ])) 
+
+18: x ← concat (x, ˆx(k⋆) 
+
+> c:c+ak⋆−1
+
+)
+
+19: if ak⋆ < m then break 
+
+20: end while 
+
+21: end while 
+
+22: Output: x
+
+sion language model (DLM) with generation distribution 
+
+˜pD and an autoregressive (AR) model with pAR . Given a prefix x<c , the DLM can generate a candidate continu-ation ˆxc:n in parallel across multiple future positions. In contrast, while AR models can leverage KV caching to reduce the per-token FLOPs, it must still generate tokens se-quentially, making long-horizon sampling latency bounded under high-parallelism on modern accelerators. However, the AR model can efficiently score a proposed continuation via pAR (ˆ xc:n | x<c ), since teacher-forced likelihood evalua-tion parallelizes across positions. Our goal is to approximate faithful, high-quality samples from pAR (xc:n | x<c ) while relying on the DLM to perform most samplings. This naturally suggests a Monte Carlo correction view: we use ˜pD (· | x<c ) as a tractable proposal distribution and set 
+
+pAR (· | x<c ) as the PoE target. Under this formulation, two naive approaches follow from classical Monte Carlo methods— rejection sampling and importance sampling .
+
+Naive approaches. A direct baseline is to apply speculative 
+
+rejection sampling . Given a prefix x<c , we first sample a continuation ˆxc:n in parallel from the DLM proposal ˜pD (· | 
+
+x<c ), and then verify it left-to-right under the AR model, accepting tokens until the first rejection. Upon rejection, we restart from the rejection position and resample a new suffix from ˜pD . In practice, however, the huge discrepancy between ˜pD and pAR leads to frequent rejection, so the accepted prefix is typically short. As shown later in Table 2, this direct DLM-to-AR correction setting ( w = 0 .0) suffers from frequent all-reject steps and short accepted prefixes, which substantially limit decoding speedup. The alternative strategy is importance sampling . We sam-ple K candidate continuations {ˆx(k)
+
+> c:n
+
+}Kk=1 ∼ ˜pD (· | x<c )
+
+and resample one using unnormalized weights Wk ∝  
+
+> pAR (ˆ x(k)
+> c:n|x<c )˜pD(ˆ x(k)
+> c:n|x<c )
+
+. This approach avoids sequential rejection and can be fully parallelized. However, when ˜pD and pAR 
+
+are poorly matched, samples from ˜pD rarely fall in high-probability regions of pAR . More intuitively, resampling tends to select the least implausible DLM continuation, rather than a truly high-quality AR continuation. Conse-quently, naive importance sampling provides no quality guarantee unless the candidate set is very large, which then becomes incompatible with the goal of efficient decoding. 
+
+4.2. PoE-Bridge Decoding 
+
+The inefficiency of rejection sampling and the lack of quality guarantees in naive importance sampling share a common root cause: the large distribution mismatch between the proposal ˜pD and the target pAR . This observation natu-rally motivates us to introduce an intermediate distribution that bridges the two. A natural bridge construction is the sequence-level PoE: 
+
+pPoE (xc:n) ∝ ˜pD (xc:n)wpAR (xc:n)1−w, (9) with the PoE weight w ∈ [0 , 1] controlling the relative position of the PoE between the proposal and target. However, directly sampling from or evaluating next-token probabilities under this distribution is generally intractable. Instead, we define the PoE bridge distribution autoregres-sively using a token-level PoE interpolation over next-token probabilities: 
+
+pPoE (xi | x<i ) : = ˜pD(xi | x<i )wpAR (xi | x<i )1−w
+
+Zi(x<i ) ,pPoE (xc:n) = 
+
+> n
+
+Y
+
+> i=c
+
+pPoE (xi | x<i ),
+
+(10) 5Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+where Zi(x<i ) = P 
+
+> xi
+
+˜pD (xi | x<i )wpAR (xi | x<i )1−w
+
+is the local normalizing constant at position i.This token-level PoE definition brings two key benefits. First, because it uses the tractable DLM proposal ˜pD , it yields tractable next-token probabilities and chunk likeli-hoods that can be efficiently evaluated for speculative rejec-tion and importance weighting. Second, like the sequence-level PoE in Equation (9), it still provides a smooth interpo-lation between the DLM proposal and the AR target. The interpolation weight w controls the position of the bridge: 
+
+w = 1 recovers ˜pD , while w = 0 recovers pAR . Interme-diate values let pPoE lie between the proposal and target, reducing the mismatch that undermines both naive rejection and importance sampling. With this bridge distribution in place, we are able to ef-fectively combine rejection and importance sampling, with both efficiency and quality guarantees. 
+
+Speculative Rejection Sampling from ˜pD to pPoE . Given a prefix x<c , we first apply speculative rejection sampling, but instead of targeting pAR , we now target pPoE . Concretely, we first sample continuation tokens ˆxc:n in parallel from 
+
+˜pD and evaluate their likelihoods under both ˜pD and pAR .Following Leviathan et al. (2023); Chen et al. (2023), we accept each proposed token with probability 
+
+min 
+
+
+
+1, pPoE (ˆ xi | ˆx<i )˜pD (ˆ xi | ˆx<i )
+
+
+
+, (11) and accept consecutive tokens until the first rejection. At the rejection position c + a, where a is the number of con-secutively accepted tokens, we resample a correction token from the residual distribution        
+
+> ˆxc+a∼norm (max (0 , p PoE (· | ˆx<c +a)−˜pD(· | ˆx<c +a))) .
+> (12)
+
+This correction step compensates for the aggressive accep-tance rule without a domination constant. As a result, each verified token is sampled from the bridge pPoE .Since pPoE interpolates between ˜pD and pAR , the rejection step operates on a smaller proposal–target mismatch than direct DLM-to-AR correction. Thus, more draft tokens are accepted at each step, improving decoding throughput. The interpolation weight w controls the tradeoff between accep-tance rate and faithfulness to the AR target: larger w places the bridge closer to the proposal, improving acceptance rates but requiring stronger importance resampling correction. 
+
+Importance Sampling from pPoE to pAR . We repeat the speculative rejection sampling procedure in parallel to ob-tain K candidate continuations {ˆx(k) 
+
+> c:c+ak−1
+
+}Kk=1 , where ak
+
+denotes the number of accepted tokens in candidate k (in-cluding the correction token). Since these candidates are distributed under pPoE , we can apply importance sampling to further correct them toward the AR target pAR . Specifi-cally, we assign each candidate a weight 
+
+wk ∝ pAR (ˆ x(k)  
+
+> c:c+ak−1
+
+| x<c )
+
+pPoE (ˆ x(k)  
+
+> c:c+ak−1
+
+| x<c ) . (13) We then resample a single candidate according to the nor-malized weights. This resampling procedure approximates sampling from 
+
+pAR as K → ∞ , though finite K still introduces bias. How-ever, compared to directly applying importance sampling from ˜pD , the bridge distribution substantially stabilizes the importance weights because pPoE already moves samples closer to the AR target. Finally, all stages of the procedure are highly paralleliz-able: candidate proposal and verification are parallelized across token positions; the K candidates are generated in-dependently in parallel; and importance-weight computa-tion is inexpensive. Overall, the intermediate PoE bridge distributes the difficult DLM-to-AR correction across two easier stages, enabling both higher acceptance rates during speculative rejection and more stable importance weights during resampling. In the following, we describe two practical techniques that make PoE-Bridge feasible in realistic inference settings. 
+
+4.3. Importance Sampling with Mixed-temperature 
+
+In modern LLM inference, low-temperature sampling is commonly used to stabilize generation. However, with a limited candidate budget K, drawing all candidates at a single low temperature can lead to mode collapse, produc-ing nearly identical samples that reduce the effectiveness of importance sampling. To improve diversity under a fixed budget, we instead draw candidates from a family of tem-pered PoE distributions: 
+
+x(k) ∼ qτk , qτk (x) ∝ pPoE (x)1/τ k . (14) The temperature schedule {τk}Kk=1 linearly spans 
+
+[τlow , τ high ] (more details in Section A). Smaller τk
+
+concentrates samples in high-probability regions of pPoE ,while larger τk promotes exploration. Importantly, under our autoregressive token-level PoE defi-nition in Equation (10), sampling from tempered PoE dis-tributions remains tractable and easy to implement. Since 
+
+pPoE (x) factorizes across positions and each next-token PoE distribution is defined as a geometric interpolation be-tween ˜pD and pAR , temperature scaling preserves the same structure: 
+
+qτk (xi | x<i ) ∝ ˜pD (xi | x<i )w/τ k pAR (xi | x<i )(1 −w)/τ k ,qτk (xc:n) = 
+
+> n
+
+Y
+
+> i=c
+
+qτk (xi | x<i ).
+
+(15) 6Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge  
+
+> Table 1. Benchmark results on GSM8K, MATH, HumanEval, and MBPP. Under each dataset, we report Accuracy (Acc.) and Throughput (Thrpt.) in tokens/second.
+
+GSM8K MATH HumanEval MBPP 
+
+Method Acc. ↑ Thrpt. ↑ Acc. ↑ Thrpt. ↑ Acc. ↑ Thrpt. ↑ Acc. ↑ Thrpt. ↑
+
+Dream 7B (Random, 2 token/step) 38.02 15.42 14.57 30.59 35.13 12.34 34.00 5.50 Dream 7B (Entropy, 4 token/step) 52.27 47.37 11.73 47.81 32.32 30.60 49.13 15.37 Dream 7B (Entropy, 2 token/step) 72.00 26.25 27.91 29.13 47.56 17.44 55.93 8.26 Qwen2.5 7B (Autoregressive) 95.53 49.26 76.28 46.50 83.54 45.83 75.87 47.09 PoE-Bridge w/o IS 95.20 104.49 73.86 99.49 80.69 84.82 72.20 79.65 PoE-Bridge 95.30 100.71 74.42 94.94 79.47 76.13 73.20 72.10 
+
+Therefore, speculative rejection sampling from tempered PoE distributions can be implemented efficiently by simply combining tempered DLM proposal logits with tempered AR verification logits at each position. Since the candidates are now drawn from different proposals 
+
+qτk , we use a multiple-importance resampling rule (Veach & Guibas, 1995). Let τ⋆ denote the target temperature (we use τ⋆ = τlow by default). For a candidate ˆx(k)  
+
+> c:c+ak−1
+
+∼ qτk ,we assign it an importance weight 
+
+wk ∝ pAR (ˆ x(k)  
+
+> c:c+ak−1
+
+| x<c )1/τ ⋆ /Z AR (τ⋆)
+
+pPoE (ˆ x(k)  
+
+> c:c+ak−1
+
+| x<c )1/τ k /Z PoE (τk) , (16) where ZAR and ZPoE denote the temperature-dependent normalizing constants of the tempered AR target and tem-pered PoE proposal, respectively. In principle, ZAR (τ⋆) can be omitted because it is shared across all candidates and therefore cancels when normalizing the raw weights. In con-trast, ZPoE (τk) depends on the proposal temperature and therefore differs across candidates. Omitting it introduces bias by rescaling the relative contributions of samples drawn from different temperatures. Nevertheless, for simplicity, we omit all these normalizers in practice, which empirically performs well. Overall, mixed-temperature sampling im-proves candidate diversity and increases the effectiveness of importance resampling under a fixed compute budget, as we demonstrate empirically in Section 5.3. 
+
+4.4. Elastic Rejection Window 
+
+At inference time, diffusion LMs are typically queried with a sufficiently long masked suffix to avoid distribution shift relative to training, especially near boundary symbols such as the end-of-sequence (EOS) token (Israel et al., 2025). Concretely, given a maximum length n, the model often takes as input a prefix ending at position c together with a large masked continuation length n − c. However, our rejection-based verification usually accepts only a short pre-fix of the proposed continuation. Generating and verifying an entire long suffix is therefore wasteful and reduces the number of parallel candidates K we can afford under a fixed compute budget. To reduce wasted computation, we introduce an Elastic Rejection Window that restricts parallel proposal and ver-ification to the next V positions at a time. At prefix in-dex c, we sample proposals in parallel only for the win-dow xc:c+V −1—rather than the entire suffix xc:n—from 
+
+μθ (· | x<c ) and evaluate the corresponding AR likelihoods 
+
+pAR (xc:c+V −1 | x<c ) for rejection. If all V tokens are accepted, we advance c ← c + V and reuse μθ ’s output logits in the next window; otherwise, we restart from the first rejected position. Further details are provided in Al-gorithm 1. Importantly, this windowing does not change the output distribution: it only truncates computation that would be discarded after a rejection, while preserving the same acceptance and correction rules. In practice, the window size V trades off parallelism against wasted verification: larger windows increase parallelism but may verify many ultimately rejected tokens, while smaller windows reduce waste at the cost of more sequential steps; we analyze this tradeoff in detail in Section 5.3. 
+
+## 5. Experiments 
+
+5.1. Experiment Setup Benchmarks. Our goal is to evaluate whether PoE-Bridge can generate faithful samples following the distribution of a strong autoregressive (AR) model while taking advantage of the efficient parallel generation capability of a diffusion language model (DLM). We therefore focus on challeng-ing mathematical reasoning and coding benchmarks, where existing DLMs are known to substantially lag behind AR models. Specifically, we consider the math reasoning tasks GSM8K (Cobbe et al., 2021) and MATH (Hendrycks et al., 2021), as well as the coding benchmarks HumanEval (Chen, 2021) and MBPP (Austin et al., 2021b). 
+
+Implementation details. We select models from the Dream (Ye et al., 2025) and Qwen2.5 (Team, 2024) fam-7Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 5 10 15 
+
+K
+
+> 0.74
+> 0.75
+> 0.76
+> Accuracy (%)
+
+MATH   
+
+> 510 15
+
+K
+
+> 0.73
+> 0.74
+> 0.75
+> 0.76
+> Accuracy (%)
+
+MBPP          
+
+> 60
+> 80
+> 100
+> Thrpt. (tok/sec)
+> 50
+> 60
+> 70
+> 80
+> Thrpt. (tok/sec)
+> Acc.(uniform) Acc.(mixed) Acc.(AR) Thrpt.(uniform) Thrpt.(mixed) Thrpt.(AR)
+> Figure 2. Effect of increasing the number of parallel candidates Kunder uniform- and mixed-temperature sampling. Mixed-temperature sampling enables consistent accuracy improvements with increasing K, whereas uniform-temperature sampling yields early-plateau returns.
+
+ilies, as they share the same tokenizer and vocabulary. Throughout all experiments, we use Dream-7B-Instruct as the DLM proposal. For task-specific AR experts, we employ Qwen2.5-Math-7B-Instruct (Yang et al., 2024) on mathematical reasoning benchmarks and Qwen2.5-Coder-7B-Instruct (Hui et al., 2024) on coding tasks. All models are evaluated in BF16 precision on a single NVIDIA A100 GPU (80GB). We use the standard LM Eval-uation Harness (Gao et al., 2023), with minor modifications to input instructions and answer parsing for improved ac-curacy. Unless otherwise specified, we use PoE weight 
+
+w = 0 .3, parallel candidate size K = 4 , and an Elastic Rejection Window of size V = 32 . We analyze the im-pact of these hyperparameters in Section 5.3. Additional implementation details are provided in Section A. 
+
+5.2. Main Results 
+
+We start by showing that PoE-Bridge substantially improves 
+
+both generation quality and decoding speed relative to stan-dard DLM decoding, while closely matching the accuracy of strong AR Target. As shown in Table 1, across all bench-marks, PoE-Bridge achieves significantly higher accuracy with up to 5× speedup than the standard entropy-based DLM decoding. Notably, our approach also recovers over 
+
+95% of AR accuracy while achieving 2× the throughput of AR decoding. This demonstrates that our approach breaks the conventional quality–efficiency tradeoff of diffusion language models, achieving AR-level faithfulness without sacrificing decoding speed. The throughput gain stems from the fact that PoE-Bridge accepts multiple tokens per DLM forward pass. In contrast to standard DLM decoding, which typically commits only one or two tokens per step to avoid significant quality degra-dation, our method enables longer accepted token blocks, leading to significantly higher effective throughput. As a result, the additional AR forward pass does not negate the efficiency gains from parallel DLM generation. We further analyze the contribution of the importance sam-pling stage in our decoding algorithm. Removing the im-portance sampling step (i.e., setting K=1, corresponding to PoE-Bridge w/o IS in Table 1) yields a small throughput improvement and slightly degrades accuracy. This suggests that the PoE-based rejection step alone already pushes sam-ples toward the AR target, but importance sampling over multiple candidates is necessary to further recover high-fidelity generations. The limited throughput gain in this setting is expected: with our Elastic Rejection Window, both candidate sampling and AR likelihood evaluation re-main highly parallelized on modern GPUs, so reducing K provides only marginal savings. We also provide qualitative examples in Section C to illus-trate the behavioral differences between PoE-Bridge and baseline decoding strategies. 
+
+5.3. Ablation Studies Mixed-temperature sampling enables effective scaling with K. We study how increasing the number of parallel candidates K in the importance sampling phase affects con-vergence toward the target AR model, and show that mean-ingful scaling emerges only when candidates are drawn from a mixed set of temperatures. We conduct this ablation on the harder MATH and MBPP benchmarks, where the larger gap between the DLM and AR target makes performance gains more apparent. Across all settings, we fix w = 0 .3.All results are summarized in Figure 2. Under uniform-temperature sampling, where all candidates are drawn from the target temperature, increasing K yields little benefit. As shown by the dotted curves, accuracy improves only 8Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge                                 
+
+> Table 2. Effect of PoE weight won accuracy, throughput, accepted tokens per DLM forward pass (Tok/Step), and the percentage of decoding steps in which all drafted tokens are rejected (% All Reject). The setting w= 0 .0corresponds to direct speculative decoding from the DLM proposal and the AR target, without an intermediate PoE bridge distribution.
+> Metric / w0.00.30.50.70.9
+> Acc. ↑81.27 80.69 74.39 64.63 30.49 Thrpt. ↑56.55 84.82 85.13 104.27 168.35 Tok/Step ↑4.91 8.30 8.32 9.25 15.61 % All Reject ↓17.15 4.53 2.73 1.88 0.33
+
+marginally as K grows, while throughput steadily degrades once the additional sampling and verification costs exceed available hardware parallelism. This indicates that simply increasing the number of parallel samples is insufficient to close the gap between the DLM and the target AR model. In contrast, mixed-temperature sampling exhibits clear and consistent scaling behavior, as K increases, accuracy steadily improves and moves closer to the AR target. Within the range of K supported by our compute budget, mixed-temperature sampling closes at least one-third of the remain-ing gap between the PoE candidates and the AR target. In Section B, we report how additional statistics vary as K
+
+to provide a more detailed view on the generative behaviors. 
+
+Quality–efficiency tradeoff w.r.t the PoE weight w.
+
+Next, we study the PoE weight w, which controls the PoE’s proximity to the DLM proposal and thus the aggressive-ness of rejection. Larger w moves the bridge toward the proposal, increasing acceptance rates and throughput. We conduct this ablation on HumanEval with K = 1 to better expose quality differences. As shown in Table 2, increasing 
+
+w consistently improves throughput, with longer accepted prefixes and fewer decoding steps in which all proposal to-kens are rejected. However, the efficiency gain comes at the cost of degraded accuracy. For larger w, quality degra-dation accelerates and outweighs the marginal throughput gains, indicating an unfavorable configuration. Overall, we find that w = 0 .3 provides the best quality–efficiency trade-off, recovering high accuracy while maintaining substantial throughput gains. 
+
+Elastic Verification Window. Finally, we analyze the Elastic Verification Window, which balances wasted verifi-cation against parallelism. We run this ablation on MATH, where longer responses amplify verification overhead. We use the default w = 0 .3 and vary K = 1 , 4 to study the effect of V under different sampling budgets. As shown in Table 3, throughput degraded when V is too small or too large. Small V fragments acceptances across sequential iterations, reducing parallelism. This effect is stronger when       
+
+> Table 3. Effect of elastic rejection window size Von throughput. When V=∞, the Elastic Rejection Window is disabled, and all logits produced by each DLM forward are sampled and verified.
+
+K / V 8 16 32 64 ∞
+
+K = 1 66.22 65.79 99.49 91.37 83.91 
+
+K = 4 80.96 94.99 94.94 71.43 39.46 
+
+K is small, as the GPU still has capacity to accommodate larger V . When V is too large, verification spans become long enough to exceed available hardware parallelism, and meanwhile, more computation is spent verifying tokens that are ultimately rejected. Large V ’s impact is more evident when K is large, where hardware parallelisms are already saturated. Overall, the elastic window is what makes impor-tance sampling practical in our setting: by adapting verifi-cation spans to realized acceptances and hardware capacity, it avoids both excessive wasted verification and excessive sequential fragmentation. 
+
+## 6. Limitations 
+
+Our experiments only consider ARLM–DLM pairs with a shared tokenizer. Extending PoE-Bridge to mismatched tok-enizers is feasible in principle using token-alignment tech-niques from speculative decoding (Timor et al., 2025), but we leave this direction for future work. Our current imple-mentation is evaluated only in the single-GPU, batch-size-1 setting, with both models resident during decoding. This in-creases memory pressure and leaves multi-query serving un-studied. Concurrent single-model approaches (Kumar et al., 2026; Liu et al., 2025) may help alleviate this overhead, and we leave such integration to future work. PoE-Bridge is not strictly lossless under a finite importance-sampling budget. However, the observed degradation is small in practice and decreases as K scales up, as shown in Figure 2. 
+
+## 7. Conclusion 
+
+In this work, we study the problem of achieving autoregressive-faithful text generation without sacrificing parallel decoding efficiency. We introduce PoE-Bridge , a decoding framework that enables diffusion language models to produce high-quality generations while preserving paral-lelism. By reducing proposal–target mismatch through an intermediate bridge distribution, PoE-Bridge makes Monte Carlo correction effective under limited compute budgets. We further introduce practical techniques to enable efficient and scalable implementation. Experiments demonstrate that PoE-Bridge approaches AR-level accuracy while delivering substantial decoding speedups, highlighting its potential as a practical solution for high-quality parallel text generation. 9Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+## Acknowledgements 
+
+This work was supported by ARO (W911NF-21-1-0125), ONR (N00014-23-1-2159), the CZ Biohub, NSF under Nos. CCF-1918940 (Expeditions), DMS-2327709 (IHBEM), IIS-2403318 (III); NIH under No. 1U24NS146314-01, Stanford Data Applications Initiative, Wu Tsai Neuro-sciences Institute, Stanford Institute for Human-Centered AI, Chan Zuckerberg Initiative, Amazon, Genentech, SAP, and SCBX, 
+
+## Impact Statement 
+
+We confirm that this work complies with the ICML Publi-cation Ethics, and we have carefully considered potential ethical implications related to the development and use of PoE-Bridge, a decoding framework for diffusion language models. PoE-Bridge is a general-purpose inference-time method de-signed to improve the efficiency and faithfulness of text generation by combining diffusion language models with autoregressive verification. It does not introduce new train-ing data, modify model parameters, or rely on sensitive or private datasets. All models and benchmarks used in our experiments are publicly available and well-documented. We also note that PoE-Bridge operates entirely at inference time and does not inherently mitigate or exacerbate privacy risks beyond those already present in the underlying lan-guage models. Users should therefore continue to evaluate privacy and data leakage risks according to the domains in which the base models are applied, and ensure compliance with relevant regulations and best practices. We are committed to transparency and reproducibility. All experimental settings, assumptions, and implementation de-tails are clearly documented (see Section A), and we release our code to facilitate reproducibility and future research. No conflicts of interest, financial or otherwise, influenced the development or presentation of this work. Based on these considerations, we do not anticipate viola-tions of the ICML Publication Ethics arising directly from PoE-Bridge. However, we stress that the method should not be used for malicious purposes, and that responsible deployment remains the responsibility of system designers and users. 
+
+## References 
+
+Austin, J., Johnson, D. D., Ho, J., Tarlow, D., and van den Berg, R. Structured denoising diffusion models in discrete state-spaces. In Beygelzimer, A., Dauphin, Y., Liang, P., and Vaughan, J. W. (eds.), Advances in Neural In-formation Processing Systems , 2021a. URL https: //openreview.net/forum?id=h7-XixPCAL .Austin, J., Odena, A., Nye, M., Bosma, M., Michalewski, H., Dohan, D., Jiang, E., Cai, C., Terry, M., Le, Q., et al. Program synthesis with large language models. arXiv preprint arXiv:2108.07732 , 2021b. Campbell, A., Benton, J., Bortoli, V. D., Rainforth, T., Deligiannidis, G., and Doucet, A. A continuous time framework for discrete denoising models. In Oh, A. H., Agarwal, A., Belgrave, D., and Cho, K. (eds.), 
+
+Advances in Neural Information Processing Systems ,2022. URL https://openreview.net/forum? id=DmT862YAieY .Chen, C., Borgeaud, S., Irving, G., Lespiau, J.-B., Sifre, L., and Jumper, J. Accelerating large language model decoding with speculative sampling, 2023. URL https: //arxiv.org/abs/2302.01318 .Chen, M. Evaluating large language models trained on code. 
+
+arXiv preprint arXiv:2107.03374 , 2021. Christopher, J. K., Bartoldson, B. R., Ben-Nun, T., Cardei, M., Kailkhura, B., and Fioretto, F. Speculative diffusion decoding: Accelerating language generation through dif-fusion. In Chiruzzo, L., Ritter, A., and Wang, L. (eds.), 
+
+Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) , pp. 12042–12059, Albuquerque, New Mex-ico, April 2025. Association for Computational Linguis-tics. ISBN 979-8-89176-189-6. doi: 10.18653/v1/2025. naacl-long.601. URL https://aclanthology. org/2025.naacl-long.601/ .Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H., Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano, R., et al. Training verifiers to solve math word problems. 
+
+arXiv preprint arXiv:2110.14168 , 2021. Devroye, L. Non-Uniform Random Variate Generation .Springer, New York, NY, 1 edition, 1986. ISBN 978-1-4613-8645-2. doi: 10.1007/978-1-4613-8643-8. Gao, L., Tow, J., Abbasi, B., Biderman, S., Black, S., DiPofi, A., Foster, C., Golding, L., Hsu, J., Le Noac’h, A., Li, H., McDonell, K., Muennighoff, N., Ociepa, C., Phang, J., Reynolds, L., Schoelkopf, H., Skowron, A., Sutawika, L., Tang, E., Thite, A., Wang, B., Wang, K., and Zou, A. A framework for few-shot language model evaluation, 12 2023. URL https://zenodo.org/records/ 10256836 .Ghazvininejad, M., Levy, O., Liu, Y., and Zettlemoyer, L. Mask-predict: Parallel decoding of conditional masked language models. In Proceedings of the 2019 Conference 
+
+10 Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP) , pp. 6112–6121, 2019. Gong, S., Zhang, R., Zheng, H., Gu, J., Jaitly, N., Kong, L., and Zhang, Y. Diffucoder: Understanding and improving masked diffusion models for code generation, 2025. URL 
+
+https://arxiv.org/abs/2506.20639 .Gu, J. and Kong, X. Fully non-autoregressive neural ma-chine translation: Tricks of the trade. In Findings of the Association for Computational Linguistics: ACL-IJCNLP 2021 , pp. 120–133, 2021. Gu, J., Bradbury, J., Xiong, C., Li, V. O., and Socher, R. Non-autoregressive neural machine translation. In 
+
+International Conference on Learning Representations ,2018. URL https://openreview.net/forum? id=B1l8BtlCb .Guo, G. and Ermon, S. Reviving any-subset autoregressive models with principled parallel sampling and speculative decoding, 2025. URL https://arxiv.org/abs/ 2504.20456 .Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart, S., Tang, E., Song, D., and Steinhardt, J. Measuring math-ematical problem solving with the math dataset. arXiv preprint arXiv:2103.03874 , 2021. Hinton, G. E. Products of experts. In Artificial Neural Net-works, 1999. ICANN 99. Ninth International Conference on (Conf. Publ. No. 470) , volume 1, pp. 1–6. IET, 1999. Hui, B., Yang, J., Cui, Z., Yang, J., Liu, D., Zhang, L., Liu, T., Zhang, J., Yu, B., Lu, K., Dang, K., Fan, Y., Zhang, Y., Yang, A., Men, R., Huang, F., Zheng, B., Miao, Y., Quan, S., Feng, Y., Ren, X., Ren, X., Zhou, J., and Lin, J. Qwen2.5-coder technical report, 2024. URL 
+
+https://arxiv.org/abs/2409.12186 .Israel, D. M., den Broeck, G. V., and Grover, A. Ac-celerating diffusion LLMs via adaptive parallel decod-ing. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https: //openreview.net/forum?id=xwqTt26NJf .Kumar, T., Dao, T., and May, A. Speculative speculative decoding. In The Fourteenth International Conference on Learning Representations , 2026. URL https:// openreview.net/forum?id=aL1Wnml9Ef .Leviathan, Y., Kalman, M., and Matias, Y. Fast in-ference from transformers via speculative decoding. In Krause, A., Brunskill, E., Cho, K., Engelhardt, B., Sabato, S., and Scarlett, J. (eds.), Proceedings of the 40th International Conference on Machine Learn-ing , volume 202 of Proceedings of Machine Learn-ing Research , pp. 19274–19286. PMLR, 23–29 Jul 2023. URL https://proceedings.mlr.press/ v202/leviathan23a.html .Liu, J., Dong, X., Ye, Z., Mehta, R., Fu, Y., Singh, V., Kautz, J., Zhang, C., and Molchanov, P. Tidar: Think in diffusion, talk in autoregression, 2025. URL https: //arxiv.org/abs/2511.08923 .Lou, A., Meng, C., and Ermon, S. Discrete diffusion lan-guage modeling by estimating the ratios of the data dis-tribution, 2024. URL https://openreview.net/ forum?id=71mqtQdKB9 .Narasimhan, H., Jitkrittum, W., Rawat, A. S., Kim, S., Gupta, N., Menon, A. K., and Kumar, S. Faster cas-cades via speculative decoding. In The Thirteenth In-ternational Conference on Learning Representations ,2025. URL https://openreview.net/forum? id=vo9t20wsmd .Nie, S., Zhu, F., You, Z., Zhang, X., Ou, J., Hu, J., ZHOU, J., Lin, Y., Wen, J.-R., and Li, C. Large language diffusion models. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https: //openreview.net/forum?id=KnqiC0znVF .Roziere, B., Gehring, J., Gloeckle, F., Sootla, S., Gat, I., Tan, X. E., Adi, Y., Liu, J., Sauvestre, R., Remez, T., et al. Code llama: Open foundation models for code. arXiv preprint arXiv:2308.12950 , 2023. Sahoo, S. S., Arriola, M., Gokaslan, A., Marroquin, E. M., Rush, A. M., Schiff, Y., Chiu, J. T., and Kuleshov, V. Simple and effective masked diffusion language mod-els. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. URL https: //openreview.net/forum?id=L4uaAR4ArM .Savinov, N., Chung, J., Binkowski, M., Elsen, E., and van den Oord, A. Step-unrolled denoising autoen-coders for text generation. In International Confer-ence on Learning Representations , 2022. URL https: //openreview.net/forum?id=T0GpzBQ1Fg6 .Shi, J., Han, K., Wang, Z., Doucet, A., and Titsias, M. Simplified and generalized masked diffusion for discrete data. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. URL https: //openreview.net/forum?id=xcqSOfHt4g .Team, Q. Qwen2.5: A party of foundation models, Septem-ber 2024. URL https://qwenlm.github.io/ blog/qwen2.5/ .11 Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+Timor, N., Mamou, J., Korat, D., Berchansky, M., Jain, G., Pereg, O., Wasserblat, M., and Harel, D. Accelerat-ing LLM inference with lossless speculative decoding algorithms for heterogeneous vocabularies. In Forty-second International Conference on Machine Learning ,2025. URL https://openreview.net/forum? id=vQubr1uBUw .Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux, M.-A., Lacroix, T., Rozière, B., Goyal, N., Hambro, E., Azhar, F., et al. Llama: Open and efficient foundation lan-guage models. arXiv preprint arXiv:2302.13971 , 2023. Trinh, T. H., Wu, Y., Le, Q. V., He, H., and Luong, T. Solv-ing olympiad geometry without human demonstrations. 
+
+Nature , 625(7995):476–482, 2024. Vaswani, A., Shazeer, N. M., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., and Polosukhin, I. Attention is all you need. In NIPS , 2017. Veach, E. and Guibas, L. J. Optimally combining sam-pling techniques for monte carlo rendering. In Pro-ceedings of the 22nd Annual Conference on Computer Graphics and Interactive Techniques , SIGGRAPH ’95, pp. 419–428, New York, NY, USA, 1995. Association for Computing Machinery. ISBN 0897917014. doi: 10.1145/218380.218498. URL https://doi.org/ 10.1145/218380.218498 .Wei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F., Chi, E., Le, Q. V., Zhou, D., et al. Chain-of-thought prompting elicits reasoning in large language models. Advances in neural information processing systems , 35:24824–24837, 2022. Wolf, T., Debut, L., Sanh, V., Chaumond, J., Delangue, C., Moi, A., Cistac, P., Rault, T., Louf, R., Funtow-icz, M., Davison, J., Shleifer, S., von Platen, P., Ma, C., Jernite, Y., Plu, J., Xu, C., Le Scao, T., Gugger, S., Drame, M., Lhoest, Q., and Rush, A. Transform-ers: State-of-the-art natural language processing. In Liu, Q. and Schlangen, D. (eds.), Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing: System Demonstrations , pp. 38–45, Online, October 2020. Association for Computational Linguistics. doi: 10.18653/v1/2020.emnlp-demos.6. URL https: //aclanthology.org/2020.emnlp-demos.6 .Xiao, Z., Zhang, H., Ge, T., Ouyang, S., Ordonez, V., and Yu, D. Parallelspec: Parallel drafter for efficient specu-lative decoding, 2024. URL https://arxiv.org/ abs/2410.05589 .Xu, M., Geffner, T., Kreis, K., Nie, W., Xu, Y., Leskovec, J., Ermon, S., and Vahdat, A. Energy-based diffusion language models for text generation. In The Thirteenth International Conference on Learning Representations ,2025. URL https://openreview.net/forum? id=sL2F9YCMXf .Yang, A., Zhang, B., Hui, B., Gao, B., Yu, B., Li, C., Liu, D., Tu, J., Zhou, J., Lin, J., Lu, K., Xue, M., Lin, R., Liu, T., Ren, X., and Zhang, Z. Qwen2.5-math techni-cal report: Toward mathematical expert model via self-improvement, 2024. URL https://arxiv.org/ abs/2409.12122 .Ye, J., Xie, Z., Zheng, L., Gao, J., Wu, Z., Jiang, X., Li, Z., and Kong, L. Dream 7b: Diffusion large language mod-els, 2025. URL https://arxiv.org/abs/2508. 15487 .Zheng, L., Yuan, J., Yu, L., and Kong, L. A reparameter-ized discrete diffusion model for text generation. arXiv preprint arXiv:2302.05737 , 2023. 12 Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+## A. Implementation Details 
+
+Generation length and termination. Allowing models to complete their full answers is crucial for accurate evaluation. For all DLM-based methods, including PoE-Bridge , we cap the maximum number of newly generated tokens at 2,048, which we found sufficient for the vast majority of examples. For the autoregressive (AR) baseline, we enforce no additional limits on generation length besides the default context window limit of 16,384 tokens. All methods terminate generation early when the end-of-sequence (EOS) token is produced. Throughput is computed as the number of generated tokens before EOS divided by the total wall-clock decoding time. 
+
+DLM forward configuration. When running DLM forwards in PoE-Bridge , we pass in the current generated tokens along with 256 trailing mask tokens, instead of all mask tokens up to the maximum generation length. This avoids costly attention computation over the full context, significantly reducing computation, while introducing only a minor distribution shift in practice. For diffusion-based baseline decoding methods, we use a block size of 256 to match this configuration and ensure a fair comparison. 
+
+Evaluation protocol. All reported results are averaged over three runs with different random seeds, as we observe moderate variance across runs. We evaluate the full datasets for GSM8K, HumanEval, and MBPP. For MATH, we evaluate the first 215 problem sets, as the full dataset (1,500 problems) is approximately five times larger than GSM8K and would otherwise dominate evaluation cost. 
+
+Prompts and answer parsing. We evaluate instruction-tuned models in a zero-shot setting. The default LM Evaluation Harness (lm_eval) pipelines are designed for base models and rely on few-shot exemplars to enforce answer formats. Directly applying these pipelines to instruction-tuned models leads to inaccurate evaluation, as the model may place the final answer arbitrarily within the output. To address this, we make minor modifications to both the prompts and answer parsers. For GSM8K and MATH, we use task-specific prompts that explicitly instruct the model to present its final answer in 
+
+\boxed{} format at the end of the response; for MATH, we additionally specify the nature of the reasoning task. During evaluation, we parse the content of the final boxed expression. If no boxed answer is found for GSM8K, we fall back to extracting the last numerical value in the generation, consistent with the task’s default evaluation protocol. For MATH, only the boxed answer is used. For the coding benchmarks HumanEval and MBPP, we use the default “You are a helpful assistant” prompt and the standard answer parsers provided by the evaluation framework. 
+
+Detailed temperature schedule. To improve candidate diversity under a fixed parallel budget K, we draw candidates from a set of tempered PoE distributions with different temperatures. Specifically, we assign each candidate k ∈ { 1, . . . , K } atemperature 
+
+τk ← τlow + k − 1
+
+K − 1
+
+ τhigh − τlow 
+
+ (17) which linearly interpolates between a low temperature τlow and a high temperature τhigh . Candidate k is then sampled from the tempered PoE distribution 
+
+qτk (xi | x<i ) ∝ ˜pD (xi | x<i )w/τ k pAR (xi | x<i )(1 −w)/τ k
+
+=
+
+
+
+˜pD (xi | x<i )1/τ k
+
+w 
+
+pAR (xi | x<i )1/τ k
+
+1−w
+
+. (18) Equivalently, this corresponds to first applying temperature τk to both the DLM proposal and the AR expert, and then combining them through the PoE. We rely on this fact in our implementation. In all experiments, we use τlow = 0 .2 and τhigh = 0 .7. During importance resampling, the target temperature τ⋆ is set to 
+
+τlow , so that all candidates are corrected toward the same low-temperature target distribution. 
+
+## B. Additional Results 
+
+Additional statistics for the ablation study on the scaling effect of K. In Figures 3 and 4, we show two additional statistics as the number of parallel candidates K increases: the generation length and the average number of tokens accepted per DLM forward pass. Both quantities generally increase with larger K. Since the target AR model typically produces answers with longer and more detailed reasoning chains, this trend provides further evidence that increasing K pushes the generated samples closer to the target distribution. 13 Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 5 10 15 
+
+K  
+
+> 0.740
+> 0.745
+> 0.750
+> 0.755
+> 0.760
+> Accuracy (%)
+> 510 15
+
+K  
+
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> Thrpt. (tok/sec)
+> 510 15
+
+K  
+
+> 630
+> 635
+> 640
+> 645
+> 650
+> 655
+> Gen Len (tokens)
+> 510 15
+
+K
+
+> 9.00
+> 9.25
+> 9.50
+> 9.75
+> 10.00
+> 10.25
+> #Accept per Fwd.
+
+## MATH 
+
+uniform mixed AR 
+
+Figure 3. Additional statistics for the ablation study on the scaling effect of K, conducted on MATH. Since the AR decoding baseline does not have the corresponding statistics for the #Accept per Fwd. statistics, we omit it in that subplot. 5 10 15 
+
+K  
+
+> 0.73
+> 0.74
+> 0.75
+> 0.76
+> Accuracy (%)
+> 510 15
+
+K  
+
+> 50
+> 60
+> 70
+> 80
+> Thrpt. (tok/sec)
+> 510 15
+
+K  
+
+> 170
+> 180
+> 190
+> 200
+> 210
+> Gen Len (tokens)
+> 510 15
+
+K
+
+> 5.2
+> 5.4
+> 5.6
+> 5.8
+> 6.0
+> #Accept per Fwd.
+
+## MBPP 
+
+uniform mixed AR 
+
+Figure 4. Additional statistics for the ablation study on the scaling effect of K, conducted on MBPP. Since the AR decoding baseline does not have the corresponding statistics for the #Accept per Fwd. statistics, we omit it in that subplot. 
+
+14 Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+## C. Qualitative Examples 
+
+Below, we show responses generated by PoE-Bridge alongside those from the DLM proposal and the AR target on math reasoning tasks. The examples illustrate that PoE-Bridge closely mimics the style of the post-trained AR target. In particular, both PoE-Bridge and the AR target produce substantially longer reasoning chains than the original DLM proposal. This qualitative behavior further suggests that PoE-Bridge effectively recovers the target distribution. 
+
+Question: 
+
+Kyle bought last year’s best-selling book for $19.50. This is with a 25% discount from the original price. What was the original price of the book? 
+
+Standard DLM Answer: 
+
+To find the original price of the book, we need to divide the discounted price by the percentage of the original price that remains. The discounted price is $19.50, which is 87.5% of the original price. So the original price is 22 .50 .
+
+PoE-Bridge Answer: 
+
+To find the original price of the book, we determine the price before the 25% discount was applied. Let the original price be denoted by P .Since Kyle paid $19.50 after a 25% discount, we have 
+
+19 .50 = P − 0.25 P. 
+
+Simplifying the right-hand side, 
+
+19 .50 = 0 .75 P. 
+
+Solving for P by dividing both sides by 0.75 ,
+
+P = 19 .50 0.75 = 26 .
+
+Therefore, the original price of the book was 
+
+26 .
+
+AR Answer: 
+
+To find the original price of the book, we determine the price before the 25% discount was applied. Let the original price be denoted by P .Since Kyle bought the book for $19.50 after a 25% discount, he paid 75% of the original price. Therefore, we can write 
+
+0.75 P = 19 .50 .
+
+Solving for P by dividing both sides by 0.75 ,
+
+P = 19 .50 0.75 .
+
+Evaluating the expression, 
+
+P = 26 .
+
+Thus, the original price of the book was 
+
+26 .
+
+15 Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+Question: 
+
+Evaluate i5 + i−25 + i45 .
+
+Standard DLM Answer: 
+
+To evaluate i5 + i−25 + i45 , we need to understand the properties of i, the imaginary unit, which is defined as 
+
+i = √−1. The powers of i cycle every four terms: i1 = i, i2 = −1, i3 = −i, i4 = 1 , and then it repeats. 1. i5 is simply i.2. i−25 can be simplified by recognizing that i−2 = −1, so i−25 = ( i−2)12 
+
+cdoti −1 = ( −1) 12 
+
+cdoti −1 = −1.3. i45 can be simplified by recognizing that i4 = 1 , so i45 = ( i4)11 
+
+cdoti 1 = 1 11 
+
+cdoti = i.Adding these together, we get i + ( −1) + i = 1 − 1.
+
+0 .
+
+PoE-Bridge Answer: 
+
+To evaluate the expression i5 + i−25 + i45 , we use the properties of the imaginary unit i, where 
+
+i = √−1.
+
+The powers of i cycle every four terms: 
+
+i1 = i, i2 = −1, i3 = −i, i4 = 1 ,
+
+and this pattern repeats for higher powers. We simplify each term individually. 1. Simplify i5:
+
+i5 = i4+1 = i4 · i = 1 · i = i. 
+
+2. Simplify i−25 : Using the identity i−n = 1 
+
+> in
+
+, we first compute 
+
+i25 = i4·6+1 = ( i4)6 · i = 1 6 · i = i. 
+
+Thus, 
+
+i−25 = 1
+
+i .
+
+To rationalize the denominator, 1
+
+i = ii2 = i
+
+−1 = −i. 
+
+3. Simplify i45 :
+
+i45 = i4·11+1 = ( i4)11 · i = 1 11 · i = i. 
+
+Substituting these results back into the original expression, 
+
+i5 + i−25 + i45 = i + ( −i) + i = i. i
+
+16 Diffusion Language Model Parallel Decoding via Product-of-Experts Bridge 
+
+AR Answer: 
+
+To evaluate i5 + i−25 + i45 , we start by recalling the properties of the imaginary unit i, where i = √−1 and the powers of i cycle every four terms: i1 = i, i2 = −1, i3 = −i, and i4 = 1 . This cycle repeats for higher powers of i.First, we simplify i5:
+
+i5 = i4+1 = i4 · i1 = 1 · i = i. 
+
+Next, we simplify i−25 . Since the powers of i cycle every four terms, we can find the equivalent positive exponent by computing −25 mod 4 :
+
+−25 ÷ 4 = −6 remainder − 1 or − 25 ≡ − 1 (mod 4) .
+
+Since −1 ≡ 3 (mod 4) , we have: 
+
+i−25 = i3 = −i. 
+
+Then, we simplify i45 :
+
+i45 = i44+1 = i44 · i1 = ( i4)11 · i = 1 11 · i = 1 · i = i. 
+
+Now, we add the simplified terms together: 
+
+i5 + i−25 + i45 = i + ( −i) + i = i − i + i = i. 
+
+Therefore, the final answer is: 
+
+i . 
+
+17
