@@ -1,0 +1,965 @@
+Title: NSVQ: Mitigating Codebook Collapse by Stabilizing Encoder Drift in Vector Quantization
+
+URL Source: https://arxiv.org/pdf/2606.11363v1
+
+Published Time: Thu, 11 Jun 2026 00:11:32 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# NSVQ: Mitigating Codebook Collapse by Stabilizing Encoder Drift in Vector Quantization 
+
+Hao Lu 
+
+Wake Forest University School of Medicine / Advocate Health 
+
+hao.lu@advocatehealth.org 
+
+Yongxin Guo 
+
+Wake Forest University School of Medicine 
+
+Yongxin.Guo@wfusm.edu 
+
+Onur Can Koyun 
+
+Advocate Health 
+
+Onur.Koyun@advocatehealth.org 
+
+Zhengjie Zhu 
+
+Wake Forest University School of Medicine 
+
+Zhengjie.Zhu@wfusm.edu 
+
+Abbas Alili 
+
+Advocate Health 
+
+Abbas.Alili@advocatehealth.org 
+
+Metin Nafi Gurcan 
+
+Wake Forest University School of Medicine 
+
+Metin.Gurcan@wfusm.edu 
+
+## Abstract 
+
+Vector quantization is central to modern generative modeling pipelines, but large-codebook VQ models often suffer from codebook collapse. We identify encoder drift as a key driver of this failure: as the encoder moves the latent distribution, sparsely updated code vectors can lag behind, lose assignments, and increase quantization error, creating a feedback loop through the straight-through estimator. We propose NSVQ, a non-stationary-aware VQ training strategy that combines a dense non-stationary embedding loss, codebook replacement, and stage-wise encoder freezing. NSVQ first helps the codebook track encoder drift during early training, then freezes the encoder to consolidate the codebook under a fixed latent geometry, and finally reintroduces adversarial refinement. Experiments on ImageNet-1k show that NSVQ improves reconstruction quality while maintaining full codebook utilization. On ImageNet-1k at 128 ×128 with 65,536 codes, NSVQ reduces rFID from 2.39 to 2.10 compared with SimVQ, while both methods maintain 100% utilization. Additional latent diffusion experiments show that NSVQ also improves downstream ImageNet generation FID. 
+
+Keywords: VQ-VAE, autoencoder, image reconstruction, deep learning. 
+
+## 1 Introduction 
+
+Vector quantization (VQ) represents continuous data with discrete codes [Gray and Neuhoff, 1998]. Since VQ-VAE [van den Oord et al., 2017], it has become a core component of modern generative modeling systems, including VQGAN-style tokenizers [Esser et al., 2021], latent diffusion mod-els [Rombach et al., 2022], and discrete visual tokenizers for vision-language modeling [Bao et al., 2022]. In these systems, images are compressed into discrete token sequences for autoregressive, masked-prediction, or multimodal modeling, making quantizer stability and reconstruction quality central to downstream performance. 
+
+> Preprint.
+> arXiv:2606.11363v1 [cs.CV] 9 Jun 2026
+
+A persistent challenge in VQ training is codebook collapse. As the codebook grows, many codes may remain inactive, reducing the effective capacity of the discrete representation. Existing methods improve utilization through stochastic quantization, regularization, code replacement, or mapping-based codebook parameterizations, but they do not fully explain why codes lose assignments or why high utilization alone may still fail to yield a high-quality tokenizer. In this work, we view these issues as consequences of a non-stationary alignment problem driven by encoder drift. During VQ-VAE training, the encoder is continuously updated through the straight-through estimator (STE) [Bengio et al., 2013], causing the latent distribution to move, whereas the codebook is updated sparsely through nearest-neighbor assignments. Code vectors must therefore serve as stable discrete representatives for a latent space that is itself drifting. When this mismatch becomes severe, codes may lose assignments and collapse; even when utilization remains high, drift-induced misalignment can degrade reconstruction and downstream generation by weakening consistency among the encoder, codebook, and decoder. Motivated by this view, we propose NSVQ, a non-stationary-aware VQ training strategy aimed at improving codebook quality, not merely codebook usage. NSVQ first compensates for encoder-induced non-stationarity by propagating local auxiliary updates to nearby non-winning codes, helping the codebook track the moving latent geometry. It then freezes the encoder, performs a short quantizer– decoder warm-up to consolidate the codebook, and finally reintroduces adversarial refinement under a fixed latent geometry. Thus, NSVQ treats collapse as one symptom of non-stationary misalignment while targeting stable encoder–codebook–decoder coordination. Our contributions are threefold. First, we identify encoder drift as a source of non-stationary encoder– codebook misalignment in large-codebook VQ training, with codebook collapse as an extreme consequence. Second, we introduce a drift-aware codebook update that improves local alignment by propagating auxiliary updates to nearby non-winning codes while preserving hard nearest-neighbor quantization. Third, we propose a stage-wise schedule that compensates for non-stationarity, freezes the encoder for codebook consolidation, and performs adversarial refinement without reintroducing encoder drift. Empirically, on ImageNet-1k at 128 × 128 with 65,536 codes, NSVQ reduces rFID from 2.39 to 2.10 compared with SimVQ while maintaining 100% utilization, and also improves downstream latent-diffusion generation under the same U-Net setting. 
+
+## 2 Background and Problem Formulation 
+
+2.1 Preliminaries on VQ-VAE 
+
+A VQ-VAE consists of an encoder Eθ , a decoder Dϕ, and a codebook C = {c1, . . . , c K } [van den Oord et al., 2017]. Given an input image x, the encoder produces ze = Eθ (x), which is quantized by nearest-neighbor assignment: 
+
+q = arg min  
+
+> j
+
+∥ze − cj ∥22, zq = cq , ˆx = Dϕ(zq ). (1) The standard objective combines reconstruction, embedding, and commitment losses: 
+
+L = Lrec + ∥sg[ ze] − zq ∥22 + β∥ze − sg[ zq ]∥22, (2) where sg[ ·] denotes stop-gradient. The STE allows decoder gradients to update the encoder through the non-differentiable quantizer, while the codebook itself is updated only through assignment-based embedding losses. 
+
+2.2 Encoder Drift and the Quantization-Error Feedback Loop 
+
+The key issue studied in this paper is that the encoder distribution is non-stationary during VQ training. We define encoder drift as the change in encoder outputs for the same input over training: 
+
+z(t) 
+
+> e
+
+(x) = Eθ(t) (x). (3) Because θ(t) is continuously updated by STE gradients, the latent distribution can move throughout training. In contrast, codebook updates are sparse: for a mini-batch at step t, only codes selected by nearest-neighbor assignment receive direct embedding updates, 
+
+c(t+1)  
+
+> j
+
+= c(t) 
+
+> j
+
++ ηc
+
+X
+
+> i:qi=j
+
+
+
+z(t) 
+
+> e,i
+
+− c(t)
+
+> j
+
+
+
+. (4) 2Non-selected codes therefore do not directly follow the moving latent geometry. This creates a non-stationary alignment problem: encoder drift can make code vectors lag behind, lose assignments, and become inactive. This process can further amplify itself through quantization error. Write 
+
+zq = ze + ϵ, ϵ = zq − ze, (5) where ϵ is the residual induced by replacing a continuous latent point with a discrete code vector. As codebook lag and dead codes accumulate, active codes become poorer representatives of the encoder distribution, increasing ∥ϵ∥. Since the STE passes decoder gradients to the encoder as if quantization were identity-like, the encoder receives gradients evaluated at zq rather than at ze. If ℓ(z) denotes the decoder-side loss, a local first-order approximation gives 
+
+gSTE  
+
+> θ
+
+− gcont  
+
+> θ
+
+≈ Jθ (x)⊤Hℓ(ze)ϵ, (6) where Jθ (x) = ∂E θ (x)/∂θ and Hℓ(ze) is the local Hessian of the decoder-side loss. Thus, larger quantization residuals can enlarge the gap between the STE gradient and the continuous-latent gradient. This yields a positive feedback loop: encoder drift → codebook lag → dead codes → ∥ ϵ∥ ↑→ STE gradient-estimation gap → encoder drift ↑ .
+
+Under this view, codebook collapse is not only the consequence of sparse updates; it can become part of a self-amplifying instability that eventually causes catastrophic reconstruction degradation. Additional controlled evidence beyond poor initialization is provided in Appendix A.3. For empirical analysis, we measure encoder drift by the root-mean-square change of encoder outputs on a fixed evaluation subset S:
+
+Dt 
+
+> RMS
+
+=
+
+s
+
+Ex∈S,u 
+
+ 1
+
+d Eθt (x)u − Eθt−∆ (x)u
+
+> 22
+
+
+
+. (7) Here, u indexes spatial latent positions, d is the latent channel dimension, and ∆ is the checkpoint logging interval. Since S is fixed, changes in Dt 
+
+> RMS
+
+reflect encoder movement rather than changes in sampled inputs. 
+
+## 3 Related Work 
+
+Existing approaches to codebook collapse can be grouped into heuristic methods, mapping-based codebook adaptation, and frozen-representation tokenization. 
+
+Heuristic collapse mitigation. Soft or stochastic quantization methods [Roy et al., 2018, Williams et al., 2020, Takida et al., 2022] relax hard nearest-neighbor assignment so that more codes re-ceive training signal. Regularized VQ [Zhang et al., 2023] and VQGAN-FC [Yu et al., 2022] improve code usage through regularization or architectural modifications. Another practical strat-egy replaces inactive codes with active latent features, as used in Jukebox [Dhariwal et al., 2020], SoundStream [Zeghidour et al., 2021], and Online Clustered Codebook [Zheng and Vedaldi, 2023]. These methods improve utilization, but mainly treat collapse as an assignment or code-maintenance problem. NSVQ instead views collapse as a non-stationary optimization problem caused by encoder drift and sparse codebook updates. 
+
+Mapping-based dense codebook adaptation. Affine codebook reparameterization [Huh et al., 2023], VQGAN-LC [Zhu et al., 2024a], SimVQ [Zhu et al., 2024b], and FVQ [Chang et al., 2025] reduce collapse by parameterizing the effective codebook through shared transformations. Updating the mapping can move many codes simultaneously, alleviating the sparse-update limitation of standard VQ. However, the movement of non-winning codes is implicit and not directly tied to measured encoder drift. NSVQ is complementary: it explicitly propagates local auxiliary updates to nearby non-winning codes during the non-stationary phase of training. 3Figure 1: Overview of NSVQ. Stage 1 prevents early collapse using the non-stationary embedding loss and codebook replacement while the encoder is still drifting. The intermediate warm-up stage freezes the encoder and disables adversarial training, allowing the quantizer and decoder to adapt to a fixed latent geometry without VQGAN instability. Stage 2 re-enables adversarial training for perceptual refinement while keeping the encoder frozen. 
+
+Frozen-representation tokenization. Recent tokenizers freeze pretrained or matured visual repre-sentations and optimize a quantizer, decoder, or rectifier around them, including CODA [Liu et al., 2025], ReVQ [Zhang et al., 2025], VQ-Transplant [Fang et al., 2026], and QLIP [Zhao et al., 2025]. These works focus on representation reuse or continuous-to-discrete conversion, rather than encoder drift as a cause of collapse. NSVQ also freezes the encoder, but only after joint VQ training has shaped a reconstruction-oriented and quantization-aware latent space. This timing matters because repre-sentation learning and clustering can reinforce each other, as shown by Deep Embedded K-Means Clustering [Guo et al., 2021]; a frozen vision representation is not necessarily cluster-structured or quantization-friendly. Thus, NSVQ uses freezing as late-stage consolidation to remove further latent drift, not as an initial tokenization assumption. 
+
+## 4 Proposed NSVQ Training Strategy 
+
+NSVQ stabilizes large-codebook VQ training by matching the training procedure to the encoder-drift dynamics identified in Section 2.2. Early in training, encoder drift is strong, so NSVQ first compensates for the moving latent geometry, then freezes the encoder once the encoder–codebook interaction has stabilized, and finally performs adversarial refinement under a fixed latent geometry. The overall procedure is shown in Figure 1. 
+
+4.1 Stage 1: Non-Stationary-Aware Codebook Learning 
+
+Stage 1 corresponds to the highly non-stationary phase of VQ training. The encoder, decoder, quantizer, and discriminator are trained jointly. For each latent vector zi, we compute its squared Euclidean distance to each code vector: 
+
+dij = ∥sg[ zi] − cj ∥22 , qi = arg min  
+
+> j
+
+dij . (8) Here, qi denotes the winning code index used for the forward quantized representation. Standard VQ updates only this winning code through the embedding loss. Under encoder drift, however, nearby non-winning codes may also need to follow the moving latent distribution; otherwise, they can lag behind and eventually lose future assignments. 4To propagate drift-aware training signal beyond the winning code, NSVQ assigns temperature-controlled soft weights to all codes: 
+
+pij = exp( −dij /τ )
+
+PKk=1 exp( −dik /τ ) , ˜pij = sg[ pij ]. (9) As detailed in Appendix C.2, the auxiliary direction can be interpreted as combining a local encoder-codebook residual with a catch-up correction toward the selected active code, yielding the simple attractive direction sg[ zi] − cj for each non-winning code. The non-stationary embedding loss is then defined as 
+
+LN S = 1
+
+N d 
+
+X
+
+> i
+
+X 
+
+> j̸=qi
+
+˜pij dij . (10) where N is the number of latent positions and d is the code dimension. The detached weights ˜pij 
+
+determine the relative strength of the auxiliary updates, giving stronger updates to codes close to the current latent point and weaker updates to distant codes. The winning code is excluded from LN S 
+
+because it is already updated by the standard embedding loss; its probability mass is not redistributed to non-winning codes. Importantly, LN S does not replace hard nearest-neighbor quantization with soft quantization. The forward pass still uses the discrete code cqi , so the VQ bottleneck remains unchanged. The soft weights are used only to distribute auxiliary embedding updates to nearby non-winning codes. From the feedback-loop view in Section 2.2, the role of LN S is therefore not merely to increase utilization. By moving nearby non-winning codes toward the current encoder outputs, the codebook can better track the drifting latent geometry before assignments are lost. This limits the growth of the quantization residual ϵ = zq − ze, thereby weakening the STE-induced feedback from quantization error back to encoder drift. The Stage-1 quantization loss is 
+
+L(1) vq = ∥zq − sg[ ze]∥22 + β ∥ze − sg[ zq ]∥22 + αLN S , (11) where β controls the commitment loss and α controls the strength of the non-stationary correction. The full generator objective is 
+
+L(1) = Lrec + λperc Lperc + λadv Ladv + λvq L(1) vq . (12) Stage 1 also uses codebook replacement to revive persistently inactive entries. Replacement is used only during Stage 1, where encoder drift is strongest and dead-code recovery is most important. In this sense, the dense non-stationary loss and replacement mechanism play complementary roles: LN S 
+
+continuously reduces codebook lag for nearby codes, while replacement prevents already inactive codes from remaining permanently unused. Together, this Stage-1 protection helps break the feedback loop between encoder drift, dead codes, quantization error, and further encoder drift. 
+
+Encoder-freezing criterion. We use the epoch-averaged commitment loss as a practical indicator of whether the encoder–codebook interaction has stabilized. Let ℓcommit  
+
+> t
+
+denote the average commitment loss over epoch t:
+
+ℓcommit  
+
+> t
+
+= 1
+
+|B t|
+
+X
+
+> b∈B t
+
+Lcommit (b), (13) where Bt is the set of mini-batches in epoch t, and 
+
+Lcommit = ∥ze − sg[ zq ]∥22 . (14) The encoder is frozen when the epoch-averaged commitment loss has not decreased for 10 consecutive epochs. Equivalently, if no new lower value of ℓcommit  
+
+> t
+
+is observed within a 10-epoch patience window, we regard the encoder–codebook interaction as having reached a plateau and enter the frozen-encoder warm-up stage. Intuitively, a decreasing commitment loss indicates that the encoder outputs and the selected code vectors are still adapting to each other. In contrast, if the epoch-averaged commitment loss fails to decrease for 10 consecutive epochs, the latent geometry has largely stabilized. At this point, further encoder updates provide limited benefit but can continue to introduce non-stationarity into codebook learning. NSVQ therefore freezes the encoder and enters the intermediate warm-up stage before adversarial refinement. 54.2 Warm-up: Frozen-Encoder Stabilization 
+
+After the commitment-loss plateau criterion is met, NSVQ enters a short frozen-encoder warm-up stage. The encoder is frozen, while adversarial training, LNS , and codebook replacement are disabled. The purpose of this stage is to prevent VQGAN collapse immediately after encoder freezing. Although the latent distribution is now stationary, the quantizer and decoder still need to adapt to the fixed encoder manifold. Removing GAN pressure during this transition allows them to stabilize with reconstruction-oriented losses before adversarial refinement is reintroduced. The warm-up quantization loss is reduced to a codebook-fitting objective: 
+
+L(warm) vq = ∥zq − sg[ ze]∥22 . (15) The warm-up objective is 
+
+L(warm) = Lrec + λperc Lperc + λvq L(warm) vq . (16) Thus, the warm-up stage acts as a collapse-safe transition between non-stationary codebook learning and adversarial perceptual refinement. 
+
+4.3 Stage 2: Perceptual Refinement under Fixed Latent Geometry 
+
+Stage 2 keeps the encoder frozen and reintroduces adversarial training. The quantization loss remains the same as in the warm-up stage: 
+
+L(2) vq = L(warm) vq . (17) The full objective becomes 
+
+L(2) = Lrec + λperc Lperc + λadv Ladv + λvq L(2) vq . (18) Because the encoder remains frozen, adversarial gradients can improve perceptual quality without reintroducing encoder drift. Stage 2 therefore separates perceptual refinement from latent-space movement, allowing the decoder and discriminator to improve visual fidelity while preserving the stabilized codebook geometry inherited from the warm-up stage. Overall, NSVQ decomposes VQ training into three sequential phases: collapse prevention → frozen-encoder warm-up → perceptual refinement .
+
+This staged design follows directly from the non-stationary view of collapse: first help the codebook follow the drifting encoder distribution, then freeze the encoder and warm up the quantizer–decoder pair under a stationary latent geometry, and finally reintroduce adversarial training for perceptual refinement. 
+
+## 5 Experimental Setup 
+
+We evaluate NSVQ on ImageNet-1k [Russakovsky et al., 2015] reconstruction at 128 ×128 resolution. Following SimVQ [Zhu et al., 2024b], models are trained on the ImageNet training set and evaluated on the validation set without validation-based early stopping or checkpoint selection. Component-level ablations and hyperparameter studies are mainly conducted on CelebA [Liu et al., 2015] at the same resolution due to computational constraints. Our autoencoder follows the VQGAN-style encoder-decoder architecture [Esser et al., 2021]. Unless otherwise specified, models use latent dimension d = 128 , codebook size K = 65 ,536 , and a 16 × 16 
+
+token grid. All compared ImageNet-1k autoencoder experiments use the same total training budget. We report rFID, LPIPS, SSIM, PSNR, and codebook utilization, where utilization is the fraction of codebook entries activated at least once during evaluation. Full details on tokenizer variants, optimization, stage transitions, and evaluation are provided in Appendix D. 
+
+## 6 Results 
+
+We evaluate NSVQ on ImageNet-1k from three perspectives: reconstruction quality compared with representative VQ tokenizers, phase-level ablations of the proposed training strategy, and training dynamics that directly test the non-stationarity hypothesis. Additional CelebA ablations, hyperparameter sensitivity, detailed dynamics, and computational cost analyses are provided in Appendix E. 6Table 1: Reconstruction performance on ImageNet-1k at 128 × 128 resolution. All models encode images into 16 × 16 tokens. Codebook utilization is calculated as the fraction of codebook entries activated at least once on ImageNet validation. †FSQ uses a finite scalar quantization codebook with 64,000 effective codes rather than exactly 65,536 vector codes. Method latent dim tokens Codebook size Util. ↑ rFID ↓ LPIPS ↓ PSNR ↑ / SSIM% ↑                                                                              
+
+> VQGAN [Esser et al., 2021] 128 256 65,536 1.4% 3.74 0.17 22.20 / 70.6 VQGAN-EMA [Razavi et al., 2019] 128 256 65,536 4.5% 3.23 0.15 22.89 / 72.3 VQGAN-FC (d=128) [Yu et al., 2022] 128 256 65,536 1.4% 5.33 0.18 21.45 / 68.8 VQGAN-FC (d=8) [Yu et al., 2022] 8256 65,536 100.0% 2.63 0.13 23.79 / 77.5 FSQ †[Mentzer et al., 2024] 6256 64,000 100.0% 2.80 0.13 23.63 / 75.8 LFQ [Yu et al., 2024] 16 256 65,536 100.0% 2.88 0.13 23.60 / 77.2 VQGAN-LC [Zhu et al., 2024a] 128 256 65,536 100.0% 2.39 0.13 23.99 / 77.3 SimVQ [Zhu et al., 2024b] 128 256 65,536 100.0% 2.39 0.13 24.07 / 77.4 FVQ [Chang et al., 2025] 128 256 65,536 100.0% 2.43 0.13 24.81 / 77.0 SimVQ + NS loss + freeze-and-refine schedule 128 256 65,536 99.2% 2.19 0.12 24.86 / 77.4
+> Ours 128 256 65,536 100.0% 2.10 0.12 25.21 / 78.8
+
+Table 2: Additional ImageNet results. Left: downstream LDM generation on ImageNet 128 × 128 ,using separately trained d = 128 , K = 65 ,536 tokenizers with a 16 × 16 token grid. The same latent-space U-Net is trained for 100 epochs for all tokenizers, and FID is computed from 5,000 generated samples. Right: ImageNet 256 × 256 reconstruction, where all methods use downsampling factor 16 and therefore produce 256 tokens per image.                                                     
+
+> LDM generation at 128 ×128 Reconstruction at 256 ×256
+> Method tokens Codebook size Latent dim FID ↓Method rFID ↓LPIPS ↓PSNR ↑SSIM% ↑
+> VQGAN 256 65,536 128 19.57 VQGAN-LC-ResNet 3.30 0.13 22.50 57.48 VQGAN-LC 256 65,536 128 17.98 SimVQ 3.29 0.13 22.58 57.56 SimVQ 256 65,536 128 20.11 FVQ 3.35 0.13 23.28 57.26
+> Ours 256 65,536 128 16.62 Ours 2.89 0.12 23.65 57.85
+
+6.1 Main Results on ImageNet-1k 
+
+Table 1 compares NSVQ with representative VQ-based tokenizers on ImageNet-1k at 128 × 128 
+
+resolution. With the same codebook size of 65,536, NSVQ achieves the best overall reconstruction quality, obtaining 100.0% codebook utilization, 2.10 rFID, 0.12 LPIPS, 25.21 PSNR, and 78.8% SSIM. Compared with SimVQ [Zhu et al., 2024b], NSVQ improves rFID from 2.39 to 2.10 and PSNR from 24.07 to 25.21 while maintaining full utilization. Since both SimVQ and NSVQ activate all codes, the improvement suggests that utilization alone is not sufficient to characterize codebook quality; stable alignment among the encoder distribution, codebook, and decoder is also important. Applying the NS loss and the freeze-and-refine schedule to SimVQ improves its reconstruction quality, reducing rFID from 2.39 to 2.19 and improving LPIPS and PSNR, while maintaining high codebook utilization. This indicates that the proposed non-stationary-aware training strategy is not limited to our base VQ formulation, but can also benefit a strong SimVQ-style baseline. Nevertheless, this variant still underperforms full NSVQ, suggesting that the best performance is obtained when dense drift-aware updates, code replacement, encoder freezing, warm-up stabilization, and adversarial refinement are combined. In addition to reconstruction at 128 × 128 , we further evaluate whether the learned tokenizer benefits downstream latent diffusion generation and higher-resolution reconstruction. As shown in Table 2, under the same LDM U-Net trained for 100 epochs on ImageNet at 128 × 128 , NSVQ achieves the best generation quality, reducing FID from 17.98 for VQGAN-LC and 20.11 for SimVQ to 16.62. On ImageNet 256 × 256 reconstruction, NSVQ also obtains the best overall reconstruction quality, improving rFID from 3.29–3.35 to 2.89 and achieving the best LPIPS, PSNR, and SSIM. These results indicate that the improved codebook stability of NSVQ transfers beyond the primary 
+
+128 × 128 reconstruction setting. 
+
+6.2 Phase Ablation on ImageNet-1k 
+
+Table 3 analyzes the role of each phase on ImageNet-1k. Stage 1 alone already achieves 100% codebook utilization and competitive reconstruction quality, confirming that the non-stationary loss and code replacement mechanism prevent early collapse during joint encoder-quantizer training. 7Table 3: ImageNet ablation study of the proposed NSVQ training strategy. The full pipeline consists of Stage 1, a frozen-encoder warm-up stage, and Stage 2. Variant Training phases rFID ↓ LPIPS-VGG ↓ SSIM ↑ PSNR ↑ Util. ↑                                    
+
+> No NS loss, No Replacement 1 only 3.74 0.17 70.6 22.20 1.4% With NS loss, No Replacement 1 only 2.58 0.13 75.4 24.85 99.1% NSVQ Stage 1 only 1 only 2.24 0.12 78.8 25.15 100.0% NSVQ Stage 1 + Warm-up 1 + W 4.02 0.12 81.1 26.05 97.6% NSVQ Stage 1 + Stage 2 only 1 + 2 2.59 0.13 75.4 24.86 99.1% Full NSVQ 1 + W + 2 2.10 0.12 78.8 25.21 100.0%
+
+Adding the frozen-encoder warm-up stage improves distortion-oriented metrics such as SSIM and PSNR, but worsens FID because adversarial training is disabled during this transition phase. This behavior is expected: the warm-up stage prioritizes quantizer–decoder alignment under a fixed encoder distribution rather than perceptual realism. Directly skipping the warm-up stage and training with Stage 1 + Stage 2 degrades FID, SSIM, and PSNR compared with the full pipeline. This shows that adversarial refinement benefits from an intermediate collapse-safe transition after encoder freezing. The full NSVQ pipeline, consisting of Stage 1, warm-up, and Stage 2, achieves the best rFID while maintaining 100% utilization. Overall, these ablations show that the gain of NSVQ comes from matching each phase to the corresponding dynamics: drift-aware codebook learning, frozen-encoder stabilization, and adversarial perceptual refinement. 
+
+6.3 Breaking the Drift–Collapse Feedback Loop 
+
+To directly test whether encoder drift can trigger the feedback loop described in Section 2.2, we conduct an encoder-drift stress test. We vary the encoder learning-rate multiplier in {0.1, 0.5, 1, 5, 10 }
+
+while keeping the rest of the training configuration fixed. This intervention provides a controlled way to increase encoder movement. We compare two settings: an unprotected baseline without NS loss or codebook replacement, and the Stage-1 protection used by NSVQ, which combines NS loss with codebook replacement. We measure four quantities: the mean RMS encoder drift DRMS  
+
+> t
+
+, assignment churn, final codebook utilization, and final rFID. Assignment churn measures how often latent positions change their nearest-code assignments between consecutive logged checkpoints: 
+
+Churn t = Ex∈S,u [1 (qt(x, u )̸ = qt−∆(x, u ))] , (19) where S is a fixed evaluation subset and u indexes spatial latent positions. Figure 2 shows that, without NS loss and replacement, increasing the encoder learning-rate multiplier substantially increases encoder drift. Assignment churn also increases, while codebook utilization collapses and rFID deteriorates catastrophically. This behavior supports the feedback-loop view: when the encoder moves faster than the sparsely updated codebook can follow, codes lose assignments, the effective quantization quality degrades, and reconstruction quality can collapse. In contrast, with NS loss and replacement, encoder drift still increases as the encoder learning-rate multiplier grows, and assignment churn also rises. However, codebook utilization and rFID remain nearly stable. This shows that NSVQ does not simply suppress encoder movement. Instead, its Stage-1 protection helps the codebook track the drifting latent distribution, preventing assignment instability from developing into codebook collapse and catastrophic reconstruction degradation. These results provide direct evidence that compensating for encoder-induced non-stationarity can break the drift–collapse feedback loop. Additional full-pipeline training curves showing the drop of measured drift after encoder freezing are provided in Appendix E.3. 
+
+## 7 Discussion 
+
+Our results support the view that codebook collapse is a non-stationary alignment problem rather than only a static utilization issue. During VQ training, the encoder distribution keeps moving, while 8Figure 2: Encoder-drift stress test. We vary the encoder learning-rate multiplier to intervene on encoder drift. Top row: without NS loss and replacement, increasing encoder drift leads to high assignment churn, codebook collapse, and catastrophic rFID degradation. Bottom row: with NS loss and replacement, encoder drift and assignment churn still increase, but codebook utilization and rFID remain stable. This indicates that NSVQ does not simply suppress encoder movement; instead, it helps the codebook track the drifting latent distribution and prevents the drift–collapse feedback loop from developing. only selected code vectors receive direct updates. This mismatch can make inactive codes lag behind and lose assignments. Once this occurs, collapse may become self-amplifying: codebook lag and dead codes increase the quantization residual, which can enlarge the STE gradient-estimation gap and further perturb encoder updates. The encoder-LR stress test provides intervention evidence for this mechanism. Increasing the encoder learning-rate multiplier increases drift; without NS loss and replacement, this leads to higher assignment churn, severe codebook collapse, and catastrophic rFID degradation. Under NSVQ Stage-1 protection, however, even substantially increased drift does not cause collapse or rFID degradation. Thus, drift itself is not necessarily fatal; the failure arises when the codebook cannot track the moving latent geometry and quantization error feeds back into encoder learning. The results also show that high utilization alone is not sufficient. Several baselines and ablations use nearly all codes, but still underperform the full NSVQ pipeline. Effective tokenizers therefore require not only broad code usage, but also stable alignment among the encoder, codebook, and decoder. NSVQ improves this alignment by matching each phase to the corresponding dynamics: drift-aware codebook learning, frozen-encoder stabilization, and adversarial perceptual refinement. Beyond reconstruction, NSVQ improves both 256 × 256 reconstruction and downstream latent diffusion generation under the same U-Net training setup, suggesting that the learned discrete representation benefits generative modeling as well. Limitations remain: our derivation uses a latent-distance approximation to encoder-induced coupling; tighter theory and larger-scale autoregressive, vision-language, and representation-learning evaluations are left for future work. 
+
+## 8 Conclusion 
+
+We present NSVQ, a non-stationary-aware training strategy for mitigating codebook collapse in VQ models. Encoder drift can initiate a positive feedback loop: codebook lag produces dead codes and larger quantization residuals, which amplify the STE gradient-estimation gap and further destabilize encoder movement. NSVQ breaks this loop by helping the codebook track the moving latent geometry before freezing the encoder for stable consolidation. Experiments on ImageNet-1k and CelebA show that NSVQ achieves full codebook utilization and improves reconstruction quality over strong baselines, suggesting that stable VQ training requires both broad code usage and robust encoder–codebook–decoder alignment. 9References 
+
+Hangbo Bao, Li Dong, Songhao Piao, and Furu Wei. BEiT: BERT pre-training of image transformers. In Inter-national Conference on Learning Representations , 2022. URL https://arxiv.org/abs/2106.08254 .Yoshua Bengio, Nicholas Léonard, and Aaron Courville. Estimating or propagating gradients through stochastic neurons for conditional computation. arXiv preprint arXiv:1308.3432 , 2013. URL https://arxiv.org/ abs/1308.3432 .Yifan Chang, Jie Qin, Limeng Qiao, Xiaofeng Wang, Zheng Zhu, Lin Ma, and Xingang Wang. Scalable training for vector-quantized networks with 100% codebook utilization. arXiv preprint arXiv:2509.10140 , 2025. URL 
+
+https://arxiv.org/abs/2509.10140 .Prafulla Dhariwal, Heewoo Jun, Christine Payne, Jong Wook Kim, Alec Radford, and Ilya Sutskever. Jukebox: A generative model for music. arXiv preprint arXiv:2005.00341 , 2020. URL https://arxiv.org/abs/ 2005.00341 .Patrick Esser, Robin Rombach, and Björn Ommer. Taming transformers for high-resolution image synthesis. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 12873–12883, 2021. URL https://arxiv.org/abs/2012.09841 .Xianghong Fang, Yuan Yuan, Dehan Kong, and Tim G. J. Rudner. VQ-Transplant: Efficient VQ-module integration for pre-trained visual tokenizers. In International Conference on Learning Representations , 2026. URL https://openreview.net/forum?id=eETr3lrOQB .Robert M. Gray and David L. Neuhoff. Quantization. IEEE Transactions on Information Theory , 44(6): 2325–2383, 1998. doi: 10.1109/18.720541. Wengang Guo, Kaiyan Lin, and Wei Ye. Deep embedded k-means clustering. In 2021 IEEE International Conference on Data Mining Workshops (ICDMW) , pages 686–694. IEEE, 2021. doi: 10.1109/ICDMW53433. 2021.00090. Minyoung Huh, Brian Cheung, Pulkit Agrawal, and Phillip Isola. Straightening out the straight-through estimator: Overcoming optimization challenges in vector quantized networks. In Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research ,pages 14096–14113, 2023. URL https://proceedings.mlr.press/v202/huh23a.html .Zeyu Liu, Zanlin Ni, Yeguo Hua, Xin Deng, Xiao Ma, Cheng Zhong, and Gao Huang. CODA: Repurposing continuous VAEs for discrete tokenization. arXiv preprint arXiv:2503.17760 , 2025. URL https://arxiv. org/abs/2503.17760 .Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang. Deep learning face attributes in the wild. In 
+
+Proceedings of the IEEE International Conference on Computer Vision , pages 3730–3738, 2015. doi: 10.1109/ICCV.2015.425. Fabian Mentzer, David Minnen, Eirikur Agustsson, and Michael Tschannen. Finite scalar quantization: VQ-VAE made simple. In International Conference on Learning Representations , 2024. URL https://openreview. net/forum?id=8ishA3LxN8 .Ali Razavi, Aaron van den Oord, and Oriol Vinyals. Generating diverse high-fidelity images with VQ-VAE-2. In Advances in Neural Information Processing Systems , volume 32, 2019. URL https://arxiv.org/abs/ 1906.00446 .Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 10684–10695, 2022. URL https://arxiv.org/abs/2112.10752 .Aurko Roy, Ashish Vaswani, Arvind Neelakantan, and Niki Parmar. Theory and experiments on vector quantized autoencoders. arXiv preprint arXiv:1805.11063 , 2018. URL https://arxiv.org/abs/1805.11063 .Olga Russakovsky, Jia Deng, Hao Su, Jonathan Krause, Sanjeev Satheesh, Sean Ma, Zhiheng Huang, Andrej Karpathy, Aditya Khosla, Michael Bernstein, Alexander C. Berg, and Li Fei-Fei. Imagenet large scale visual recognition challenge. International Journal of Computer Vision , 115(3):211–252, 2015. doi: 10.1007/ s11263-015-0816-y. Yuhta Takida, Wei-Hsiang Liao, Chieh-Hsin Lai, Toshimitsu Takahashi, Toshiyuki Uesaka, Yuki Mitsufuji, and Stefano Ermon. SQ-VAE: Variational Bayes on discrete representation with self-annealed stochastic quantization. In Proceedings of the 39th International Conference on Machine Learning , volume 162 of 
+
+Proceedings of Machine Learning Research , pages 20987–21012, 2022. URL https://proceedings.mlr. press/v162/takida22a.html .
+
+10 Aaron van den Oord, Oriol Vinyals, and Koray Kavukcuoglu. Neural discrete representation learning. In 
+
+Advances in Neural Information Processing Systems , volume 30, 2017. URL https://arxiv.org/abs/ 1711.00937 .Yuqing Wang, Zhijie Lin, Yao Teng, Yuanzhi Zhu, Shuhuai Ren, Jiashi Feng, and Xihui Liu. Bridging continuous and discrete tokens for autoregressive visual generation. In Proceedings of the IEEE/CVF International Conference on Computer Vision , 2025. URL https://arxiv.org/abs/2503.16430 .Will Williams, Sam Ringer, Tom Ash, John Hughes, David MacLeod, and Jamie Dougherty. Hierarchical quantized autoencoders. arXiv preprint arXiv:2002.08111 , 2020. URL https://arxiv.org/abs/2002. 08111 .Jiahui Yu, Xin Li, Jing Yu Koh, Han Zhang, Ruoming Pang, James Qin, Alexander Ku, Yuanzhong Xu, Jason Baldridge, and Yonghui Wu. Vector-quantized image modeling with improved VQGAN. In International Con-ference on Learning Representations , 2022. URL https://openreview.net/forum?id=pfNyExj7z2 .Lijun Yu, José Lezama, Nitesh Bharadwaj Gundavarapu, Luca Versari, Kihyuk Sohn, David Minnen, Yong Cheng, Agrim Gupta, Xiuye Gu, Alexander G. Hauptmann, Boqing Gong, Ming-Hsuan Yang, Irfan Essa, David A. Ross, and Lu Jiang. Language model beats diffusion—tokenizer is key to visual generation. In 
+
+International Conference on Learning Representations , 2024. URL https://openreview.net/forum? id=gzqrANCF4g .Neil Zeghidour, Alejandro Luebs, Ahmed Omran, Jan Skoglund, and Marco Tagliasacchi. SoundStream: An end-to-end neural audio codec. IEEE/ACM Transactions on Audio, Speech, and Language Processing , 30: 495–507, 2021. doi: 10.1109/TASLP.2021.3129994. Borui Zhang, Qihang Rao, Wenzhao Zheng, Jie Zhou, and Jiwen Lu. Quantize-then-rectify: Efficient VQ-VAE training. arXiv preprint arXiv:2507.10547 , 2025. URL https://arxiv.org/abs/2507.10547 .Jiahui Zhang, Fangneng Zhan, Christian Theobalt, and Shijian Lu. Regularized vector quantization for tokenized image synthesis. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,pages 18467–18476, 2023. URL https://arxiv.org/abs/2303.06424 .Yue Zhao, Fuzhao Xue, Scott Reed, Linxi Fan, Yuke Zhu, Jan Kautz, Zhiding Yu, Philipp Krähenbühl, and De-An Huang. QLIP: Text-aligned visual tokenization unifies auto-regressive multimodal understanding and generation. arXiv preprint arXiv:2502.05178 , 2025. URL https://arxiv.org/abs/2502.05178 .Chuanxia Zheng and Andrea Vedaldi. Online clustered codebook. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 22798–22807, 2023. Lei Zhu, Fangyun Wei, Yanye Lu, and Dong Chen. Scaling the codebook size of VQGAN to 100,000 with a utilization rate of 99%. In Advances in Neural Information Processing Systems , 2024a. URL 
+
+https://arxiv.org/abs/2406.11837 .Yongxin Zhu, Bocheng Li, Yifei Xin, Zhihua Xia, and Linli Xu. Addressing representation collapse in vector quantized models with one linear layer. arXiv preprint arXiv:2411.02038 , 2024b. URL https: //arxiv.org/abs/2411.02038 .
+
+11 A Additional Analysis of Encoder-Induced Non-Stationarity 
+
+A.1 Quantization Error and the STE Gradient-Estimation Gap 
+
+The main text argues that codebook collapse can become self-amplifying because quantization error feeds back into encoder updates through the straight-through estimator (STE). Here we provide a more detailed derivation of this approximation. Let the encoder output be ze = Eθ (x) and the quantized representation be 
+
+zq = ze + ϵ, ϵ = zq − ze. (20) Let ℓ(z) denote the decoder-side loss as a function of the latent input to the decoder. In a continuous autoencoder, the encoder would receive a gradient evaluated at the continuous latent point: 
+
+gcont  
+
+> θ
+
+= Jθ (x)⊤∇z ℓ(z) z=ze
+
+, (21) where 
+
+Jθ (x) = ∂E θ (x)
+
+∂θ (22) is the encoder Jacobian. In VQ training with the STE, the forward pass uses zq , but the quantizer is treated as identity-like in the backward pass. Therefore, the encoder receives the decoder-side gradient evaluated at the quantized point: 
+
+gSTE  
+
+> θ
+
+= Jθ (x)⊤∇z ℓ(z) z=zq
+
+. (23) Using a first-order Taylor expansion around ze, we have 
+
+∇z ℓ(zq ) = ∇z ℓ(ze + ϵ) ≈ ∇ z ℓ(ze) + Hℓ(ze)ϵ, (24) where Hℓ(ze) is the Hessian of the decoder-side loss with respect to the latent input. Substituting this approximation into the STE gradient gives 
+
+gSTE  
+
+> θ
+
+≈ Jθ (x)⊤∇z ℓ(ze) + Jθ (x)⊤Hℓ(ze)ϵ. (25) Since the first term is gcont  
+
+> θ
+
+, the difference between the STE gradient and the continuous-latent gradient is approximately 
+
+gSTE  
+
+> θ
+
+− gcont  
+
+> θ
+
+≈ Jθ (x)⊤Hℓ(ze)ϵ. (26) This approximation shows that the STE gradient mismatch is controlled by the quantization residual 
+
+ϵ together with the local curvature of the decoder-side loss. When the codebook tracks the encoder distribution well, ∥ϵ∥ remains small and the STE gradient is closer to the continuous-latent gradient. However, when encoder drift causes codebook lag and dead codes, the active code vectors become poorer representatives of the latent distribution, increasing ∥ϵ∥. This can enlarge the STE gradient-estimation gap and further perturb encoder updates. Thus, codebook collapse can form a positive feedback loop: encoder drift → codebook lag → dead codes → ∥ ϵ∥ ↑→ STE gradient-estimation gap → encoder drift ↑ .
+
+(27) This provides the mechanism behind the catastrophic collapse behavior observed in the encoder-drift stress test in Section 6.3. 
+
+A.2 Batch-Size-One Illustration of Codebook Lag 
+
+We also give a simple batch-size-one illustration of how encoder drift can make non-selected codes lag behind the moving latent geometry. At step t = 0 , suppose the model processes sample x1, whose nearest code is c(0)  
+
+> q1
+
+. The encoder is updated through the STE as 
+
+θ(1) = θ(0) − ηθ ∇θ L(θ) θ=θ(0) . (28) At the same time, the embedding loss updates only the winning code: 
+
+c(1)  
+
+> j
+
+= c(0)  
+
+> j
+
++ ηc
+
+
+
+z(0)  
+
+> e
+
+(x1) − c(0) 
+
+> j
+
+
+
+1[j = q1]. (29) 12 Therefore, after one training step, the encoder has changed globally, but only the selected code has directly followed the movement of the latent space. Now consider another sample x2, whose nearest code at step t = 0 is c(0)  
+
+> q2
+
+, with q2̸ = q1. Because the encoder has already been updated using x1, the latent position of x2 changes approximately as 
+
+z(1)  
+
+> e
+
+(x2) ≈ z(0)  
+
+> e
+
+(x2) + J(0)  
+
+> θ
+
+(x2)∆ θ(0) . (30) However, because cq2 was not selected when processing x1, it does not directly move: 
+
+c(1)  
+
+> q2
+
+= c(0)  
+
+> q2
+
+. (31) This creates an immediate asymmetry: the latent feature of x2 has drifted, but its previously associated code has not. If the drift is large enough, z(1)  
+
+> e
+
+(x2) may cross a Voronoi boundary and become closer to another code: 
+
+q(1) (x2) = arg min  
+
+> j
+
+z(1)  
+
+> e
+
+(x2) − c(1) 
+
+> j
+> 22
+
+̸ = q2. (32) Once this happens, cq2 loses the assignment. After a code stops winning assignments, it no longer receives embedding updates and may fall increasingly far behind the moving latent distribution. As discussed in Appendix A.1, such codebook lag can further increase the quantization residual and feed back into encoder updates through the STE. 
+
+A.3 Controlled Evidence Beyond Poor Initialization 
+
+To test whether utilization decay can occur even with favorable initialization, we train a continuous autoencoder to convergence, extract its latent features, initialize the codebook by k-means, and then continue VQ training with the STE. This setup removes poor codebook initialization as a primary confounding factor: under a frozen encoder, the k-means centroids are already well aligned with the latent distribution and form an approximate fixed point of the standard VQ update, as discussed in Appendix F. Figure 3 shows that codebook utilization still decreases after VQ training begins, while Dt 
+
+> RMS
+
+remains non-zero. Thus, utilization decay is not merely a consequence of poor initialization. Even from a favorable assignment structure, residual encoder movement after quantizer insertion can destabilize the codebook. This observation is consistent with the feedback view in Section 2.2: encoder drift induces codebook lag, stale codes lose assignments, quantization residuals grow, and the resulting STE gradient-estimation gap can further destabilize the encoder. 
+
+## B Extended Related Work 
+
+B.1 Stochastic Quantization, Regularization, and Code Maintenance 
+
+A first line of work addresses codebook collapse by modifying the assignment or update rule so that more code vectors receive training signal. Instead of relying strictly on deterministic nearest-neighbor assignment, softened or stochastic quantization methods allow code selection to become probabilistic [Roy et al., 2018, Williams et al., 2020]. SQ-VAE [Takida et al., 2022], for example, introduces stochastic quantization within a variational framework, allowing code selection to be treated probabilistically rather than as a hard argmin. Regularized VQ [Zhang et al., 2023] further combines prior-distribution regularization and stochastic mask regularization to improve token utilization and reduce mismatch between training and inference. Another pragmatic family of methods focuses on code maintenance. In large-scale systems, dead or stale codes are often reset or replaced using more active latent features. This idea is widely used in practice, including in Jukebox [Dhariwal et al., 2020] and SoundStream [Zeghidour et al., 2021]. Related work such as Online Clustered Codebook also updates the codebook with explicit clustering-style mechanisms [Zheng and Vedaldi, 2023]. Although such replacement heuristics do not by themselves explain the origin of collapse, they are effective at preventing permanent code starvation and are therefore a useful complement to more principled update mechanisms. NSVQ adopts this practical viewpoint but places it in a non-stationary framework: replacement is not treated as a stand-alone solution, but rather as a way to compensate for the approximation error of the drift-propagation mechanism used during the early, highly non-stationary phase of training. 13 Figure 3: Controlled evidence that encoder drift and codebook collapse remain coupled under favorable initialization. A continuous autoencoder is first trained to convergence, and the codebook is initialized by k-means on the converged latent features before STE-based VQ training begins. Despite this favorable initialization, the RMS encoder drift DRMS  
+
+> t
+
+defined in Eq. (7) remains non-zero and codebook utilization progressively decreases. Encoder drift is computed between consecutive logged checkpoints with interval ∆ = 1 optimizer steps on a fixed evaluation subset. 
+
+B.2 Mapping-Based and Dense-Update Codebook Adaptation 
+
+A second and increasingly influential line of work attempts to reduce collapse by making codebook updates denser. Instead of updating only the winning code vector, these methods parameterize the codebook through a transformation Pψ (·), so that changing ψ alters the entire set of effective codes simultaneously. Formally, let 
+
+C′ = Pψ (C). (33) After observing one batch, not only the selected transformed code Pψ (cqi ) but all transformed codes can change because they share the same mapping parameters. In this sense, for any non-winning code cm with m̸ = qi, the update to ψ induces an implicit motion term: 
+
+Pψ(t+1) (cm) = Pψ(t) (cm) + Jψ(t) (cm)∆ ψ(t). (34) Straightening Out the Straight-Through Estimator [Huh et al., 2023] is a key precursor in this direction. It introduces an affine reparameterization of code vectors to alleviate optimization difficulties caused by sparse codebook gradients and STE mismatch. VQGAN-LC [Zhu et al., 2024a] extends this idea to large codebooks by learning a projector over a frozen, pre-initialized codebook, enabling much higher utilization at scale. SimVQ [Zhu et al., 2024b] simplifies the mapping to a single linear layer and shows that even this minimal reparameterization can strongly improve codebook health. More recently, FVQ [Chang et al., 2025] replaces the simple mapping with a more expressive projector architecture and reports full codebook utilization under large-scale training. These methods are highly effective, but their dense updates are implicit. The induced motion of non-winning codes is not explicitly constrained to match the actual drift of the encoder distribution. In addition, mapping-based approaches introduce extra parameters and additional optimization dynamics, which may increase computational cost or create new capacity bottlenecks. NSVQ is complementary to this family: rather than relying only on a learned projector, it explicitly models the non-stationary movement of the encoder distribution and encourages nearby code vectors to track it during the unstable early phase of training. 
+
+B.3 Freezing the Encoder and Continuing to Optimize the Quantizer or Decoder 
+
+A third direction decouples representation learning from discretization by freezing some or all of the backbone once the continuous latent space is sufficiently mature. This idea aligns closely with our non-stationarity argument: if encoder drift is a major driver of collapse, then stopping encoder updates after convergence should make codebook learning substantially easier. 14 Recent tokenizer research increasingly follows this philosophy. CODA [Liu et al., 2025] studies how to convert off-the-shelf continuous VAEs into discrete tokenizers, and its ablations show that adapting the decoder yields substantial gains, whereas adapting the encoder provides only marginal benefit. ReVQ [Zhang et al., 2025] freezes both the encoder and decoder of a pretrained VAE and trains only a quantizer together with a lightweight rectifier. VQ-Transplant [Fang et al., 2026] preserves pretrained encoder-decoder parameters, replaces the quantization module, and introduces a short decoder adaptation stage to reduce the mismatch between the new quantizer and the pretrained decoder. These works suggest that, once the latent space is sufficiently mature, continued encoder updates may no longer be essential for improving discretization quality. Instead, fixing the latent geometry and optimizing the quantizer and decoder around it can lead to a favorable stability-performance trade-off. QLIP [Zhao et al., 2025] also adopts a two-stage training pipeline in which the visual encoder is frozen in the second stage and only the bottleneck quantizer and decoder are optimized. However, its motivation differs from ours. QLIP freezes the encoder primarily to resolve practical conflicts between contrastive learning and GAN-based reconstruction, which prefer different batch-size and memory regimes. In contrast, our freezing strategy is motivated by the dynamics of VQ training itself. We freeze the encoder to remove encoder-induced latent drift, thereby converting quantizer learning into a more stable problem under a fixed latent geometry. Although freezing the encoder can stabilize tokenizer training, prior work also suggests that naive frozen-backbone quantization is not always sufficient for high-quality VQ reconstruction [Liu et al., 2025, Zhang et al., 2025, Fang et al., 2026]. In standard VQ-VAE training, the commitment loss shapes encoder outputs toward the selected code vectors [van den Oord et al., 2017]. If the encoder is frozen from the beginning, this objective cannot adapt the continuous feature space to the discrete codebook. As a result, the quantizer must fit a fixed latent distribution that may not be sufficiently clustered, fine-grained, or reconstruction-oriented. Consistent with this limitation, recent studies on continuous-to-discrete tokenizer conversion show that additional quantizer, decoder, or rectifier adaptation is often needed to recover fine-grained reconstruction quality [Liu et al., 2025, Zhang et al., 2025, Wang et al., 2025]. Our stage-wise freezing strategy differs from naive frozen-backbone tokenization. NSVQ does not freeze an arbitrary pretrained encoder at the start. Instead, Stage 1 first trains the encoder, decoder, and quantizer jointly under the VQ objective, allowing the latent space to become reconstruction-oriented and quantization-aware. This design is also consistent with recent evidence that the timing of quantization matters: allowing the encoder to first form a more mature latent space can improve the quality of the discrete codebook [Liu et al., 2025, Zhang et al., 2025, Wang et al., 2025]. Only after the encoder has largely matured do we freeze it after Stage 1. At this point, freezing no longer prevents the encoder from learning a VQ-compatible representation; rather, it removes further encoder drift and converts codebook learning into a stable consolidation problem. Stage 2 then reintroduces adversarial refinement under the same fixed latent geometry. Therefore, in NSVQ, encoder freezing is not used as a stand-alone shortcut, but as a carefully timed mechanism for suppressing non-stationarity after the latent space has already been shaped by VQ training. 
+
+## C Additional Details of the NSVQ Training Strategy 
+
+C.1 VQ Autoencoder Setup 
+
+NSVQ builds on a standard VQ-based autoencoder with an encoder Eθ , a decoder Dϕ, and a discrete codebook C = {cj }Kj=1 , where cj ∈ Rd. Given an input image x, the encoder produces a continuous latent representation 
+
+ze = Eθ (x). (35) Quantization is performed by nearest-neighbor assignment: 
+
+q = arg min  
+
+> j
+
+∥ze − cj ∥22, (36) and the decoder reconstructs the image from the quantized representation zq = cq :
+
+ˆx = Dϕ(zq ). (37) 15 C.2 Derivation of the Non-Stationary Embedding Loss 
+
+The core idea of NSVQ is to propagate encoder drift not only to the winning code, but also to nearby non-winning codes, so that the codebook can better track a non-stationary latent distribution. In standard VQ training, only the selected code receives a direct embedding update for each latent vector. However, when the encoder changes rapidly, nearby codes may also need to move with the local latent manifold; otherwise, they can lag behind the drifting encoder distribution and eventually become inactive. At iteration t, suppose the current sample is xi with encoder output Eθ(t) (xi), and let qi be its winning code index. For another sample xj , the encoder update induced by xi changes its latent representation as 
+
+Eθ(t+1) (xj ) = Eθ(t) (xj ) + ∆ E(xj ). (38) Under a first-order approximation, 
+
+∆E(xj ) ≈ J(t) 
+
+> θ
+
+(xj )∆ θ(t), (39) where J(t) 
+
+> θ
+
+(xj ) is the encoder Jacobian with respect to the parameters. One gradient step induced by the loss on xi gives 
+
+∆θ(t) = −η ∂L(Eθ(t) (xi)) 
+
+∂θ = −ηJ (t) 
+
+> θ
+
+(xi)⊤gi, gi = ∂L
+
+∂E θ(t) (xi) . (40) Substituting this into the expression for ∆E(xj ) yields 
+
+∆E(xj ) ≈ − ηJ (t) 
+
+> θ
+
+(xj )J(t) 
+
+> θ
+
+(xi)⊤gi = −ηK (t) 
+
+> θ
+
+(xj , x i)gi, (41) where 
+
+K(t) 
+
+> θ
+
+(xj , x i) = J(t) 
+
+> θ
+
+(xj )J(t) 
+
+> θ
+
+(xi)⊤ (42) is the encoder-induced neural tangent kernel between xj and xi. This expression shows that the latent movement of xj caused by an update on xi depends on the coupling between their encoder Jacobians. Computing this exact kernel is intractable during large-scale VQ training. We therefore approximate the coupling between latent points using a distance-based kernel in latent space: 
+
+k(xj , x i) = exp 
+
+
+
+− ∥Eθ (xj ) − Eθ (xi)∥22
+
+2σ2
+
+
+
+. (43) This replacement approximates the matrix-valued NTK Kθ (xj , x i) by an isotropic scalar kernel 
+
+k(xj , x i)I. We use this only as a computationally tractable locality approximation, not as an exact NTK estimate. This gives the practical approximation 
+
+∆E(xj ) ≈ k(xj , x i)∆ E(xi). (44) Thus, Eq. (44) motivates where to propagate auxiliary training signal: latent locations close to the current sample should receive stronger drift propagation than distant locations. However, the NTK-style analysis does not directly specify the codebook update direction, because the exact task-gradient-induced drift vector ∆E(xi) is not explicitly available for each non-winning code. We therefore use a practical drift-and-catch-up surrogate for the update direction. The residual 
+
+sg[ zi] − cqi approximates the local encoder-codebook mismatch around the currently selected active code cqi . However, directly translating a non-winning code by this residual implicitly assumes that the code is already active and associated with a nearby latent point. This assumption is undesirable in large-codebook training, where some codes may be stale or inactive. To prevent such codes from falling further behind, we add a catch-up correction cqi − cj , which pulls the non-winning code toward the selected active code. Combining the two terms gives 
+
+(sg[ zi] − cqi ) + ( cqi − cj ) = sg[ zi] − cj .
+
+Therefore, the final auxiliary direction is a locality-weighted drift-and-catch-up update: 
+
+∆cj ∝ wij (sg[ zi] − cj ) , j̸ = qi, (45) where 
+
+wij = exp 
+
+
+
+− ∥ sg[ zi] − cj ∥22
+
+2σ2
+
+
+
+. (46) 16 The winning code is still updated by the standard embedding loss, while nearby non-winning codes receive auxiliary drift-aware updates. This yields the following update rule: 
+
+∆cj = ηc
+
+(sg[ zi] − cqi , j = qi,wij (sg[ zi] − cj ) , j̸ = qi, (47) where wij is the detached locality weight. The non-winning branch of Eq. (47) can be implemented by minimizing the following auxiliary embedding objective with detached locality weights: 
+
+L′ 
+
+> emb
+
+= ∥ sg[ Eθ (xi)] − cqi ∥22 + X 
+
+> j̸=qi
+
+sg 
+
+
+
+exp 
+
+
+
+− ∥ sg[ Eθ (xi)] − cj ∥22
+
+2σ2
+
+ 
+
+∥ sg[ Eθ (xi)] − cj ∥22. (48) Because wij is detached, the gradient with respect to cj is proportional to wij (cj −sg[ zi]) , so gradient descent produces the attractive update wij (sg[ zi] − cj ). The weight determines which non-winning codes are close enough to receive an auxiliary update, but it is not differentiated. Therefore, for 
+
+j̸ = qi, the negative gradient direction is 
+
+−∇ cj L′ 
+
+> emb
+
+∝ wij (sg[ Eθ (xi)] − cj ) ,
+
+where wij denotes the detached locality weight. Hence the induced update is strictly attractive toward the current encoder output. The first term is the standard embedding loss for the winning code. The second term extends the update to nearby non-winning codes, with a strength determined by their distance to the current encoder output. In the implementation used in the main paper, we further normalize the kernel weights for easier tuning. For each latent vector zi = Eθ (xi), we define 
+
+dij = ∥sg[ zi] − cj ∥22 , qi = arg min  
+
+> j
+
+dij , (49) and use the softmax-normalized locality weight 
+
+pij = exp( −dij /τ )
+
+PKk=1 exp( −dik /τ ) , ˜pij = sg[ pij ]. (50) Here, τ plays the role of a temperature parameter that controls the locality of the dense update. A smaller τ concentrates the auxiliary update on codes closest to the current latent vector, while a larger 
+
+τ spreads the update more broadly. As in the main text, the softmax is normalized over all codes, including the winning code, while the auxiliary loss sums only over non-winning codes. We do not redistribute the winning-code probability mass, because the winning code already receives the standard embedding update. The practical non-stationary embedding loss used by NSVQ is 
+
+LN S = 1
+
+N d 
+
+> N
+
+X
+
+> i=1
+
+X 
+
+> j̸=qi
+
+˜pij dij . (51) where N is the number of latent positions and d is the code dimension. This loss corresponds to the softmax-normalized version of the kernel-weighted non-winning-code update, with the normalized locality weights treated as constants during backpropagation. The stop-gradient prevents the derivative of the softmax weights from introducing repulsive terms and makes the induced codebook update consistent with the attractive update rule in Eq. (47) . The normalization makes the dense-update term easier to tune, because its global contribution can be controlled by a single coefficient α.Combining the standard winning-code embedding loss, the commitment loss, and the non-stationary dense update gives the complete Stage-1 quantization loss: 
+
+L(1) vq = 1
+
+N d 
+
+> N
+
+X
+
+> i=1
+
+∥sg[ zi] − cqi ∥22 + β 1
+
+N d 
+
+> N
+
+X
+
+> i=1
+
+∥zi − sg[ cqi ]∥22 + αLNS . (52) Equivalently, using zq to denote the quantized latent representation, this can be written compactly as 
+
+L(1) vq = ∥zq − sg[ ze]∥22 + β ∥ze − sg[ zq ]∥22 + αLNS . (53) Thus, NSVQ preserves hard nearest-neighbor quantization in the forward pass, while adding a drift-aware auxiliary update for nearby non-winning codes during the non-stationary Stage 1 training phase. 17 C.3 Codebook Replacement in Stage 1 
+
+In addition to the non-stationary embedding loss, Stage 1 uses a codebook replacement strategy to revive persistently inactive entries. During each epoch, we accumulate the usage count of every code. At the end of the epoch, codes whose usage falls below a dead-code threshold are marked as inactive. Each dead code is replaced by copying an active source code, optionally with a small Gaussian perturbation: 
+
+cnew  
+
+> j
+
+= cs(j) + ϵ, ϵ ∼ N (0 , σ 2I). (54) The source code cs(j) can be selected either from the most frequently used code or by sampling from active codes with probability proportional to their usage. In our implementation, replacement is used only in Stage 1, where encoder drift is strongest and dead-code recovery is most necessary. After the encoder is frozen, replacement is disabled because the codebook is then optimized under a fixed latent geometry. 
+
+C.4 Encoder-Freezing Criterion 
+
+We use the epoch-averaged commitment loss as a practical indicator of whether the encoder–codebook interaction has stabilized. Let ℓcommit  
+
+> t
+
+denote the average commitment loss over epoch t:
+
+ℓcommit  
+
+> t
+
+= 1
+
+|B t|
+
+X
+
+> b∈B t
+
+Lcommit (b), (55) where Bt is the set of mini-batches in epoch t, and 
+
+Lcommit = ∥ze − sg[ zq ]∥22 . (56) The encoder is frozen when the epoch-averaged commitment loss has not decreased for 10 consecutive epochs. Equivalently, if no new lower value of ℓcommit  
+
+> t
+
+is observed within a 10-epoch patience window, we regard the encoder–codebook interaction as having reached a plateau: 
+
+> t
+
+min  
+
+> s=t−9
+
+ℓcommit  
+
+> s
+
+≥ min  
+
+> u≤t−10
+
+ℓcommit  
+
+> u
+
+. (57) A decreasing commitment loss indicates that the encoder outputs and selected code vectors are still adapting to each other. In contrast, when the epoch-averaged commitment loss does not decrease for 10 consecutive epochs, the latent geometry is considered sufficiently stable. NSVQ then freezes the encoder and enters the frozen-encoder warm-up stage. 
+
+C.5 Why the Warm-up Stage Is Separated from Stage 2 
+
+A direct transition from Stage 1 to Stage 2 can be unstable because adversarial gradients may disrupt codebook and decoder adaptation immediately after the encoder is frozen. Although the latent distribution becomes stationary after freezing, the quantizer and decoder may still be insufficiently aligned with this fixed encoder manifold. Applying GAN pressure too early can amplify transient quantization errors and destabilize reconstruction. The warm-up stage avoids this issue by first optimizing the quantizer and decoder without adversarial interference. During warm-up, the encoder remains frozen, while adversarial training, LNS , and codebook replacement are disabled. Once the quantizer and decoder have adapted to the fixed latent geometry, Stage 2 re-enables adversarial training for perceptual refinement. Thus, the warm-up stage acts as a collapse-safe transition between non-stationary codebook learning and adversarial refinement. 
+
+C.6 Implementation Details for Stage Transitions 
+
+To ensure stable and reproducible training, we carefully control trainable parameters and adver-sarial updates during stage transitions. When transitioning from Stage 1 to the warm-up stage, the encoder parameters are frozen by setting requires_grad=False . The decoder and quantizer remain trainable. The non-stationary embedding loss and codebook replacement are disabled, since encoder-induced non-stationarity has been removed. Adversarial training is also disabled entirely during warm-up, so both discriminator updates and generator-side adversarial losses are removed. 18 When transitioning from the warm-up stage to Stage 2, the encoder remains frozen and adversarial training is re-enabled. In practice, we use a short linear ramp for the adversarial loss so that the generator and discriminator are reintroduced gradually rather than abruptly. Learning rates and optimizer hyperparameters are kept unchanged across phases. These choices ensure that phase transi-tions modify only the intended aspects of training, such as removing encoder drift or reintroducing perceptual refinement, rather than introducing unrelated optimization artifacts. 
+
+## D Additional Experimental Details 
+
+D.1 Datasets and Evaluation Protocol 
+
+We evaluate NSVQ on image reconstruction using ImageNet-1k at 128 × 128 resolution. Following SimVQ [Zhu et al., 2024b], models are trained on the ImageNet training set and evaluated on the ImageNet validation set. We do not use validation-based early stopping or checkpoint selection. Due to computational constraints, controlled component-level ablations and hyperparameter studies are mainly conducted on CelebA at 128 × 128 resolution, while the main comparison is reported on ImageNet-1k. For fair internal comparisons and ablations, we keep the training configuration fixed unless a specific component is being evaluated. Codebook utilization is computed as the fraction of codebook entries activated at least once on the evaluation set. 
+
+D.2 Architecture and Quantizer Hyperparameters 
+
+Our VQ autoencoder follows the VQGAN-style encoder-decoder architecture [Esser et al., 2021]. Unless otherwise specified, the latent channel dimension is d = 128 and the codebook size is 
+
+K = 65 ,536 . All models encode images into 16 × 16 discrete tokens. The encoder-decoder backbone uses a base channel width of 128 and two residual blocks at each resolution level. The NSVQ quantizer uses commitment coefficient β = 0 .25 , non-stationary loss coefficient α = 0 .1,and temperature τ = 0 .35 . Unless otherwise specified, the loss weights are set to 
+
+λperc = λadv = λvq = 1 . (58) 
+
+Additional tokenizer configurations. Unless otherwise specified, the default tokenizer uses latent channel dimension d = 128 , codebook size K = 65 ,536 , and a 16 × 16 token grid. For the LDM generation experiment, we train a separate tokenizer with latent channel dimension d = 128 ,codebook size K = 65 ,536 , and a 16 × 16 token grid on ImageNet-1k at 128 × 128 resolution. For the 256 × 256 reconstruction experiment, we train separate tokenizers at 256 × 256 resolution with a spatial downsampling factor of 16 . This produces a 16 × 16 token grid, corresponding to 256 discrete tokens per image. All compared methods in this setting use the same resolution, downsampling factor, token budget, codebook size, and evaluation protocol. 
+
+D.3 Stage 1 + Warm-up + Stage 2 Schedule 
+
+NSVQ is trained with the proposed Stage 1 + Warm-up + Stage 2 schedule. All ImageNet-1k 
+
+128 × 128 autoencoder experiments are trained for 70 epochs, corresponding to 700700 optimizer steps under the global batch size specified in Appendix D.4. CelebA 128 × 128 experiments are trained for 100 epochs, corresponding to 90700 optimizer steps. The same total budget is used for all methods within each dataset unless otherwise specified. Stage 1 corresponds to non-stationary-aware codebook learning. During this phase, the encoder, decoder, quantizer, and discriminator are jointly trained. The non-stationary embedding loss and codebook replacement are enabled to prevent early codebook collapse while the encoder distribution is still drifting. Codebook replacement is performed only during Stage 1. We accumulate the usage count of each code during every epoch. After a 5-epoch replacement warm-up, codes with usage below 1 are treated as inactive and replaced by active codes using probabilistic sampling with Gaussian perturbation of standard deviation 0.001. Replacement is disabled after encoder freezing, because the latent distribution is then fixed and the codebook can be optimized by standard fitting losses. 19 The transition from Stage 1 to the frozen-encoder warm-up stage is determined by a commitment-loss plateau criterion. Let ℓcommit  
+
+> t
+
+denote the average commitment loss over epoch t. We freeze the encoder when ℓcommit  
+
+> t
+
+has not decreased for 10 consecutive epochs. Equivalently, if no new lower value of ℓcommit  
+
+> t
+
+is observed within a 10-epoch patience window, we regard the encoder–codebook interaction as stabilized and freeze the encoder. In our ImageNet experiments, this criterion triggers encoder freezing around epoch 50. The detailed step-based training-dynamics figures in Appendix E.3 are reported on CelebA 128 × 128 , where the same criterion triggers at step 45,350. After encoder freezing, NSVQ enters a short frozen-encoder warm-up stage for 3 epochs. During warm-up, the encoder remains frozen, while the decoder and quantizer remain trainable. Adversarial training, LNS , and codebook replacement are disabled. This phase allows the quantizer and decoder to adapt to the fixed encoder manifold using reconstruction-oriented losses before GAN pressure is reintroduced. Stage 2 continues training with the encoder frozen. The decoder and quantizer remain trainable, and adversarial training is re-enabled for perceptual refinement. Given the fixed total budget of 70 epochs, Stage 2 is run for the remaining epochs after the commitment-loss-triggered Stage 1 and the 3-epoch warm-up stage. In our ImageNet experiments, the freeze criterion typically triggers around epoch 50, so Stage 2 lasts approximately 17 epochs. To avoid abrupt optimization changes, the adversarial loss is linearly ramped up over the first 2 epochs of Stage 2, with a maximum GAN factor of 1.0. The discriminator is not reset when transitioning from warm-up to Stage 2. 
+
+D.4 Optimization Details 
+
+All models are trained with Adam using a learning rate of 1 × 10 −4 and no learning-rate scheduler. Exponential moving average (EMA) is enabled throughout training. Training is conducted with distributed data parallelism on 4 GPUs using mixed precision. The batch size is 32 per GPU, yielding a global batch size of 128. The number of dataloader workers is 4 per process. Across phase transitions, we preserve optimizer states for the remaining trainable parameters. When the encoder is frozen, its parameters are removed from gradient updates by setting 
+
+requires_grad=False . The decoder and quantizer remain trainable throughout all phases. During the warm-up stage, discriminator updates and generator-side adversarial losses are disabled entirely. During Stage 2, adversarial training is re-enabled while keeping the encoder frozen. 
+
+D.5 LDM Generation Setup LDM generation setup. For the LDM generation experiment, we train a separate tokenizer on ImageNet-1k at 128 × 128 resolution and use it as the first-stage model for latent diffusion training. The latent diffusion model operates on a 16 × 16 latent grid with 128 latent channels. For all tokenizers, we use the same latent-space U-Net architecture: input and output channels are both 128, the base channel width is 256, the channel multipliers are [1 , 2, 4] , each resolution level uses 2 residual blocks, attention is applied at latent resolutions 16 , 8, 4, the number of attention heads is 4, and dropout is set to 0.0. The diffusion model is trained with a DDPM objective using 1000 diffusion timesteps, a linear noise schedule from 1 × 10 −4 to 2 × 10 −2, ϵ-prediction, and an L2 denoising loss. We train the LDM for 100 epochs using AdamW with learning rate 1 × 10 −4, weight decay 0.0, mixed precision training, and distributed data parallelism on 4 GPUs. The data-loader batch size is 32 per GPU, giving a global batch size of 128. During evaluation, samples are generated using deterministic DDIM sampling with 50 steps ( η = 0 .0). FID is computed using 5,000 generated samples against the ImageNet validation set. Here, η = 0 .0 denotes deterministic DDIM sampling without additional stochastic noise in the reverse process. 
+
+D.6 Evaluation Metrics 
+
+We evaluate reconstruction quality using rFID, LPIPS, SSIM, and PSNR. Codebook utilization is computed as the fraction of codebook entries activated at least once on the evaluation set. We also report computational cost, including average epoch time and peak GPU memory usage, measured under the same distributed training setup. 20 E Additional Results 
+
+E.1 Component-Level Ablation on CelebA 
+
+To analyze the contribution of each component under limited compute, we conduct a controlled ablation study on CelebA at 128 × 128 resolution. Table 4 shows that no single component is sufficient to achieve the best performance. The freeze-and-refine schedule alone leaves codebook utilization low, indicating that encoder freezing cannot recover a poorly trained codebook by itself. Code replacement improves utilization, while the non-stationary loss achieves better FID, suggesting that dense drift-aware updates more directly address the mismatch caused by encoder drift. The full NSVQ pipeline achieves the best FID and LPIPS while maintaining high utilization, showing that the components are complementary. Table 4: Ablation study of NSVQ on CelebA at 128 × 128 resolution. The full pipeline consists of Stage 1, a frozen-encoder warm-up stage, and Stage 2. Lower is better for FID and LPIPS; higher is better for SSIM, PSNR, and utilization. Variant Freeze-and-refine schedule NS loss Codebook replacement Training phases FID ↓ LPIPS ↓ SSIM ↑ PSNR ↑ Util. ↑                                                               
+
+> Freeze schedule only ✓––1, W, 2 14.87 0.095 85.5 27.14 0.36 Replacement only ––✓1 only 15.38 0.089 86.6 27.35 0.82 NS loss only –✓–1 only 14.43 0.084 86.4 27.99 0.84 Stage 1 + Stage 2 only ✓✓✓1 + 2 14.20 0.085 87.1 27.60 0.88 Stage 1 + Warm-up only ✓✓✓1 + W 17.26 0.083 88.3 29.00 0.93 No encoder freezing –✓✓1 only 14.37 0.088 86.8 28.24 0.99 Full NSVQ ✓✓✓1, W, 2 13.42 0.079 87.9 27.98 0.99
+
+E.2 Hyperparameter Sensitivity 
+
+We evaluate the sensitivity of NSVQ to the dense-update coefficient α and temperature τ in the non-stationary loss. As shown in Figure 4, NSVQ is stable across a moderate range of α, with 
+
+α = 0 .01 , 0.05 , and 0.1 all achieving competitive rFID. The best result is obtained at α = 0 .1.For τ , both τ = 0 .3 and τ = 0 .35 perform well, while overly small or large temperatures degrade performance. A very small τ makes the dense update too local, whereas a very large τ spreads the update too broadly and weakens locality. 
+
+Figure 4: Sensitivity analysis of NSVQ hyperparameters. 
+
+E.3 Detailed Training Dynamics 
+
+Figure 5 provides detailed CelebA 128 × 128 training curves for codebook utilization, commitment loss, and perceptual loss. During Stage 1, codebook utilization rapidly increases toward nearly full usage, while commitment loss remains relatively high because the quantizer must adapt to a moving encoder distribution. After the encoder is frozen at step 45,350 in this CelebA run, training enters the warm-up stage and commitment loss decreases sharply, consistent with the reduced non-stationarity shown in the main text. During warm-up, adversarial training is disabled, which allows the quantizer and decoder to adapt to the fixed encoder manifold using reconstruction-oriented losses. In Stage 2, adversarial training is re-enabled for perceptual refinement. Figure 6 shows the adversarial training dynamics. During the warm-up stage, GAN training is disabled to avoid destabilizing the quantizer and decoder immediately after encoder freezing. In 21 Stage 2, adversarial training is reintroduced, and the generator and discriminator losses return to an adversarial optimization process. Figure 7 shows the measured encoder drift across the proposed training phases. Drift is large at the beginning of Stage 1, decreases as the encoder approaches convergence, and becomes approximately zero once the encoder is frozen. 
+
+Figure 5: Detailed training dynamics on CelebA 128 × 128 , including codebook utilization, com-mitment loss, and perceptual loss. Encoder freezing begins at step 45,350 in this run, marking the transition from Stage 1 to the frozen-encoder warm-up stage. 
+
+Figure 6: Training dynamics of generator and discriminator losses. The adversarial objective is disabled during the frozen-encoder warm-up stage and re-enabled in Stage 2. 
+
+Figure 7: Detailed encoder drift across the proposed training phases. Drift is high during Stage 1, drops to approximately zero after the transition to the frozen-encoder warm-up stage, and remains near zero during Stage 2. 
+
+E.4 Computational Cost 
+
+We compare the computational cost of Vanilla VQ, SimVQ, and NSVQ under the same implementa-tion and training environment. As shown in Table 5, NSVQ increases average epoch time from 1055 22 s to 1257 s relative to SimVQ, corresponding to a 1.20 × time overhead. Peak allocated GPU memory increases from 34.47 GB to 38.49 GB, corresponding to a 1.12 × memory overhead. Peak reserved memory increases only slightly. These results indicate that the proposed non-stationary dense-update mechanism introduces moderate computational cost. Table 5: Computational cost comparison on ImageNet-1k at 128×128 using 4 GPUs and a global batch size of 128. Average epoch time is computed over 3 logged epochs. Peak GPU memory is the maximum observed value. Relative overhead is normalized by SimVQ. Method Epoch time Peak allocated memory Peak reserved memory Relative time Relative allocated memory Vanilla VQ 1048 s 34.49 GB 40.75 GB 1.00 × 1.00 ×          
+
+> SimVQ 1055 s 34.47 GB 40.77 GB 1.00 ×1.00 ×
+> NSVQ (Ours) 1257 s 38.49 GB 41.67 GB 1.20 ×1.12 ×
+
+## F Why Online VQ Converges to a k-Means Fixed Point 
+
+Let x ∈ Rd be sampled i.i.d. from a distribution P , and let the codebook be C = ( c1, . . . , c K ) ∈
+
+(Rd)K . Given C, define the Voronoi partition 
+
+Vk(C) = {x : ∥x − ck∥ ≤ ∥ x − cj ∥, ∀j}. (59) The expected quantization distortion is 
+
+J(C) = Ex∼P
+
+
+
+min  
+
+> k
+
+∥x − ck∥2
+
+
+
+=
+
+> K
+
+X
+
+> k=1
+
+Z 
+
+> Vk(C)
+
+∥x − ck∥2 dP (x). (60) Although the Voronoi boundaries move when the centroids are perturbed, the boundary terms cancel in the derivative of J(C). By Leibniz’s integral rule, differentiating the cell integrals gives interior terms and boundary terms. On a shared boundary between Vk(C) and Vl(C), we have 
+
+∥x − ck∥22 = ∥x − cl∥22, (61) so the boundary contributions from adjacent cells cancel. Assuming tie boundaries have zero probability mass, the gradient is 
+
+∂J ∂c k
+
+(C) = −2
+
+Z 
+
+> Vk(C)
+
+(x − ck) dP (x). (62) Setting the gradient to zero gives 
+
+ck = E[x | x ∈ Vk(C)] , (63) which is exactly the fixed-point condition of k-means: each centroid equals the conditional mean of its Voronoi cell. Now consider the standard winner-take-all online VQ update for a sample xt:
+
+kt(xt) = arg min  
+
+> j
+
+∥xt − c(t) 
+
+> j
+
+∥, (64) 
+
+c(t+1)  
+
+> k
+
+= c(t) 
+
+> k
+
++ ηt1[k = kt(xt)]  xt − c(t)
+
+> k
+
+. (65) Taking conditional expectation with respect to the current codebook gives 
+
+E
+
+h
+
+c(t+1)  
+
+> k
+
+− c(t) 
+
+> k
+
+| C(t)i
+
+= ηthk(C(t)), (66) 
+
+hk(C) = E [1[x ∈ Vk(C)]( x − ck)] = 
+
+Z 
+
+> Vk(C)
+
+(x − ck) dP (x). (67) Comparing the two expressions shows that ∂J ∂c k (C) = −2hk(C), so the mean online update direction is proportional to −∇ J(C). Therefore, online VQ is a stochastic approximation to gradient descent on the k-means distortion objective. 23 Equivalently, the recursion can be written as 
+
+c(t+1)  
+
+> k
+
+= c(t) 
+
+> k
+
++ ηt
+
+ hk(C(t)) + ξt,k 
+
+, (68) where ξt,k is a martingale-difference noise term with zero conditional mean. Under the standard Robbins–Monro conditions P 
+
+> t
+
+ηt = ∞ and P 
+
+> t
+
+η2 
+
+> t
+
+< ∞, together with bounded second moments and mild regularity assumptions, standard stochastic approximation theory implies that the iterates track the ODE 
+
+˙C(t) = h(C(t)) = − 12 ∇J(C(t)) . (69) Using J(C) as a Lyapunov function, 
+
+ddt J(C(t)) = ⟨∇ J(C(t)) , ˙C(t)⟩ = − 12 ∥∇ J(C(t)) ∥2 ≤ 0, (70) so trajectories converge to the stationary set {∇ J = 0 }. Hence, online VQ converges almost surely to a k-means fixed point, typically a local optimum. 
+
+## G Reconstruction Comparison 
+
+Figure 8 presents qualitative reconstruction comparisons between the ground truth images, the proposed NSVQ, SimVQ, and vanilla VQ. Consistent with the quantitative results in the main paper, NSVQ produces reconstructions that are generally sharper and structurally more faithful than vanilla VQ, while also showing clearer details than SimVQ in several regions. In the first example, NSVQ better preserves the fish boundaries and the net structure. In the second example, it recovers more coherent facial structure and clothing appearance, whereas vanilla VQ exhibits stronger distortions and SimVQ remains slightly blurrier. In the third example, NSVQ better maintains the elongated body contour of the fish and reduces local artifacts around the supporting structure. Overall, these examples suggest that the proposed training strategy improves not only codebook utilization, but also the perceptual quality and structural consistency of reconstructions. 
+
+## H Implementation Details for Stage Transitions 
+
+To ensure stable and reproducible training, we carefully design the transition between stages to avoid optimization discontinuities or unintended parameter updates. This section summarizes the key implementation details that make the stage-wise training procedure robust in practice. 
+
+Optimizer and parameter groups. Across stages, we maintain consistent optimizer configurations while modifying the set of trainable parameters. When transitioning from Stage 1 to Warm-up stage, the encoder parameters are frozen by setting requires_grad = False , and the optimizer is updated to exclude these parameters from gradient updates. The decoder and quantizer remain trainable throughout all stages. Importantly, we do not reinitialize the optimizer state when changing stages; instead, we preserve momentum and adaptive statistics, such as Adam moments, for the remaining trainable parameters. This avoids sudden optimization instability caused by restarting the optimizer. 
+
+Handling of optimizer state after freezing. Freezing the encoder effectively removes it from gradient updates but does not invalidate the optimizer state of the remaining modules. Since the encoder no longer contributes gradients, its associated optimizer states become inactive and are ignored. This ensures a smooth transition without requiring explicit state reset or reparameterization. 
+
+Gradient control and optimizer toggling. During adversarial training in Stage 1 and Stage 2, we explicitly control gradient flow using a toggle mechanism for generator and discriminator up-dates. In our implementation, based on PyTorch Lightning, we ensure that only the generator modules—encoder, decoder, and quantizer—receive gradients during generator updates, and only the discriminator receives gradients during discriminator updates. When entering Warm-up stage, adversarial training is disabled entirely. Both the discriminator updates and the corresponding toggle logic are turned off, so the training reduces to a standard reconstruction objective. This eliminates gradient interference from adversarial objectives and allows the quantizer and decoder to adapt to a fixed latent distribution. 24 Figure 8: Qualitative reconstruction comparison. From left to right: ground truth, NSVQ (our method), SimVQ, and vanilla VQ. Across all three examples, NSVQ produces reconstructions with sharper boundaries, fewer local artifacts, and better structural fidelity than vanilla VQ, while also providing modest visual improvements over SimVQ in fine details and object consistency. 
+
+Consistency across stage transitions. We avoid abrupt changes in optimization dynamics by freezing modules without reinitializing optimizers, gradually reintroducing adversarial training in Stage 2 via a linear ramp, and keeping learning rates and optimizer hyperparameters unchanged across stages. These design choices ensure that stage transitions modify only the intended aspects of training, such as removing encoder drift or reintroducing perceptual refinement, rather than introducing unintended optimization artifacts. 
+
+Practical robustness. In practice, we find that this transition strategy is stable across multiple runs and does not introduce noticeable spikes in loss curves beyond those expected from enabling or disabling adversarial objectives. The observed changes in training dynamics, such as the drop in commitment loss at the beginning of Warm-up stage, are therefore attributable to the intended design of the method, rather than to artifacts of optimizer reinitialization or gradient leakage. 
+
+Existing assets and licenses. We use ImageNet-1k and CelebA only for academic research evalua-tion and follow their respective terms of use. ImageNet-1k is used under the ImageNet terms of access, and CelebA is used under its non-commercial research terms. We cite the original dataset papers and websites where applicable. Our implementation builds on standard open-source deep learning libraries such as PyTorch, and evaluation follows commonly used reconstruction metrics including rFID, LPIPS, PSNR, and SSIM. Baseline methods are credited through their original publications, and any released code will include a license file and documentation specifying dependencies and their licenses. 25
