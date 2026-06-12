@@ -6,35 +6,28 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-11
-- 运行时间：2026-06-11 22:12:02 UTC
+- 最新运行日期：2026-06-12
+- 运行时间：2026-06-12 21:06:14 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：3
-- 速读区：2
+- 本次总论文数：2
+- 精读区：1
+- 速读区：1
 
 ### 今日简报（AI）
-今日精读两篇高分论文，分别聚焦文本到图像对齐与多轮编辑的时序一致性。值得关注STEDiff和AnchorEdit在提升生成可控性上的创新思路。建议优先阅读这两篇以把握图像生成前沿。
-- 详情：[/202606/11/README](/202606/11/README)
+今天更新2篇论文，聚焦扩散ODE的Stein稳定化与视觉自回归模型KV压缩。  
+最值得关注的是《Mitigating the Contractivity Trap in Diffusion ODEs via Stein Stabilization》（8.0分），它提出了一种解决扩散ODE收缩陷阱的新思路。  
+建议优先精读这篇高分论文，深入理解其稳定化机制，对扩散模型优化有直接启发。
+- 详情：[/202606/12/README](/202606/12/README)
 
 ### 精读区论文标签
-1. [STEDiff: Strengthening Text Embedding for Text-to-Image Alignment in Diffusion Model](/202606/11/2606.10653v1-stediff-strengthening-text-embedding-for-text-to-image-alignment-in-diffusion-model)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：训练无关方法改进扩散模型文本到图像对齐
-2. [AnchorEdit: Maintaining Temporal Consistency in Multi-turn Image Editing via Causal Memory](/202606/11/2606.11751v1-anchoredit-maintaining-temporal-consistency-in-multi-turn-image-editing-via-causal-memory)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：自回归扩散用于多轮图像编辑
-3. [ReCache: Learning Budget-Aware Caching Schedules for Diffusion Models via REINFORCE](/202606/11/2606.06060v1-recache-learning-budget-aware-caching-schedules-for-diffusion-models-via-reinforce)  
+1. [Mitigating the Contractivity Trap in Diffusion ODEs via Stein Stabilization](/202606/12/2606.07835v1-mitigating-the-contractivity-trap-in-diffusion-odes-via-stein-stabilization)  
    标签：评分：8.0/10、query:real-ir
-   evidence：扩散模型推理加速的缓存调度方法
+   evidence：扩散ODE推理稳定化方法
 
 ### 速读区论文标签
-1. [Beyond Raw Signals: Undecoded Generative Latents as Privileged Synthetic Data](/202606/11/2606.08336v1-beyond-raw-signals-undecoded-generative-latents-as-privileged-synthetic-data)  
+1. [HACK++: Towards More Effective Head-Aware Key-Value Compression for Efficient Visual Autoregressive Modeling](/202606/12/2606.08302v1-hack-towards-more-effective-head-aware-key-value-compression-for-efficient-visual-autoregressive-modeling)  
    标签：评分：6.0/10、query:real-ir
-   evidence：利用生成模型的潜在表示作为特权信息用于多模态学习
-2. [NSVQ: Mitigating Codebook Collapse by Stabilizing Encoder Drift in Vector Quantization](/202606/11/2606.11363v1-nsvq-mitigating-codebook-collapse-by-stabilizing-encoder-drift-in-vector-quantization)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：面向生成模型的向量量化训练策略
+   evidence：VAR头感知KV压缩
 
 
 <div class="dpr-home-promo-card">
