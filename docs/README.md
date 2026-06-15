@@ -6,79 +6,82 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-14
-- 运行时间：2026-06-14 20:29:08 UTC
+- 最新运行日期：2026-06-15
+- 运行时间：2026-06-15 23:06:49 UTC
 - 运行状态：成功
-- 本次总论文数：19
-- 精读区：8
-- 速读区：11
+- 本次总论文数：20
+- 精读区：12
+- 速读区：8
 
 ### 今日简报（AI）
-今天共读19篇论文，精读8篇，其中《Edit the Bits》与《Ultra Flash》分别拿到10分和9分。
-最亮眼的方向一是用比特级残差编辑提升视觉自回归模型的可控性，二是将实时流视频生成推进到高分辨率。
-建议普通读者先关注这两项工作，它们正在重塑图像和视频生成的“精修”与“实时高清”能力。
-- 详情：[/202606/14/README](/202606/14/README)
+今日精读12篇、速读8篇，聚焦生成模型在可控编辑与空间生成上的两篇满分研究。  
+最值得关注：360度全景编辑首次用重聚焦交叉注意力实现无调优扩散编辑，以及单步图像编辑新范式ChordEdit揭示现有方法的简化与全新见解。  
+下一步可尝试将此类零试错编辑思路迁移到视频或多视角生成，降低普通用户尝试成本。
+- 详情：[/202606/15/README](/202606/15/README)
 
 ### 精读区论文标签
-1. [Edit the Bits, Diff the Codes: Bitwise Residual Editing for Visual Autoregressive Models](/202606/14/2606.13558v1-edit-the-bits-diff-the-codes-bitwise-residual-editing-for-visual-autoregressive-models)  
+1. [Toward 360-Degree Indoor Panorama Editing via Tuning-Free Diffusion Model with Refocusing Cross-Attention](/202606/15/2606.14035v1-toward-360-degree-indoor-panorama-editing-via-tuning-free-diffusion-model-with-refocusing-cross-attention)  
    标签：评分：10.0/10、query:real-ir
-   evidence：提出一种针对逐位残差视觉自回归模型的无需训练的图像编辑器
-2. [Ultra Flash: Scaling Real-Time Streaming Video Generation to High Resolutions](/202606/14/2606.09150v1-ultra-flash-scaling-real-time-streaming-video-generation-to-high-resolutions)  
+   evidence：免微调扩散模型实现精确区域图像编辑。
+2. [Rethinking One-Step Image Editing through ChordEdit: Reproduction, Simplification, and New Insights](/202606/15/2606.14042v1-rethinking-one-step-image-editing-through-chordedit-reproduction-simplification-and-new-insights)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：分析并简化一步扩散图像编辑机制。
+3. [Conditioning Matters: Stabilizing Inversion and Attention in Diffusion Image Editing](/202606/15/2606.14125v1-conditioning-matters-stabilizing-inversion-and-attention-in-diffusion-image-editing)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：稳定扩散图像编辑中的反演与注意力以提升条件控制
+4. [Improving Lunar Topography with Deep Learning Schrödinger Bridges](/202606/15/2606.14638v1-improving-lunar-topography-with-deep-learning-schrdinger-bridges)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：基于扩散薛定谔桥的月球地形超分辨率
+5. [Enhanced Low-Density Region Exploration in Classifier-Guided Diffusion Models Through Modified Reverse Diffusion Sampling](/202606/15/2606.13347v1-enhanced-low-density-region-exploration-in-classifier-guided-diffusion-models-through-modified-reverse-diffusion-sampling)  
    标签：评分：9.0/10、query:real-ir
-   evidence：结合级联扩散与超分辨率训练实现实时高清视频生成。
-3. [sketch-plot: Progressive Editing for Text-to-Image Academic Figures](/202606/14/2606.09171v2-sketch-plot-progressive-editing-for-text-to-image-academic-figures)  
+   evidence：通过修改反向扩散采样增强分类器引导扩散模型的低密度区域探索
+6. [Dual-Constrained Diffusion Image Compression for Operational Rate-Distortion-Perception Optimization](/202606/15/2606.13366v1-dual-constrained-diffusion-image-compression-for-operational-rate-distortion-perception-optimization)  
    标签：评分：9.0/10、query:real-ir
-   evidence：用于文本到图像学术图的渐进式编辑管道，实现可控图像编辑
-4. [ARM: An AutoRegressive Large Multimodal Model with Unified Discrete Representations](/202606/14/2606.11188v1-arm-an-autoregressive-large-multimodal-model-with-unified-discrete-representations)  
+   evidence：提出带失真和幂等约束的扩散解码器，用于率-失真-感知优化的图像压缩
+7. [Recursively Trained Diffusion Models: Limiting Collapse Distribution and Spectral Characterization](/202606/15/2606.13796v1-recursively-trained-diffusion-models-limiting-collapse-distribution-and-spectral-characterization)  
    标签：评分：9.0/10、query:real-ir
-   evidence：在单一自回归模型中统一图像理解、生成和编辑
-5. [A Stabilized Path-Space Approach to Diffusion-Based Posterior Sampling](/202606/14/2606.12710v1-a-stabilized-path-space-approach-to-diffusion-based-posterior-sampling)  
+   evidence：递归训练下扩散模型崩溃的理论分析
+8. [Compressing Image Style Training into a Single Model Forward](/202606/15/2606.13809v1-compressing-image-style-training-into-a-single-model-forward)  
    标签：评分：9.0/10、query:real-ir
-   evidence：提出一种适用于贝叶斯逆问题的稳定扩散后验采样方法，可直接用于图像修复与超分辨率。
-6. [SeamEdit: A Black-Box VLM-Agnostic Pipeline for Large-Image Semantic Editing](/202606/14/2606.13041v1-seamedit-a-black-box-vlm-agnostic-pipeline-for-large-image-semantic-editing)  
+   evidence：通过扩散模型进行风格迁移，将风格训练压缩到前向传播中，实现高效图像编辑。
+9. [HiLo-Token: Input-Adaptive High-Low Frequency Token Compression for Efficient Image Editing](/202606/15/2606.13898v1-hilo-token-input-adaptive-high-low-frequency-token-compression-for-efficient-image-editing)  
    标签：评分：9.0/10、query:real-ir
-   evidence：使用VLM修复进行大图像语义区域编辑
-7. [DuET: Dual Expert Trajectories for Diffusion Image Editing](/202606/14/2606.13303v1-duet-dual-expert-trajectories-for-diffusion-image-editing)  
+   evidence：面向高效图像编辑的扩散模型令牌压缩
+10. [CaricHarmony: Contrastive Diffusion Paths for Identity-Preserving Caricature Synthesis](/202606/15/2606.13964v1-caricharmony-contrastive-diffusion-paths-for-identity-preserving-caricature-synthesis)  
    标签：评分：9.0/10、query:real-ir
-   evidence：通过双专家轨迹实现免训练扩散图像编辑
-8. [EvTexture++: Event-Driven Texture Enhancement for Video Super-Resolution](/202606/14/2606.13580v1-evtexture-event-driven-texture-enhancement-for-video-super-resolution)  
+   evidence：通过分离身份与形状条件的扩散模型实现漫画生成。
+11. [Local Coverage Governs Memorization in Diffusion Models](/202606/15/2606.14390v1-local-coverage-governs-memorization-in-diffusion-models)  
    标签：评分：9.0/10、query:real-ir
-   evidence：提出事件驱动的纹理增强视频超分辨率方法，直接针对图像超分辨率。
+   evidence：局部覆盖理论解释扩散模型记忆行为
+12. [Regional Climate Model Emulation with Diffusion Approaches: What is the Added Value of Generative Machine Learning?](/202606/15/2606.14570v1-regional-climate-model-emulation-with-diffusion-approaches-what-is-the-added-value-of-generative-machine-learning)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于扩散的生成模型用于气候降尺度（超分辨率）。
 
 ### 速读区论文标签
-1. [Self-Consistent Generative Paths via Admissible Random Variational Transport](/202606/14/2606.08953v1-self-consistent-generative-paths-via-admissible-random-variational-transport)  
+1. [Modality Forcing for Scalable Spatial Generation](/202606/15/2606.13676v1-modality-forcing-for-scalable-spatial-generation)  
    标签：评分：8.0/10、query:real-ir
-   evidence：扩散与流匹配生成模型中自洽路径的理论框架
-2. [sketch-plot: Progressive Editing for Text-to-Image Academic Figures](/202606/14/2606.09171v1-sketch-plot-progressive-editing-for-text-to-image-academic-figures)  
+   evidence：模态强制：使用分离噪声级别的扩散Transformer联合生成图像与深度
+2. [RepFusion: Leveraging Multimodal Priors for Denoising in Representation Space](/202606/15/2606.14700v1-repfusion-leveraging-multimodal-priors-for-denoising-in-representation-space)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向文本到图像学术图片的渐进式编辑流水线
-3. [Cranio-Diff: Diffusion-based Cross-domain Craniofacial Reconstruction with 2D X-ray Skull Guidance and Structural Identity Constraints](/202606/14/2606.09699v1-cranio-diff-diffusion-based-cross-domain-craniofacial-reconstruction-with-2d-x-ray-skull-guidance-and-structural-identity-constraints)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于扩散的跨域颅面重建
-4. [PTL-Diffusion: Manifold-Aware Diffusion with Periodic Terminal Laws](/202606/14/2606.09816v1-ptl-diffusion-manifold-aware-diffusion-with-periodic-terminal-laws)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：通过周期性终止定律改善低维流形数据的扩散模型结构
-5. [SHERPA: Seam-aware Harmonized ERP Adaptation for Open-Domain 360$^\circ$ Panorama Generation](/202606/14/2606.12213v1-sherpa-seam-aware-harmonized-erp-adaptation-for-open-domain-360circ-panorama-generation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：轻量级适配框架使文本到图像扩散模型能生成360度全景图。
-6. [High-Fidelity Two-Step Image Generation via Teacher-Aligned End-to-End Distillation](/202606/14/2606.12575v1-high-fidelity-two-step-image-generation-via-teacher-aligned-end-to-end-distillation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：通过扩散蒸馏实现两步高保真图像生成，是对扩散模型的算法改进
-7. [MilliVid: Hierarchical Latents for Long-Range Consistency in Video Generation](/202606/14/2606.09056v1-millivid-hierarchical-latents-for-long-range-consistency-in-video-generation)  
+   evidence：利用多模态大模型作为噪声表示编码器进行扩散文本到图像生成。
+3. [A Theoretical Analysis of Memory and Overfitting Phenomena in Stochastic Interpolation Models](/202606/15/2606.08554v1-a-theoretical-analysis-of-memory-and-overfitting-phenomena-in-stochastic-interpolation-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：用于长程视频生成的分层潜变量扩散
-8. [Correct Looks Better: Pairwise Comparisons Reveal Accuracy Rankings](/202606/14/2606.09409v1-correct-looks-better-pairwise-comparisons-reveal-accuracy-rankings)  
+   evidence：对扩散模型基础的随机插值过程进行理论分析，揭示记忆化现象
+4. [The Geometry of Phase Transitions in Generative Dynamics via Projection Caustics](/202606/15/2606.13191v1-the-geometry-of-phase-transitions-in-generative-dynamics-via-projection-caustics)  
    标签：评分：7.0/10、query:real-ir
-   evidence：通过成对比较评价生成模型
-9. [Evaluating the Representation Space of Diffusion Models via Self-Supervised Principles](/202606/14/2606.09718v1-evaluating-the-representation-space-of-diffusion-models-via-self-supervised-principles)  
+   evidence：对扩散和流匹配模型中的相变进行几何分析。
+5. [JointEdit3D: Feed-Forward 3D Scene Editing in a Unified Latent Space](/202606/15/2606.13345v1-jointedit3d-feed-forward-3d-scene-editing-in-a-unified-latent-space)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于自监督原则评估扩散模型表征空间
-10. [Can Image Models Imagine Time? ImageTime: A Novel Benchmark for Probing Visual World Modeling Through Spatiotemporal Consistency](/202606/14/2606.10620v1-can-image-models-imagine-time-imagetime-a-novel-benchmark-for-probing-visual-world-modeling-through-spatiotemporal-consistency)  
+   evidence：利用生成式潜空间模型实现前馈三维场景编辑。
+6. [Hölder++: Improving the Quality-Coherence Trade-off in Multimodal VAEs](/202606/15/2606.13381v1-hlder-improving-the-quality-coherence-trade-off-in-multimodal-vaes)  
    标签：评分：7.0/10、query:real-ir
-   evidence：用于故事板和参考引导编辑的图像生成模型
-11. [Compositional Generative Modeling from Decentralized Data](/202606/14/2606.10153v1-compositional-generative-modeling-from-decentralized-data)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：针对分散数据提出去中心化组合流匹配的生成建模框架
+   evidence：改进多模态VAE，通过精确Hölder池化提升生成质量和一致性。
+7. [Prompt2Effect: Training-Free Image-to-Video Model Specialization via LoRA Generation](/202606/15/2606.13971v1-prompt2effect-training-free-image-to-video-model-specialization-via-lora-generation)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：Prompt2Effect 为图像到视频扩散模型生成 LoRA 权重，实现免训练的扩散模型专业化
+8. [ForceForget: Reinforcement Concept Removal for Enhancing Safety in Text-to-Image Models](/202606/15/2606.14351v1-forceforget-reinforcement-concept-removal-for-enhancing-safety-in-text-to-image-models)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：强化学习用于文本到图像生成模型的概念移除。
 
 
 <div class="dpr-home-promo-card">
