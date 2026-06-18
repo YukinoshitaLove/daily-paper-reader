@@ -1,0 +1,602 @@
+Title: BindEdit: Taming Attention Leakage for Precise Multi-Object Image Editing
+
+URL Source: https://arxiv.org/pdf/2606.18906v1
+
+Published Time: Thu, 18 Jun 2026 00:52:15 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+# BindEdit: Taming Attention Leakage for Precise Multi-Object Image Editing 
+
+## Chaewon Park 1 Soyoon Lee 1 Naeun Lee 2 Minjung Shin 2∗
+
+## Seogkyu Jeon 3∗
+
+## Kibeom Hong 1∗
+
+1Sookmyung Women’s University 2Yonsei University 3Samsung Research 
+
+{sea9392, synuo, kb.hong }@sookmyung.ac.kr {skdms1449, smj139052 }@yonsei.ac.kr jone9312@gmail.com 
+
+## Abstract 
+
+Real image editing enables precise manipulation of visual content, yet existing methods often fail in complex multi-object scenarios, causing semantic blending, object dupli-cation, or incomplete edits. We attribute these failures to attention leakage, where signals across spatial regions and text tokens become entangled during the denoising process. Specifically, we identify two distinct forms of leakage: Edit-Token Leakage, where ambiguous token-region alignment leads to object blending, and Source Dominance Leakage, where tokens of unchanged source objects overwhelm the attention intended for target entities. To resolve these leak-ages, we propose BindEdit , which enforces attention-level constraints within a single diffusion trajectory. To suppress Edit-Token Leakage, BindEdit jointly regularizes cross- and self-attention so that each target token group is bound to its corresponding spatial region while maintaining instance-level separation. To suppress Source Dominance Leakage, a cross-attention re-balancing mechanism amplifies target token influence and attenuates residual source semantics within editable regions. Moreover, a region fidelity term ensures that each target concept is expressed coherently across the entire editing mask. Additionally, we propose a comprehensive multi-object benchmark encompassing di-verse object counts and categories. Extensive experiments demonstrate that BindEdit consistently outperforms exist-ing methods within a single diffusion trajectory, maintain-ing robust performance across both single- and multi-object editing scenarios. 
+
+## 1. Introduction 
+
+Real image editing is essential in many industries as it en-ables direct modification of existing visual content. With the advent of diffusion models [14, 20, 28, 29, 33, 34, 36], editing can be performed in a fine-grained manner while preserving the realism and structure of unedited regions. Among these approaches, text-guided editing is particularly 
+
+> *
+
+denotes the corresponding author. (a) Edit Token Leakage  (b) Source Dominance Leakage       
+
+> “a cat”
+> “a teddy bear”
+> Source Image
+> BindEdit
+> (Ours)
+> w/o binding
+> [16]
+> “A teddy bear and a cat
+> are sitting on a branch”
+> Object Missing
+> →Editing Failure !
+> Target prompt
+> Mask
+> “A wall with paintings of two birds and a rabbit and a dog on it ”
+> two birds a rabbit
+> Source Token Dominance
+> →Editing Failure !
+
+“a dog” 
+
+> Target prompt
+> Mask
+> Source Image
+> BindEdit
+> (Ours)
+> w/o binding
+> [16]
+
+Figure 1. (a) Edit-Token Leakage : when editing two birds into a teddy bear and a cat, the cross-attention maps of target tokens both activate across unintended regions without our binding guid-ance, causing one object to go missing. BindEdit precisely binds each target token group to its designated mask region. (b) Source Dominance Leakage : when editing three of four dog paintings into two birds and a rabbit, the source token “a dog” maintains strong attention bias that spill over into the editable areas (red cir-cle), suppressing target token signals and retaining canine features. BindEdit suppresses residual source influence, enabling faithful semantic replacement. 
+
+compelling due to its intuitive natural language interface. Specifically, text-guided image editing modifies regions rel-evant to a target prompt within a source image, simultane-ously preserving the integrity of the remaining regions. While previous text-guided editing methods [1, 12, 13, 16, 18, 19, 23, 25, 26, 32, 35, 39, 40] primarily focus on single-object scenarios, real-world images commonly con-tain multiple distinct entities requiring simultaneous edit-ing. This necessity has led to the emergence of multi-object image editing , defined as simultaneously and pre-cisely modifying multiple independent entities. However, existing single-object approaches often fail in these com-plex settings. For instance, as illustrated in Fig. 1, when the source image contains two birds to be edited into a cat and a teddy bear respectively, the resulting objects exhibit blended identities rather than distinct transformations. Sim-ilarly, when the target prompt retains source-related tokens such as “a dog”, the edited regions often preserve the ap-pearance of the original entities instead of reflecting the 
+
+> arXiv:2606.18906v1 [cs.CV] 17 Jun 2026
+
+intended target concepts. These failures highlight a funda-mental gap between single-object and multi-object editing that current methods struggle to bridge. We attribute these persistent limitations to attention leak-age , a phenomenon widely recognized in text-conditioned generation [6, 9, 11, 21, 27] that remains underexplored in the context of multi-object editing. Unlike single-object scenarios, multi-object image editing necessitates that each target prompt be precisely coupled with its corresponding source entity to ensure faithful modification. However, in standard architectures, cross-attention is jointly calculated across all spatial locations and text tokens, thereby conflat-ing object-specific signals and hindering independent con-trol, even when per-object masks and prompts are provided. This entangled attention prevents the model from isolat-ing edits to their intended targets, ultimately leading to the aforementioned failure cases. To address this, previous multi-object editing methods [4, 10, 15, 41] have attempted to circumvent the leakage by decomposing the task into a fragmented generation process. These approaches per-form iterative single-object operations followed by a merg-ing step. While intuitive, this multi-pass denoising strategy introduces significant limitations in terms of both fidelity and efficiency. By isolating each object into disjointed gen-eration steps, these methods often result in overly con-strained to per-object masks. As a result, edited regions ap-pear as unnaturally stitched patches with visible boundary artifacts, rather than being harmoniously synthesized with surrounding content. Furthermore, the sequential nature of such pipelines incurs prohibitive computational overhead, which limits their scalability and practical utility for com-plex images. Motivated by these observations, we conduct a rigorous analysis of how attention leakage manifests during the tran-sition from the inverted source image to the target prompt ,and identify two distinct forms of leakage (Fig. 1). The first, 
+
+Edit-Token Leakage , refers to the entanglement of attention signals across different target objects that causes their iden-tities to blend rather than being edited independently. As il-lustrated in Fig. 1.(a), an attempt to modify “two birds” into “a teddy bear and a cat” yields a single blended object com-bining features of both. This arises because target tokens alone cannot specify which spatial regions in the source im-age they should attend to, even when only object-related words change from the source prompt. The second, Source Dominance Leakage , occurs when the source image con-tains multiple objects of the same category and only a sub-set is targeted for editing. As shown in Fig. 1.(b), among four dogs in the source image only three are intended to be edited into two birds and a rabbit, yet the edited regions still exhibit canine features. This arises because source tokens describing unedited objects maintain strong attention bind-ings to their original spatial regions and these bindings spill over into the editable areas, suppressing the target token sig-nals. To this end, we propose BindEdit , a framework de-signed to precisely bind each target prompt to its corre-sponding spatial region through attention-level constraints within a single diffusion trajectory. BindEdit supervises both cross-attention and self-attention using region masks, enabling each object to be edited independently while pre-serving the coherence of the overall image. To resolve 
+
+Edit-Token Leakage , we introduce a joint regularization on cross- and self-attention. In cross-attention, each target to-ken group is guided to concentrate its activation within its designated semantic region. In self-attention, spatial to-kens within each target instance are encouraged to primar-ily interact with one another, reinforcing instance-level sep-aration. By jointly enforcing both semantic-level binding and instance-level separation, this regularization ensures that each object is edited without interfering with others. BindEdit further tackles Source Dominance Leakage by suppressing source and background token activations that persist from the inversion process within editable regions, allowing target tokens to dominate the cross-attention dis-tribution. This ensures that the edited regions are driven by the intended target semantics rather than inheriting residual source characteristics. Additionally, we enforce spatially consistent attention distribution within each editing mask, ensuring that each object is expressed coherently across its entire region and avoiding fragmented generations. In addition, we introduce a comprehensive benchmark to facilitate standardized evaluation in complex multi-object scenarios. While existing benchmarks [4, 41] mainly ad-dress editing with fewer objects, our benchmark extends to three or more objects and covers multiple object cate-gories and diverse spatial layouts. Extensive experiments demonstrate that BindEdit consistently outperforms exist-ing methods within a single diffusion trajectory, maintain-ing robust performance across both single- and multi-object editing scenarios. 
+
+## 2. Related works 
+
+2.1. Diffusion-based Text-to-Image Editing 
+
+Diffusion-based image editing [3, 8, 12, 13, 16, 18, 23– 25, 32, 39, 40] has been actively studied following the suc-cess of text-to-image generation models [14, 20, 28, 29, 33, 34, 36]. Early works rely on mask-based or region-constrained editing, such as SDEdit [24] and DiffEdit [8], while subsequent approaches manipulate cross-attention maps to align generation with the target prompt, as in Prompt-to-Prompt [12] and Plug-and-Play [39]. However, these methods implicitly assume a single editing target and lack mechanisms to separate multiple instances of the same class or coordinate region-specific edits, limiting their ap-plicability to multi-object editing. 
+
+2.2. Multi-object image editing 
+
+Several approaches [2, 4, 10, 15, 17, 22, 41, 42, 44] ex-tend diffusion-based image editing to multi-object scenar-ios. Early attempts decompose multi-object editing into in-dependent single-object edits: LoMOE [4], OIR [41], Split-Flow [42], and LayerEdit [10] follow a separate-and-merge paradigm that isolates each object during editing and com-bines the results afterward. While reducing direct interfer-ence, these methods require object-wise noise prediction or multiple denoising runs, incurring computational cost that scales with object count and often degrading global co-herence. To reduce this overhead, LEDITS++ [2] and Par-allelEdits [15] aggregate object-specific guidance signals within a shared diffusion trajectory, but still rely on object-wise computation without explicitly regulating attention in-teractions, leaving attention leakage unaddressed. In con-trast, by enforcing attention-level constraints that bind each target prompt to its corresponding spatial region, BindEdit achieves coherent edits without object-wise noise separa-tion. 
+
+2.3. Attention Control in Diffusion Models 
+
+Recent studies in multi-object text-to-image generation [5– 7, 9, 11, 30] have shown that attention distributions can be explicitly optimized to improve object localization and se-mantic grounding, for example by applying object-specific masks to suppress semantic leakage across subjects [9] or aligning attention maps to target layouts via optimal trans-port [11]. However, in image editing, attention is persis-tently biased by the source image. This introduces an addi-tional challenge absent in generation: misalignment stems not only from interference among target tokens but also from residual source dominance, which these generation-oriented methods do not address. BindEdit bridges this gap by adapting attention-level guidance to the editing setting, jointly suppressing both forms of leakage within a single denoising process. 
+
+## 3. Proposed methods 
+
+Our goal is to enable simultaneous editing of multiple ob-jects within a single diffusion trajectory while preventing attention leakage across objects. We present BindEdit , a training-free framework that achieves this by directly steer-ing the intermediate latent variables zt throughout the de-noising process without modifying the parameters of the pretrained denoising network. We adopt the edit-friendly DDPM inversion [16] to obtain the initial noisy latent for editing. As shown in Fig. 2, BindEdit addresses the two identified forms of attention leakage through dedicated guidance losses: Attention Binding Guidance (Lbind ) for Edit-Token Leakage and Source Dominance Suppression 
+
+(Lsupp ) for Source Dominance Leakage. We further intro-duce a Region Fidelity term ( Lfidelity ) to ensure spatially coherent generation within each editing mask. Throughout this section, we denote the cross-attention score tensor as Aattn ∈ R(H×W )×Nt , where each row is a probability distribution over Nt text tokens at spa-tial location (h, w ). For a target token group To, we de-fine its aggregated spatial attention map as ATo (h, w ) = P 
+
+> t∈To
+
+Aattn (h, w, t ).
+
+3.1. Attention Binding Guidance: Suppressing Edit-Token Leakage 
+
+Simultaneous multi-object editing requires that each target token group binds precisely to its corresponding mask re-gion at the attention level. When this binding fails, target tokens activate beyond their intended regions in both cross-and self-attention, producing blended or hybrid objects. As depicted in the bottom-left of Fig. 2, the attention weights for “two birds” erroneously spread not only within the des-ignated area but also into background regions and the mask for “a rabbit,” disrupting the correspondence between target concepts and their spatial regions. This Edit-Token Leakage stems from both attention mechanisms. In cross-attention, target token groups fail to concentrate on their designated semantic regions, causing editing signals to be delivered to incorrect objects. In self-attention, spatial tokens from different instances freely interact with one another, break-ing instance-level separation and inducing identity blending even across objects of different categories. To address both forms of leakage simultaneously, we introduce Attention Binding Guidance (Lbind ), which enforces semantic-level binding through cross-attention and instance-level isolation through self-attention. Inspired by [9], we formulate a ratio-based objective that measures how strongly attention concentrates within the target region. For each object o, we define its concentration ratio S(o) as: 
+
+S(o) = W(o)
+
+> in
+
+W(o) 
+
+> in
+
++ W(o) 
+
+> out
+
++ ε , (1) where W(o) 
+
+> in
+
+and W(o) 
+
+> out
+
+denote the total sum of attention weights inside and outside the target region respectively. As 
+
+S(o) approaches one, the out-of-region attention is driven toward zero. Since cross- and self-attention exhibit leakage in different ways, we define W(o) 
+
+> in
+
+and W(o) 
+
+> out
+
+independently for each mechanism. 
+
+Cross-attention binding. For the cross-attention concen-tration ratio S(o)
+
+> cross
+
+, we compute W(o) 
+
+> in
+
+as the sum of attention weights of the target token group within the object mask 
+
+M(o) 
+
+> obj
+
+, and W(o) 
+
+> out
+
+as the sum in the region outside the corre-sponding semantic mask (1 − M (c)
+
+> sem
+
+). Here M(c) 
+
+> sem
+
+denotes the union of all instance masks belonging to the same se-mantic category c. This formulation penalizes attention that 𝒁𝒁𝒁 𝒕𝒕 = 𝒁𝒁 𝒕𝒕  －𝜵𝜵 (𝓛𝓛 𝒃𝒃𝒃𝒃𝒃𝒃𝒃𝒃 + 𝓛𝓛 𝒔𝒔𝒔𝒔𝒔𝒔𝒔𝒔 + 𝓛𝓛 𝒇𝒇 𝒃𝒃𝒃𝒃 𝒇𝒇𝒇𝒇 𝒃𝒃𝒕𝒕 𝒇𝒇 ) 
+
+> <Cross Attention of Edit Tokens>
+> “Two birds ”“a rabbit ”
+> <Self Attention of Edit Tokens>
+
+Attention Binding Guidance (Sec.3.1)      
+
+> 𝑶𝑶 𝟏𝟏 𝑶𝑶 𝟐𝟐 𝑶𝑶 𝟑𝟑
+> Leakage
+
+𝓛𝓛 𝒃𝒃𝒃𝒃𝒃𝒃𝒃𝒃 = 𝟏𝟏 
+
+|𝓞𝓞 | �𝒐𝒐∈ 𝓞𝓞 
+
+(𝟏𝟏 − 𝑺𝑺 𝒄𝒄𝒄𝒄 𝒐𝒐𝒔𝒔𝒔𝒔  
+
+> (𝒐𝒐 )
+
+� 𝑺𝑺 𝒔𝒔 𝒇𝒇𝒇𝒇𝒇𝒇  
+
+> (𝒐𝒐 )
+
+)
+
+Resolving Source Dominance Leakage (Sec.3.2)   
+
+> 𝐀𝐀 𝒂𝒂 𝒕𝒕𝒕𝒕𝒃𝒃 (𝒉𝒉 ,𝒘𝒘 ,⋅)
+> Cross-attention
+> Probability distribution
+> Index of Tokens
+> …
+> Prob.
+> Source
+> 𝑻𝑻 𝒃𝒃
+> Source Suppression Guidance
+> …
+
+𝓛𝓛 𝑩𝑩𝑩𝑩𝑩𝑩 +
+
+> …
+
+𝓛𝓛 𝑩𝑩𝑩𝑩𝑩𝑩 −
+
+> Index of Tokens
+> …
+> Prob.
+> Source / Background
+> 𝑻𝑻 𝒃𝒃
+
++ 𝟏𝟏     
+
+> 𝓞𝓞 �𝒐𝒐∈ 𝓞𝓞
+> 𝒔𝒔 𝒐𝒐 (𝒉𝒉 ,𝒘𝒘 )
+> 𝒒𝒒 𝒐𝒐 (𝒉𝒉 ,𝒘𝒘 )
+
+Region Fidelity Regularization (Sec.3.3) 
+
+(𝓛𝓛 𝒇𝒇 𝒃𝒃𝒃𝒃 𝒇𝒇𝒇𝒇 𝒃𝒃𝒕𝒕 𝒇𝒇 )    
+
+> Regularized
+> attention
+> 𝟏𝟏
+> |𝓞𝓞 |�𝑜𝑜∈ 𝓞𝓞
+> 𝑫𝑫 𝑲𝑲𝑲𝑲 (𝒔𝒔 𝒐𝒐 || 𝒒𝒒 𝒐𝒐 )
+> <Bound Attention>
+> 𝒐𝒐 𝟏𝟏 𝒐𝒐 𝟑𝟑 𝒐𝒐 𝟐𝟐
+> (𝓛𝓛 𝒔𝒔𝒔𝒔𝒔𝒔𝒔𝒔 )
+> Leakage
+
+“A rabbit” 
+
+“Two birds” 
+
+Source Image 
+
+“A wall with paintings of two birds 
+
+and a rabbit and a dog on it” 
+
+Edited Image 
+
+BindEdit 
+
+Mask  
+
+> Inversion [16]
+
+𝑧𝑧 𝑡𝑡   
+
+> Attention Binding Ex) 𝑶𝑶 𝟏𝟏
+
+Figure 2. Overview of the proposed BindEdit. BindEdit guides the denoising process through three attention-level losses within a single diffusion trajectory. First, Attention Binding Guidance ( Lbind ) jointly constrains cross- and self-attention to enforce semantic-level binding and instance-level separation. Second, Source Suppression Guidance ( Lsupp ) re-balances cross-attention within editable regions by strength-ening target tokens and mitigating source dominance. Lastly, Region Fidelity ( Lfidelity ) consolidates scattered attention peaks into a single coherent mode via a truncated Gaussian prior. 
+
+leaks into semantically unrelated regions while permitting activation within the same category, allowing the model to maintain natural inter-instance context. Maximizing S(o)
+
+cross 
+
+ensures that each target token group is semantically bound to its designated region. 
+
+Self-attention binding. For the self-attention concentration ratio S(o)
+
+self , we compute W(o)
+
+in by accumulating attention scores among spatial tokens within the target object region, and W(o)
+
+out by accumulating scores between the target region and non-target regions. Maximizing S(o)
+
+self enforces instance-level isolation, ensuring that spatial features within each ob-ject primarily interact with one another rather than blending across instances. 
+
+Joint formulation. Semantic binding and instance isolation must hold simultaneously: correct token-to-region mapping is ineffective if spatial features freely mix across instances, and vice versa. A simple summation would allow one term to compensate for the other. We therefore combine the two ratios as a product and average over all edited objects: 
+
+Lbind = 1
+
+|O| 
+
+X
+
+o∈O 
+
+
+
+1 − S(o)
+
+cross · S(o)
+
+self 
+
+
+
+, (2) where O is the set of all objects to be edited. This coupling ensures that neither condition alone is sufficient: the loss de-creases only when both semantic binding and instance iso-lation are jointly satisfied. All attention statistics are computed at the 16 ×16 spatial resolution, where object-level semantics are most promi-nently formed [5, 9, 11, 37, 38]. Since attention naturally concentrates within the intended regions as denoising pro-gresses, persistent regularization at later stages risks over-constraining the synthesis and reducing image fidelity. To address this, we introduce a timestep-dependent scaling fac-tor: 
+
+λt = 1 −
+
+P
+
+h,w M(o)
+
+obj (h, w ) · ATo (h, w )
+
+P
+
+h,w ATo (h, w ) + ε , L(t)
+
+bind = λt Lbind .
+
+(3) When attention is diffused in early timesteps, λt is close to one and the guidance provides strong binding. As more attention mass settles into the correct region, λt decreases and the regularizer gracefully recedes. We provide a de-tailed derivation showing that λt acts as a per-object gra-dient scaling coefficient in the supplementary material. 3.2. Source Suppression Guidance: Resolving Source Dominance Leakage 
+
+As identified in Sec. 1, Source Dominance Leakage arises when multiple objects of the same category appear in the source image and only a subset is targeted for edit-ing. This is particularly severe during the early denoising timesteps when source and target share similar semantics (e.g ., a dog edited into a teddy bear), as source tokens dominate the cross-attention distribution and inhibit the in-tended target concepts from being expressed. Unlike Edit-Token Leakage, which involves entanglement across target tokens, Source Dominance Leakage requires directly re-shaping the cross-attention distribution within the editable region to shift probability mass from source tokens toward target tokens. Since cross-attention scores at each spatial location form a probability distribution over text tokens, bi-nary cross-entropy provides a natural supervision signal that allows independent control over positive (target) and nega-tive (source/background) terms. We extract the attention within the target editing area us-ing the object mask Mobj ∈ { 0, 1}H×W and define a binary token supervision mask MTo ∈ { 0, 1}Nt that selects the target token group To and sets all other entries to zero. We construct a contrastive binary cross-entropy loss: 
+
+Lsupp = L+ 
+
+> BCE
+
++ γ L−
+
+> BCE
+
+, γ > 1, (4) where the positive and negative terms are defined as 
+
+L+ 
+
+> BCE
+
+= − X
+
+> (h,w )∈M obj
+
+X
+
+> t∈To
+
+log  Aattn (h, w, t ) + ε,
+
+L− 
+
+> BCE
+
+= − X
+
+> (h,w )∈M obj
+
+X
+
+> t / ∈To
+
+log  1 − Aattn (h, w, t ) + ε.
+
+(5) The positive term L+ 
+
+> BCE
+
+increases the probability as-signed to the target token group inside the editable region, while the negative term L− 
+
+> BCE
+
+penalizes attention allocated to all other tokens including source-related and background tokens. Since generic source tokens tend to dominate the initial distribution, we amplify the negative term by a factor 
+
+γ to effectively suppress residual source influence. The final loss averages over all edited objects: 
+
+Lsupp = 1
+
+|O| 
+
+X
+
+> o∈O
+
+L(o)
+
+> supp
+
+. (6) This supervision acts only on the cross-attention distribu-tions within the editing masks and does not alter the global layout inherited from inversion, thereby driving semantic replacement in the editable regions while preserving the overall scene geometry. The robustness to parameter γ is further analyzed in Sec. 4.4. 
+
+3.3. Region Fidelity Regularization 
+
+While the preceding two losses effectively suppress atten-tion leakage across objects, the spatial distribution of target attention within each editing mask can be further improved with additional regularization. Specifically, we observe that target token activation can become sparse and fragmented within the editing mask in certain cases. Instead of forming a single coherent distribution, the activation splits into mul-tiple scattered peaks. As shown in Fig. 2, this can lead to multiple instances of the target concept appearing within a single mask region, such as two rabbits generated inside an area intended for one. To further refine the editing quality in such cases, we in-troduce a lightweight region fidelity term. We normalize the attention inside the object mask M(o) 
+
+> obj
+
+as a spatial probabil-ity distribution: 
+
+po(h, w ) = M(o) 
+
+> obj
+
+(h, w ) ATo (h, w )
+
+P 
+
+> h′,w ′
+
+M(o) 
+
+> obj
+
+(h′, w ′) ATo (h′, w ′) + ε . (7) We then construct a Gaussian reference qo(h, w ) centered at the centroid of M(o) 
+
+> obj
+
+with variance covering the mask extent, truncated by the mask boundary and renormalized. Region fidelity is enforced via DKL (po∥qo):
+
+Lfidelity = 1
+
+|O| 
+
+X
+
+> o∈O
+
+X
+
+> h,w
+
+M(o) 
+
+> obj
+
+(h, w ) po(h, w ) log po(h, w )
+
+qo(h, w ) + ε .
+
+(8) This formulation penalizes po whenever it places mass at isolated sub-regions, consolidating scattered peaks into a single coherent mode. To further sharpen this focus, we im-plement a thresholding mechanism that eliminates any non-global maxima, ensuring a definitive semantic assignment within the mask. While not essential for the majority of edit-ing scenarios, this term provides a meaningful quality boost in difficult cases by ensuring that the target concept is ex-pressed as a single complete object across the entire mask. 
+
+3.4. Overall Objective 
+
+The full editing objective combines the three attention-level constraints: 
+
+Ledit = λbind L(t) 
+
+> bind
+
++ λsupp Lsupp + λfidelity Lfidelity , (9) where λbind , λsupp , and λfidelity balance the three terms. Dur-ing guided sampling, we directly optimize the latent state at selected timesteps without modifying the diffusion model. For a noisy latent zt, we apply a gradient step of the form: 
+
+zt ← zt − η ∇zt Ledit , (10) where η is the step size for latent optimization. This update steers the denoising trajectory toward attention patterns that respect object boundaries, suppress residual source seman-tics, and cover each editable region coherently, while the generative prior of the pretrained diffusion model remains fully intact. 
+
+## 4. Experiments 
+
+4.1. Datasets and Implementation Details 
+
+Datasets. We evaluate BindEdit on two established multi-object editing benchmarks and a newly proposed bench-mark designed for more complex scenarios. LoMOE-Bench [4] contains 64 images with 2–7 annotated object masks and paired source–target prompts. While suitable for multi-object evaluation, most samples focus on minor at-tribute changes rather than large-scale compositional ed-its. OIR-Bench [41] provides 100 multi-object text–image pairs that serve as a complementary testbed for assessing structural preservation under diverse object configurations. 
+
+Extended Multi-Object Benchmark (Ours). To comple-ment these benchmarks with more complex scenarios, we introduce an extended benchmark comprising 238 images that uniformly covers edit object counts ranging from 1 to 5 or more. This balanced distribution enables a controlled analysis of how each method scales with the number of si-multaneously edited objects, providing a rigorous evalua-tion of semantic disentanglement and region-aware fidelity. Please refer to the supplementary material for more compre-hensive details and examples of the proposed benchmark. 
+
+Implementation details. BindEdit is a training-free method that requires no finetuning of the pretrained diffu-sion model. We set the loss balancing coefficients to λbind =20 , λsupp = 10 , and λfidelity = 2 . All experiments are con-ducted on a single NVIDIA A6000 GPU. Further details including the latent optimization schedule are provided in the supplementary material. 
+
+4.2. Qualitative comparisons 
+
+Fig. 3 presents qualitative comparisons with recent multi-object editing methods [4, 10, 15, 16, 41, 42]. We evalu-ate on existing benchmarks [4, 41] and our proposed multi-object benchmark, which covers a wider range of object counts to assess scalability. Methods that decompose edit-ing into separate per-object operations [4, 10, 41] can gen-erate intended objects within their respective areas but often leave visible seams or mask residues due to the independent processing of each region. As shown in Row 6, even with the explicit region isolation of LayerEdit [10] or the flow de-composition of SplitFlow [42], artifacts of the source tokens (“an apple”) persist within the edited “teddy bear” region. This indicates that spatial or trajectory separation alone is insufficient to suppress attention leakage, often resulting in missing or duplicated edits. In contrast, BindEdit performs the entire edit within a single trajectory. Furthermore, as shown in Row 1 and Row 7, BindEdit faithfully edits diverse objects ranging from color-specific cushion pairs to complex interior scenes with six or more entities, all without cross-object interference. Even in the densely populated layout of Row 7, BindEdit successfully updates all designated objects while preserving source ele-ments such as “two oval mirrors” with high fidelity. These results confirm that BindEdit scales effectively to scenes of increasing complexity while maintaining both coherence and region-level precision. 
+
+4.3. Quantitative results 
+
+Evaluation metrics We evaluate all methods using three complementary metrics. CLIP-image [31] measures global text–image alignment between the edited result and the target prompt. CLIP-object [31] computes CLIP similar-ity between each edited region crop and its corresponding object-level phrase, reflecting how faithfully each individ-ual edit follows its instruction. LPIPS [43] quantifies per-ceptual similarity between the source and edited images on background regions outside the object masks, measuring how well unedited areas are preserved. 
+
+Quantitative comparisons. Tab. 1 reports quantitative comparisons across the three benchmarks against six re-cent methods: LoMOE [4], OIR [41], LayerEdit [10], Par-allelEdits [15], SplitFlow [42], and Edit-Friendly [16]. BindEdit achieves the highest CLIP-image scores on all three datasets, demonstrating its ability to produce globally coherent and visually harmonious scenes. Un-like decompose-and-merge methods that process each ob-ject independently, BindEdit edits most objects simultane-ously, allowing the denoising process to maintain natural inter-object and background relationships throughout. In addition, BindEdit attains the highest CLIP-object scores on both Multi-Object-bench (0.2679) and LoMOE-bench (0.2716), and ranks second on OIR-bench while maintain-ing a clear lead in CLIP-image. The consistent CLIP-object improvements are a direct result of our Attention Binding Guidance, which ensures that each target token group is pre-cisely bound to its designated region, preventing the identity blending that degrades per-object alignment in competing methods. On average, BindEdit leads in both CLIP-object (0.2728) and CLIP-image (0.3375), confirming a favorable balance between precise local edits and overall scene qual-ity. Notably, the improvement is most pronounced on Multi-Object-bench, which features scenes with the highest object counts among the three benchmarks. This trend aligns with our motivation. As the number of simultaneously edited ob-jects grows, attention leakage becomes increasingly prob-lematic, and BindEdit’s attention-level guidance effectively addresses this challenge. For LPIPS, BindEdit records com-petitive scores across all benchmarks. LoMOE achieves the lowest LPIPS values, which reflects a conservative editing Source Image  Edit Mask 
+
+> BindEdit
+> (Ours)
+> LayerEdit [10]
+> (AAAI 26`)
+> ParallelEdit [15]
+> (NeurIPS 24`)
+> SplitFlow [42]
+> (NeurIPS 25`)
+> OIR [41]
+> (ICLR 24`)
+> LoMOE [4]
+> (ACM MM 24`)
+> Edit-Friendly [16]
+> (CVPR 24`)
+
+“Vintage furniture including a white leather lounge chair , a brown sofa , glass display cabinet , a golden 
+
+statue , a clock and two oval mirrors  arranged in an eclectic interior.” 
+
+> LoMOE-benchmark OIR-benchmark Extended Multi-Object benchmark
+
+“Two dark blue cushions and two light blue cushions on a black leather sofa and a white wall ”
+
+“An origami duck and a crochet duck on wooden table ”
+
+“A golden chair on the wooden floor ”
+
+“A Lego van parked on a snowy street , next to an ancient roman architecture .” 
+
+“A stone statue holding a golden pole in the wild” 
+
+“Four teddy bears and an apple  in front of a white background” Figure 3. Qualitative comparisons. We present qualitative results on three benchmarks: LoMOE-Bench, OIR-Bench, and our Extended Multi-Object Benchmark. For each example, the edit masks indicate the regions to be edited, where masks sharing the same color corre-spond to the same target token group. The target prompt is displayed below each example, with target tokens color-coded to match their corresponding edit masks. Underlined tokens in the target prompt denote source concepts that should be preserved in the edited image. Table 1. Quantitative comparisons on three multi-object editing benchmarks. Best results are in bold , second best are underlined. 
+
+Metrics Datasets BindEdit LoMOE [4] OIR [41] LayerEdit [10] ParallelEdits [15] SplitFlow [42] Edit Friendly [16] CLIP-obj. ↑
+
+CLIP-img. ↑
+
+LPIPS ↓
+
+Multi-Object-bench 
+
+0.2679 0.3336 
+
+0.1415 0.2627 0.3043 0.0856 0.2523 0.3028 0.0947 0.2646 0.3115 0.1038 0.2466 0.2871 
+
+0.0659 
+
+0.2619 0.3334 0.2001 0.2595 0.3274 0.1737 CLIP-obj. ↑
+
+CLIP-img. ↑
+
+LPIPS ↓
+
+LoMOE-bench [4] 
+
+0.2716 0.3341 
+
+0.1604 0.2574 0.3187 
+
+0.0903 
+
+0.2567 0.3115 0.1150 0.2712 0.3102 0.1410 0.2483 0.2831 0.3162 0.2654 0.3336 0.2099 0.2644 0.3281 0.1959 CLIP-obj. ↑
+
+CLIP-img. ↑
+
+LPIPS ↓
+
+OIR-bench [41] 0.2789 
+
+0.3448 
+
+0.0923 
+
+0.2808 
+
+0.3368 
+
+0.0576 
+
+0.2716 0.3339 0.0723 0.2714 0.3224 0.0696 0.2551 0.3068 0.1818 0.2746 0.3416 0.1224 0.2712 0.3338 0.1076 CLIP-obj ↑
+
+CLIP-img ↑
+
+LPIPS ↓
+
+Average 
+
+0.2728 0.3375 
+
+0.1314 0.2670 0.3199 
+
+0.0778 
+
+0.2602 0.3161 0.0940 0.2691 0.3147 0.1048 0.2500 0.2923 0.1880 0.2673 0.3362 0.1775 0.2650 0.3298 0.1591 
+
+strategy that keeps outputs closer to the source image, often at the cost of under-editing target objects. BindEdit instead employs soft attention guidance rather than hard mask con-straints, allowing edited regions and their surroundings to adapt coherently. 
+
+User preference. We conduct a user study with 90 partic-Table 2. User study results. Preference rate (%) across different benchmarks. Best results are in bold .                                                         
+
+> Dataset BindEdit LoMOE [4] OIR [41] ParallelEdits [15] LayerEdit [10] SplitFlow [42] LoMOE-bench [4] 67.79% 13.89% 3.51% 1.65% 5.03% 8.13% OIR-bench [41] 52.23% 20.47% 5.40% 3.64% 6.03% 12.23% Multi-Object-bench 64.44% 15.19% 2.10% 1.00% 12.09% 5.18% Total 61.47% 16.52% 3.54% 2.02% 8.23% 8.22% Source Image (a) Baseline [16] (b) + ℒ𝒃𝒃𝒃𝒃𝒃𝒃𝒃𝒃 Edit Mask
+> “Two kiwis ,two teddy bears and an apple are in front of a white
+> background”
+> (c) + ℒ𝒔𝒔𝒔𝒔𝒔𝒔𝒔𝒔
+> (d) + ℒ𝒇𝒇 𝒃𝒃𝒃𝒃 𝒇𝒇𝒇𝒇 𝒃𝒃 𝒇𝒇𝒇𝒇
+> (BindEdit)
+> “A wall with paintings of two birds and a rabbit and a dog on it” 𝜸𝜸
+> Qualitative ablation results of BindEdit Ablation study of suppression scale 𝜸𝜸
+
+Figure 4. Ablation studies. (Left) Qualitative effect of progres-sively adding each proposed guidance( Lbind ,Lsupp , and Lfidelity )from left to right. Each loss incrementally resolves object blend-ing, suppresses source token dominance, and consolidates scat-tered attention into coherent objects. (Right) Robustness to sup-pression scale γ Both CLIP-object and CLIP-image remain stable across γ ∈ { 6, 8, 10 , 12 , 14 }.Table 3. Ablation on loss components. Results on LoMOE-bench. Best in bold , second best underlined. 
+
+Lbind Lsupp Lfidelity CLIP-obj. ↑ CLIP-img. ↑ LPIPS ↓
+
+.2663 .3206 .1499 
+
+✓ .2708 .3287 .1565 
+
+✓ ✓ .2718 .3321 .1611 
+
+✓ ✓ ✓ .2716 .3341 .1604 
+
+ipants to evaluate perceptual editing quality, collecting a total of 1,980 responses. Participants were presented with the source image, target prompt, and results from BindEdit and five multi-object image editing methods: OIR [41], LoMOE [4], LayerEdit [10], ParallelEdits [15], and Split-Flow [42]. For each case, participants were asked to select the image that most accurately reflected the intended mod-ifications while preserving the source image. As reported in Tab. 2, BindEdit is preferred in 67.79%, 52.23%, and 64.44% on LoMOE-bench, OIR-bench, and Multi-Object-bench respectively, significantly outperforming the second-best method LoMOE (16.52% overall). These results con-firm that the attention-level constraints in BindEdit lead to edits that are perceived as more natural, prompt-faithful, and coherent by human evaluators. 
+
+4.4. Ablation Studies 
+
+We conduct ablation experiments on LoMOE-Bench[4] to validate the contribution of each proposed component and the sensitivity to hyperparameter choices. 
+
+Effect of each loss component. Tab. 3 and Fig. 4 (left) present quantitative and qualitative results when progres-sively adding each loss term. Starting from the base-line [16], target token influence fails to localize, causing the intended edits to spread globally across the entire image. Introducing Lbind successfully grounds the editing inten-tion within the target region, improving both CLIP-object (+1.7%) and CLIP-image (+2.5%) over the baseline. How-ever, as visible in Fig. 4 (b), traces of the original object (e.g ., “an apple”) still persist within the target mask, indi-cating residual source dominance. Adding Lsupp effectively suppresses these artifacts, further improving CLIP-object and CLIP-image. The benefit of Lfidelity is demonstrated in the second example of Fig. 4. Even after suppressing source influence, the target region may exhibit multimodal atten-tion distributions, leading to structural inconsistencies such as a split rabbit artifact in (c). Lfidelity resolves this by con-solidating scattered attention into a single coherent mode while also improving LPIPS. The full BindEdit framework achieves +2.0% CLIP-object and +4.2% CLIP-image over the baseline, confirming that each component addresses a distinct aspect of multi-object editing and their combination yields the strongest overall performance. 
+
+Ablation study of suppression scale γ. We analyze the sensitivity of the suppression scale γ in Lsupp , which con-trols the relative strength of the negative term. As shown in Fig. 4 (right), both CLIP-object and CLIP-image remain stable across γ ∈ { 6, 8, 10 , 12 , 14 }, with CLIP-object rang-ing from 0.2693 to 0.2716 and CLIP-image from 0.3312 to 0.3341. The best performance is achieved at γ = 10 ,which we adopt as the default. This narrow variance ( <1% across all tested values) confirms that BindEdit is robust to the choice of γ within a reasonable range. Additional abla-tion studies on the loss balancing coefficients ( λ∗) are pro-vided in the supplementary material. 
+
+## 5. Conclusion 
+
+We presented BindEdit, a training-free framework for multi-object image editing that operates within a single dif-fusion trajectory. Through attention analysis, we identified two key failure modes in multi-object editing: Edit-Token Leakage, where target tokens for different objects become entangled, and Source Dominance Leakage, where residual source tokens suppress newly introduced target concepts. To address these issues, BindEdit introduces three comple-mentary attention-level guidance losses: Attention Binding Guidance jointly regularizes cross- and self-attention for se-mantic binding and instance isolation, Source Suppression Guidance rebalances cross-attention within editable regions to reduce residual source dominance, and Region Fidelity Regularization consolidates target attention into a coherent spatial distribution. Unlike prior sequential per-object editing methods, BindEdit edits all objects simultaneously within a unified denoising process, achieving higher fidelity and computational efficiency. Experiments on multiple benchmarks, including our proposed multi-object bench-mark, demonstrate that BindEdit achieves state-of-the-art performance in automatic metrics and human evaluation while scaling robustly to complex multi-object scenes. References 
+
+[1] Omri Avrahami, Or Patashnik, Ohad Fried, Egor Nemchi-nov, Kfir Aberman, Dani Lischinski, and Daniel Cohen-Or. Stable flow: Vital layers for training-free image editing. 
+
+2025 IEEE/CVF Conference on Computer Vision and Pat-tern Recognition (CVPR) , pages 7877–7888, 2024. 1 [2] Manuel Brack, Felix Friedrich, Katharina Kornmeier, Linoy Tsaban, Patrick Schramowski, Kristian Kersting, and Apolin’ario Passos. Ledits++: Limitless image editing using text-to-image models. 2024 IEEE/CVF Conference on Com-puter Vision and Pattern Recognition (CVPR) , pages 8861– 8870, 2023. 3 [3] Ming Cao, Xintao Wang, Zhongang Qi, Ying Shan, Xiaohu Qie, and Yinqiang Zheng. Masactrl: Tuning-free mutual self-attention control for consistent image synthesis and editing. 
+
+2023 IEEE/CVF International Conference on Computer Vi-sion (ICCV) , pages 22503–22513, 2023. 2 [4] Goirik Chakrabarty, Aditya Chandrasekar, Ramya Hebbal-aguppe, and Prathosh AP. Lomoe: Localized multi-object editing via multi-diffusion. In Proceedings of the 32nd ACM International Conference on Multimedia , pages 3342–3351, 2024. 2, 3, 6, 7, 8 [5] Hila Chefer, Yuval Alaluf, Yael Vinker, Lior Wolf, and Daniel Cohen-Or. Attend-and-excite: Attention-based se-mantic guidance for text-to-image diffusion models. ACM Transactions on Graphics (TOG) , 42:1 – 10, 2023. 3, 4 [6] Minghao Chen, Iro Laina, and Andrea Vedaldi. Training-free layout control with cross-attention guidance. 2024 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pages 5331–5341, 2023. 2 [7] Zhennan Chen, Yajie Li, Haofan Wang, Zhibo Chen, Zhengkai Jiang, Jun Li, Qian Wang, Jian Yang, and Ying Tai. Region-aware text-to-image generation via hard binding and soft refinement. ArXiv , abs/2411.06558, 2024. 3 [8] Guillaume Couairon, Jakob Verbeek, Holger Schwenk, and Matthieu Cord. Diffedit: Diffusion-based semantic image editing with mask guidance. ArXiv , abs/2210.11427, 2022. 2[9] Omer Dahary, Or Patashnik, Kfir Aberman, and Daniel Cohen-Or. Be yourself: Bounded attention for multi-subject text-to-image generation. In European Conference on Com-puter Vision (ECCV) , 2024. 2, 3, 4 [10] Fengyi Fu, Mengqi Huang, Lei Zhang, and Zhendong Mao. Layeredit: Disentangled multi-object editing via conflict-aware multi-layer learning. The 40th Annual AAAI Confer-ence on Artificial Intelligence , 2026. 2, 3, 6, 7, 8 [11] Woojung Han, Yeonkyung Lee, Chanyoung Kim, Kwanghyun Park, and Seong Jae Hwang. Spatial transport optimization by repositioning attention map for training-free text-to-image synthesis. 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 18401–18410, 2025. 2, 3, 4 [12] Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Prompt-to-prompt im-age editing with cross attention control. arXiv preprint arXiv:2208.01626 , 2022. 1, 2 [13] Amir Hertz, Kfir Aberman, and Daniel Cohen-Or. Delta de-noising score. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 2328–2337, 2023. 1, 2[14] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-fusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. 1, 2 [15] Mingzhen Huang, Jialing Cai, Shan Jia, Vishnu Suresh Lokhande, and Siwei Lyu. Paralleledits: Efficient multi-aspect text-driven image editing with attention grouping. Ad-vances in Neural Information Processing Systems 37 , 2024. 2, 3, 6, 7, 8 [16] Inbar Huberman-Spiegelglas, Vladimir Kulikov, and Tomer Michaeli. An edit friendly ddpm noise space: Inversion and manipulations. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 12469– 12478, 2024. 1, 2, 3, 6, 7, 8 [17] Min Gyu Kang, Keon Kim, and Yong Suk Choi. Bounded editing: Multi-object image manipulation with region-specific control. Proceedings of the 40th ACM/SIGAPP Sym-posium on Applied Computing , 2025. 3 [18] Gwanhyeong Koo, Sunjae Yoon, Jiajing Hong, and Chang-dong Yoo. Flexiedit: Frequency-aware latent refinement for enhanced non-rigid editing. In European Conference on Computer Vision (ECCV) , 2024. 1, 2 [19] Vladimir Kulikov, Matan Kleiner, Inbar Huberman-Spiegelglas, and Tomer Michaeli. Flowedit: Inversion-free text-based editing using pre-trained flow models. ArXiv ,abs/2412.08629, 2024. 1 [20] Black Forest Labs, Stephen Batifol, A. Blattmann, Frederic Boesel, Saksham Consul, Cyril Diagne, Tim Dockhorn, Jack English, Zion English, Patrick Esser, Sumith Kulal, Kyle Lacey, Yam Levi, Cheng Li, Dominik Lorenz, Jonas Muller, Dustin Podell, Robin Rombach, Harry Saini, Axel Sauer, and Luke Smith. Flux.1 kontext: Flow matching for in-context image generation and editing in latent space. ArXiv ,abs/2506.15742, 2025. 1, 2 [21] Yumeng Li, Margret Keuper, Dan Zhang, and Anna Khoreva. Divide & bind your attention for improved generative seman-tic nursing. ArXiv , abs/2307.10864, 2023. 2 [22] Yanfeng Li, Ka-Hou Chan, Yue Sun, Chan Quan Loi Lam, Tong Tong, Zitong Yu, Keren Fu, Xiaohong Liu, and Tao Tan. Moedit: On learning quantity perception for multi-object image editing. 2025 IEEE/CVF Conference on Com-puter Vision and Pattern Recognition (CVPR) , pages 2683– 2693, 2025. 3 [23] Bingyan Liu, Chengyu Wang, Tingfeng Cao, Kui Jia, and Jun Huang. Towards understanding cross and self-attention in stable diffusion for text-guided image editing. 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 7817–7826, 2024. 1, 2 [24] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jia-jun Wu, Jun-Yan Zhu, and Stefano Ermon. Sdedit: Guided image synthesis and editing with stochastic differential equa-tions. In International Conference on Learning Representa-tions , 2021. 2 [25] Ron Mokady, Amir Hertz, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Null-text inversion for editing real im-ages using guided diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 6038–6047, 2023. 1, 2 [26] Hyelin Nam, Gihyun Kwon, Geon Yeong Park, and Jong Chul Ye. Contrastive denoising score for text-guided latent diffusion image editing. 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 9192–9201, 2023. 1 [27] Jungwon Park, Jungmin Ko, Dongnam Byun, Jangwon Suh, and Wonjong Rhee. Cross-attention head position patterns can align with human visual concepts in text-to-image gener-ative models. In International Conference on Learning Rep-resentations , 2025. 2 [28] William S. Peebles and Saining Xie. Scalable diffusion mod-els with transformers. 2023 IEEE/CVF International Confer-ence on Computer Vision (ICCV) , pages 4172–4182, 2022. 1, 2[29] Dustin Podell, Zion English, Kyle Lacey, A. Blattmann, Tim Dockhorn, Jonas Muller, Joe Penna, and Robin Rombach. Sdxl: Improving latent diffusion models for high-resolution image synthesis. ArXiv , abs/2307.01952, 2023. 1, 2 [30] Weimin Qiu, Jieke Wang, and Meng Tang. Self-cross diffu-sion guidance for text-to-image synthesis of similar subjects. 
+
+2025 IEEE/CVF Conference on Computer Vision and Pat-tern Recognition (CVPR) , pages 23528–23538, 2024. 3 [31] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and Ilya Sutskever. Learning transferable visual models from natural language supervision. In International Conference on Machine Learning , 2021. 6 [32] Yufan Ren, Zicong Jiang, Tong Zhang, Søren Forchham-mer, and Sabine S¨ usstrunk. Fds: Frequency-aware denois-ing score for text-guided latent diffusion image editing. In 
+
+Proceedings of the Computer Vision and Pattern Recognition Conference , pages 2651–2660, 2025. 1, 2 [33] Robin Rombach, A. Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 10674–10685, 2021. 1, 2 [34] Chitwan Saharia, William Chan, Saurabh Saxena, Lala Li, Jay Whang, Emily L. Denton, Seyed Kamyar Seyed Ghasemipour, Burcu Karagol Ayan, Seyedeh Sara Mah-davi, Raphael Gontijo Lopes, Tim Salimans, Jonathan Ho, David J. Fleet, and Mohammad Norouzi. Photorealistic text-to-image diffusion models with deep language understand-ing. ArXiv , abs/2205.11487, 2022. 1, 2 [35] Joonghyuk Shin, Alchan Hwang, Yujin Kim, Daneul Kim, and Jaesik Park. Exploring multimodal diffusion trans-formers for enhanced prompt-based image editing. ArXiv ,abs/2508.07519, 2025. 1 [36] Jiaming Song, Chenlin Meng, and Stefano Ermon. De-noising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. 1, 2 [37] Raphael Tang, Akshat Pandey, Zhiying Jiang, Gefei Yang, Karun Kumar, Jimmy J. Lin, and Ferhan Ture. What the daam: Interpreting stable diffusion using cross attention. In 
+
+Annual Meeting of the Association for Computational Lin-guistics , 2022. 4 [38] Junjiao Tian, Lavisha Aggarwal, Andrea Colaco, Zsolt Kira, and Mar Gonz´ alez-Franco. Diffuse, attend, and segment: Unsupervised zero-shot segmentation using stable diffusion. 
+
+2024 IEEE/CVF Conference on Computer Vision and Pat-tern Recognition (CVPR) , pages 3554–3563, 2023. 4 [39] Narek Tumanyan, Michal Geyer, Shai Bagon, and Tali Dekel. Plug-and-play diffusion features for text-driven image-to-image translation. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 1921–1930, 2023. 1, 2 [40] Wei Wu, Qingnan Fan, Shuai Qin, Hong Gu, Ruoyu Zhao, and Antoni B. Chan. Freediff: Progressive frequency trun-cation for image editing with diffusion models. In European Conference on Computer Vision (ECCV) , 2024. 1, 2 [41] Zhen Yang, Ganggui Ding, Wen Wang, Hao Chen, Bo-han Zhuang, and Chunhua Shen. Object-aware inver-sion and reassembly for image editing. arXiv preprint arXiv:2310.12149 , 2023. 2, 3, 6, 7, 8 [42] Sunghoon Yoon, Minghan Li, Gaspard Beaudouin, Cong-cong Wen, Muhammad Rafay Azhar, and Mengyu Wang. Splitflow: Flow decomposition for inversion-free text-to-image editing. In Conference on Neural Information Pro-cessing Systems (NeurIPS) , 2025. 3, 6, 7, 8 [43] Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shecht-man, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. 2018 IEEE/CVF Con-ference on Computer Vision and Pattern Recognition , pages 586–595, 2018. 6 [44] Hongyang Zhu, Haipeng Liu, Bo Fu, and Yang Wang. Mde-edit: Masked dual-editing for multi-object image editing via diffusion models. ArXiv , abs/2505.05101, 2025. 3
