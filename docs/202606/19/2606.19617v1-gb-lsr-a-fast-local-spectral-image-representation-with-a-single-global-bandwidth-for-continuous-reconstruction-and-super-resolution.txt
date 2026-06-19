@@ -1,0 +1,778 @@
+Title: GB-LSR: A Fast Local Spectral Image Representation with a Single Global Bandwidth for Continuous Reconstruction and Super-Resolution
+
+URL Source: https://arxiv.org/pdf/2606.19617v1
+
+Published Time: Fri, 19 Jun 2026 00:15:37 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# GB-LSR: A Fast Local Spectral Image Representation with a Single Global Bandwidth for Continuous Reconstruction and Super-Resolution ∗
+
+Max Shad †
+
+Kempner Institute for the Study of Natural and Artificial Intelligence Harvard University 
+
+max_shad@harvard.edu 
+
+Naeem Khoshnevis 
+
+Kempner Institute for the Study of Natural and Artificial Intelligence Harvard University 
+
+naeem_khoshnevis@harvard.edu 
+
+## Abstract 
+
+We present GB-LSR (Global-Bandwidth Local Spectral Representation), a fixed-grid local spectral representation for continuous image reconstruction. The image domain is partitioned into non-overlapping square patches, each carrying coeffi-cients for a truncated Fourier basis predicted from shared convolutional-encoder features. A single trainable scalar bandwidth is shared globally across all patches and images, and reconstruction at any continuous coordinate is a fixed-size basis contraction whose cost is independent of image size. We study three bandwidth-handling variants: a trainable global scalar (main), a fixed global scalar, and a per-patch bandwidth field. On a standardized native-reconstruction benchmark across Kodak, Set14, and Urban100, the main variant outperforms matched-budget amor-tized LIIF / LTE / WIRE re-implementations by 2.8–3.6 dB PSNR and 0.11 –0.15 
+
+LPIPS, while running at roughly one-quarter of the slowest baseline’s inference cost. The single global scalar suffices empirically: per-patch adaptive-bandwidth alternatives do not improve over it on either a closed-form locality diagnostic or an end-to-end ablation. In a separate arbitrary-scale super-resolution (ASR) exten-sion, GB-LSR achieves competitive PSNR-Y under a canonical-style SR protocol and runs 1.44 × faster than LIIF-RDN and 3.25 × faster than LTE-SwinIR at ×4;within the same extension, a variant trained and evaluated without 4-corner local-ensemble averaging gives a 1.77 × speedup with 35% lower peak memory and negligible PSNR change, while additionally widening the RDN encoder from 64 
+
+to 96 channels gives a small positive PSNR shift with a 1.58 × speedup and 31% 
+
+lower peak memory. Native-reconstruction claims are scoped to the matched-budget amortized protocol, and ASR claims are scoped to a separate canonical-style SR protocol. 
+
+## 1 Introduction 
+
+Continuous image representations let one store an image as a function over its continuous coordi-nate domain rather than a fixed pixel grid, and then query any coordinate at any density at inference time. The representations that have driven recent progress in this regime are coordinate-based neural fields: multi-layer perceptrons (MLPs) with Fourier-feature inputs or sinusoidal activations [Tancik et al., 2020, Sitzmann et al., 2020], either fit per image (WIRE [Saragadam et al., 2023]) or amor-tized across a distribution (LIIF [Chen et al., 2021b], LTE [Lee and Jin, 2022]), with subsequent  
+
+> ∗Code: https://github.com/KempnerInstitute/gblsr
+> †Corresponding author. Preprint.
+> arXiv:2606.19617v1 [cs.CV] 17 Jun 2026
+
+arbitrary-scale extensions of the amortized branch exploring attention-based or neural-operator de-coders (CiaoSR [Cao et al., 2023], CLIT [Chen et al., 2023], SRNO [Wei and Zhang, 2023], SS-RNO [Han and Zhang, 2024]), parameter-free upsampling via orthogonal position encoding (OPE-SR [Song et al., 2023]), and diffusion-style iterative refinement (DIIN [Dai et al., 2025]). Two properties matter in practice: expressiveness (how accurately the representation can reconstruct the image) and inference cost (how many operations a single pixel query costs). Fixed-grid local spec-tral representations are interesting in this trade-off: they store per-patch coefficient tensors over a fixed spectral basis, so each coordinate query touches only a constant-size local neighborhood, but they can still capture image-level frequency content through the spectral basis itself. We present GB-LSR (Global-Bandwidth Local Spectral Representation), a fixed-grid local spectral representation in which a single trainable scalar bandwidth is shared globally across every patch in every image. The image domain is partitioned into a fixed grid of non-overlapping square patches; each patch carries a small block of coefficients for a truncated Fourier basis, predicted from shared convolutional-encoder features by a single linear projection. The global scalar parameter sets the basis frequency for all patches; reconstruction at any continuous query coordinate is a fixed-size basis contraction whose cost is independent of image size, so the encoder is paid once per image while the decoder pays O(p2
+
+> max
+
+) multiply-adds per output coordinate, where pmax is the number of modes per axis of the truncated Fourier basis (Section 3.1). On the standardized 256 ×256 native-reconstruction benchmark across Kodak, Set14, and Urban100, the main variant GB-LSR-Scalar outperforms matched-budget amortized LIIF / LTE / WIRE base-lines by 2.8–3.6 dB peak signal-to-noise ratio (PSNR) and 0.11 –0.15 Learned Perceptual Image Patch Similarity (LPIPS), while running at roughly one-quarter of the slowest baseline’s inference cost. We evaluate all native-reconstruction arms under a fixed matched-budget protocol: the same training schedule, evaluation datasets, parameter-budget band, and reporting fields. GB-LSR itself is defined for arbitrary H×W images and continuous-coordinate queries; the 256 ×256 standardization is part of the benchmark, used to keep the matched-budget comparison controlled. The matched-budget amortized LIIF / LTE / WIRE baselines are trained in a single amortized pass at matched parameter budget and are therefore not canonical reproductions; all native-reconstruction compar-isons are scoped to this matched-budget protocol (Section 4, Section 6.1). To test whether the same decoder efficiency transfers beyond native reconstruction, we additionally evaluate an arbitrary-scale super-resolution (ASR) extension (GB-LSR-Scalar-ASR) against canonical-style LIIF-RDN, LTE-RDN, and LTE-SwinIR baselines (Section 5.5, Appendix A.7). 
+
+Contributions. 
+
+1. We propose GB-LSR, a fixed-grid local spectral representation with a single global train-able scalar bandwidth. Its main variant, GB-LSR-Scalar, outperforms matched-budget amortized LIIF / LTE / WIRE on the standardized 256 ×256 native-reconstruction bench-mark across Kodak, Set14, and Urban100 on both whole-image PSNR and whole-image LPIPS under the fixed matched-budget evaluation protocol (Sections 5.1–5.2). 2. We report two inference-cost results: (a) under the matched-budget amortized protocol, GB-LSR-Scalar runs at 0.247 × the slowest baseline on every dataset (Section 5.4); and (b) under a separate arbitrary-scale SR extension, the base (unmodified) GB-LSR-Scalar-ASR runs 1.44 × faster than LIIF-RDN and 3.25 × faster than LTE-SwinIR on Set14, B100, and Urban100 at ×4 under the fixed GPU latency protocol, and within the same family, a variant trained and evaluated without 4-corner local-ensemble averaging gives a 1.77 ×
+
+speedup with 35% lower peak memory and negligible PSNR change, while additionally widening the RDN encoder from 64 to 96 channels gives a small positive PSNR shift with a 1.58 × speedup and 31% lower peak memory (Section 5.5). 3. We empirically justify the single-global-scalar bandwidth choice with two targeted tests: a closed-form locality diagnostic on converged models, and a per-patch log-space adaptive-bandwidth ablation. These tests do not support per-patch bandwidth adaptation for this decoder family, so a single global scalar is sufficient (Section 6.2, Appendix A.3). 
+
+Scope. Native-reconstruction results are reported under the matched-budget amortized protocol, while arbitrary-scale SR results use the separate canonical-style super-resolution (SR) protocol in Section 5.5 and Appendix A.7. These comparisons are not intended as state-of-the-art claims over the broader LIIF / LTE / WIRE or SR literature; Section 6.3 lists what we do not claim. 22 Related work 
+
+Continuous / coordinate-based image representations. Coordinate-based neural fields treat an image (or more generally a signal) as a continuous function over its coordinate domain and fit an MLP to that function. Two ingredients are central: Fourier-feature input mappings [Tancik et al., 2020], which directly address the spectral bias of plain ReLU MLPs, and sinusoidal hidden-layer activations [Sitzmann et al., 2020], which let coordinate-based MLPs represent fine spatial detail and signal derivatives. Together these advances made coordinate-based fitting practical for natural images. These representations are either fit per image at test time, or amortized across a training distribution so that a single trained network produces an image-specific field at inference. As a no-local-basis control, our Global Fourier-MLP baseline follows this amortized pattern: a plain MLP on Fourier-feature inputs conditioned on a spatially mean-pooled global encoder code. 
+
+Local implicit representations. A second line of work adds a local component to continuous rep-resentations, typically by conditioning an MLP decoder on features from a grid of image patches. LIIF (local implicit image function) [Chen et al., 2021b] predicts color at a query coordinate from the surrounding encoder-feature cells; LTE (local texture estimator) [Lee and Jin, 2022] extends this with per-coordinate Fourier embeddings with learned amplitudes and dominant frequencies. WIRE (Wavelet Implicit neural REpresentation) [Saragadam et al., 2023] and related wavelet implicit neu-ral representations (INRs) replace the activation with a complex-Gabor wavelet (canonical; see Ap-pendix A.1), giving a spectral / localization trade-off inside the MLP itself. The standard evaluation setting for LIIF and LTE is arbitrary-scale super-resolution; for WIRE it is per-image fitting. In this paper, all three serve as matched-budget amortized baselines (not canonical reproductions): trained under a single amortized schedule at matched parameter budget and evaluated on the standardized 
+
+256 ×256 native-reconstruction benchmark (Section 6.1). Broader ASR-INR work [Wei and Zhang, 2023, Chen et al., 2023, Han and Zhang, 2024, Dai et al., 2025] is outside our matched-budget comparison set. 
+
+Fixed-grid local spectral bases. The representation we study is a fixed-grid local spectral basis with per-patch coefficient tensors: each patch carries a small set of coefficients over a fixed basis, and the reconstruction at any query coordinate is a bounded local combination of these coefficients. The bandwidth of the basis is the central hyperparameter, and a natural design question is whether it should vary spatially across patches or be shared globally. We test per-patch adaptive alternatives empirically (Section 6.2); the locality and ablation results do not support per-patch bandwidth adap-tation for this decoder family, so GB-LSR uses one global trainable scalar bandwidth on top of the fixed local basis (Section 3). 
+
+Efficient neural representations. The inference-cost axis of this paper is closely tied to decoder cost per query. A local spectral decoder evaluates a fixed-size basis contraction ( O(p2
+
+> max
+
+) multiply-adds per output coordinate), which is a smaller per-query cost than the MLP forward through the comparable matched-budget LIIF / LTE / WIRE decoders. The reported 0.247 × inference-cost ad-vantage of GB-LSR-Scalar over the slowest matched-budget amortized baseline (Section 5.4) is a consequence of the local spectral architecture, not of the bandwidth mechanism. 
+
+Perceptual metrics. We report LPIPS-AlexNet [Zhang et al., 2018a] as the main perceptual met-ric, alongside PSNR, the structural similarity index (SSIM), and an edge-region restricted LPIPS variant (edge-LPIPS). LPIPS compares deep features of an ImageNet-trained AlexNet and correlates better with human perceptual judgment than PSNR / SSIM alone for natural images; edge-LPIPS re-stricts the comparison to a Sobel-magnitude edge mask (Section 4) and is reported because the three GB-LSR arms split on whole-image LPIPS vs edge-LPIPS (Section 5.2). 
+
+Two evaluation protocols. The matched-budget amortized LIIF / LTE / WIRE re-implementations in our native benchmark are not canonical reproductions; the arbitrary-scale SR extension in Sec-tion 5.5 and Appendix A.7 reports separate canonical-style LIIF-RDN / LTE-RDN / LTE-SwinIR re-implementations under their own evaluation protocol. 33 Method 
+
+GB-LSR is a fixed-grid local spectral representation with a single global trainable scalar bandwidth, trained once in an amortized pass over a training distribution and then frozen for evaluation. This section describes the architecture, the three GB-LSR family variants, and the matched-budget amor-tized training / evaluation protocol that scopes the native-benchmark quantitative claims (arbitrary-scale SR claims are scoped separately; Section 5.5, Appendix A.7). 
+
+3.1 Fixed-grid local spectral basis 
+
+In the native benchmark instance, an image x ∈ R3×H×W is encoded by a shared encoder into a feature map z = E(x) with dfeat = 128 channels; E is a shared three-stage convolutional encoder (an input lift, log 2(P ) stride-2 downsampling blocks, and an output projection) used identically by every arm in the benchmark. The image plane is partitioned into a fixed grid of non-overlapping patches of side P = 32 , and each patch e carries a coefficient tensor ce ∈ R3×pmax ×pmax (one 
+
+pmax × pmax block per color channel) over a fixed separable spectral basis with pmax = 16 modes per axis (mode indices 0, . . . , p max − 1; distinct from the patch side P ). These specific values (dfeat , P , pmax ) are benchmark-instance choices, not method-defining restrictions. The continuous reconstruction at query coordinate u is a bounded local combination of the coefficient tensors of the patches whose local supports contain u, scaled by the spectral basis evaluated at u’s normalized offset within each patch: 
+
+f (u) = X  
+
+> e:u∈supp (e)
+
+ϕe(u) ψ ˆue; s, c e , (1) where ϕe is the patch’s partition-of-unity weight, ue is the patch center, ˆue = 2( u − ue)/P ∈
+
+[−1, 1] 2 is u’s patch-local coordinate (the offset normalized by the half-patch width P/ 2, mapping the patch’s support onto [−1, 1] 2; the native-benchmark implementation places the P pixel centers per axis at P uniformly spaced points spanning [−1, 1] inclusive, which normalizes by (P − 1) /2
+
+instead; the ≈ 3% difference between the two conventions amounts to a fixed rescaling of the bandwidth s), and ψ( · ; s) ∈ Rpmax ×pmax is the fixed spectral basis with pmax modes per axis and bandwidth s, separable across the two patch axes: entry [ψ(v; s)] ij is the product of the i-th and j-th 1D modes evaluated at the two components of v, where the 1D mode list is the constant followed by cosine / sine pairs of increasing frequency (ending in an unpaired cosine for even pmax ). The inner product ⟨· , ·⟩ contracts the two mode indices for each color channel, [⟨ψ, c e⟩]k = P 
+
+> i,j
+
+[ψ]ij [ce]kij ,so f (u) ∈ R3; the decoder produces ce from the encoder feature z. Before the contraction, the coefficients are modulated by a smooth per-mode cutoff wij = σ (psoft − max( i, j )) κ, where σ is the logistic sigmoid, κ = 4 is a fixed sharpness, and psoft is the effective cutoff order (pinned to pmax 
+
+in all arms except GB-LSR-Full, which predicts it per patch); at psoft = pmax the highest modes retain weight σ(κ) ≈ 0.98 , i.e., effectively the full basis. In this work the patch grid is non-overlapping, so ϕe(u) = 1{u ∈ supp (e)}; away from patch boundaries, the sum in (1) has exactly one nonzero patch term. Because the basis is fixed and the partition is local, a query at u touches a constant-size neighborhood of patches, independent of image size. The local spectral decoder is the same across the three GB-LSR family variants; they differ in how the bandwidth s is handled, with GB-LSR-Full additionally adapting the per-patch effective cutoff order (Section 3.2). 
+
+3.2 Bandwidth handling: GB-LSR-Scalar / GB-LSR-Fixed / GB-LSR-Full 
+
+We study three ways of handling the bandwidth parameter s in (1): 
+
+GB-LSR-Scalar (main). A single global trainable scalar bandwidth s, applied identically to every patch in every image and trained end-to-end with the rest of the decoder; the raw parameter is mapped through a log-space sigmoid that bounds s to [0 .25 , 2.0] . It adds exactly one trainable scalar on top of GB-LSR-Fixed. 
+
+GB-LSR-Fixed (quality / LPIPS floor). A single global fixed scalar bandwidth ( s0 = 1 .125 , the midpoint of the [0 .25 , 2.0] bandwidth range) and the effective cutoff order fixed at pmax ;no trainable spectral hyperparameters. This arm isolates the local spectral basis with no bandwidth adaptation. It is the whole-image LPIPS floor of the family (Section 5.2). 4GB-LSR-Full (family trade-off ablation). A per-patch log-space bandwidth field se = exp( θe),with θe predicted by a linear adaptivity head on spatial encoder features and bounded by the same log-space sigmoid (so se ∈ [0 .25 , 2.0] per patch), replacing the global scalar s
+
+of GB-LSR-Scalar in (1). The same head additionally predicts a per-patch effective cutoff order, so this arm adapts both spectral axes (bandwidth and order) rather than bandwidth alone. A closed-form locality diagnostic and a log-space ablation (Section 6.2) show that the per-patch bandwidth field se collapses to a near-constant value within each image. The three variants share the same encoder, partition-of-unity weights, and fixed spectral basis. GB-LSR-Fixed and GB-LSR-Scalar differ only in whether the single global bandwidth is trainable; GB-LSR-Full is a family trade-off arm that adapts both per-patch bandwidth and per-patch order, not a bandwidth-only ablation. The per-patch bandwidth axis in isolation (order held fixed) is tested by the GB-LSR-Bandwidth arm in Appendix A.3. 
+
+3.3 Matched-budget amortized training 
+
+All arms are trained in a single amortized pass over a fixed training distribution and then frozen for evaluation. Concretely: training uses a DTD (Describable Textures Dataset) [Cimpoi et al., 2014] + DIV2K [Agustsson and Timofte, 2017] mixture at 256 ×256 for 2000 steps with three seeds; evaluation is held-out Kodak [Eastman Kodak Company, 1999], Set14 [Zeyde et al., 2012] 3, and Urban100 [Huang et al., 2015] at 256 ×256 (center-crop for images larger than 256 , upsample-to-256 
+
+for images smaller). The architecture and query rule of Section 3.1 are defined for arbitrary H × W
+
+images; the 256 ×256 size here is the standardized training/evaluation instance used for the matched-budget native benchmark, not a representational restriction. No arm is fit per image at test time; in particular the canonical per-image-fitted WIRE setting is not reproduced here (Section 6.1). Training hyperparameters (AdamW with β1 = 0 .9, β2 = 0 .95 , weight decay 0; constant η = 2 × 10 −4; batch size 8; gradient-norm clipping at 1.0; pointwise mean-squared-error (MSE) loss) are identical across all seven arms (F2 below). We refer to this setting as matched-budget amortized throughout. 
+
+Three comparison-protocol rules. Every cross-arm comparison in the native benchmark follows three fixed protocol definitions, used as shorthand throughout. F1 (matched parameter budget): 
+
+every arm’s trainable-parameter count lies within a 1.25 × ratio band around the anchor arm GB-LSR-Scalar ( 989 ,955 trainable parameters); realized per-arm ratios span 1.000 –1.134 × (Table 8). 
+
+F2 (matched optimization): all newly trained arms use the same optimizer, learning-rate schedule, batch size, training-step count, and seed list (the values listed above). F3 (matched reporting): 
+
+every arm contributes the same reporting record, including parameter count, per-image metrics, inference time, and per-region metrics, so that any per-arm comparison can be carried out from one common record. 
+
+Matched parameter budget. GB-LSR-Scalar is the F1 anchor at 989 ,955 trainable parameters. Every arm (the three GB-LSR variants, the Global Fourier-MLP baseline, and the three matched-budget amortized baselines LIIF, LTE, and WIRE) sits inside the fixed 1.25 × F1 band around this anchor. Per-arm parameter ratios and decoder-deviation notes are in Table 8. 
+
+Arbitrary-scale SR extension. For the arbitrary-scale super-resolution setting, GB-LSR-Scalar-ASR keeps the local spectral decoder and shared scalar bandwidth, while using the RDN (residual dense network) encoder [Zhang et al., 2018c] shared by the RDN-based super-resolution baselines; details are in Appendix A.7. The RDN encoder has its own width parameter nf (its base channel count; G0 in the notation of Zhang et al. [2018c]), so its nf = 48 /64 /96 variants are separate from the native benchmark’s dfeat = 128 setting. 
+
+## 4 Experimental setup 
+
+For the standardized matched-budget native-reconstruction benchmark, we evaluate seven arms on three held-out datasets (Kodak [Eastman Kodak Company, 1999], Set14 [Zeyde et al., 2012], Ur-ban100 [Huang et al., 2015]) standardized to 256 ×256 , with three seeds each under a fixed evalua- 
+
+> 3We follow standard practice in citing Zeyde et al. [2012] for Set14; the 14 images are listed in their Table 1 and the Set14
+> label is community-assigned (e.g., Agustsson and Timofte, 2017, §5).
+
+5tion protocol. Four arms are ours (Global Fourier-MLP baseline, GB-LSR-Fixed, GB-LSR-Scalar, GB-LSR-Full). The other three are matched-budget amortized LIIF / LTE / WIRE baselines, not canonical reproductions. 
+
+Training protocol. All seven arms are trained under a single F2-identical schedule (Ap-pendix A.1): DTD [Cimpoi et al., 2014] + DIV2K [Agustsson and Timofte, 2017] mixture, 2000 steps, three seeds. Training is a single amortized pass; no per-image fitting is used for any arm (in particular, the canonical per-image-fitted WIRE setting is not reproduced). 
+
+Evaluation protocol. Evaluation is held-out Kodak, Set14, and Urban100 at 256 ×256 : center-crop for images larger than 256 , upsample-to-256 for images smaller (the Global Fourier-MLP base-line is shape-fixed at this resolution). This 256 ×256 standardization is part of the benchmark proto-col to keep the matched-budget comparison controlled and should not be read as a restriction of the GB-LSR representation, whose query rule (Section 3.1) is defined for arbitrary H × W images. All metrics are whole-image except edge-LPIPS, which masks non-edge pixels to a constant gray ( 0.5)in both prediction and target before applying LPIPS, where the single per-image mask is computed from the Sobel-gradient magnitude of the grayscale (channel-mean) ground-truth image, thresholded at the 80 th percentile and dilated by one pixel. Inference cost is measured in milliseconds per image at batch size 1 on a single NVIDIA H200 SXM 141 GB GPU. Bicubic / nearest-neighbor have no low-resolution (LR) input here; Global Fourier-MLP is the no-local-basis control. 
+
+Parameter budget. GB-LSR-Scalar is the F1 anchor at 989 ,955 trainable parameters. Every arm stays within the F1 1.25 × band around this anchor (Table 8). LIIF drops the canonical 3×3 encoder-feature unfolding; LTE adjusts decoder depth and amplitude / frequency head-kernel size; WIRE uses a real-valued sin-Gabor activation and runs amortized rather than per-image-fitted (full detail in Table 8). 
+
+Evaluation criteria. We summarize the benchmark with two fixed evaluation criteria. The quality criterion is a composite of three per-dataset sub-conditions: at most 0.5 dB below the best matched-budget amortized baseline PSNR, at most 0.02 above the best matched-budget amortized baseline LPIPS, and a ≥ 0.5 dB gap over the Global Fourier-MLP baseline; the composite requires all three on at least two of the three datasets. The inference-cost criterion requires GB-LSR-Scalar to run at 
+
+≤ 0.75 × the slowest matched-budget amortized baseline’s inference time per dataset. Both criteria are reported in Table 5. 
+
+Metrics. PSNR (dB, ↑), SSIM ( ↑), whole-image LPIPS-AlexNet ( ↓), edge-LPIPS ( ↓), and infer-ence milliseconds per image ( ↓). Native-protocol PSNR is RGB-PSNR; the ASR extension reports PSNR-Y, PSNR computed on the luminance (Y) channel of YCbCr, per SR convention. We addi-tionally report LSE (local spectrum error) in Table 10 (Appendix A.6.4): reconstruction and ground truth are converted to grayscale (channel mean) and split into the same non-overlapping 32 ×32 patch grid; each patch is transformed with an orthonormal 2D fast Fourier transform (FFT), and LSE is the per-image mean of log |ˆr|2 − log |ˆg|2 over all frequency bins and patches (power clamped below at 10 −8), where ˆr and ˆg are the patch FFTs of the reconstruction and the ground truth. LSE is not a primary metric because it is not monotone with PSNR across the GB-LSR family. Section 5.5 reports a separate arbitrary-scale super-resolution extension under its own protocol; full details are in Appendix A.7. 
+
+## 5 Results 
+
+We report results on the standardized 256 ×256 native-reconstruction benchmark, with seven arms evaluated on three held-out datasets (Kodak, Set14, Urban100) with three seeds each under the fixed evaluation protocol. The three matched-budget amortized baselines (LIIF, LTE, WIRE) are not canonical reproductions (see Section 6). 
+
+5.1 Main result 
+
+On the native benchmark, GB-LSR-Scalar outperforms every matched-budget amortized baseline on both whole-image PSNR and whole-image LPIPS on every dataset, at roughly a quarter of the 612 14 16 18 20 22 
+
+PSNR (dB), higher is better →
+
+0.60 
+
+0.65 
+
+0.70 
+
+0.75 
+
+0.80 
+
+0.85 
+
+0.90 
+
+0.95 
+
+> ← LPIPS-AlexNet, lower is better  GB-LSR-Scalar (main)
+
+Arm (mean of 3 datasets) GB-LSR-Scalar GB-LSR-Full GB-LSR-Fixed Global Fourier-MLP LIIF LTE WIRE Per-dataset point Kodak Set14 Urban100 Figure 1: PSNR vs LPIPS frontier under the matched-budget amortized evaluation protocol. 
+
+Whole-image PSNR ( x-axis, ↑) vs whole-image LPIPS-AlexNet ( y-axis, ↓, inverted); upper-right is best. Small markers: per-dataset three-seed means (Kodak, Set14, Urban100); large filled circles: cross-dataset mean per arm. Matched-budget amortized LIIF / LTE / WIRE are not canonical repro-ductions (Section 6). Table 1: Main table (Kodak). Three-seed means ± std under the fixed evaluation protocol. Bold: per-column best on the four quality metrics (within-seed-noise ties both bolded); bold arm name marks the main variant. Inference ms/img at batch size 1 on the NVIDIA H200 GPU; #params reported. Matched-budget amortized LIIF / LTE / WIRE are not canonical reproductions (Section 6).                                                                                     
+
+> Arm PSNR (dB) SSIM LPIPS edge-LPIPS inf ms #params Global Fourier-MLP baseline 15.190 ±0.057 0.4370 ±0.0007 0.9057 ±0.0071 0.4039 ±0.0022 2.14 1,121,539 GB-LSR-Fixed 20.270 ±0.159 0.4468 ±0.0019 0.5936 ±0.0046 0.2653 ±0.0010 1.40 989,954
+> GB-LSR-Scalar (main) 22.312 ±0.204 0.5279 ±0.0044 0.6417 ±0.0132 0.2469 ±0.0029 1.41 989,955 GB-LSR-Full 22.438 ±0.064 0.5352 ±0.0026 0.7162 ±0.0096 0.2476 ±0.0025 1.41 989,954 LIIF (matched-budget amortized) 18.812 ±0.094 0.4577 ±0.0010 0.7794 ±0.0040 0.3214 ±0.0075 5.72 1,122,819 LTE (matched-budget amortized) 19.476 ±0.160 0.4758 ±0.0005 0.8457 ±0.0107 0.3087 ±0.0034 2.58 1,122,051 WIRE (matched-budget amortized) 18.428 ±0.281 0.4656 ±0.0026 0.8988 ±0.0126 0.3438 ±0.0062 2.66 1,058,051
+
+slowest baseline’s inference cost. Three-seed means ( ± std) appear in Tables 1–3, and the per-dataset bars for all seven arms across the four quality metrics appear in Figure 2; Figure 1 plots the PSNR-vs-LPIPS frontier over the same three-seed means. Against the best baseline per dataset, GB-LSR-Scalar achieves the per-dataset gaps summarized in Table 4: • Kodak: +2 .835 dB PSNR vs LTE, −0.1378 LPIPS vs LIIF. • Set14: +3 .589 dB PSNR vs LTE, −0.1537 LPIPS vs LIIF. • Urban100: +2 .974 dB PSNR vs LTE, −0.1051 LPIPS vs LIIF. Inference cost: 0.247 × the slowest baseline (LIIF, 5.72 ms/img at batch size 1) on every dataset. The quality and inference-cost criteria are both met (Table 5); all three quality sub-conditions hold on all three datasets, exceeding the composite’s two-of-three requirement. 7Table 2: Main table (Set14). Three-seed means ± std under the fixed evaluation protocol. Bold: per-column best on the four quality metrics (within-seed-noise ties both bolded); bold arm name marks the main variant. Inference ms/img at batch size 1 on the NVIDIA H200 GPU; #params reported. Matched-budget amortized LIIF / LTE / WIRE are not canonical reproductions (Section 6).                                                                                     
+
+> Arm PSNR (dB) SSIM LPIPS edge-LPIPS inf ms #params Global Fourier-MLP baseline 12.304 ±0.015 0.3353 ±0.0007 0.9358 ±0.0142 0.4558 ±0.0131 2.12 1,121,539 GB-LSR-Fixed 18.148 ±0.056 0.3817 ±0.0014 0.5967 ±0.0011 0.2681 ±0.0027 1.41 989,954
+> GB-LSR-Scalar (main) 20.776 ±0.228 0.4925 ±0.0054 0.5970 ±0.0076 0.2294 ±0.0028 1.41 989,955 GB-LSR-Full 20.904 ±0.060 0.5024 ±0.0028 0.6648 ±0.0084 0.2305 ±0.0023 1.40 989,954 LIIF (matched-budget amortized) 16.458 ±0.045 0.3706 ±0.0021 0.7507 ±0.0036 0.3326 ±0.0027 5.72 1,122,819 LTE (matched-budget amortized) 17.188 ±0.077 0.3959 ±0.0018 0.8027 ±0.0079 0.3157 ±0.0034 2.57 1,122,051 WIRE (matched-budget amortized) 16.031 ±0.100 0.3802 ±0.0022 0.8666 ±0.0067 0.3601 ±0.0044 2.65 1,058,051
+
+Table 3: Main table (Urban100). Three-seed means ± std under the fixed evaluation protocol. Bold: per-column best on the four quality metrics (within-seed-noise ties both bolded); bold arm name marks the main variant. Inference ms/img at batch size 1 on the NVIDIA H200 GPU; #params reported. Matched-budget amortized LIIF / LTE / WIRE are not canonical reproductions (Section 6).                                                                                     
+
+> Arm PSNR (dB) SSIM LPIPS edge-LPIPS inf ms #params Global Fourier-MLP baseline 13.059 ±0.034 0.2831 ±0.0007 0.9175 ±0.0079 0.4422 ±0.0096 2.12 1,121,539 GB-LSR-Fixed 17.011 ±0.015 0.3316 ±0.0021 0.6159 ±0.0045 0.3369 ±0.0030 1.41 989,954
+> GB-LSR-Scalar (main) 18.793 ±0.244 0.4183 ±0.0065 0.6925 ±0.0029 0.3040 ±0.0030 1.41 989,955 GB-LSR-Full 18.827 ±0.068 0.4175 ±0.0022 0.7448 ±0.0043 0.3065 ±0.0032 1.40 989,954 LIIF (matched-budget amortized) 15.371 ±0.046 0.2994 ±0.0010 0.7976 ±0.0056 0.3891 ±0.0030 5.72 1,122,819 LTE (matched-budget amortized) 15.819 ±0.023 0.3155 ±0.0011 0.9457 ±0.0065 0.3836 ±0.0014 2.57 1,122,051 WIRE (matched-budget amortized) 15.198 ±0.157 0.3041 ±0.0013 0.9504 ±0.0037 0.3962 ±0.0023 2.65 1,058,051
+
+5.2 Family trade-offs 
+
+Within our family, GB-LSR-Scalar is the designated main variant. Two companion arms sit along-side it. GB-LSR-Full ties GB-LSR-Scalar on whole-image PSNR within seed noise on every dataset (Welch t < 1.05 , Welch–Satterthwaite df ≈ 2.3–2.4). This is a family trade-off: GB-LSR-Full trains per-patch log-space bandwidth and effective-order fields, but a closed-form locality diagnos-tic and a log-space ablation (Section 6.2) establish that the bandwidth field collapses to a near-constant value; any small residual mean-PSNR gap therefore reflects additional trainable degrees of freedom on top of the global scalar, not a spatially local mechanism. We present GB-LSR-Full as a design ablation. On whole-image LPIPS, GB-LSR-Full is strictly worse than GB-LSR-Scalar (+0 .0746 / +0 .0678 / +0 .0523 on Kodak / Set14 / Urban100). GB-LSR-Fixed (no trainable bandwidth at all; one fixed bandwidth constant and one fixed cutoff order) is the whole-image LPIPS winner across all three datasets: 0.5936 / 0.5967 / 0.6159 on Ko-dak / Set14 / Urban100 (better than GB-LSR-Scalar on that single metric; on Set14 the gap is within seed noise). It trails GB-LSR-Scalar on PSNR by 2.042 / 2.629 / 1.782 dB respectively. Across the family, GB-LSR-Scalar achieves the best edge-LPIPS on every dataset (0.2469 / 0.2294 / 0.3040 ). It ties GB-LSR-Full on whole-image PSNR within seed noise but is decisively ahead of GB-LSR-Full on whole-image LPIPS. Those are the two reasons it is the designated main variant. 
+
+5.3 What the matched-budget amortized baselines show 
+
+Under the matched-budget protocol (one-shot amortized training on DTD + DIV2K, frozen evalua-tion on Kodak, Set14, and Urban100), on whole-image PSNR the baselines rank, best to worst, LTE, LIIF, WIRE; on whole-image LPIPS the ordering is LIIF, LTE, WIRE; both orderings hold on every dataset. The relative ordering is stable but the absolute gap to GB-LSR-Scalar is large ( 2.8–3.6 dB PSNR, 0.11 –0.15 LPIPS). Several adjustments under the matched-budget amortized protocol contribute; Appendix A.1 and Table 8 list the per-arm deviations. These adjustments apply to every native-benchmark numeric 8Table 4: Per-dataset winner summary with main-result gaps. Best-PSNR / best-LPIPS arm iden-tified over all seven arms (“best (any)”) and restricted to the three matched-budget amortized base-lines (“best (baseline)”). Scalar / Fixed / Full abbreviate the GB-LSR variant names; “Full ≈ Scalar” marks ties within seed noise. Signed gap = GB-LSR-Scalar − best (baseline): positive ∆PSNR and negative ∆LPIPS both indicate Scalar beats the best baseline. Gaps are computed from the full-precision three-seed means and rounded last, so they can differ by one unit in the last digit from arithmetic on the displayed values. Matched-budget amortized LIIF / LTE / WIRE are not canonical reproductions (Section 6).                           
+
+> Dataset best PSNR (any) best PSNR (baseline) ∆PSNR best LPIPS (any) best LPIPS (baseline) ∆LPIPS Kodak Full ≈Scalar (22.438) LTE (19.476) +2.835 Fixed (0.5936) LIIF (0.7794) −0.1378
+> Set14 Full ≈Scalar (20.904) LTE (17.188) +3.589 Fixed (0.5967) LIIF (0.7507) −0.1537
+> Urban100 Full ≈Scalar (18.827) LTE (15.819) +2.974 Fixed (0.6159) LIIF (0.7976) −0.1051
+
+Table 5: Evaluation criteria for the standardized benchmark. Criteria and thresholds are fixed across all reported arms. See Section 4.                    
+
+> Criterion / sub-condition Definition Result at most 0.5 dB below best baseline PSNR quality sub-condition met (3/3) at most 0.02 above best baseline LPIPS quality sub-condition met (3/3) baseline gap ≥0.5dB vs Global Fourier-MLP baseline quality sub-condition met (3/3) Quality criterion composite all three sub-conditions on ≥2/3datasets met Inference-cost criterion ≤0.75 ×slowest baseline’s inference time on every dataset met ( 0.247 ×on all 3)
+
+claim in this paper. The correct reading is “under the matched-budget amortized protocol” rather than “better than canonical LIIF / LTE / WIRE”. Canonical LIIF / LTE use much larger RDN / EDSR-baseline [Lim et al., 2017] encoders trained for 1000 epochs on DIV2K with training scales sampled continuously in ×1–×4, and report super-resolution at ×2–×4 in-distribution and up to ×30 out-of-distribution; canonical WIRE is fit per image at test time. Our matched-budget setup uses a ∼0.9M-parameter shared encoder ( ∼1M-parameter models in total), 2000 amortized training steps, and a different evaluation task (the stan-dardized 256 ×256 native-reconstruction benchmark). The native-benchmark comparison-of-record is GB-LSR-Scalar vs matched-budget amortized LIIF / LTE / WIRE under the matched-budget pro-tocol. 
+
+5.4 Inference-cost result 
+
+At batch size 1 on the NVIDIA H200 GPU, GB-LSR-Scalar runs at 1.41 ms/img on every dataset: 
+
+0.247 × the slowest baseline (LIIF) and 0.55 × / 0.53 × the LTE / WIRE baselines. The advantage is a consequence of the local spectral basis architecture, not the bandwidth mechanism; Figure 7 gives the cost-vs-quality view. 
+
+Qualitative evidence. Reconstructions for one exemplar per dataset at seed 0 are in Figure 8 (Appendix A.5), with columns Ground Truth, GB-LSR-Scalar, the best-PSNR arm (GB-LSR-Full), and the best-LPIPS arm (GB-LSR-Fixed). In every dataset the best-PSNR and best-LPIPS arms are from the GB-LSR family. 
+
+Summary. On the native benchmark, GB-LSR-Scalar outperforms every matched-budget amor-tized baseline on both whole-image PSNR and whole-image LPIPS on every dataset, at a fraction of the slowest baseline’s inference cost. Within the family, the main variant trades ≤ 0.13 dB PSNR to GB-LSR-Full for a decisive whole-image LPIPS advantage and an edge-LPIPS sweep, while the local spectral basis alone (GB-LSR-Fixed) already separates from the Global Fourier-MLP baseline by ∼ 4–6 dB PSNR at matched parameter budget. 90          
+
+> 5
+> 10
+> 15
+> 20
+> PSNR (dB)  ↑
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> SSIM  ↑
+> Kodak Set14 Urban100
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> LPIPS-AlexNet  ↓
+> Kodak Set14 Urban100
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> edge-LPIPS  ↓
+> Global Fourier-MLP GB-LSR-Fixed GB-LSR-Scalar GB-LSR-Full LIIF LTE WIRE
+
+Figure 2: Per-dataset grouped bar chart (three-seed means ± std) for PSNR, SSIM, whole-image LPIPS, and edge-LPIPS. Seven bars per dataset group in each panel: Global Fourier-MLP baseline, GB-LSR-Fixed, GB-LSR-Scalar (main), GB-LSR-Full, LIIF, LTE, WIRE. Matched-budget amortized LIIF / LTE / WIRE are not canonical reproductions (Section 6). 
+
+5.5 Arbitrary-scale super-resolution efficiency 
+
+GB-LSR-Scalar-ASR extends GB-LSR-Scalar to arbitrary-scale SR over a shared RDN encoder, trained for 1,000 ,000 steps on DIV2K with three seeds, and evaluated on Set5 [Bevilacqua et al., 2012] / Set14 / B100 [Martin et al., 2001] / Urban100 / DIV2Kval at in-distribution (ID) scales 
+
+×2 / ×3 / ×4 and out-of-distribution (OOD) scales ×6 / ×8 (Tables 11 and 13, Appendix A.7; Fig-ure 10 plots PSNR-Y against scale across all five datasets). Under the fixed GPU latency protocol, the base GB-LSR-Scalar-ASR runs 1.44 × faster than LIIF-RDN and 3.25 × faster than LTE-SwinIR over Set14, B100, and Urban100 at ×4; Table 6 and Appendix A.7 give latency values and ×4
+
+speedups, and Figure 9 plots the quality-vs-latency view on Urban100 ×4. Within the GB-LSR-Scalar-ASR family, the noLE variant (trained and evaluated without 4-corner local-ensemble averag-ing) gives a 1.77 × arithmetic-mean speedup and a 35% peak-memory reduction across the three ×4
+
+timing cells with a negligible PSNR-Y change (three-seed mean ID ∆PSNR-Y −0.006 dB, worst-cell −0.031 dB on Set5 ×2); the nf96+noLE variant additionally widens the RDN encoder to 96 channels and gives a small positive PSNR-Y shift ( +0 .008 dB ID, +0 .005 dB OOD) while retaining a 1.58 × arithmetic-mean speedup and a 31% memory reduction. Speedup and memory-reduction numbers within the family are computed relative to the base row of Table 6; Table 7 gives the full quality / efficiency deltas. We read this as a quality / efficiency trade-off, not a raw-PSNR superiority claim; GB-LSR-Scalar-ASR stays within 1.0 dB of the best baseline on every in-distribution quality cell. 
+
+## 6 Limitations 
+
+We list the main limitations so the reader can calibrate what the paper is and is not claiming. Each limitation is paired with a pointer to the appendix subsection or artifact that documents it. 10 Table 6: Arbitrary-scale super-resolution: GPU latency vs canonical-style baselines. ms/img is the three-seed mean of the per-image mean latency under the fixed GPU latency protocol (single NVIDIA H200 GPU, batch size 1); baseline ms/img is from the original timing run, and GB-LSR family ms/img (including the base row) is from the follow-up family re-timing run under the same protocol (the base row reproduces between the two runs within 0.5 ms). PSNR-Y for the baseline rows and the base GB-LSR-Scalar-ASR row is from the original timing run; for the noLE and nf96+noLE rows it is the three-seed mean from the quality evaluation (the family tim-ing artifact records latency only). Speed ratios are the geometric mean of per-cell speedups across Set14 / B100 / Urban100 at ×4. The noLE variant is trained and evaluated without 4-corner local-ensemble averaging; nf96+noLE additionally widens the RDN encoder to 96 channels. Trainable parameters: LIIF-RDN 22.32M, LTE-RDN 22.47M, LTE-SwinIR 12.53M, GB-LSR-Scalar-ASR 22.02M (24.93M for nf96+noLE). Quality gap to per-cell best in Table 11; full quality / efficiency deltas in Table 7. See Appendix A.7 for full protocol details.                                                    
+
+> Method PSNR-Y (dB) ↑ms/img ↓Speed ↑
+> Set14 ×4Urban100 ×4Set14 ×4Urban100 ×4vs LIIF-RDN vs LTE-SwinIR LIIF-RDN 28.839 26.659 37.67 127.42 1.00 ×2.26 ×
+> LTE-RDN 28.803 26.585 41.84 145.53 0.93 ×2.10 ×
+> LTE-SwinIR 29.002 27.133 88.88 292.31 0.44 ×1.00 ×
+> GB-LSR-Scalar-ASR (base) 28.746 26.457 27.20 85.94 1.44 ×3.25 ×
+> GB-LSR-Scalar-ASR-noLE 28.726 26.456 15.35 41.65 2.52 ×5.69 ×
+> GB-LSR-Scalar-ASR-nf96+noLE 28.750 26.457 18.01 44.84 2.25 ×5.07 ×
+
+Table 7: Arbitrary-scale super-resolution: quality / efficiency deltas within the GB-LSR-Scalar-ASR family. Three-seed mean of all numbers; quality from the 5-dataset × 5-scale grid; latency / memory from the family re-timing run (same fixed GPU latency protocol as Table 6). 
+
+∆PSNR-Y is vs the base row; ID averages over ×2 / ×3 / ×4 across all 5 datasets; OOD averages over ×6 / ×8. Worst-cell ∆ is the most-negative per-cell ∆ across the 25-cell grid. Mean speedup and mean memory reduction are arithmetic means over Set14 / B100 / Urban100 at ×4 of the per-cell ratio vs the base row. Urban100 peak is the most demanding cell. The noLE row gives 1.77 ×
+
+speedup and 35% memory reduction with negligible PSNR change; nf96+noLE gives a small pos-itive PSNR shift while retaining substantial speed and memory gains. See Appendix A.7 for full protocol details and Table 12 for the aggressive-efficiency appendix variant.                                   
+
+> Variant Params (M) Mean ∆PSNR-Y (dB) Worst-cell Mean speedup Urban100 peak Mean mem ID ↑OOD ↑∆(dB) vs base ↑(MB) ↓reduction ↑
+> GB-LSR-Scalar-ASR (base) 22.024 0.0000 0.0000 n/a 1.000 ×43763.6 0.00% GB-LSR-Scalar-ASR-noLE 22.024 −0.0059 −0.0090 −0.0312 1.767 ×28213.8 +35 .34 %GB-LSR-Scalar-ASR-nf96+noLE 24.927 +0 .0078 +0 .0052 −0.0250 1.579 ×30145.2 +30 .57 %
+
+6.1 Matched-budget amortized baselines (not canonical reproductions) 
+
+The three matched-budget amortized baselines (LIIF, LTE, WIRE) share a single F2-identical train-ing schedule and amortized encoder, and stay within the F1 1.25 × parameter budget around our 
+
+989 ,955 -param anchor. This is the matched-budget amortized setting used for the native benchmark and is the only setting in which our comparisons are valid. The deviations from canonical config-urations are documented in Appendix A.1 and Table 8; under any of these variations the relative ordering, or distance to GB-LSR-Scalar, may shift. The paper’s claims are scoped to “matched-budget amortized LIIF / LTE / WIRE under the fixed evaluation protocol,” not to canonical paper configurations. 
+
+6.2 Per-patch locality is empirically unsupported 
+
+A closed-form locality diagnostic on converged models shows that the learned per-patch bandwidth field is near-constant within each image (within-image coefficient of variation (CoV) median ≈
+
+0.013 , even though se is allowed to vary over [0 .25 , 2.0] ; 0/4 locality thresholds met). A per-patch log-space adaptive-bandwidth ablation does not meet either of its two binary criteria. Diagnostic 11 detail is in Appendices A.2 and A.3 (Table 9, Figures 3–6). The single global scalar therefore suffices for the bandwidth role in this architecture; we do not claim a per-patch locality mechanism. 
+
+6.3 What we do not claim 
+
+We do not claim state of the art over the SR literature, canonical-paper superiority over matched-budget amortized LIIF / LTE / WIRE, spatially local bandwidth adaptation, universality outside nat-ural images, or raw-PSNR superiority for the arbitrary-scale SR extension (Appendix A.6). Video reconstruction and video super-resolution, for example by sharing local spectral coefficients across time, are left to future work. 
+
+## 7 Conclusion 
+
+We presented GB-LSR (Global-Bandwidth Local Spectral Representation), a fixed-grid local spec-tral representation with a single global trainable scalar bandwidth. On the standardized native-reconstruction benchmark across Kodak, Set14, and Urban100, the main variant GB-LSR-Scalar outperforms matched-budget amortized LIIF / LTE / WIRE re-implementations by 2.8–3.6 dB PSNR and 0.11 –0.15 LPIPS at 0.247 × the slowest baseline’s inference cost. Reconstruction at any query coordinate is a fixed-size basis contraction independent of image size, so the decoder cost is bounded per pixel. The single global scalar suffices empirically: a closed-form locality diagnostic and a per-patch log-space adaptive-bandwidth ablation both show that the bandwidth field collapses to a near-constant value within each image. Across 256 validation images and three seeds, the within-image CoV of the per-patch bandwidth field has median ≈ 0.013 even though the per-patch parameter is free to vary over [0 .25 , 2.0] .The arbitrary-scale SR extension delivers a strong quality / efficiency trade-off under the fixed GPU latency protocol. GB-LSR-Scalar-ASR runs 1.44 × faster than LIIF-RDN and 3.25 × faster than LTE-SwinIR at ×4 while staying within 1.0 dB of the best canonical-style baseline on every in-distribution quality cell. Within the family, disabling 4-corner local-ensemble averaging gives a further 1.77 × arithmetic-mean speedup with 35% lower peak memory at essentially unchanged PSNR-Y ( −0.006 dB ID), and additionally widening the RDN encoder to 96 channels yields a small positive PSNR-Y shift ( +0 .008 dB ID) with 1.58 × speedup and 31% memory reduction. Extending the local spectral representation to video reconstruction and video super-resolution, by sharing local spectral coefficients across time, is a natural next step. Each patch’s coefficient block is a fixed-size object whose dimension is independent of spatial resolution, so a temporal model could operate on the patch grid of coefficient blocks rather than on pixels while preserving the per-pixel decoder-cost bound; whether the single-global-scalar bandwidth choice transfers across time, or whether a time-varying bandwidth becomes necessary, is left for that future work. 
+
+## Acknowledgments 
+
+This work has been made possible in part by a gift from the Chan Zuckerberg Initiative Foundation to establish the Kempner Institute for the Study of Natural and Artificial Intelligence at Harvard University. 
+
+## References 
+
+Eirikur Agustsson and Radu Timofte. NTIRE 2017 challenge on single image super-resolution: Dataset and study. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) Workshops , pages 126–135, 2017. Marco Bevilacqua, Aline Roumy, Christine Guillemot, and Marie-Line Alberi Morel. Low-complexity single-image super-resolution based on nonnegative neighbor embedding. In Pro-ceedings of the British Machine Vision Conference (BMVC) , pages 135.1–135.10, 2012. Jiezhang Cao, Qin Wang, Yongqin Xian, Yawei Li, Bingbing Ni, Zhiming Pi, Kai Zhang, Yulun Zhang, Radu Timofte, and Luc Van Gool. CiaoSR: Continuous implicit attention-in-attention network for arbitrary-scale image super-resolution. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 1796–1807, 2023. 12 Hanting Chen, Yunhe Wang, Tianyu Guo, Chang Xu, Yiping Deng, Zhenhua Liu, Siwei Ma, Chun-jing Xu, Chao Xu, and Wen Gao. Pre-trained image processing transformer. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 12299– 12310, 2021a. Hao-Wei Chen, Yu-Syuan Xu, Min-Fong Hong, Yi-Min Tsai, Hsien-Kai Kuo, and Chun-Yi Lee. Cascaded local implicit transformer for arbitrary-scale super-resolution. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 18257– 18267, 2023. Liangyu Chen, Xiaojie Chu, Xiangyu Zhang, and Jian Sun. Simple baselines for image restoration. In Proceedings of the European Conference on Computer Vision (ECCV) , pages 17–33, 2022. Yinbo Chen, Sifei Liu, and Xiaolong Wang. Learning continuous image representation with local implicit image function. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 8628–8638, 2021b. Mircea Cimpoi, Subhransu Maji, Iasonas Kokkinos, Sammy Mohamed, and Andrea Vedaldi. De-scribing textures in the wild. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 3606–3613, 2014. Tao Dai, Song Wang, Hang Guo, Jianping Wang, and Zexuan Zhu. DIIN: Diffusion iterative implicit network for arbitrary-scale super-resolution. In Proceedings of the Thirty-Fourth International Joint Conference on Artificial Intelligence (IJCAI) , pages 855–863, 2025. Eastman Kodak Company. Kodak lossless true color image suite. https://r0k.us/graphics/ kodak/ , 1999. Lei Han and Xuesong Zhang. Scalable super-resolution neural operator. In Proceedings of the 32nd ACM International Conference on Multimedia (ACMMM) , pages 10036–10045, 2024. Jia-Bin Huang, Abhishek Singh, and Narendra Ahuja. Single image super-resolution from trans-formed self-exemplars. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 5197–5206, 2015. Jaewon Lee and Kyong Hwan Jin. Local texture estimator for implicit representation function. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,pages 1929–1938, 2022. Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, and Radu Timofte. SwinIR: Image restoration using Swin transformer. In Proceedings of the IEEE/CVF International Con-ference on Computer Vision Workshops (ICCVW) , pages 1833–1844, 2021. Bee Lim, Sanghyun Son, Heewon Kim, Seungjun Nah, and Kyoung Mu Lee. Enhanced deep resid-ual networks for single image super-resolution. In Proceedings of the IEEE Conference on Com-puter Vision and Pattern Recognition Workshops (CVPRW) , pages 136–144, 2017. David Martin, Charless Fowlkes, Doron Tal, and Jitendra Malik. A database of human segmented natural images and its application to evaluating segmentation algorithms and measuring ecological statistics. In Proceedings of the IEEE International Conference on Computer Vision (ICCV) ,volume 2, pages 416–423, 2001. Yiqun Mei, Yuchen Fan, and Yuqian Zhou. Image super-resolution with non-local sparse atten-tion. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 3517–3526, 2021. Vishwanath Saragadam, Daniel LeJeune, Jasper Tan, Guha Balakrishnan, Ashok Veeraraghavan, and Richard G. Baraniuk. WIRE: Wavelet implicit neural representations. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 18507– 18516, 2023. Vincent Sitzmann, Julien N. P. Martel, Alexander W. Bergman, David B. Lindell, and Gordon Wet-zstein. Implicit neural representations with periodic activation functions. In Advances in Neural Information Processing Systems (NeurIPS) , volume 33, pages 7462–7473, 2020. 13 Gaochao Song, Qian Sun, Luo Zhang, Ran Su, Jianfeng Shi, and Ying He. OPE-SR: Orthogonal position encoding for designing a parameter-free upsampling module in arbitrary-scale image super-resolution. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 10009–10020, 2023. Matthew Tancik, Pratul P. Srinivasan, Ben Mildenhall, Sara Fridovich-Keil, Nithin Raghavan, Utkarsh Singhal, Ravi Ramamoorthi, Jonathan T. Barron, and Ren Ng. Fourier features let networks learn high frequency functions in low dimensional domains. In Advances in Neural Information Processing Systems (NeurIPS) , volume 33, pages 7537–7547, 2020. Min Wei and Xuesong Zhang. Super-resolution neural operator. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 18247–18256, 2023. Roman Zeyde, Michael Elad, and Matan Protter. On single image scale-up using sparse-representations. In Curves and Surfaces , volume 6920 of Lecture Notes in Computer Science ,pages 711–730, Berlin, Heidelberg, 2012. Springer. doi: 10.1007/978-3-642-27413-8_47. Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shechtman, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 586–595, 2018a. Yulun Zhang, Kunpeng Li, Kai Li, Lichen Wang, Bineng Zhong, and Yun Fu. Image super-resolution using very deep residual channel attention networks. In Proceedings of the European Conference on Computer Vision (ECCV) , pages 286–301, 2018b. Yulun Zhang, Yapeng Tian, Yu Kong, Bineng Zhong, and Yun Fu. Residual dense network for image super-resolution. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 2472–2481, 2018c. 
+
+## A Technical appendices and supplemental material 
+
+This appendix collects material supporting the main paper: extended comparison-protocol and devi-ation detail for the matched-budget amortized baselines (Appendix A.1); the closed-form locality di-agnostic and the per-patch log-space adaptive-bandwidth ablation with supporting figures and tables (Appendices A.2–A.3); an inference-cost scatter plot (Appendix A.4); additional qualitative panels (Appendix A.5); supplementary scoping caveats, including a local-spectrum-error (LSE) analysis (Appendix A.6); full arbitrary-scale super-resolution details with per-scale quality grids and qual-ity / efficiency deltas across in-distribution and out-of-distribution scales (Appendix A.7); compute resources (Appendix A.8); and licenses for existing assets (Appendix A.9). 
+
+A.1 Comparison protocol and deviation details 
+
+The three matched-budget amortized baselines (LIIF, LTE, WIRE) are trained under the matched-budget amortized protocol of Section 3.3 for the standardized native-reconstruction benchmark. Four kinds of deviation from canonical published settings arise under this protocol; we list them here so the reader can inspect each one independently. 
+
+Amortized training vs per-image fitting. WIRE is canonically fit per image at test time. The matched-budget training protocol (Section 3.3) trains all three matched-budget amortized baselines once, amortized, on DTD + DIV2K, then freezes and evaluates them on held-out Kodak, Set14, and Urban100 without any per-image adaptation. This is the same regime as every other arm in the benchmark (the Global Fourier-MLP baseline and the three GB-LSR variants), so the relative PSNR and LPIPS gaps reported in Section 5.1 reflect the amortized setting only. Canonical paper numbers that depend on per-image fitting are not directly comparable. 
+
+Architecture differences. All seven arms share the same encoder ( dfeat = 128 , three structural stages: an input lift, log 2(P ) stride-2 downsampling blocks, and an output projection). Decoders diverge per arm: • LIIF (matched-budget amortized): MLP decoder, hidden 256, 5 layers. 14 • LTE (matched-budget amortized): MLP decoder, hidden 256, 3 layers; learned local Fourier features with frequency-bank size 128 .• WIRE (matched-budget amortized): MLP decoder, hidden 256, 4 layers; real-valued sin-Gabor activations with learnable per-channel ω0, σ 0 initialized at 10 .0, a known deviation from canonical WIRE’s complex-Gabor activation (Eq. 2 of Saragadam et al. [2023]; the spread parameter written s0 there is renamed σ0 here to avoid the GB-LSR-Fixed band-width s0). • Global Fourier-MLP baseline: MLP on Fourier-feature inputs conditioned on a spatially mean-pooled global code from the encoder feature map; no local spectral basis (no-local-basis control). • GB-LSR-Scalar / GB-LSR-Fixed / GB-LSR-Full use the fixed-grid local spectral basis (patch side P = 32 , pmax = 16 ) with the local spectral pointwise decoder; they differ in how the bandwidth s is handled, and GB-LSR-Full additionally adapts the per-patch effective cutoff order (Section 3.2). None of these decoder configurations matches the canonical paper-reported settings of LIIF, LTE, or WIRE; they are tuned to fit inside the F1 parameter budget. 
+
+Feature-count and feature-unfolding differences. The canonical LIIF setting concatenates the 
+
+3×3 encoder-feature neighborhood (effectively 9× channels) before feeding the decoder. Reinstat-ing this unfolding would push LIIF past the F1 1.25 × band around the 989 ,955 -param GB-LSR-Scalar anchor. We therefore drop the unfolding; the relative ordering of the three matched-budget amortized baselines may shift if unfolding is reinstated under a widened parameter budget. 
+
+Parameter-budget adjustments (F1 anchor). Every arm in the standardized benchmark stays inside the fixed 1.25 × F1 band around the F1 anchor of 989 ,955 trainable parameters. Per-arm ratios: • GB-LSR-Scalar (anchor): 989 ,955 params ( 1.000 ×). • LIIF: 1,122 ,819 (1.134 ×). • LTE: 1,122 ,051 (1.133 ×). • WIRE: 1,058 ,051 (1.069 ×). All three matched-budget amortized baselines therefore sit comfortably within the F1 band. Param-eter counts are also recorded in Table 8 alongside decoder notes. The comparison protocol fixes the F1 / F2 / F3 axis definitions and thresholds, and enumerates the permitted deviations from canonical settings; no deviations beyond those listed above are used in the standardized native-reconstruction benchmark. 
+
+A.2 Closed-form locality diagnostic 
+
+The closed-form locality diagnostic tests whether the learned per-patch bandwidth field se in GB-LSR-Full-Linear (the linear-sigmoid full-adaptive variant) and its companion arm GB-LSR-Bandwidth-Linear (the linear-sigmoid bandwidth-only adaptive variant) is genuinely spatially local, or whether it has collapsed to a near-constant value within its allowed range se ∈ [0 .25 , 2.0] . Four binary tests are specified: • T1 : median within-image CoV of se must be ≥ 0.05 (larger is more local). • T2 : fraction of images with within-image range below 5% of the allowed range must be 
+
+< 0.50 (smaller is more local). • T3 : relative texture-vs-smooth region gap in mean se must be ≥ 0.05 .• T4 : frac within = var within /var total ≥ 0.25 AND absolute var within ≥ 10 −3 (the magnitude floor prevents T4 from passing for purely noise-level jitter). On 256 validation images across three seeds, the full-adaptive arm GB-LSR-Full-Linear records global se mean = 0 .7345 , global se std = 0 .0121 , within-image CoV median = 0 .0127 , and 15 Table 8: Parameter-budget ratios and key protocol differences. F1 (matched parameter bud-get): the anchor is GB-LSR-Scalar at 989 ,955 trainable params; all seven arms sit inside the fixed 
+
+1.25 × ratio band. Shared encoder: dfeat = 128 , three structural stages. Matched-budget amortized LIIF / LTE / WIRE are not canonical reproductions (Section 6).                                                       
+
+> Arm #params ratio Decoder / notes
+> GB-LSR-Scalar (F1 anchor) 989,955 1.000 ×Local spectral basis, P= 32 ,pmax = 16 ;global trainable scalar s.GB-LSR-Full 989,954 1.000 ×Per-patch log-space se+ order fields re-placing the global scalar s(trade-off ab-lation; bandwidth field collapses, see Ap-pendix A.3). GB-LSR-Fixed 989,954 1.000 ×Fixed s0and pmax ; no trainable spectral hy-perparameters. Global Fourier-MLP baseline 1,121,539 1.133 ×MLP on Fourier features; no local basis. LIIF (matched-budget amortized) 1,122,819 1.134 ×MLP hidden 256, 5 layers; 3×3feature un-folding dropped to meet F1. LTE (matched-budget amortized) 1,122,051 1.133 ×Hidden 256 ×3 layers (vs canonical 4);
+> 1×1amplitude / frequency heads (vs canonical 3×3conv); frequency-bank size
+> = 128 (canonical). WIRE (matched-budget amortized) 1,058,051 1.069 ×Hidden 256 ×4layers; real-valued sin-Gabor, learnable per-channel ω0, σ 0ini-tialized at 10 .0; amortized.
+
+a fraction-collapsed of 0.9844 at the 5% threshold. Every locality statistic except T4 misses its threshold by a factor of 2–6; T4’s formal threshold result is an artifact of var within = 1 .07 × 10 −4
+
+falling below the 10 −3 magnitude floor, so we do not treat T4 as supporting locality. Region-mean separation between smooth and texture patches is 0.0086 (T3 threshold 0.05 ). The companion arm GB-LSR-Bandwidth-Linear gives the same qualitative outcome (0/4 thresholds met, bandwidth-collapsed). Both arms are classified as bandwidth-collapsed under the decision rule used for this diagnostic. The within-image CoV histogram (Figure 3) shows the distribution peaking near 0.013 with essen-tially no mass above the 0.05 T1 threshold. The variance decomposition bar chart (Figure 4) shows the within-image component dominates the across-image component in ratio, but both components are absolute-tiny, so the bandwidth field operates as a per-image constant rather than a per-patch spatial map. The decision rule “bandwidth-collapsed ⇒ bandwidth axis is global, not spatial” motivates the per-patch log-space adaptive-bandwidth ablation that follows (Appendix A.3). 
+
+A.3 Per-patch log-space adaptive-bandwidth ablation 
+
+This subsection reports the ablation that re-tests the per-patch locality claim under a log-space pa-rameterization. It re-parameterizes the per-patch bandwidth field in the log domain ( se = exp( θe)
+
+with θe predicted by the adaptivity head; see Section 3.2) so the optimization landscape does not artificially compress se toward its allowed center. Four arms are trained: GB-LSR-Fixed, GB-LSR-Scalar, GB-LSR-Bandwidth (per-patch bandwidth only, effective cutoff order fixed at pmax ), and GB-LSR-Full (per-patch bandwidth and order, Section 3.2). Two binary criteria are evaluated: • Criterion A : any per-patch log-space arm meets all four T1–T4 locality thresholds. • Criterion B : any per-patch log-space arm beats the global-scalar control by the specified margins ∆PSNR texture ≥ +0 .30 dB OR ∆PSNR mixed ≥ +0 .30 dB OR ∆LPIPS ≤ − 0.015 ,AND ∆PSNR edge ≥ − 0.20 dB (no more than 0.20 dB edge regression). Neither criterion is met. For Criterion A, both per-patch log-space arms (GB-LSR-Bandwidth, GB-LSR-Full) record 0/4 thresholds met, with T1 within-image CoV of 0.0100 and 0.0101 (threshold 
+
+0.05 ) respectively, well below the threshold and qualitatively matching the linear-sigmoid parame-terization (CoV 0.0114 and 0.0127 ). For Criterion B, the whole-image PSNR decomposition is: 16 0.00 0.01 0.02 0.03 0.04 0.05              
+
+> within-image CoV (se)
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> # images (3 seeds pooled)
+> GB-LSR-Full-Linear
+> T1 thresh. =0.05 median =0.013
+> 0.00 0.01 0.02 0.03 0.04 0.05
+> within-image CoV (se)
+> GB-LSR-Bandwidth-Linear
+> T1 thresh. =0.05 median =0.011
+
+Figure 3: Within-image coefficient of vari-ation of the learned per-patch bandwidth field. Histograms over 256 validation images and three seeds for the two linear-sigmoid per-patch adaptive variants (GB-LSR-Full-Linear, left; GB-LSR-Bandwidth-Linear, right). T1 threshold 0.05 (red dashed) and per-arm me-dian (black, mean of per-seed medians) marked; observed medians 0.013 and 0.011 . See Sec-tion 6.2. GB-LSR-Full-Linear GB-LSR-Bandwidth-Linear 
+
+0.0
+
+0.5
+
+1.0
+
+1.5   
+
+> variance of  se
+> ×10 −4
+> frac within =0.73 frac within =0.79
+> within-image (spatial) across-image (global)
+
+Figure 4: Variance decomposition of the per-patch bandwidth field. Within-image vs across-image variance of se for the two linear-sigmoid per-patch adaptive variants: per-seed decompositions over 256 validation images, av-eraged over three seeds. Bars annotated with frac within , the mean of per-seed within/total ra-tios ( 0.73 for GB-LSR-Full-Linear, 0.79 for GB-LSR-Bandwidth-Linear). See Section 6.2. Table 9: Per-patch log-space adaptive-bandwidth ablation: locality-test readout. Fixed →
+
+global-scalar step: +2 .096 dB whole-image PSNR. Global-scalar → per-patch steps: −0.091 dB (bandwidth only) and +0 .234 dB (bandwidth + order), both inside seed noise and wrong-signed on LPIPS. ∆ columns in the table report this arm minus GB-LSR-Scalar. See Section 6.2. 
+
+Arm T1–T4 whole-image PSNR (dB) ∆ PSNR ∆ LPIPS Criteria result GB-LSR-Fixed n/a 19.472 −2.096 n/a n/a 
+
+GB-LSR-Scalar n/a 21.568 n/a n/a n/a GB-LSR-Bandwidth 0 / 4 21.477 −0.091 +0.042 neither criterion met GB-LSR-Full 0 / 4 21.802 +0.234 +0.069 neither criterion met 
+
+• GB-LSR-Fixed → GB-LSR-Scalar: 19 .472 → 21 .568 dB, ∆ = +2 .10 dB. • GB-LSR-Scalar → GB-LSR-Bandwidth: 21 .568 → 21 .477 dB, ∆ = −0.09 dB (worse). • GB-LSR-Scalar → GB-LSR-Full: 21 .568 → 21 .802 dB, ∆ = +0 .23 dB. Per-region PSNR gaps to the global-scalar control are also small or negative: on texture and mixed regions, both per-patch log-space arms either match or regress, and on LPIPS both regress by +0 .04 –
+
++0 .07 (Figure 5). Criterion B is therefore not met. Under the decision rule, because neither criterion is met, the ablation does not support a per-patch locality mechanism for this decoder family. Per-arm T1–T4 thresholds-met counts are 0/4 for both per-patch log-space arms (Figure 6, Table 9). 
+
+A.4 Inference cost vs quality scatter plot 
+
+The scatter plot visualizes the inference-cost claim of Section 5.4; the numeric values (per-arm ms/img across the three datasets) are in the per-dataset main tables (Tables 1–3). 
+
+A.5 Additional qualitative panels 
+
+Figure 8 shows reconstructions for one exemplar image per dataset at seed 0 (Kodak: kodim01 ;Set14: baboon ; Urban100: img_001 ). Each row has four columns: Ground Truth, GB-LSR-Scalar (the main arm), the best-PSNR arm on that dataset over all seven arms (GB-LSR-Full on all three datasets), and the best-LPIPS arm on that dataset over all seven arms (GB-LSR-Fixed on all three 17 Fixed Scalar Bandwidth Full    
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> whole-image PSNR (dB)  ↑
+> 19.47 21.57 21.48 21.80
+> +2.10 dB +0.23 dB
+> Fixed Scalar Bandwidth Full
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> whole-image LPIPS  ↓
+> 0.597 0.630 0.672 0.699
+> +0.069 (regress.)
+
+Figure 5: Whole-image metrics under the per-patch log-space adaptive-bandwidth ab-lation. Whole-image PSNR (left, ↑) and LPIPS (right, ↓) for four arms; reference arms in blue (GB-LSR-Fixed light, GB-LSR-Scalar dark), log-space ablation arms in warm tones (GB-LSR-Bandwidth amber, GB-LSR-Full red). Fixed →Scalar: +2 .10 dB; Scalar →Full: +0 .23 dB and +0 .069 LPIPS re-gression. See Section 6.2. T1 T2 T3 T4      
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> test value
+> 0.010 1.000 0.007 0.754
+> GB-LSR-Bandwidth (log-space) 0/4 thresholds met
+> T1 T2 T3 T4
+> 0.010 1.000 0.008 0.774
+> GB-LSR-Full (log-space) 0/4 thresholds met
+> met not met per-test threshold
+
+Figure 6: Locality-test values under the per-patch log-space adaptive-bandwidth ab-lation. T1–T4 locality-test values for the two per-patch log-space arms. Bars green (met) / red (not met); dashed lines: per-test specified thresholds. T1 / T3 / T4 require the value at or above the dashed line; T2 requires it below. The T4 bars clear the 0.25 ratio threshold but fail the test’s second condition, the var within ≥
+
+10 −3 magnitude floor ( 3.2 × 10 −5 / 3.7 × 10 −5
+
+for GB-LSR-Bandwidth / GB-LSR-Full), which the dashed line does not show (Appendix A.2). Both arms meet 0/4. See Section 6.2. datasets). Because the best-PSNR and best-LPIPS arms are from the GB-LSR family on every dataset, the matched-budget amortized baselines do not appear in the panel. The qualitative panel mirrors the quantitative story in Section 5.2: GB-LSR-Scalar resolves high-frequency edge content (Urban100 lines, Set14 baboon whiskers); GB-LSR-Full trades some edge crispness for a slightly higher whole-image PSNR; GB-LSR-Fixed yields the most heavily smoothed (low-pass) reconstructions, at the cost of visible patch-seam artifacts, consistent with its best whole-image LPIPS and its fixed bandwidth. 
+
+A.6 Additional scoping caveats 
+
+The following supplementary scope caveats extend the main-body limitations (Section 6). Each is a standalone caveat. The first subsection contrasts the two evaluation protocols (native reconstruction; arbitrary-scale SR extension); the remaining subsections are scoped to the native-reconstruction benchmark. 
+
+A.6.1 Two evaluation protocols (native reconstruction; arbitrary-scale SR extension) 
+
+The main body of this paper uses a native-reconstruction benchmark instantiated at a standardized 
+
+256 ×256 evaluation size: images larger than 256 ×256 are center-cropped, and images with any native dimension below 256 are upsampled to 256 . This 256 ×256 standardization is a benchmark-control choice for the matched-budget comparison (Section 4), not a restriction of the GB-LSR representation, which is defined for arbitrary H × W images and continuous-coordinate queries (Section 3.1). The paper additionally reports an arbitrary-scale super-resolution extension (Section 5.5, Ap-pendix A.7). This is a separate evaluation: input is a low-resolution image, queries are at high-resolution coordinates, and methods are LIIF-RDN / LTE-RDN / LTE-SwinIR / GB-LSR-Scalar-ASR. The two protocols differ in input resolution, query distribution, and baseline set; numbers from one protocol are not directly comparable to the other. 18 1 2 3 4 5 6
+
+← inference time (ms / image), lower is better 
+
+> 13
+> 15
+> 17
+> 19
+> 21
+> PSNR (dB), higher is better  →
+> GB-LSR-Scalar (main)
+> Arm (mean of 3 datasets) GB-LSR-Scalar GB-LSR-Full GB-LSR-Fixed Global Fourier-MLP LIIF LTE WIRE Per-dataset point Kodak Set14 Urban100
+
+Figure 7: Inference cost vs whole-image PSNR, per arm. Inference time per image at batch size 1 on the NVIDIA H200 GPU ( x-axis, ↓) vs whole-image PSNR ( y-axis, ↑); upper-left is best. Small markers: per-dataset three-seed means (Kodak, Set14, Urban100); large filled circles: cross-dataset mean per arm. GB-LSR-Scalar and GB-LSR-Full have nearly identical inference times ( 1.41 vs 
+
+1.40 –1.41 ms), so their large circles coincide at the upper left; the annotation marks GB-LSR-Scalar. Matched-budget amortized LIIF / LTE / WIRE are not canonical reproductions (Section 6). 
+
+A.6.2 Single encoder / decoder family, narrow architectural sweep 
+
+All seven arms share a single encoder ( dfeat = 128 , three structural stages: an input lift, log 2(P )
+
+stride-2 downsampling blocks, and an output projection). Decoders differ per arm, but the sweep does not exhaustively cover alternative adaptivity-head designs. The locality-negative result is there-fore specific to this adaptivity head (a single linear projection from spatial encoder features to scalar 
+
+se per patch); a different head design might behave differently and is not investigated here. 
+
+A.6.3 Single training dataset mix 
+
+All seven arms are trained on a DTD + DIV2K mixture; the held-out datasets (Kodak, Set14, Ur-ban100) are strictly held out from training, so the cross-dataset numbers are legitimate distribution-shift numbers within the natural-image regime. A broader distribution shift (e.g., medical, satellite, or rendered computer-graphics imagery) is not tested. 
+
+A.6.4 LSE is not monotone with PSNR 
+
+Table 10 reports whole-image LSE (local spectrum error) alongside whole-image PSNR for the three GB-LSR variants under the fixed evaluation protocol. The local-spectrum-error metric is not monotone with whole-image PSNR across the family: GB-LSR-Scalar has the lowest LSE on every dataset ( 4.055 / 3.541 / 4.106 on Kodak / Set14 / Urban100), yet GB-LSR-Full attains a marginally higher PSNR ( +0 .126 / +0 .128 / +0 .034 dB, all within seed noise) at a noticeably worse LSE ( +0 .384 / +0 .243 / +0 .305 ). We therefore do not claim “better spectrum match implies better reconstruction” universally; LSE is reported alongside PSNR / SSIM / LPIPS for transparency but is not a primary metric. 
+
+A.6.5 Fixed evaluation protocol 
+
+Two evaluation criteria summarize the standardized benchmark. The quality criterion is composite: at most 0.5 dB below the best matched-budget amortized baseline PSNR, at most 0.02 above the 19 Kodak:  kodim01.png                                                  
+
+> Ground Truth
+> PSNR =22 .312 LPIPS =0.6417
+> GB-LSR-Scalar (main)
+> PSNR =22 .438 LPIPS =0.7162
+> Best PSNR: GB-LSR-Full
+> PSNR =20 .270 LPIPS =0.5936
+> Best LPIPS: GB-LSR-Fixed
+> Set14:  baboon.png
+> PSNR =20 .776 LPIPS =0.5970 PSNR =20 .904 LPIPS =0.6648 PSNR =18 .148 LPIPS =0.5967
+> Urban100:  img_001.png
+> PSNR =18 .793 LPIPS =0.6925 PSNR =18 .827 LPIPS =0.7448 PSNR =17 .011 LPIPS =0.6159
+
+Figure 8: Qualitative reconstruction panel. One exemplar image per dataset (Kodak: kodim01 ;Set14: baboon ; Urban100: img_001 , all seed 0). Columns: Ground Truth, GB-LSR-Scalar (main), the best-PSNR arm, and the best-LPIPS arm; the best-PSNR arm is GB-LSR-Full and the best-LPIPS arm is GB-LSR-Fixed on all three datasets, so the column labels are constant. The small in-image tag (lower-left of each reconstruction) shows the three-seed-mean PSNR / LPIPS for that arm on that dataset (matches Tables 1–3). “Best” is by three-seed mean over all seven arms. Table 10: Whole-image LSE (local spectrum error) vs PSNR across the GB-LSR family. Three-seed mean ± std under the fixed evaluation protocol. Bold marks per-column best: lowest LSE (better spectrum match) and highest PSNR (better reconstruction), with within-seed-noise ties both bolded. GB-LSR-Scalar has the lowest LSE on every dataset, yet GB-LSR-Full ties or marginally beats it on PSNR, illustrating the non-monotonicity discussed below. See Section 4 for the LSE metric and Tables 1–3 for the full PSNR / SSIM / LPIPS context. 
+
+Kodak Set14 Urban100 Arm LSE ↓ PSNR (dB) ↑ LSE ↓ PSNR (dB) ↑ LSE ↓ PSNR (dB) ↑
+
+GB-LSR-Fixed 4.556 ± 0.099 20.270 ± 0.159 4.206 ± 0.104 18.148 ± 0.056 4.699 ± 0.071 17.011 ± 0.015 
+
+GB-LSR-Scalar (main) 4.055 ± 0.104 22.312 ± 0.204 3.541 ± 0.063 20.776 ± 0.228 4.106 ± 0.067 18.793 ± 0.244 
+
+GB-LSR-Full 4.439 ± 0.019 22.438 ± 0.064 3.784 ± 0.013 20.904 ± 0.060 4.411 ± 0.026 18.827 ± 0.068 
+
+best baseline LPIPS, and a ≥ 0.5 dB gap over the Global Fourier-MLP baseline, with the composite required to hold on at least two of the three datasets. The inference-cost criterion requires GB-LSR-Scalar to run at ≤ 0.75 × the slowest baseline’s inference time on every dataset. Both criteria and their thresholds are fixed across all reported arms. Any reinterpretation under a different protocol is out of scope for this paper. 20 100 150 200 250 300 
+
+Latency (ms / image, Urban100 ×4, batch 1, H200) 
+
+> 26 .5
+> 26 .6
+> 26 .7
+> 26 .8
+> 26 .9
+> 27 .0
+> 27 .1
+> 27 .2
+> PSNR-Y (dB)
+> GB-LSR-Scalar-ASR LIIF-RDN LTE-RDN LTE-SwinIR
+
+Figure 9: Arbitrary-scale SR: PSNR-Y vs H200 GPU latency on Urban100 ×4. Three-seed mean ± std on both axes; GB-LSR-Scalar-ASR shown as a blue diamond. See Section 5.5. 
+
+A.7 Arbitrary-scale super-resolution details Methods. We report four arbitrary-scale SR methods: LIIF-RDN, LTE-RDN, LTE-SwinIR, and the GB-LSR-Scalar-ASR extension. LIIF-RDN, LTE-RDN, and LTE-SwinIR are canonical-style re-implementations of Chen et al. [2021b] and Lee and Jin [2022]; LIIF-RDN and LTE-RDN use the RDN encoder of Zhang et al. [2018c], and LTE-SwinIR uses the SwinIR encoder of Liang et al. [2021]. GB-LSR-Scalar-ASR is the arbitrary-scale extension of GB-LSR-Scalar (Section 3); it shares the RDN encoder used in LIIF-RDN and LTE-RDN, with the local spectral decoder (pmax = 16 ; each basis element’s support is the high-resolution footprint of one LR feature cell, which is scale-dependent rather than the native benchmark’s fixed P = 32 patch) and a single global trainable scalar bandwidth. The ASR bandwidth uses a softplus parameterization (strictly positive, unbounded above) initialized at s = 1 .0, rather than the native benchmark’s log-space sig-moid bound to [0 .25 , 2.0] ; the trained value remains well inside the native range ( s ≈ 0.88 on all three seeds). 
+
+Training and evaluation. All four methods train for 1,000 ,000 steps on DIV2K with three seeds on NVIDIA H200; evaluation runs on Set5 / Set14 / B100 / Urban100 / DIV2Kval at canonical scales 
+
+×2 / ×3 / ×4 (in-distribution) and OOD scales ×6 / ×8.
+
+Canonical anchor. Our LIIF-RDN reproduction lands on Set5 ×2 at 38 .181 ± 0.003 dB PSNR-Y vs Chen et al. [2021b] Table 2 (their RDN-LIIF) Set5 ×2 = 38 .17 dB (deviation +0 .011 dB). Three additional canonical cells (LIIF-RDN Set14 ×4 deviation +0 .039 dB; LIIF-RDN B100 ×4 deviation 
+
++0 .012 dB; LTE-SwinIR Set14 ×4 deviation −0.058 dB) are within ±0.06 dB of the published canonical numbers, calibrating the SR re-implementations to canonical literature. 
+
+GPU latency protocol. Latency is measured on a single NVIDIA H200 GPU at batch size 1, with no automatic mixed precision (AMP), no torch.compile , no CUDA Graphs, 50 timed forward passes per image/scale after 10 warm-up passes, torch.cuda.Event timing with synchronization, and no file I/O or dataloader work inside the timed region. We report ms/img (per-image median and mean) aggregated as the three-seed mean of the per-image mean. These settings are deployment-conservative; production inference (batch > 1, mixed precision, compiled graphs) would lower ab-solute latencies, with the per-cell speed ratios approximately preserved since all four methods would benefit similarly. 21 Table 11: Arbitrary-scale super-resolution quality (PSNR-Y, dB). Three-seed mean ± std at 
+
+×2 / ×3 / ×4 on Set5 / Set14 / B100 / Urban100 / DIV2Kval. Bold = per-column best within each dataset block. Trainable parameters: LIIF-RDN 22.32M, LTE-RDN 22.47M, LTE-SwinIR 12.53M, GB-LSR-Scalar-ASR 22.02M. All methods trained 1,000,000 steps on DIV2K with three seeds (NVIDIA H200). LIIF-RDN / LTE-RDN / LTE-SwinIR are canonical-style re-implementations of Chen et al. [2021b] and Lee and Jin [2022]; see Section 5.5.                                                                                                                                                                                        
+
+> Method ×2×3×4
+> Set5
+> LIIF-RDN 38.181 ±0.003 34.673 ±0.001 32.519 ±0.006 LTE-RDN 37.705 ±0.025 34.507 ±0.029 32.489 ±0.024 LTE-SwinIR 37.901 ±0.033 34.687 ±0.043 32.768 ±0.010
+> GB-LSR-Scalar-ASR 38.090 ±0.013 34.397 ±0.038 32.237 ±0.036
+> Set14
+> LIIF-RDN 34.005 ±0.048 30.533 ±0.011 28.839 ±0.012 LTE-RDN 33.475 ±0.027 30.387 ±0.016 28.803 ±0.003 LTE-SwinIR 33.725 ±0.042 30.638 ±0.013 29.002 ±0.008
+> GB-LSR-Scalar-ASR 33.850 ±0.028 30.429 ±0.010 28.746 ±0.012
+> B100
+> LIIF-RDN 32.323 ±0.002 29.269 ±0.005 27.752 ±0.004 LTE-RDN 32.089 ±0.011 29.168 ±0.011 27.719 ±0.011 LTE-SwinIR 32.297 ±0.019 29.318 ±0.012 27.864 ±0.004
+> GB-LSR-Scalar-ASR 32.248 ±0.015 29.154 ±0.012 27.673 ±0.010
+> Urban100
+> LIIF-RDN 32.823 ±0.023 28.794 ±0.016 26.659 ±0.014 LTE-RDN 31.175 ±0.085 28.396 ±0.008 26.585 ±0.029 LTE-SwinIR 31.817 ±0.059 28.979 ±0.084 27.133 ±0.040
+> GB-LSR-Scalar-ASR 32.530 ±0.079 28.632 ±0.025 26.457 ±0.020
+> DIV2Kval
+> LIIF-RDN 36.480 ±0.004 32.735 ±0.006 30.746 ±0.008 LTE-RDN 35.818 ±0.036 32.506 ±0.009 30.661 ±0.014 LTE-SwinIR 36.142 ±0.060 32.762 ±0.052 30.894 ±0.037
+> GB-LSR-Scalar-ASR 36.325 ±0.022 32.661 ±0.005 30.683 ±0.010
+
+Table 12: Arbitrary-scale super-resolution: aggressive-efficiency appendix variant. GB-LSR-Scalar-ASR-nf48+noLE narrows the RDN encoder to 48 channels and is trained and evaluated with-out 4-corner local-ensemble averaging. Three-seed mean of all numbers under the same fixed GPU latency protocol as Table 6, Table 7. Listed appendix-only due to a measurable quality cost on Ur-ban100 ×4. Columns and aggregation rules match Table 7.                     
+
+> Variant Params (M) Mean ∆PSNR-Y (dB) Worst-cell Mean speedup Urban100 peak Mean mem ID ↑OOD ↑∆(dB) vs base ↑(MB) ↓reduction ↑
+> GB-LSR-Scalar-ASR-nf48+noLE 20.611 −0.0419 −0.0376 −0.0798 1.702 ×27261.7 +37 .24 %
+
+Per-cell speedups ( ×4 timing cells; base GB-LSR-Scalar-ASR). On the three ×4 timing cells (Set14, B100, Urban100), the base GB-LSR-Scalar-ASR runs faster than LIIF-RDN by 1.385 ×,
+
+1.461 ×, and 1.483 × respectively (geometric mean 1.442 ×), and faster than LTE-SwinIR by 
+
+3.267 ×, 3.096 ×, and 3.401 × (geometric mean 3.253 ×). Three-seed std / mean for GB-LSR-Scalar-ASR ms/img is 0.14% / 0.12% / 0.09% on the same three cells. 
+
+Per-cell speedups ( ×4 timing cells; GB-LSR-Scalar-ASR family variants). On the same three timing cells, the noLE variant (disabling 4-corner local-ensemble averaging) runs faster than the base GB-LSR-Scalar-ASR by 1.773 ×, 1.465 ×, and 2.064 × respectively (arithmetic mean 1.767 ×), with three-seed std / mean 0.04% / 0.35% / 0.05% . The nf96+noLE variant (RDN encoder widened to 96 channels, trained and evaluated without local-ensemble averaging) runs faster than the base variant by 1.510 ×, 1.309 ×, and 1.917 × (arithmetic mean 1.579 ×; three-seed std / mean 
+
+0.17% / 0.09% / 0.45% ). Speedups vs LIIF-RDN are 2.455 ×, 2.140 ×, 3.060 × for noLE and 
+
+2.092 ×, 1.912 ×, 2.842 × for nf96+noLE; speedups vs LTE-SwinIR are 5.792 ×, 4.537 ×, 7.019 ×
+
+22 Table 13: Arbitrary-scale super-resolution: out-of-distribution scales (PSNR-Y, dB). Three-seed mean ± std at ×6 / ×8 (unseen during training; training scales are ×1–×4). Bold = per-column best within each dataset block. Trainable parameters: LIIF-RDN 22.32M, LTE-RDN 22.47M, LTE-SwinIR 12.53M, GB-LSR-Scalar-ASR 22.02M. See Section 5.5.                                                                                                                           
+
+> Method ×6×8
+> Set5
+> LIIF-RDN 29.199 ±0.062 27.165 ±0.035 LTE-RDN 29.226 ±0.025 27.195 ±0.008 LTE-SwinIR 29.575 ±0.038 27.442 ±0.029
+> GB-LSR-Scalar-ASR 28.899 ±0.035 26.966 ±0.030
+> Set14
+> LIIF-RDN 26.659 ±0.020 25.157 ±0.002 LTE-RDN 26.669 ±0.008 25.178 ±0.016 LTE-SwinIR 26.865 ±0.021 25.413 ±0.017
+> GB-LSR-Scalar-ASR 26.522 ±0.010 25.031 ±0.011
+> B100
+> LIIF-RDN 25.987 ±0.002 24.920 ±0.005 LTE-RDN 25.987 ±0.004 24.933 ±0.004 LTE-SwinIR 26.109 ±0.009 25.057 ±0.008
+> GB-LSR-Scalar-ASR 25.930 ±0.009 24.885 ±0.006
+> Urban100
+> LIIF-RDN 24.186 ±0.005 22.786 ±0.016 LTE-RDN 24.194 ±0.008 22.801 ±0.003 LTE-SwinIR 24.679 ±0.026 23.231 ±0.017
+> GB-LSR-Scalar-ASR 24.024 ±0.005 22.686 ±0.011
+> DIV2Kval
+> LIIF-RDN 28.466 ±0.009 27.096 ±0.009 LTE-RDN 28.442 ±0.010 27.091 ±0.004 LTE-SwinIR 28.656 ±0.023 27.298 ±0.019
+> GB-LSR-Scalar-ASR 28.408 ±0.004 27.048 ±0.005
+
+(noLE) and 4.934 ×, 4.053 ×, 6.519 × (nf96+noLE). The Set14 and Urban100 ms/img values appear in Table 6; the B100 values enter the per-cell ratios and the geometric means but are not tabu-lated, and all ratios are computed from the full-precision measurements rather than the rounded table cells. The LIIF-RDN and LTE-SwinIR numbers are from the same fixed GPU latency protocol (batch size 1, 10 warm-up + 50 timed passes, CUDA-event timing). The base GB-LSR-Scalar-ASR row reproduces between the original timing run and a follow-up family re-timing run within 
+
+0.5 ms across all three cells, and the base row’s speed ratios computed entirely within the original timing run are unchanged at the displayed precision ( 1.44 × vs LIIF-RDN, 3.25 × vs LTE-SwinIR). Quality / efficiency deltas (three-seed mean ID / OOD / worst-cell ∆PSNR-Y, peak memory, mean memory reduction) appear in Table 7 for the main-paper variants and Table 12 for the appendix-only nf48+noLE variant. 
+
+Per-cell PSNR-Y deficits. Across the 15 in-distribution quality cells (5 datasets × 3 scales), GB-LSR-Scalar-ASR’s worst-case deficit relative to the best canonical-style baseline is 0.676 dB on Urban100 ×4, and it remains within 1.0 dB of the best baseline on every cell. The full PSNR-Y grid across all evaluated scales is in Table 14 (full SSIM-Y grid in Table 15). 
+
+Scope statement. The arbitrary-scale SR extension is a quality / efficiency trade-off benchmark on four methods (three canonical-style: LIIF-RDN, LTE-RDN, LTE-SwinIR; plus GB-LSR-Scalar-ASR), five SR datasets, and three in-distribution scales (plus two OOD scales). It is not 
+
+a literature SR survey: we do not compare against EDSR [Lim et al., 2017] / RCAN [Zhang et al., 2018b] / SwinIR-T [Liang et al., 2021] / NLSN [Mei et al., 2021] / IPT [Chen et al., 2021a] / NAFNet [Chen et al., 2022] / OPE-SR [Song et al., 2023] / CiaoSR [Cao et al., 2023]. It is not a raw-PSNR superiority claim: GB-LSR-Scalar-ASR trails LTE-SwinIR by up to 0.68 dB on many cells. The claim is competitive PSNR-Y at substantially lower GPU inference latency under the fixed GPU latency protocol. 23 Table 14:  Arbitrary-scale super-resolution: full PSNR-Y grid (dB).  Three-seed mean  ± std on Set5 / Set14 / B100 / Urban100 / DIV2Kval across all evaluated scales  ×2 / ×3 / ×4 / ×6 / ×8. Bold = per-column best within each dataset block.  Trainable parameters: LIIF-RDN 22.32M, LTE-RDN 22.47M, LTE-SwinIR 12.53M, GB-LSR-Scalar-ASR 22.02M. See Section 5.5. 
+
+> Method  ×2 ×3 ×4 ×6 ×8
+> Set5
+> LIIF-RDN  38.181  ± 0.003  34.673  ± 0.001  32.519  ± 0.006  29.199  ± 0.062  27.165  ± 0.035 LTE-RDN  37.705  ± 0.025  34.507  ± 0.029  32.489  ± 0.024  29.226  ± 0.025  27.195  ± 0.008 LTE-SwinIR  37.901  ± 0.033  34.687  ± 0.043  32.768  ± 0.010  29.575  ± 0.038  27.442  ± 0.029
+> GB-LSR-Scalar-ASR  38.090  ± 0.013  34.397  ± 0.038  32.237  ± 0.036  28.899  ± 0.035  26.966  ± 0.030
+> Set14
+> LIIF-RDN  34.005  ± 0.048  30.533  ± 0.011  28.839  ± 0.012  26.659  ± 0.020  25.157  ± 0.002 LTE-RDN  33.475  ± 0.027  30.387  ± 0.016  28.803  ± 0.003  26.669  ± 0.008  25.178  ± 0.016 LTE-SwinIR  33.725  ± 0.042  30.638  ± 0.013  29.002  ± 0.008  26.865  ± 0.021  25.413  ± 0.017
+> GB-LSR-Scalar-ASR  33.850  ± 0.028  30.429  ± 0.010  28.746  ± 0.012  26.522  ± 0.010  25.031  ± 0.011
+> B100
+> LIIF-RDN  32.323  ± 0.002  29.269  ± 0.005  27.752  ± 0.004  25.987  ± 0.002  24.920  ± 0.005 LTE-RDN  32.089  ± 0.011  29.168  ± 0.011  27.719  ± 0.011  25.987  ± 0.004  24.933  ± 0.004 LTE-SwinIR  32.297  ± 0.019  29.318  ± 0.012  27.864  ± 0.004  26.109  ± 0.009  25.057  ± 0.008
+> GB-LSR-Scalar-ASR  32.248  ± 0.015  29.154  ± 0.012  27.673  ± 0.010  25.930  ± 0.009  24.885  ± 0.006
+> Urban100
+> LIIF-RDN  32.823  ± 0.023  28.794  ± 0.016  26.659  ± 0.014  24.186  ± 0.005  22.786  ± 0.016 LTE-RDN  31.175  ± 0.085  28.396  ± 0.008  26.585  ± 0.029  24.194  ± 0.008  22.801  ± 0.003 LTE-SwinIR  31.817  ± 0.059  28.979  ± 0.084  27.133  ± 0.040  24.679  ± 0.026  23.231  ± 0.017
+> GB-LSR-Scalar-ASR  32.530  ± 0.079  28.632  ± 0.025  26.457  ± 0.020  24.024  ± 0.005  22.686  ± 0.011
+> DIV2Kval
+> LIIF-RDN  36.480  ± 0.004  32.735  ± 0.006  30.746  ± 0.008  28.466  ± 0.009  27.096  ± 0.009 LTE-RDN  35.818  ± 0.036  32.506  ± 0.009  30.661  ± 0.014  28.442  ± 0.010  27.091  ± 0.004 LTE-SwinIR  36.142  ± 0.060  32.762  ± 0.052  30.894  ± 0.037  28.656  ± 0.023  27.298  ± 0.019
+> GB-LSR-Scalar-ASR  36.325  ± 0.022  32.661  ± 0.005  30.683  ± 0.010  28.408  ± 0.004  27.048  ± 0.005
+
+24 Table 15:  Arbitrary-scale super-resolution: full SSIM-Y grid.  Three-seed mean  ± std on Set5 / Set14 / B100 / Urban100 / DIV2Kval across all evaluated scales 
+
+> ×2 / ×3 / ×4 / ×6 / ×8. Bold = per-column best within each dataset block. Trainable parameters: LIIF-RDN 22.32M, LTE-RDN 22.47M, LTE-SwinIR 12.53M, GB-LSR-Scalar-ASR 22.02M. See Section 5.5.
+> Method  ×2 ×3 ×4 ×6 ×8
+> Set5
+> LIIF-RDN  0.9657  ± 0.0000  0.9377  ± 0.0001  0.9084  ± 0.0002  0.8421  ± 0.0008  0.7807  ± 0.0009 LTE-RDN  0.9646  ± 0.0000  0.9367  ± 0.0002  0.9081  ± 0.0003  0.8417  ± 0.0003  0.7804  ± 0.0003 LTE-SwinIR  0.9654  ± 0.0000  0.9383  ± 0.0002  0.9113  ± 0.0004  0.8499  ± 0.0003  0.7890  ± 0.0008
+> GB-LSR-Scalar-ASR  0.9654  ± 0.0000  0.9358  ± 0.0002  0.9053  ± 0.0005  0.8327  ± 0.0013  0.7662  ± 0.0016
+> Set14
+> LIIF-RDN  0.9289  ± 0.0004  0.8617  ± 0.0001  0.8046  ± 0.0001  0.7135  ± 0.0004  0.6501  ± 0.0005 LTE-RDN  0.9275  ± 0.0002  0.8611  ± 0.0001  0.8046  ± 0.0000  0.7139  ± 0.0003  0.6508  ± 0.0003 LTE-SwinIR  0.9297  ± 0.0002  0.8652  ± 0.0001  0.8093  ± 0.0001  0.7201  ± 0.0005  0.6576  ± 0.0002
+> GB-LSR-Scalar-ASR  0.9284  ± 0.0002  0.8608  ± 0.0001  0.8036  ± 0.0001  0.7103  ± 0.0003  0.6456  ± 0.0004
+> B100
+> LIIF-RDN  0.9108  ± 0.0001  0.8275  ± 0.0001  0.7611  ± 0.0002  0.6658  ± 0.0003  0.6041  ± 0.0004 LTE-RDN  0.9098  ± 0.0000  0.8269  ± 0.0002  0.7610  ± 0.0003  0.6660  ± 0.0001  0.6042  ± 0.0003 LTE-SwinIR  0.9116  ± 0.0004  0.8303  ± 0.0005  0.7662  ± 0.0002  0.6727  ± 0.0002  0.6111  ± 0.0001
+> GB-LSR-Scalar-ASR  0.9104  ± 0.0001  0.8249  ± 0.0001  0.7592  ± 0.0002  0.6636  ± 0.0002  0.6014  ± 0.0001
+> Urban100
+> LIIF-RDN  0.9400  ± 0.0002  0.8761  ± 0.0003  0.8162  ± 0.0004  0.7129  ± 0.0004  0.6382  ± 0.0004 LTE-RDN  0.9319  ± 0.0006  0.8725  ± 0.0006  0.8156  ± 0.0010  0.7128  ± 0.0008  0.6380  ± 0.0008 LTE-SwinIR  0.9373  ± 0.0006  0.8820  ± 0.0010  0.8295  ± 0.0007  0.7332  ± 0.0007  0.6592  ± 0.0005
+> GB-LSR-Scalar-ASR  0.9380  ± 0.0005  0.8730  ± 0.0004  0.8111  ± 0.0004  0.7052  ± 0.0004  0.6300  ± 0.0006
+> DIV2Kval
+> LIIF-RDN  0.9529  ± 0.0001  0.9035  ± 0.0001  0.8568  ± 0.0002  0.7809  ± 0.0003  0.7276  ± 0.0003 LTE-RDN  0.9509  ± 0.0002  0.9023  ± 0.0001  0.8564  ± 0.0003  0.7809  ± 0.0004  0.7276  ± 0.0004 LTE-SwinIR  0.9529  ± 0.0003  0.9055  ± 0.0003  0.8609  ± 0.0002  0.7871  ± 0.0002  0.7346  ± 0.0002
+> GB-LSR-Scalar-ASR  0.9523  ± 0.0001  0.9026  ± 0.0001  0.8557  ± 0.0001  0.7790  ± 0.0002  0.7251  ± 0.0002
+
+25 2 3 4 6 8
+
+Upsampling scale ( ×s)
+
+> 27 .5
+> 30 .0
+> 32 .5
+> 35 .0
+> 37 .5
+> PSNR-Y (dB)
+
+Set5     
+
+> 23468
+
+Upsampling scale ( ×s)
+
+> 26
+> 28
+> 30
+> 32
+> 34
+
+Set14     
+
+> 23468
+
+Upsampling scale ( ×s)
+
+> 26
+> 28
+> 30
+> 32
+
+B100     
+
+> 23468
+
+Upsampling scale ( ×s)
+
+> 22 .5
+> 25 .0
+> 27 .5
+> 30 .0
+> 32 .5
+> PSNR-Y (dB)
+
+Urban100     
+
+> 23468
+
+Upsampling scale ( ×s)
+
+> 27 .5
+> 30 .0
+> 32 .5
+> 35 .0
+
+DIV2Kval 
+
+LIIF-RDN LTE-RDN LTE-SwinIR GB-LSR-Scalar-ASR Figure 10: Arbitrary-scale SR: PSNR-Y vs scale across Set5 / Set14 / B100 / Urban100 / DIV2Kval (three-seed mean ± std). Shaded region: ×6 / ×8
+
+are out-of-distribution (training scales were ×1 – ×4). See Section 5.5. 26 Table 16: Native matched-budget training compute. Per-run wall-clock on a single H200 SXM 141 GB GPU. Each row groups arms × seeds (3 seeds per arm). The main GB-LSR-Scalar arm is trained alongside the per-patch log-space adaptive-bandwidth ablation and is counted once in the GB-LSR variants and Global Fourier-MLP row; the ablation row reports the three remaining ablation arms. Inference latency is reported in Tables 1–3.                         
+
+> Training group runs per-run total Main matched-budget amortized baselines (LIIF, LTE, WIRE; 3 arms
+> ×3 seeds) 91m37s–4m50s 25m28s Main GB-LSR variants and Global Fourier-MLP baseline (GB-LSR-Fixed, GB-LSR-Scalar, GB-LSR-Full, Global Fourier-MLP; 4 arms
+> ×3 seeds) 12 1m17s–1m46s 17m54s Closed-form locality diagnostic (Appendix A.2; 2 linear-sigmoid per-patch arms ×3 seeds) 61m17s–1m18s 7m48s Per-patch log-space adaptive-bandwidth ablation (Appendix A.3; 3 ablation arms ×3 seeds, with the main GB-LSR-Scalar reused as control) 91m18s–1m37s 12m49s Robustness reruns: checkpoint-loading parity and seed-set sensitiv-ity over the main arms and the log-space ablation 36 1m18s–1m29s 48m03s Earlier pilot variants and smoke runs (not in shipped tables) 21 8s–1m20s 10m07s
+> Native subtotal 93 2h02m
+
+Table 17: Arbitrary-scale super-resolution training compute. Per-run wall-clock on a single H200 SXM 141 GB GPU. Each shipped variant trains for 1,000 ,000 steps on DIV2K with three seeds. The LIIF-RDN canonical-anchor calibration sweep (two seeds per preprocessing variant) and the GB-LSR-Scalar-ASR scout variants (single-seed) are exploratory and do not appear in Ta-bles 11–15. Row totals and the subtotal are truncated to whole minutes independently from un-rounded wall-clock, so the displayed rows can differ from the displayed subtotal by one minute.                                             
+
+> Training group runs per-run total LIIF-RDN, LTE-RDN, GB-LSR-Scalar-ASR (3 RDN-encoder methods ×3 seeds) 935h56m–36h12m 324h36m LTE-SwinIR (SwinIR-encoder method ×3 seeds) 3122h12m–122h22m 366h55m GB-LSR-Scalar-ASR family ablation arms (noLE, nf48, nf96, nf48+noLE, nf96+noLE; 5 variants ×3 seeds) 15 35h42m–36h38m 540h32m LIIF-RDN canonical-anchor calibration sweep (4 preprocessing variants ×2 seeds) 81h47m–1h49m 14h26m GB-LSR-Scalar-ASR scouts (5 single-seed exploratory variants varying basis bandwidth and cutoff; not in shipped tables) 536h18m–36h26m 181h48m
+> ASR subtotal 40 1,428h18m
+
+A.8 Compute resources 
+
+All training and inference runs used a single NVIDIA H200 SXM 141 GB GPU on an internal academic cluster, single-GPU per run. Per-run wall-clock totals below are aggregated from on-disk training logs. 
+
+Total project compute. Summing over all training runs in Tables 16–17 (both reported and pre-liminary), the project consumed approximately 1,430 GPU-hours on H200: ≈ 2h02 m on native-protocol training across 93 runs, plus ≈ 1,428 h18 m on arbitrary-scale super-resolution training across 40 runs. Inference and evaluation passes are an order of magnitude shorter than training and are not separately aggregated. 27 Table 18: Licenses and terms of use for existing assets. Datasets used for evaluation and code / architectures used for baseline re-implementations or as encoder building blocks. 
+
+Asset License or terms of use URL 
+
+Datasets 
+
+DTD [Cimpoi et al., 2014] Released for research purposes (no for-mal license name on project page) 
+
+https://www.robots.ox.ac.uk/~vgg/ data/dtd/ 
+
+DIV2K [Agustsson and Timofte, 2017] For academic research purpose only https://data.vision.ee.ethz.ch/cvl/ DIV2K/ 
+
+Kodak [Eastman Kodak Company, 1999] Released by Eastman Kodak Company for unrestricted usage (per project-page maintainer’s statement) 
+
+https://r0k.us/graphics/kodak/ 
+
+Set14 [Zeyde et al., 2012] No formal license published; community-distributed alongside the original paper 
+
+https://github.com/jbhuang0604/ SelfExSR 
+
+Urban100 [Huang et al., 2015] No formal license published; community-distributed alongside the original paper 
+
+https://github.com/jbhuang0604/ SelfExSR 
+
+Set5 [Bevilacqua et al., 2012] No formal license published; community-distributed alongside the original paper 
+
+https://github.com/jbhuang0604/ SelfExSR 
+
+BSDS300 / B100 [Mar-tin et al., 2001] Non-commercial research and educa-tional purposes (per project page) 
+
+https://www2.eecs.berkeley.edu/ Research/Projects/CS/vision/grouping/ segbench/ 
+
+Code / architectures 
+
+LIIF [Chen et al., 2021b] BSD-3-Clause https://github.com/yinboc/liif 
+
+LTE [Lee and Jin, 2022] BSD-3-Clause https://github.com/jaewon-lee-b/lte 
+
+WIRE [Saragadam et al., 2023] MIT https://github.com/vishwa91/wire 
+
+RDN encoder [Zhang et al., 2018c] No license file in repository (used solely as architectural reference) 
+
+https://github.com/yulunzhang/RDN 
+
+SwinIR encoder [Liang et al., 2021] Apache-2.0 https://github.com/JingyunLiang/ SwinIR 
+
+SIREN [Sitzmann et al., 2020] MIT https://github.com/vsitzmann/siren 
+
+Fourier features [Tancik et al., 2020] MIT https://github.com/tancik/ fourier-feature-networks 
+
+LPIPS [Zhang et al., 2018a] BSD-2-Clause https://github.com/richzhang/ PerceptualSimilarity 
+
+A.9 Licenses for existing assets 
+
+This subsection enumerates the existing assets used in this paper, together with their licenses or stated terms of use as retrieved from the canonical project pages. License names follow SPDX identifiers where the project ships a formal license file; where no formal license is published, the project page’s stated terms are quoted instead. All assets are used within their stated terms; no commercial redistribution is performed. Datasets without an explicit license file are used following the access terms quoted on their canonical project pages. Code repositories without an explicit license are used solely as architectural refer-ence for our matched-budget amortized re-implementations (Section 3.3) and the canonical-style comparison set (Appendix A.7); no upstream code is redistributed in this submission. 28
