@@ -6,64 +6,65 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-24
-- 运行时间：2026-06-24 21:09:48 UTC
+- 最新运行日期：2026-06-25
+- 运行时间：2026-06-25 21:58:45 UTC
 - 运行状态：成功
-- 本次总论文数：14
-- 精读区：6
+- 本次总论文数：15
+- 精读区：7
 - 速读区：8
 
 ### 今日简报（AI）
-今日聚焦可控视觉生成新范式，精读两篇 9.0 论文剖析「结构先行」与「轻量扩散模型自适应剪枝」，速读三篇覆盖多样性控制、token 精简与语义混合。  
-最值得关注：生成轨迹先于像素的「Trajectory Forcing」给出高可控语义布局，PeLAP-A 的 50% 以上通道剪枝大幅压缩模型却保有质量，适合落地低成本图像生成。  
-普通读者可体验 Semantic Browsing 的滑块控多样性，或尝试 Token Dropping 思路，扔掉冗余视觉词元，在家用 GPU 上跑小模型也能产出稳定结果。
-- 详情：[/202606/24/README](/202606/24/README)
+今日精读2篇前沿论文，速读3篇高关注度研究，涵盖语义优先扩散模型与推理增强图像生成等方向。重点关注SeFi-Image如何将语义理解前置到扩散过程，以及RS-Gen的多阶段智能体框架如何提升生成图像的逻辑一致性。想跟上文生图前沿的读者，可从这两篇精读入手，再循速读论文拓展归因分析与语音生成视角。
+- 详情：[/202606/25/README](/202606/25/README)
 
 ### 精读区论文标签
-1. [Trajectory Forcing: Structure-First Generation with Controllable Semantic Trajectories](/202606/24/2606.22527v1-trajectory-forcing-structure-first-generation-with-controllable-semantic-trajectories)  
+1. [SeFi-Image: A Text-to-Image Foundation Model with Semantic-First Diffusion](/202606/25/2606.22568v2-sefi-image-a-text-to-image-foundation-model-with-semantic-first-diffusion)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：大规模文本到图像扩散基础模型具有语义优先扩散
+2. [RS-Gen: A Multi-Stage Agentic Framework for Reasoning and Search-Augmented Image Generation](/202606/25/2606.23221v1-rs-gen-a-multi-stage-agentic-framework-for-reasoning-and-search-augmented-image-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：使扩散和流模型的生成轨迹显式、语义化且可编辑
-2. [PeLAP-A: Adaptive Latent Pruning for Lightweight Latent Diffusion Models](/202606/24/2606.23086v1-pelap-a-adaptive-latent-pruning-for-lightweight-latent-diffusion-models)  
+   evidence：提出一种智能体框架，用于推理和搜索增强的图像生成与编辑
+3. [Cross-Modality Structural Guidance in 3D Latent Diffusion for Robust FLAIR Super-Resolution](/202606/25/2606.25255v1-cross-modality-structural-guidance-in-3d-latent-diffusion-for-robust-flair-super-resolution)  
    标签：评分：9.0/10、query:real-ir
-   evidence：引入自适应潜在剪枝方法，构建轻量级潜在扩散模型
-3. [Bridging the Manifold Gap: Riemannian Residual Line Search for One-Step Image Editing](/202606/24/2606.24844v1-bridging-the-manifold-gap-riemannian-residual-line-search-for-one-step-image-editing)  
+   evidence：使用扩散模型结合结构引导进行FLAIR MRI超分辨率
+4. [Shift Variant Image Degradation and Restoration Using Singular Value Decomposition](/202606/25/2606.25818v1-shift-variant-image-degradation-and-restoration-using-singular-value-decomposition)  
    标签：评分：9.0/10、query:real-ir
-   evidence：使用黎曼残差线搜索改进一步扩散图像编辑。
-4. [SeFi-Image: A Text-to-Image Foundation Model with Semantic-First Diffusion](/202606/24/2606.22568v1-sefi-image-a-text-to-image-foundation-model-with-semantic-first-diffusion)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：语义优先潜在扩散的文本到图像基础模型与高效训练
-5. [MythraGen: Two-Stage Retrieval Augmented Art Generation Framework](/202606/24/2606.22924v1-mythragen-two-stage-retrieval-augmented-art-generation-framework)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：结合检索增强与LoRA微调的文本到艺术图像生成
-6. [Stable Image Reconstruction via Two-Parameter Power-Scale Variation Minimization](/202606/24/2606.23083v1-stable-image-reconstruction-via-two-parameter-power-scale-variation-minimization)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：双可调参数幂尺度变分最小化实现稳定图像重建
+   evidence：使用奇异值分解恢复移变图像退化
+5. [In-context Region-based Drag: Drag Any Region to Any Shape](/202606/25/2606.25907v1-in-context-region-based-drag-drag-any-region-to-any-shape)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于扩散模型的区域拖拽编辑
+6. [Improving Richardson--Lucy Deconvolution with Diffusion Priors for Fluorescence Microscopy](/202606/25/2606.25924v1-improving-richardson--lucy-deconvolution-with-diffusion-priors-for-fluorescence-microscopy)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：使用扩散先验改进荧光显微镜的RL去卷积
+7. [MIMFlow: Integrating Masked Image Modeling with Normalizing Flows for End-to-End Image Generation](/202606/25/2606.26016v1-mimflow-integrating-masked-image-modeling-with-normalizing-flows-for-end-to-end-image-generation)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：将掩码图像建模与标准化流结合用于图像生成
 
 ### 速读区论文标签
-1. [Semantic Browsing: Controllable Diversity for Image Generation](/202606/24/2606.23679v1-semantic-browsing-controllable-diversity-for-image-generation)  
+1. [Diffusion Integrated Gradients: Controllable Path Generation for Flexible Feature Attribution](/202606/25/2606.22314v2-diffusion-integrated-gradients-controllable-path-generation-for-flexible-feature-attribution)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向文本到图像模型的可控多样性方法
-2. [Keep The Essentials: Efficient Reference Conditioned Generation via Token Dropping](/202606/24/2606.23682v1-keep-the-essentials-efficient-reference-conditioned-generation-via-token-dropping)  
+   evidence：使用扩散模型学习积分梯度的归因路径
+2. [On the Effect of Segmentation Width and Cluster Size on Speech Resynthesis and Continuation in Generative Spoken Language Models](/202606/25/2606.23285v1-on-the-effect-of-segmentation-width-and-cluster-size-on-speech-resynthesis-and-continuation-in-generative-spoken-language-models)  
    标签：评分：8.0/10、query:real-ir
-   evidence：提出令牌丢弃方法实现高效基于参考的扩散图像生成
-3. [Token-to-Token Alignment of Text Embeddings for Semantic Blending](/202606/24/2606.24021v1-token-to-token-alignment-of-text-embeddings-for-semantic-blending)  
+   evidence：研究使用生成式口语语言模型进行语音重合成与续写
+3. [Fabric Image Demoiréing Benchmark from Synthesis to Restoration](/202606/25/2606.24072v1-fabric-image-demoiring-benchmark-from-synthesis-to-restoration)  
    标签：评分：8.0/10、query:real-ir
-   evidence：改善生成模型中的图像融合与连续编辑控制
-4. [EPEdit: Redefining Image Editing with Generative AI and User-Centric Design](/202606/24/2606.24057v1-epedit-redefining-image-editing-with-generative-ai-and-user-centric-design)  
+   evidence：提出织物图像去莫尔纹基准，属于图像复原任务
+4. [Concept Removal for Frontier Image Generative Models](/202606/25/2606.25548v1-concept-removal-for-frontier-image-generative-models)  
    标签：评分：8.0/10、query:real-ir
-   evidence：引入一个使用生成式AI的高效照片编辑器，支持多种图像编辑任务
-5. [ZeroGVC: Zero-Shot Generative Video Compression with Autoregressive Diffusion Priors](/202606/24/2606.22371v2-zerogvc-zero-shot-generative-video-compression-with-autoregressive-diffusion-priors)  
+   evidence：通过替换瓶颈层为转码器实现扩散和自回归图像模型的概念移除
+5. [Efficient Real-World Dehazing via Physics-Inspired Global-Local Decoupling](/202606/25/2606.25732v1-efficient-real-world-dehazing-via-physics-inspired-global-local-decoupling)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：物理启发式高效去雾网络
+6. [Towards Error-Free Long Video Generation](/202606/25/2606.22370v1-towards-error-free-long-video-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：使用预训练自回归扩散先验进行零样本视频压缩
-6. [Generative Relightable Avatars](/202606/24/2606.22718v1-generative-relightable-avatars)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：生成式细化用于照片级可重光照化身编辑
-7. [Cyclic Denoising Reveals Ultrastable Memories in Diffusion Models](/202606/24/2606.24000v1-cyclic-denoising-reveals-ultrastable-memories-in-diffusion-models)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：循环去噪攻击揭示图像扩散模型中的记忆现象
-8. [S1-Omni-Image: A Unified Model for Scientific Image Understanding, Generation, and Editing](/202606/24/2606.24441v1-s1-omni-image-a-unified-model-for-scientific-image-understanding-generation-and-editing)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：在单一模型中统一了科学图像的理解、生成与编辑
+   evidence：使用扩散模型和因果注意力生成长视频
+7. [Delta-Diffusion: Modeling Longitudinal Brain Amyloid-PET Trajectories via Conditional Poisson Diffusion Bridge](/202606/25/2606.22216v1-delta-diffusion-modeling-longitudinal-brain-amyloid-pet-trajectories-via-conditional-poisson-diffusion-bridge)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：泊松扩散桥用于纵向PET生成
+8. [ZeroGVC: Zero-Shot Generative Video Compression with Autoregressive Diffusion Priors](/202606/25/2606.22371v1-zerogvc-zero-shot-generative-video-compression-with-autoregressive-diffusion-priors)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：基于自回归扩散先验的视频压缩
 
 
 <div class="dpr-home-promo-card">
