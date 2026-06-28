@@ -191,11 +191,13 @@ function testAxisTabsRenderUnreadCounts() {
 
   assert.ok(html.includes('data-axis-key="20260624"'));
   assert.ok(html.includes('data-axis-key="20260624" data-unread="1"'));
+  assert.ok(html.includes('<span class="dpr-sidebar-unread-dot dpr-sidebar-axis-tab-dot" aria-hidden="true"></span>'));
   assert.ok(html.includes('<span class="dpr-sidebar-axis-tab-unread">1</span>/<span class="dpr-sidebar-axis-tab-total">2</span>'));
   assert.ok(html.includes('data-axis-key="neurips-2024"'));
   assert.ok(html.includes('data-axis-key="neurips-2024" data-unread="0"'));
   assert.ok(html.includes('<span class="dpr-sidebar-axis-tab-unread">0</span>/<span class="dpr-sidebar-axis-tab-total">1</span>'));
   assert.ok(html.includes('data-axis-section-toggle="daily:date:20260624" aria-expanded="true" data-unread="1"'));
+  assert.ok(html.includes('<span class="dpr-sidebar-unread-dot dpr-sidebar-axis-section-dot" aria-hidden="true"></span>'));
 
   assert.equal(typeof tools.buildAxisViewForMode, 'function');
   const updatedDateView = tools.buildAxisViewForMode(model, 'daily', 'date', {
@@ -235,6 +237,7 @@ function testPaperEvidenceAndActionButtonsRender() {
 
   assert.ok(html.includes('中文解释 A'));
   assert.ok(html.includes('class="dpr-sidebar-paper-actions"'));
+  assert.ok(html.includes('<span class="dpr-sidebar-unread-dot dpr-sidebar-paper-unread-dot" aria-hidden="true"></span>'));
   assert.ok(html.includes('data-paper-status="good"'));
   assert.ok(html.includes('data-paper-status="blue"'));
   assert.ok(html.includes('data-paper-status="orange"'));
@@ -336,10 +339,11 @@ function testSidebarPaperVisualStateCssContract() {
   assert.ok(/\.dpr-sidebar-paper\s*{[^}]*background:\s*#ffffff/i.test(css));
   assert.ok(/\.dpr-sidebar-paper\.is-active\s*{[^}]*background:\s*#e5e7eb/i.test(css));
   assert.ok(/body\.dpr-dark \.dpr-sidebar-paper\.is-active\s*{[^}]*background:\s*#334155/i.test(css));
-  assert.ok(/\.dpr-sidebar-paper\[data-read="0"\]::after\s*{[^}]*background:\s*#ef4444/i.test(css));
-  assert.ok(/\.dpr-sidebar-paper\[data-read="1"\]::after\s*{[^}]*display:\s*none/i.test(css));
-  assert.ok(/\.dpr-sidebar-axis-tab\[data-unread="1"\]::after\s*{[^}]*background:\s*#ef4444/i.test(css));
-  assert.ok(/\.dpr-sidebar-axis-section-header\[data-unread="1"\] \.dpr-sidebar-axis-section-label::after\s*{[^}]*background:\s*#ef4444/i.test(css));
+  assert.ok(/\.dpr-sidebar-unread-dot\s*{[^}]*display:\s*none/i.test(css));
+  assert.ok(/\.dpr-sidebar-axis-tab\[data-unread="1"\] > \.dpr-sidebar-axis-tab-dot\s*{[^}]*background:\s*#ef4444/i.test(css));
+  assert.ok(/\.dpr-sidebar-axis-section-header\[data-unread="1"\] > \.dpr-sidebar-axis-section-dot\s*{[^}]*background:\s*#ef4444/i.test(css));
+  assert.ok(/\.dpr-sidebar-paper\[data-read="0"\] > \.dpr-sidebar-paper-unread-dot\s*{[^}]*background:\s*#ef4444/i.test(css));
+  assert.ok(/\.dpr-sidebar-paper\[data-read="1"\] > \.dpr-sidebar-paper-unread-dot\s*{[^}]*display:\s*none/i.test(css));
 
   const readRowRule = /\.dpr-sidebar-paper\[data-read-status="read"\]\s*{[^}]*background:/i;
   assert.ok(!readRowRule.test(css), 'read should not paint the whole row');

@@ -1282,6 +1282,7 @@
       var unread = typeof tab.unreadCount === 'number' ? tab.unreadCount : tab.count;
       var unreadFlag = unread > 0 ? '1' : '0';
       html.push('    <button type="button" class="dpr-sidebar-axis-tab' + active + '" data-axis-tab="' + safeAttr(group) + '" data-axis-key="' + safeAttr(tab.key) + '" data-unread="' + unreadFlag + '" title="' + safeAttr(tab.label) + '">');
+      html.push('      <span class="dpr-sidebar-unread-dot dpr-sidebar-axis-tab-dot" aria-hidden="true"></span>');
       html.push('      <span class="dpr-sidebar-axis-tab-label">' + safeText(tab.label) + '</span>');
       html.push('      <span class="dpr-sidebar-axis-tab-count"><span class="dpr-sidebar-axis-tab-unread">' + safeText(unread) + '</span>/<span class="dpr-sidebar-axis-tab-total">' + safeText(tab.count) + '</span></span>');
       html.push('    </button>');
@@ -1307,6 +1308,7 @@
       html.push('<section class="dpr-sidebar-axis-section' + sectionClass + expandedClass + '" data-axis-section="' + safeAttr(item.key) + '" data-axis-section-key="' + safeAttr(stateKey) + '">');
       html.push('  <button type="button" class="dpr-sidebar-axis-section-header" data-axis-section-toggle="' + safeAttr(stateKey) + '" aria-expanded="' + (isExpanded ? 'true' : 'false') + '" data-unread="' + unreadFlag + '">');
       html.push('    <span class="dpr-sidebar-day-arrow" aria-hidden="true">▸</span>');
+      html.push('    <span class="dpr-sidebar-unread-dot dpr-sidebar-axis-section-dot" aria-hidden="true"></span>');
       html.push('    <span class="dpr-sidebar-axis-section-label">' + safeText(item.label) + ' <span class="dpr-sidebar-day-counts"><span class="dpr-sidebar-day-unread">' + safeText(unread) + '</span>/<span class="dpr-sidebar-day-total">' + safeText((item.papers || []).length) + '</span></span></span>');
       html.push('  </button>');
       html.push('  <ul class="dpr-sidebar-axis-papers">');
@@ -1346,6 +1348,7 @@
     }).join('');
     return (
       '<li class="dpr-sidebar-paper' + sectionClass + '" ' + dataAttrs + '>' +
+      '  <span class="dpr-sidebar-unread-dot dpr-sidebar-paper-unread-dot" aria-hidden="true"></span>' +
       '  <div class="dpr-sidebar-paper-main">' +
       '    <a class="dpr-sidebar-paper-link" href="' + safeAttr(p.href) + '">' +
       '      <span class="dpr-sidebar-paper-title">' + safeText(p.title) + '</span>' +
