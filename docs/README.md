@@ -6,55 +6,76 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-28
-- 运行时间：2026-06-28 21:26:43 UTC
+- 最新运行日期：2026-06-29
+- 运行时间：2026-06-29 20:59:37 UTC
 - 运行状态：成功
-- 本次总论文数：11
-- 精读区：6
-- 速读区：5
+- 本次总论文数：18
+- 精读区：12
+- 速读区：6
 
 ### 今日简报（AI）
-今天通过6篇精读和5篇速读，重点审视了扩散模型的全方位能力评估与图像编辑中的物理逻辑理解。
-最值得关注的是新基准DiffusionBench对扩散Transformer的精细诊断，以及模型对光影认知仍显著弱于人类的发现，这直指生成式AI的深层短板。
-建议从业者优先瞄准评估体系与物理常识对齐这两个方向，它们将是下一代可控生成突破的关键。
-- 详情：[/202606/28/README](/202606/28/README)
+今日精选18篇AI论文，精读其中12篇，重点解读了一步式扩散修复与语义优先扩散两大创新。
+满分论文《OSOR》提出效果感知的一步扩散物体移除，高分论文《SeFi-Image》用语义优先扩散增强文生图模型的可控性。
+建议读者关注扩散模型在高效图像编辑和精确生成上的最新突破，可跟进这两项工作的代码复现与应用。
+- 详情：[/202606/29/README](/202606/29/README)
 
 ### 精读区论文标签
-1. [DiffusionBench: On Holistic Evaluation of Diffusion Transformers](/202606/28/2606.24888v1-diffusionbench-on-holistic-evaluation-of-diffusion-transformers)  
+1. [OSOR: One-Step Diffusion Inpainting for Effect-Aware Object Removal](/202606/29/2606.28094v1-osor-one-step-diffusion-inpainting-for-effect-aware-object-removal)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：单步扩散修复实现效果感知的物体移除
+2. [SeFi-Image: A Text-to-Image Foundation Model with Semantic-First Diffusion](/202606/29/2606.22568v3-sefi-image-a-text-to-image-foundation-model-with-semantic-first-diffusion)  
    标签：评分：9.0/10、query:real-ir
-   evidence：扩散变换器图像生成的全面评估框架
-2. [Do Image Editing Models Understand Lighting?](/202606/28/2606.26738v1-do-image-editing-models-understand-lighting)  
+   evidence：提出基于语义优先扩散的文本到图像基础模型，加速训练。
+3. [Qwen-Image-Agent: Bridging the Context Gap in Real-World Image Generation](/202606/29/2606.26907v2-qwen-image-agent-bridging-the-context-gap-in-real-world-image-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：评估图像编辑模型光照理解的基准
-3. [DiT-Reward: Generative Representations for Text-to-Image Reward Modeling](/202606/28/2606.23626v1-dit-reward-generative-representations-for-text-to-image-reward-modeling)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：将扩散变换器表示用于文本到图像奖励建模以评估生成质量
-4. [Diffusion Models Adapt to Low-Dimensional Structure Under Flexible Coefficient Choices](/202606/28/2606.23627v1-diffusion-models-adapt-to-low-dimensional-structure-under-flexible-coefficient-choices)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：扩散模型适应低维结构的理论分析
-5. [IV-CoT: Implicit Visual Chain-of-Thought for Structure-Aware Text-to-Image Generation](/202606/28/2606.24849v1-iv-cot-implicit-visual-chain-of-thought-for-structure-aware-text-to-image-generation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：文本到图像生成的隐式视觉思维链
-6. [Chorus II: Cross-Request Sparsity Reuse for Efficient Image-to-Video Generation](/202606/28/2606.25040v1-chorus-ii-cross-request-sparsity-reuse-for-efficient-image-to-video-generation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：扩散模型中通过跨请求稀疏复用的高效图像到视频生成
+   evidence：通过代理框架弥合文本到图像生成中的上下文鸿沟
+4. [CoIn: Comprehensive 2D-3D Inpainting with Gaussian Splatting Guidance](/202606/29/2606.27584v1-coin-comprehensive-2d-3d-inpainting-with-gaussian-splatting-guidance)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：利用扩散模型进行2D修复的3D场景修复
+5. [Qwen-Image-2.0-RL Technical Report](/202606/29/2606.27608v1-qwen-image-20-rl-technical-report)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：应用RLHF与在策略蒸馏提升扩散模型在文生图和图像编辑任务上的表现
+6. [Class-frequency Guided Noise Schedule for Diffusion Models](/202606/29/2606.27696v1-class-frequency-guided-noise-schedule-for-diffusion-models)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：通过类别频率引导的噪声调度改进扩散模型训练
+7. [SIFT: Self-Imagination Fine-Tuning for Physically Plausible Motion in Video Diffusion Models](/202606/29/2606.27741v1-sift-self-imagination-fine-tuning-for-physically-plausible-motion-in-video-diffusion-models)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：微调视频扩散模型以提升运动合理性
+8. [PixelU: A U-Shaped Transformer for Efficient End-to-End Pixel Diffusion](/202606/29/2606.27760v1-pixelu-a-u-shaped-transformer-for-efficient-end-to-end-pixel-diffusion)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：简化的U形扩散Transformer用于端到端像素空间生成
+9. [Parallel Rollout Approximation for Pixel-Space Autoregressive Image Generation](/202606/29/2606.27978v1-parallel-rollout-approximation-for-pixel-space-autoregressive-image-generation)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：像素空间连续令牌自回归图像生成
+10. [Mind the Gap: Quantifying the Domain Gap in Cross-Sensor Diffusion Super-Resolution](/202606/29/2606.28039v1-mind-the-gap-quantifying-the-domain-gap-in-cross-sensor-diffusion-super-resolution)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：首次系统研究跨传感器卫星图像扩散超分辨率中合成到真实域间隙的影响
+11. [BiDeMem: Bidirectional Degradation Memory for Explainable Image Restoration](/202606/29/2606.28112v1-bidemem-bidirectional-degradation-memory-for-explainable-image-restoration)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：提出双向退化记忆以实现可解释图像复原
+12. [VGB for Masked Diffusion Model: Efficient Test-time Scaling for Reward Satisfaction and Sample Editing](/202606/29/2606.28301v1-vgb-for-masked-diffusion-model-efficient-test-time-scaling-for-reward-satisfaction-and-sample-editing)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：掩码扩散模型的奖励引导重掩码采样器，用于高效测试时缩放
 
 ### 速读区论文标签
-1. [Multi-modality Image Fusion under Adverse Weather: Mask-Guided Feature Restoration and Interaction](/202606/28/2606.26812v1-multi-modality-image-fusion-under-adverse-weather-mask-guided-feature-restoration-and-interaction)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：掩模引导的特征修复用于多模态图像融合
-2. [SPAR: Semantic-Pixel Self-Alignment and Adaptive Routing for Unified Multimodal Models](/202606/28/2606.23041v1-spar-semantic-pixel-self-alignment-and-adaptive-routing-for-unified-multimodal-models)  
+1. [Physically-guided Image Generation for Multi-Projection Mapping](/202606/29/2606.22477v1-physically-guided-image-generation-for-multi-projection-mapping)  
    标签：评分：7.0/10、query:real-ir
-   evidence：统一多模态模型，桥接语义感知与像素生成
-3. [Public Diffusion Models, Private Images: Key-Controlled Inversion for Conditional Reconstruction](/202606/28/2606.22988v1-public-diffusion-models-private-images-key-controlled-inversion-for-conditional-reconstruction)  
+   evidence：将扩散模型与物理约束结合用于投影映射，提出ConPhyG可控生成框架。
+2. [CSD: Content-aware Speculative Decoding for Efficient Image Generation](/202606/29/2606.27829v1-csd-content-aware-speculative-decoding-for-efficient-image-generation)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：通过内容感知推测解码加速自回归图像生成
+3. [Local Fokker--Planck Geometry for Score Estimation: Heat-Ball Mean-Value Representations and Exact High-Dimensional Sampling](/202606/29/2606.27954v1-local-fokker--planck-geometry-for-score-estimation-heat-ball-mean-value-representations-and-exact-high-dimensional-sampling)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：通过局部福克-普朗克几何改进扩散模型中的分数估计
+4. [Monocular Avatar Reconstruction via Cascaded Diffusion Priors and UV-Space Differentiable Shading](/202606/29/2606.28144v1-monocular-avatar-reconstruction-via-cascaded-diffusion-priors-and-uv-space-differentiable-shading)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：利用级联扩散先验进行3D头像重建
+5. [Quantum Generative Diffusion Model for Real-World Time Series](/202606/29/2606.27561v1-quantum-generative-diffusion-model-for-real-world-time-series)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向扩散模型的密钥控制反演框架，防止非授权图像重建
-4. [DivRL: Disentangled Self-Similarity Rewards for Diverse Subject-Driven Generation](/202606/28/2606.23950v1-divrl-disentangled-self-similarity-rewards-for-diverse-subject-driven-generation)  
+   evidence：用于时间序列合成的量子生成扩散模型
+6. [DeLux: Cross-Modal Local Artifact Restoration in Video Using Neuromorphic Data](/202606/29/2606.27576v1-delux-cross-modal-local-artifact-restoration-in-video-using-neuromorphic-data)  
    标签：评分：6.0/10、query:real-ir
-   evidence：通过解缠自相似性奖励实现多样化主题驱动生成
-5. [High-Fidelity Synthetic Transmission Electron Microscopy Image Generation Using Diffusion Probabilistic Models for Data-Limited Semiconductor Metrology](/202606/28/2606.24817v1-high-fidelity-synthetic-transmission-electron-microscopy-image-generation-using-diffusion-probabilistic-models-for-data-limited-semiconductor-metrology)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：使用去噪扩散概率模型生成合成TEM图像
+   evidence：利用事件相机数据作为结构先验修复视频中的光照伪影
 
 
 <div class="dpr-home-promo-card">

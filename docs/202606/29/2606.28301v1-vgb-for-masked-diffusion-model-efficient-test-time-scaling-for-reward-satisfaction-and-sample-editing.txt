@@ -1,0 +1,5848 @@
+Title: VGB for Masked Diffusion Model: Efficient Test-time Scaling for Reward Satisfaction and Sample Editing
+
+URL Source: https://arxiv.org/pdf/2606.28301v1
+
+Published Time: Mon, 29 Jun 2026 01:08:15 GMT
+
+Number of Pages: 72
+
+Markdown Content:
+# VGB for Masked Diffusion Model: Efficient Test-time Scaling for Reward Satisfaction and Sample Editing 
+
+Kijung Jeon 
+
+Georgia Tech 
+
+kjeon@gatech.edu 
+
+Thuy-Duong Vuong ∗
+
+UCSD 
+
+thvuong@ucsd.edu 
+
+Molei Tao ∗
+
+Georgia Tech 
+
+mtao@gatech.edu 
+
+## Abstract 
+
+Inference-time scaling is a promising paradigm to improve generative models, especially when outputs must satisfy structural constraints or optimize downstream rewards. We consider Masked Diffusion Model (MDM) and introduce MDM-VGB, a discrete diffusion sampler that augments unmasking generation with theoretically principled reward-guided remasking. Inspired by the recent success of the classical Jerrum-Sinclair backtracking Markov chain [ 25 ] in reward-tilted generation [ 23 ], MDM-VGB extends the backtracking random walk from a fixed prefix tree to a masked-state graph, allowing tokens to be unmasked and remasked at arbitrary positions. The resulting sampler favors unmasking and remasking moves that lead to higher-value partial configurations, enabling both effective high-reward generation and efficient repair of low-reward samples. We prove that MDM-VGB is robust to process-verifier noise and achieves quadratic complexity, while popular test-time heuristics such as best-of-N can incur exponential complexity due to error accumulation. Our theoretical findings are corroborated by strong empirical performance, particularly on popular constraint-satisfaction and scientific benchmarks such as Sudoku and QM9 [22]. 1
+
+## 1 Introduction 
+
+Many sequence-generation tasks require outputting configurations that satisfy global structural prop-erties. Such properties are often easy to verify for complete sequences, but difficult to reliably extrapolate from partially generated configurations. Examples include mathematical proofs, computer programs, Sudoku puzzles, protein sequences for designing drug candidates: a completed configura-tion can often be accurately evaluated by a theorem prover, compiler, (Sudoku) constraint checker, or drug-property oracle, while evaluating whether a partial configuration can be extended to a valid full configuration is much harder. Verifier-guided inference-time algorithms are a promising direction for improving structured genera-tion [ 5, 15 , 19 , 23 , 26 –29 ]. In many realistic settings, one has access to a reliable, possibly perfect, 
+
+outcome verifier for complete configurations, together with weaker and noisier process verifiers that estimate the potential value of partial configurations [ 17 , 28 , 32 ]. Empirically, non-trivial gains have been shown even with simple methods that only use an outcome verifier. A canonical example is Best-of-N , which selects the highest-reward full configuration among n sampled candidates [ 5]. Access to a process verifier may unlock additional gains [ 17 , 27 , 28 ]; however, a recent work by Rohatgi et al. [23] points out that these methods suffer from the curse of horizon as even mild errors in process verifiers can lead to outcome-level errors that grow exponentially with sequence length. They further observed that the classical Jerrum–Sinclair backtracking Markov chain [ 25 ] can avoid this issue, yielding a theoretically grounded inference-time algorithm with promising performance.    
+
+> *Joint mentorship on this project.
+> 1All code is provided in the following repository: https://github.com/KraitGit/MDM-VGB .Preprint.
+> arXiv:2606.28301v1 [cs.LG] 26 Jun 2026 (a) Root-start reward tilting
+> depth 0
+> depth 1
+> depth 2
+> depth 3
+> depth 4
+> depth root
+> y
+> leaf reward low high
+
+(a) Generation (Root-start) (b) Leaf-start editing / repair     
+
+> depth 0
+> depth 1
+> depth 2
+> depth 3
+> depth 4
+> depth root
+> y0yrepair
+> leaf reward low high
+> reveal re-mask
+
+(b) Editing (Leaf-start) 
+
+Figure 1: Visualization of MDM-VGB for generation and editing. The depth of a state is the number of unmasked tokens, and same-depth states are ordered from left to right by estimated value. MDM-VGB is a random walk on the masked state graph: root-start generation begins at the fully masked state, while leaf-start editing begins at a fully revealed configuration to repair. Since value estimates are noisy, greedy unmasking can be suboptimal; re-masking can correct earlier mistakes. However, this chain is fixed-order : it reveals tokens from left to right and can backtrack only by deleting the most recently generated token. This restriction limits its ability to revise earlier decisions, which is especially problematic in editing, and in general constraint-generation tasks, where early mistakes can often be fatal (see Figure 7). In this work, we introduce Masked-Diffusion-Model Value-Guided Backtracking (MDM-VGB), a verifier-guided discrete diffusion sampler with remasking. MDM-VGB generalizes the classical Jerrum-Sinclair backtracking Markov chain [ 25 ] from fixed-order generation to any-order gener-ation. The Markov chain underlying MDM-VGB operates on partial configurations, i.e., masked states, where some coordinates are revealed, and the remaining coordinates are masked. Given an outcome reward on fully revealed configurations, we define the value of a partial configuration as the expected reward of compatible full configurations. At each step, the Markov chain either reveals masked token(s) or remasks already revealed token(s), with transition probabilities biased toward configurations with larger estimated value. This rule gives a principled randomized-greedy way to reveal and remask tokens: tokens whose removal increases the value of the partial configuration are treated as unreliable and are more likely to be revised; similarly, unmasking decisions that lead to higher-value configurations are prioritized (see Definition 4.2). This Markov chain supports both generation and editing. For generation, the chain starts at the fully masked root state (see Figure 1a); for editing, it starts from a low-reward fully revealed configuration (see Figure 1b). Unlike the fixed-order autoregressive backtracking from [ 23 ], MDM-VGB can unmask and remask tokens at arbitrary locations, allowing it to efficiently fix fatal early mistakes (see Figure 7); this flexibility yields significant performance gains in practice. While MDM-VGB also supports flexible block updates in the sense that each transition may reveal or re-mask an arbitrary block of coordinates, we will place particular emphasis on the singleton-block case as in the original masked diffusion model, which we call Any-Order-Auto-Regressive VGB (AOAR-VGB). This simplest variant already yields strong empirical gains while admitting the cleanest theoretical guarantees. This Markov chain provably targets the reward-tilted target distribution in the asymptotic time limit. In particular, in hard-constraint settings with a perfect outcome verifier, where invalid full configurations are certifiably rewardless, the sampler is guaranteed to never produce an invalid full configuration. Moreover, as in the fixed-order case, the chain mixes rapidly, even when subjected to substantial multiplicative error in the intermediate value estimates provided by the process verifiers. In particular, we show that AOAR-VGB converges to the target reward-tilted distribution within a number of Markov steps 2 that is quadratic in the sequence length n, whereas best-of-N incurs an exponential cost. In addition, motivated by non-reversible liftings of Markov chains [ 11 ] and the momentum lift of the AR-VGB chain considered by Rohatgi et al. [23] , we also study MDM-VGB-Momentum, the momentum lift of MDM-VGB. By augmenting each state with a direction variable, the momentum lift mitigates the diffusive and oscillatory behavior of MDM-VGB and improves first-leaf hitting time, a practical quantity of interest under finite-budget sampling. 
+
+> 2In our implementation, the cost per step matches a standard forward generation step, up to a small constant factor
+
+2Empirically, MDM-VGB and MDM-VGB-Momentum deliver consistent gains on scientific-design benchmarks and standard combinatorial constraint generation tasks such as QM9 and Sudoku. For generation tasks, MDM-VGB-Momentum achieves higher reward at matched inference cost than best-of-N , and reward-guided MDM (MDM-VGR, see Section 3), with especially impressive gains for harder tasks where unguided MDM has lower accuracy. For editing tasks, MDM-VGB and MDM-VGB-Momentum outperform fixed-order backtracking algorithms from [ 23 , 25 ]: on Dyck grammar editing, they reach near-perfect accuracy using substantially fewer moves compared to AR-VGB and AR-VGB-Momentum. Moreover, MDM-VGB and MDM-VGB-Momentum improve over non-editing baselines in both output quality and cost across scientific-design benchmarks, e.g., DNA and Protein synthesis. 
+
+Contributions. 
+
+• We introduce MDM-VGB, a reward-guided masked discrete diffusion sampler with a prin-cipled remasking strategy that supports both generation and editing, with especially strong gains in editing. • Theoretically, we prove that MDM-VGB efficiently targets the reward-tilted distribution over complete configurations, even in the presence of substantial process-verifier error. • Across structured-generation benchmarks, MDM-VGB outperforms standard baselines under matched inference budgets. We also observe substantial gains for editing compared to the fixed-order backtracking baselines (AR-VGB and AR-VGB-Momentum) from [23]. 
+
+## 2 Other related works 
+
+Recent works, such as Lee et al. [15] , Wang et al. [26] , have considered alternative formulations of masked diffusion models (MDM) with remasking. Even without an additional reward signal, remasking can empirically improve sample quality by correcting errors introduced by MDM-style parallel decoding [ 26 ]. However, it is less clear how to remask in a principled way with quantitatively significant benefits. In fact, the Markov-chain formulation of Lee et al. [15] also targets a reward-tilted stationary distribution, but unlike our method, it does not provide mixing-time or error-tolerance guarantees. Moreover, Lee et al. [15] remasks coordinates uniformly at random rather than by confidence, which reduces its ability to correct earlier mistakes. Remasking diffusion (ReMDM) [ 26 ]can use confidence scores to guide remasking decisions, but its updates follow a factorized parallel decoding structure: all coordinates are resampled in parallel from coordinate-wise conditionals. This can be limiting for structured outputs with strong cross-coordinate dependencies. For example, changing 1 + 2 = 4 to 1 + 2 = 3 gives a valid expression, whereas simultaneously changing 4 → 3
+
+and 2 → 1 does not. ReMDM does not target the reward-tilted distribution, and as with Lee et al. [15], does not provide mixing-time or robustness guarantees. Fixed-order backtracking (AR-VGB) [ 23 , 25 ] comes with strong theoretical guarantees, as MDM-VGB does, but it does not allow earlier mistakes to be edited without undoing a long suffix. Likewise, sampling-and-search methods like Sequential Monte Carlo [ 20 ] and Monte-Carlo Tree-Search [ 19 ,20 ], as well as standard masked diffusion [ 2 , 3 , 14 , 24 ], do not allow backtracking, and thus cannot repair earlier mistakes in the generative process. This is particularly problematic for structured languages, where an early error can make every subsequent extension invalid (see Figure 7). 
+
+## 3 Preliminaries 
+
+Let Y = Vn be the set of fully revealed sequences of length n over vocabulary V. Let Z =(V ∪ { [mask] })n be the set of masked states, where ∅ = (([ mask ], . . . , [mask ])) denotes the fully masked state. For z ∈ Z , let R(z) = {i : zi̸ = [mask] } be the revealed set and k(z) = |R(z)| be its depth. Let C(z) = {y ∈ Y : yi = zi for all i ∈ R(z)} denote the compatible completion set. Throughout, we fix a conditioning context x. Given a reference distribution πref (·| x) over Y,
+
+we define the marginal at z ∈ Z as πref (z | x) := P 
+
+> y∈C (z)
+
+πref (y | x). For B ⊆ [n] \ R(z) and 
+
+aB ∈ V B , let zB→aB be the state obtained by setting the tokens in B to aB . We define the conditional marginal at B conditioned on z, i.e., πref (YB = aB | x, z ), by: 
+
+πref (YB = aB | x, z ) := πref (zB→aB | x)
+
+πref (z | x) = Pπref (YB = aB | Y ∈ C (z)) .
+
+3Masked diffusion model (MDM). Following [ 24 ], if a pretrained MDM is unavailable for a task, we train a discrete masked diffusion model πref (·| x) ≡ πθ over Y using a continuous masking process by minimizing the following objective function: 
+
+LMDM (θ) = E(x,y )∼D ,t ∼Unif[0 ,1] ,z t∼qt(·| y)
+
+ α′
+
+> t
+
+1 − αt
+
+X 
+
+> i:zt,i =[ mask ]
+
+log πθ (Yi = yi | x, z t)
+
+ .
+
+where D is the training data, αt ∈ [0 , 1] is a decreasing masking schedule, α′ 
+
+> t
+
+is its time derivative, and zt is sampled from the distribution qt(·| y) over Z defined by: 
+
+qt(zt | y) = 
+
+> n
+
+Y
+
+> i=1
+
+(αt1{zt,i = yi} + (1 − αt)1{zt,i = [ mask ]}) .
+
+At inference time, MDM samples from πref (·| x) by starting from ∅ and iteratively revealing a new block of tokens according to the marginal of πref (·| x) conditioned on the revealed tokens. In other words, at a current masked configuration z, the process reveals a new block B ⊂ [n] \ R(z) by sampling from πref (YB = · | x, z ).
+
+Reward-tilted sampling. Given a base reference model πref (· | x) and a nonnegative terminal score, i.e., reward function, τ (x, ·) : Y → R≥0, define the reward-tilted target distribution π⋆(· | x)
+
+over Y where: 
+
+π⋆(y | x) := πref (y | x)τ (x, y )
+
+Z(x) , Z(x) := X
+
+> y∈Y
+
+πref (y | x)τ (x, y ).
+
+We also define the marginal of π⋆ at z ∈ Z by π⋆(z | x) := P 
+
+> y∈C (z)
+
+π⋆(y | x). In particular, binary reward τ (i.e., τ (x, y ) ∈ { 0, 1}, ∀y ∈ Y ) corresponds to the hard-constraint case. 
+
+Our goal is to sample from π∗ using a given base model πref and terminal score τ at inference time, without accessing or changing the base model’s parameters, i.e., via test-time scaling rather than RL fine-tuning. 
+
+Value of partial configurations. For a given terminal score τ , the ideal value of a partial configura-tion or masked state z ∈ (V ∪ { [mask] })n is 
+
+V ⋆(x, z ) := EY ∼πref (·| x)[τ (x, Y ) | Y ∈ C (z)] .
+
+In practice, V ∗ is not available, and therefore we train a process verifier bV to approximate V ∗ by fitting Vθ with mean squared error , as in Rohatgi et al. [23]: 
+
+Lreg (θ) := Ex,z,y 
+
+h
+
+(Vθ (x, z ) − τ (x, y )) 2i
+
+,
+
+where z is a partial configuration sampled from the reference model πref and y is a completion of z.After training, we use bV = Vθ . In some settings, we instead use a lightweight heuristic to reduce computational cost. For example, in constraint-satisfaction tasks such as Sudoku, where the terminal reward is the indicator that a full configuration satisfies a certain constraint, we take bV (x, z ) to be the indicator that the partial assignment z has not yet violated the constraint. We note that this approximation can be far from the true value V ⋆(x, z ), since there exist partial assignments that do not violate the constraint but cannot be extended to valid full configurations. Nevertheless, such heuristic verifiers can still perform strongly on some constraint-satisfaction tasks; see Section 5. 
+
+Value-guided Masked Diffusion Model (MDM-VGR). Given a base MDM πref and the value function V ⋆ with respect to a terminal reward τ , MDM-VGR samples from π⋆(·| x) by starting from 
+
+∅ and iteratively revealing a new block of tokens according to the reward-tilted marginal conditioned on the current state, i.e., π⋆(YB = aB | x, z ) = πref (YB = aB | x, z ) · V ⋆(x,z B→aB )  
+
+> V⋆(x,z )
+
+. In practice, MDM-VGR uses a process verifier ˆV that approximates V ⋆.
+
+4(a) Masked state graph    
+
+> depth 0
+> depth 1
+> depth 2
+> depth 3
+> depth 4
+> depth
+> leaf reward low high
+> root
+> (b) Prefix tree
+> depth 0
+> depth 1
+> depth 2
+> depth 3
+> depth 4
+> depth
+> leaf reward low high
+> root reveal
+> re-mask
+
+Figure 2: Masked-state graph vs. prefix tree. MDM-VGB operates on the any-order masked-state graph, which allows arbitrary-coordinate re-masking. AR-VGB operates on a fixed-order prefix tree, where backtracking only removes the latest revealed token. 
+
+Masked states graph. Consider a masked state z ∈ Z . For B ⊆ [n] \ R(z) and aB ∈ V B , we call zB→aB a forward child of z; let C(z) be the set of children of z. For B ⊆ R(z), write z−B
+
+for the state obtained by re-masking B, which we call a backward parent of z; we note that a state can have multiple parents and let P (z) be the set of parents of z. The parent-child relation between states defines the masked states graph , an undirected graph whose vertices are masked states and edges are {z, w }, where w is a backward parent of z. We write z ∼ w and say z and w are neighbors when {z, w } is an edge in the graph. We call the fully masked state ∅ the root, and the set of full configurations Y the leaves of this graph. 
+
+Prefix tree. The AR-VGB Markov chain from [ 23 , 25 ] is a random walk on the following prefix tree graph. Fix an ordering σ of {1, 2, · · · , n }. Let Zσ denote the set of masked states in which the revealed coordinates form a prefix in this order. The prefix tree on Zσ is the graph where {x, y } is an edge whenever x is the back-parent of y obtained by remasking its last unmasked coordinate in the order σ. See Figure 2 for an illustration. 
+
+## 4 Methods and Theoretical Guarantees 
+
+4.1 Formulation of MDM-VGB 
+
+To address the goal of Section 3, we now describe the MDM-VGB algorithm. At a high level, MDM-VGB is a random walk on the weighted masked state graph with appropriately chosen edge weights. The edge weights depend geometrically on the estimated values of endpoint states, so that remasking or unmasking moves that lead to higher-value states are prioritized. We also rescale each edge weight by a scalar depending on the depths of its endpoint states. This depth-dependent normalization is designed to balance forward moves that unmask new coordinates and backward moves that remask coordinates at each state and is crucial for ensuring the chain’s fast convergence. The MDM-VGB Markov chain is defined by either of the following equivalent definitions. 
+
+Definition 4.1. Fix λ ≥ 0 and depth coefficients sk,r :=  n−rk
+
+−1, which satisfy  n−kr
+
+sk,r =
+
+ kr
+
+sk−r,r . The MDM-VGB Markov chain is the random walk on the weighted masked state graph, where the edge weights are as follows: for neighboring states u ∼ v, let p denote the lower-depth endpoint and c denote the higher-depth endpoint among u, v . Let the symmetric edge weight between u, v be 
+
+f (u, v ) = f (v, u ) := 
+
+(
+
+sk(p),k (c)−k(p)πref (c | x) bV (x, c ) bV (x, p )λ if c / ∈ Y 
+
+sk(p),k (c)−k(p)πref (c | x) bV (x, c ) if c ∈ Y .
+
+Equivalently, the same chain can be specified through its local forward and backward move weights. In both views, sk,r is the depth-dependent normalization factor that balances forward moves revealing 
+
+r new coordinates with backward moves re-masking r revealed coordinates. 5Definition 4.2. For a state z at depth k, a child c = zB→aB ∈ C(z) where B ⊆ [n] \ R(z) with 
+
+|B| = r, and a backward parent p = z−B′
+
+∈ P (z) where B′ ⊆ R(z) and |B′| = r′, set: 
+
+wfwd (z → c) := 
+
+(
+
+sk,r bV (x, z )λ bV (x, c )πref (YB = aB | x, z ), c / ∈ Y ,sk,r πref (YB = aB | x, z ) bV (x, c ), c ∈ Y ,wbwd (z → p) := 
+
+(
+
+sk−r′,r ′ bV (x, z ) bV (x, p )λ, z / ∈ Y ,sk−r′,r ′ bV (x, z ), z ∈ Y ,
+
+Let W (z) := P 
+
+> c∈C(z)
+
+wfwd (z → c) + P  
+
+> p∈P(z)
+
+wbwd (z → p) be the normalization factor at z.The MDM-VGB Markov chain’s transition probabilities at z are given by: 
+
+∀c ∈ C(z) : P[z → c] = wfwd (z → c)
+
+W (z) and ∀p ∈ P (z) : P[z → p] = wbwd (z → p)
+
+W (z)
+
+The first definition is more helpful for proving the theoretical properties of the Markov chain, while the second is more helpful for implementation. 
+
+Remark 4.1 (Role of λ). The parameter λ ≥ 0 controls how strongly re-masking decisions depend on the value of the resulting parent state: larger λ makes the chain more likely to erase a block that yields a higher-value parent state. Our ablation study found that a moderate λ yields the best performance, as the chain can effectively edit problematic tokens while still retaining sufficient flexibility to explore alternative edits (see Section 5.3). In the appendix, we further distinguish between the case λ = 0 , which we call Balanced MDM-VGB 
+
+(see Section C.3), and the general case λ ≥ 0, which we call Geometric Balanced MDM-VGB (see Sections C.5 and E.2). The λ = 0 chain is closer to existing backtracking walks [ 23 , 25 ], but it selects a uniformly random block for re-masking and thus is less effective at editing problematic tokens. In Section C.2, we also show that the direct generalization of AR-VGB to the diffusion setting, which corresponds to setting λ = 0 and having no depth-normalization factor sk,r , has exponentially slow convergence. 
+
+Remark 4.2 (Implementation details: shortlisting rule) . To improve efficiency, instead of exploring the entire neighborhood of a masked state, we follow the practical shortlisting convention of Rohatgi et al. [23] : each MDM-VGB (or MDM-VGB-Momentum) step considers at most Lf
+
+choices of blocks to unmask, Lb choices of blocks to re-mask, and K token vocabulary candidates for each coordinate to unmask. Unless otherwise stated, we use the singleton block size |B| = 1 .
+
+4.2 Asymptotic behavior: properties of the stationary distribution 
+
+We now state the assumptions on the estimated masked-state values used in our theoretical analysis. Following Rohatgi et al. [23] , we assume that the process verifier approximates the true expected value of every masked state within a multiplicative factor κ. We also assume that the estimated values are uniformly bounded between m and M . This boundedness condition is mild in practice, since these estimated values are typically clipped during implementation. 
+
+Assumption 4.1. Assume terminal anchoring at leaves ( bV (x, y ) = τ (x, y ), ∀y ∈ Y ) and the following κ-accurate verifier condition on every reachable non-leaf state z:
+
+κ−1V ⋆(x, z ) ≤ bV (x, z ) ≤ κV ⋆(x, z )
+
+Define the positive target-support component by Z+(x) := {z ∈ Z : π⋆(z | x) > 0}, and assume additionally that every non-leaf z ∈ Z +(x) satisfies 0 < m ≤ bV (x, z ) ≤ M < ∞.It is easy to see that MDM-VGB is an irreducible Markov chain. Thus, its lazified version 3 is ergodic and converges to a unique stationary distribution μ. Next, we show that the stationary distribution μ,conditioned on the leaves Y, is exactly the target distribution π⋆.
+
+6Theorem 4.1. Assume terminal anchoring bV (x, y ) = τ (x, y ) for all y ∈ Y . For any λ ≥ 0, the stationary law μ of the lazy MDM-VGB chain satisfies 
+
+μ(· | Y ) = π⋆(· | x).
+
+In particular, in hard-constraint settings with τ ∈ { 0, 1}, μ(· | Y ) assigns zero probability to invalid configurations. 
+
+Our analysis focuses on the simplest case, MDM-VGB with singleton-block updates, i.e., AOAR-VGB. The next theorem lower bounds the probability mass of the full configurations under the stationary distribution. 
+
+Theorem 4.2. Under Assumption 4.1, the stationary distribution μ of the lazy AOAR-VGB chain places substantial mass on the set of full configurations Y: for some constant C > 0,μ(Y) = 1
+
+CM λκn .
+
+Mixing time guarantee. We study AOAR-VGB’s speed of convergence to the stationary distribu-tion, commonly known as the mixing time. The following theorem lower bounds the spectral gap of the AOAR-VGB Markov chain (see [16] for the connection between spectral gap and mixing time). 
+
+Theorem 4.3. Under Assumption 4.1, let PAOAR denote the transition matrix of the lazy AOAR-VGB Markov chain. Define the spectral gap [16] by 
+
+γ(PAOAR ) := 1 − max {| λ| : λ ∈ Λ( PAOAR ), λ ̸ = 1 },
+
+where Λ( PAOAR ) denotes the set of eigenvalues of PAOAR . Then 
+
+γ(PAOAR ) = Ω 
+
+ mM
+
+2λ 1
+
+κ4n2
+
+
+
+.
+
+By standard Markov chain theory, this together with Theorem 4.2 gives an upper bound on the mixing time to the target reward-tilted distribution π⋆(·| x) over Y, starting from any initial state. 
+
+Corollary 4.1. Assume Assumption 4.1. For any target accuracy level δ > 0, the distribution 
+
+ZT obtained after T steps of the lazy AOAR-VGB chain initialized at a masked state z satisfies 
+
+dTV (L(ZT | ZT ∈ Y ), π ⋆(· | x)) ≤ δ and P[ZT ∈ Y ] ≥ Ω   1 
+
+> Mλκn
+
+ , when 
+
+T ≥ Θ
+
+ Mm
+
+2λ
+
+κ4n2 log 
+
+ M λκn δμ (z)
+
+!
+
+> a
+
+In particular, when z is the root ∅, it suffices to take T = Θ 
+
+  Mm
+
+2λ κ4n2 log 
+
+ (M/m )λκn δ
+
+       
+
+> awhere μ(z)is the probability mass of zunder the stationary distribution μof the lazy chain AOAR-VGB.
+
+Remark 4.3. The bound above controls the target law conditioned on reaching a leaf, but the the stationary distribution μ of the current chain’s mass on the leaves, i.e. μ(Y), is only of order 1/n .Thus, obtaining a leaf with constant probability would require running the chain O(n) times. By using the modification from [ 11 , 23 ], i.e. increasing the holding probabilities at the leaves, we can instead make μ(Y) at least a constant, and obtain a quadratic-time sampler for π⋆(·| x). This modification is mainly a technical step to improve the theoretical analysis; in practice, the sampler simply stops after seeing a few leaves, so we keep the simpler construction of the Markov chain.                                
+
+> 3For a Markov chain with transition matrix Pand a parameter γ≥0, its γ-held lazy version has transition matrix
+> Plazy ,γ =γ
+> 1+ γI+11+ γP. Each step of Plazy ,γ stays in-place with probability γ
+> 1+ γ,and makes moves according to P
+> with probability 11+ γ.When γ= 1 , we refer to Plazy ,γ as the lazy version of P. For our theoretical analysis, it is convenient to work with the lazy MDM-VGB.
+
+7Proof sketch. We discuss the analysis of AOAR-VGB. The proof is by relating the properties of AOAR-VGB to those of AR-VGB. The key observation is that the weighted masked-state graph defining AOAR-VGB can be decomposed as a sum of weighted prefix-tree graphs that define AR-VGB. Consequently, the properties of AOAR-VGB can be compared with those of the corresponding AR-VGB walks. The stationary distribution probability at a state z is proportional to the total weight of the edges incident to z. First, the stationary distribution of AOAR-VGB is the average of the stationary distributions of the AR-VGB walks, and thus induces the same target distribution π⋆ on the leaves as the AR-VGB walks. Second, the weight on the leaves under the stationary distribution of AOAR-VGB can be lower bounded by those of the AR-VGB chains. Third, the conductance of the masked-state graph, which corresponds to the relaxation time and mixing time of AOAR-VGB, can be lower bounded by the conductance of the prefix-tree graphs, which in turn can be lower bounded via the existing analysis in [23, 25]. For details, see Theorem C.5. 
+
+4.3 Formulation of MDM-VGB-Momentum 
+
+We introduce MDM-VGB-Momentum, a momentum lift of MDM-VGB in the spirit of [ 11 ] that targets the same distribution over the full configurations, while reducing oscillatory behaviors. The lift augments each masked state z with a direction variable, yielding two lifted states (z, ↓) and (z, ↑). In reveal mode (z, ↓), the chain can only reveal tokens, while in re-mask mode (z, ↑), it can only re-mask tokens. At each state, the chain switches between these two modes with a probability governed by a parameter χ chosen to reduce reveal/re-mask oscillations. See Figure 3 for an illustration. For AR-VGB, momentum has been shown empirically to improve performance [ 23 ]; theoretical work by [ 11 ] also shows mixing-time improvements in the low-error regime, where the approximation parameter κ is sufficiently close to 1. On the theory side, we prove that at a sufficiently low error– when κ = 1 + O(1 /n )–MDM-VGB-Momentum reaches a leaf in expected O(n) time, achieving a quadratic speedup over the non-momentum version, which requires Ω( n2) time 4. We expect analogous mixing-time improvements in this low error regime, but leave a full mixing time analysis to future work. In our experiments, MDM-VGB-Momentum tends to perform better on generation tasks, whereas the non-momentum version performs slightly better on editing tasks. 
+
+Definition 4.3 (MDM-VGB-Momentum) . For a masked state z, a child c ∈ C(z), and a parent 
+
+p ∈ P (z), let wfwd (z → c) and wbwd (z → p) be as in Definition 4.2. Let 
+
+F (z) := X
+
+> c∈C(z)
+
+wfwd (z → c), B(z) := X 
+
+> p∈P(z)
+
+wbwd (z → p),M (z) := min {F (z), B (z)} , W (z) := F (z) + B(z).
+
+Fix a parameter χ ∈ [0 , 1] . The MDM-VGB-Momentum with parameter χ is a Markov chain on the lifted state space eZ = Z × {↓ , ↑} a.At (z, ↓) ∈ eZ, the Markov chain can either transition to (c, ↓) for c ∈ C(z), or (z, ↑), or stays at 
+
+(z, ↓). The transition probabilities are given by:                             
+
+> P[( z, ↓)→(c, ↓)] = wfwd (z→c)
+> W(z),P[( z, ↓)→(z, ↓)] = χM (z)
+> W(z),P[( z, ↓)→(z, ↑)] = B(z)−χM (z)
+> W(z)
+
+At (z, ↑) ∈ eZ, the Markov chain can either transition to (p, ↑) for p ∈ P (z), or (z, ↓) or stays at 
+
+(z, ↑). The transition probabilities are given by:                                  
+
+> P[( z, ↑)→(p, ↑)] = wbwd (z→p)
+> W(z),P[( z, ↑)→(z, ↑)] = χM (z)
+> W(z),P[( z, ↑)→(z, ↓)] = F(z)−χM (z)
+> W(z)
+> aBlue ↓denotes forward/reveal momentum, and red ↑denotes backward/re-mask momentum.
+
+The following theorem characterizes asymptotic behavior of AOAR-VGB-Momentum.  
+
+> 4We suppress dependency on other parameters M, m, λ.
+
+8Figure 3: MDM-VGB and MDM-VGB-Momentum. MDM-VGB alternates value-guided reveal and re-mask moves, while the momentum variant augments the state with a direction variable to reduce immediate reversals. 
+
+Theorem 4.4 (Stationary distribution of AOAR-VGB-Momentum) . AOAR-VGB-Momentum with parameter χ ∈ [0 , 1] as defined in Definition 4.3 is an ergodic Markov chain, with stationary distribution eμ defined by 
+
+eμ(z, ↓) = eμ(z, ↑) = 12 μ(z)
+
+where μ is the stationary distribution of the AOAR-VGB chain. Hence the projection proj # eμ of ˜μ
+
+on Z satisfies proj # eμ = μ. In particular, if μ(· | Y ) = π⋆(· | x) then 
+
+proj # eμ(· | Y ) = π⋆(· | x).
+
+The following theorem shows that in the low error regime κ = 1 + O(1 /n ), AOAR-VGB-Momentum takes only O(n) steps to hit a leaf, whereas AOAR-VGB requires Θ( n2) steps. 
+
+Theorem 4.5. Consider the AOAR-VGB-Momentum with parameter χ as defined in Definition 4.3. Let 
+
+p↓(z) = F (z)
+
+F (z) + B(z) , p↑(z) = B(z)
+
+F (z) + B(z) , ∆ := sup  
+
+> z∈˜Z◦
+> +(x)
+
+|p↓(z) − p↑(z)| ,
+
+where the supremum is over reachable interior states ˜Z◦
+
+> +
+
+(x) := {z ∈ Z +(x) | 0 < k (z) < n } × {↓ , ↑} . Suppose ∆ = O(1 /n ) and 1 − χ = O(1 /n ). Let Tn and T Mo  
+
+> n
+
+be the time of first hitting the set of leaves Y for AOAR-VGB and AOAR-VGB-Momentum initialized at ∅ and (∅, ↓) respectively, then 
+
+E[Tn] = Θ( n2), E[T Mo  
+
+> n
+
+] = O(n),
+
+In particular, under the multiplicative value-error bound κ−1V ⋆ ≤ bV ≤ κV ⋆, the condition 
+
+∆ = O(1 /n ) is satisfied when κ = 1 + O(1 /n ).
+
+## 5 Experiments 
+
+We evaluate our methods MDM-VGB and MDM-VGB-M OMENTUM on reward-guided generation and editing tasks across several domains. 
+
+Task descriptions. We briefly summarize each task, its terminal score R, the base model, and the learned verifier used by our method. When applicable, the Pass@95 terminal reward is defined from the terminal score R as described in the Evaluation metrics paragraph. 
+
+Molecular design aims to design drug-like molecules using the QM9 benchmark [ 22 ]. For the base model, we train a 92.4M-parameter QM9 MDLM model with the MDLM objective using 9the UDLM-QM9 architecture. We use the quantitative estimate of drug-likeness (QED) [ 4] as the terminal score R. The terminal reward is the Pass@95 indicator defined from QED as described in the Evaluation metrics paragraph. To approximate the values of partial configurations, we train a process verifier using a token Transformer over SMILES tokens with 3.24 M parameters. 
+
+DNA enhancer design evaluates regulatory-sequence generation. We use D3LM [ 33 ], a DNA diffusion language model initialized from Nucleotide Transformer [ 8], as the base model, and DeepSTARR developmental enhancer activity [ 9] as the terminal score R. The terminal reward is the Pass@95 indicator defined from DeepSTARR developmental activity. The goal is to generate DNA sequences with high predicted developmental enhancer activity. We learn the values of partial configurations using a small Transformer over D3LM tokens. We test multiple verifier model sizes (see Section 5.3) and report results for the verifier with 0.97 M parameters. 
+
+Protein motif scaffolding evaluates whether generated protein sequences can scaffold a prescribed structural motif. We use EvoDiff OADM as the base model [ 1], and fold generated sequences with OmegaFold [ 30 ]. For terminal scoring, we measure the motif Cα root-mean-square deviation (RMSD) against the reference structure [ 18 ]. For evaluation, we report motif RMSD and Success@1Å, the percentage of generated configurations whose motif RMSD is below 1.0Å. We learn the values of partial configurations using a small Transformer over amino-acid tokens with 
+
+1.94 M parameters. To avoid training the verifier on a sparse Success@1Å signal, we use a smoothed RMSD-derived target for verifier training. 
+
+Sudoku is a typical constraint-satisfaction generation task. The goal is to generate a complete 9 × 9
+
+grid filled with digits 1, . . . , 9 so that every row, column, and 3 × 3 subgrid contains each digit exactly once. The terminal reward is the binary indicator that all constraints are satisfied. For partial configurations, we use a heuristic process verifier that returns the indicator that no constraint has yet been violated. For the base model, we use DiT-MDM, i.e., a masked discrete diffusion model [ 24 ]with a Diffusion Transformer backbone [21]. 
+
+Letter avoidance is a synthetic constrained natural-language generation task: the model must generate a one-sentence story without using the letter “e”, a task also considered in AR-VGB [ 23 ]. We use Qwen3-0.6B-diffusion-mdlm-v0.1 as the base model [ 10 ]. The terminal reward is the binary indicator that the sequence does not contain the forbidden character. For partial configurations, we use a heuristic process verifier that returns this same indicator. 
+
+Dyck grammar is a formal language over bracket symbols {(, ), [, ]}, commonly used as a sandbox test (see e.g. [ 23 ]). The terminal score is the binary indicator that the (full) configuration is a valid well-balanced expression: every opening bracket must be closed by the matching bracket type in the correct nested order. For example, () , [] , and [()] are valid, whereas (, ], [(] , (() , and [) are not. We focus on the editing task, which highlights the benefit of arbitrary-coordinate repair, since due to long-range dependencies, an early mistake can invalidate an otherwise plausible subsequent generation. For the base model, we use a BERT-style masked language model with 12 .9M parameters. For the process verifier, we train a small token-state Transformer with 3.24 M parameters. 
+
+Evaluation metrics. For a given task, all test-time inference methods use the same reference model 
+
+πref and terminal reward τ . We compare MDM-VGB and MDM-VGB-M OMENTUM against the baselines B ASE , B ON, MDM-VGR, AR-VGB, and AR-VGB-M OMENTUM . B ASE is the unguided MDM sampler. B ON (best-of-N ) generates N full configurations using unguided MDM and returns the one with the highest terminal reward [ 5, 12 ]. To match the complexity of B ON, we allow up to 
+
+n × N MDM-VGB steps, and upon reaching this budget, perform forward-only sampling using πref .For editing, all methods edit the same pool of full configurations of lower reward. See Section A.1 for further details on the baselines. For tasks with hard constraints, i.e., binary terminal score/reward, we report the success rate (percent-age of configurations satisfying the constraint), and, when appropriate, a secondary quality metric: for Sudoku, we report the number of violated constraints and for Letter, we report the overall quality score (Ovl.) of the generated sentence provided by Qwen3-32B model [ 31 ]; see the Letter prompt details in Section F.1. For tasks with a real-valued terminal score (QM9, DNA, Protein), we report a calibrated metric that measures how often generated samples reach the high-quality region of the base model’s distribution. Given an independent B ASE calibration set and task-specific terminal score R(y), let qBase  
+
+> α
+
+(R) be 10 85                                                 
+
+> 90
+> 95
+> 100
+> Solve (%)
+> 1
+> 2
+> 4816 32 Sudoku
+> 0
+> 50
+> 100
+> Pass@95 (%)
+> 124
+> 816
+> 32
+> QM9
+> 0
+> 50
+> 100
+> Pass@95 (%)
+> 12
+> 4
+> 8
+> 16
+> 32
+> DNA
+> 0
+> 50
+> 100
+> Success@1A (%)
+> 12
+> 4
+> 816
+> 32
+> Protein
+> 26272829210 211
+> NFE / sample
+> 0
+> 1
+> 2
+> Viol (%)
+> 2526272829210
+> NFE / sample
+> 60
+> 80
+> 100
+> Valid (%)
+> 26272829210 211
+> NFE / sample
+> 0
+> 1
+> 2
+> Dev
+> 26272829210 211
+> NFE / sample
+> 1.0
+> 1.5
+> Mean RMSD (A)
+> BoN Base MDM-VGR MDM-VGB MDM-VGB-Momentum (solid: raw NFE / dotted: FLOP-adjusted NFE) BoN Base MDM-VGR MDM-VGB MDM-VGB-Momentum (solid: raw NFE / dotted: FLOP-adjusted NFE) BoN Base MDM-VGR MDM-VGB MDM-VGB-Momentum (: raw NFE / : FLOP-adjusted NFE)
+
+Figure 4: Generation quality–cost frontiers for Sudoku, QM9, DNA, and Protein. Solid curves count raw reference-model forward calls, and dotted curves show FLOP-adjusted NFE including learned-verifier overhead. Numeric labels on the B ON curve denote the number of independent rollouts N .
+
+Heuristic verifier Learned verifier Method Letter Sudoku QM9 DNA Protein Avoid ↑ Ovl. ↑ Solve ↑ Viol. ↓ Pass@95 ↑ Valid ↑ Pass@95 ↑ Dev. ↑ Success@1Å ↑ RMSD ↓
+
+Base 0.0 – 92.9 0.791 3.2 66.8 0.041 -0.50 8.7 1.732 BoN 0.1 7.00 99.3 0.087 41.0 79.5 0.500 1.37 73.7 0.926 MDM-VGR 100.0 5.72 86.9 1.659 39.1 92.9 0.058 -0.42 15.0 1.780 MDM-VGB 100.0 5.86 92.0 0.917 61.3 82.2 0.411 1.06 62.0 1.101 MDM-VGB-Momentum 100.0 5.72 100.0 0.000 90.6 95.7 0.705 1.55 82.0 0.982 
+
+Table 1: Generation results at a representative budget N = 16 . Letter and Sudoku use heuristic verifiers; QM9, DNA, and Protein use learned verifiers. Columns report primary and secondary metrics for each task. Bold and underline mark best and second-best. the α-quantile of the distribution over terminal scores produced by the base model. We define 
+
+Pass@ α(y) = 
+
+1{R(y) ≥ qBase 
+
+α (R)}, if higher values are better ,
+
+1{R(y) ≤ qBase 1−α (R)}, if lower values are better .
+
+Across QM9 and DNA we use α = 0 .95 : QM9 reports Pass@95 based on QED and DNA reports Pass@95 based on developmental activity. Protein is evaluated with Success@1Å and motif RMSD. We report additional metrics as appropriate: for QM9, the average QED of valid generated molecules and validity (percentage of valid molecules); for DNA, the average developmental activity score (Dev); and for Protein, mean motif RMSD and Success@1Å, the percentage of generated configurations whose RMSD is below 1.0Å. For editing, we report the reward of the edited configuration and the total computational cost of making the edits. For tasks with learned verifiers, we also report adjusted NFE, which accounts for the total cost of verifier and base-model calls. Further details about the experiments are given in Section F. 
+
+5.1 Generation 25 26 27 28 29 210  
+
+> FLOP-adjusted NFE / sample
+> 0
+> 20
+> 40
+> 60
+> Unique Pass@95 Ratio (%)
+> 12
+> 4
+> 8
+> 16
+> BoN
+> Base
+> MDM-VGR
+> MDM-VGB
+> MDM-VGB-Momentum
+
+Figure 5: QM9 unique Pass@95: fraction of distinct generated molecules satisfying Pass@95 versus per-sample compute. Figure 4 and Table 1 evaluate MDM-VGB and MDM-VGB-Momentum as generative mechanisms under matched compute. Overall, the main trend is that MDM-VGB and MDM-VGB-Momentum improve the quality–cost frontier, especially on tasks with learned verifiers. On QM9 and DNA, MDM-VGB-Momentum reaches high Pass@95 at substantially smaller NFE than B ON; this trend largely holds even after FLOP-adjusting for verifier calls. Protein has a more competitive B ON frontier at large rollout budgets, but MDM-VGB-Momentum still gives the best success rate (Success@1Å) under matched budget (see Table 1). 11 400                                
+
+> 600
+> 800
+> Adjusted NFE / sample  QM9
+> 500
+> 750
+> 1000
+> 1250
+> DNA
+> 0
+> 500
+> 1000
+> Protein
+> 60 65 70 75 80 85 90
+> Seed reward percentile α
+> 0
+> 50
+> 100
+> Pass@95 (%)
+> 60 65 70 75 80 85 90
+> Seed reward percentile α
+> 0
+> 50
+> 100
+> Pass@95 (%)
+> 60 65 70 75 80 85 90
+> Seed reward percentile α
+> 0
+> 50
+> 100
+> Success@1A (%)
+> Leaf VGB Leaf VGB-Momentum No repair BoN (N=16) Root VGB Root VGB-Momentum Leaf MDM-VGB Leaf MDM-VGB-Momentum No repair BoN (N=16) Root MDM-VGB Root MDM-VGB-Momentum
+
+Figure 6: Editing on QM9, DNA, and Protein. Initial configurations are grouped by seed reward percentile α, i.e., base samples that fail Pass@95 but pass Pass@ α. Larger α indicates higher-reward initial outputs. Top: adjusted NFE per sample (↓). Bottom: edited quality (↑). Dashed lines show the reward of the initial configuration (no-edit) and of baselines that discard the initial configurations and generate from scratch: BoN, root-start MDM-VGB, and root-start MDM-VGB-Momentum. 
+
+Task Metric NoEdit Generation (Root start) Editing (Leaf start) Gain BoN MDM-VGB MDM-VGB-Momentum MDM-VGB MDM-VGB-Momentum QM9 Pass@95 0.0 41.0 61.3 90.6 87.5 92.5 1.9 pp DNA Pass@95 0.0 50.0 41.1 70.5 69.0 88.5 18.0 pp Protein Success@1Å 7.4 73.7 62.0 82.0 97.7 95.6 15.7 pp 
+
+Table 2: Comparison of generation and editing methods on QM9, DNA, and protein-design tasks. Editing methods are initialized from the same low-reward configurations, whereas generation meth-ods discard these initial configurations and generate new samples from scratch. Leaf-start entries are averaged over seed-leaf reward percentile groups α ∈ { 60 , 65 , . . . , 90 }. BoN uses N = 16 
+
+independent rollouts, and the MDM-VGB variants use up to the corresponding matched budget. Gain denotes the absolute percentage-point improvement of the best editing method over the best non-editing baseline. For Sudoku, a popular constraint-satisfaction benchmark, MDM-VGB-Momentum reaches perfect accuracy with much lower compute than the baselines, whereas MDM-VGB performs slightly worse. For QM9, Figure 5 plots the fraction of generated samples that are both unique and satisfy Pass@95 versus compute. The MDM-VGB variants still achieve a higher fraction of high-reward molecules at similar FLOP-adjusted NFE, suggesting that their gains are not simply due to repeatedly sampling the same few high-reward molecules. 
+
+5.2 Editing 
+
+Next, we evaluate MDM-VGB and MDM-VGB-M OMENTUM as editing procedures. We initialize the Markov chain at a completed low-reward output y0 ∈ Y sampled from the reference model. All editing methods start with the same y0 ∈ Y . N OEDIT returns y0, B ON discards y0 and samples fresh completions from πref , and root-start MDM-VGB variants restart from the fully masked configuration under the same maximum budget. Leaf-start MDM-VGB variants instead re-mask selected coordinates of y0 and return the best full-configuration observed within the allowed edit budget. Figure 6 and Table 2 show that using MDM-VGB and MDM-VGB-M OMENTUM as editing procedures improves over non-editing procedures that generate samples from scratch. Across the three scientific tasks, MDM-VGB and MDM-VGB-M OMENTUM as editing procedures match or improve output quality relative to the best non-editing baseline, with gains of 1.9, 18 .0, and 15 .7
+
+percentage points on QM9, DNA, and Protein, respectively. The required adjusted NFE generally decreases as the initial reward percentile α increases, indicating that the editing methods make fewer edits when starting closer to the targeted high-reward region. 12 AR ( ) ) ) [ ] ( ) M M M M            
+
+> re-mask suffix
+> MDM ()))[]()M)[]
+> re-mask coordinate
+
+Figure 7: MDM-VGB can edit an early mistake directly, while AR-VGB must erase the suffix. The red token marks the local error, and gray tokens denote positions selected for re-masking.                  
+
+> AR MDM Method Acc. ↑Cost ↓Acc. ↑Cost ↓
+> VGB 25.64% 127.63 99.41% 29.98 +Momentum 80.92% 75.50 97.54% 26.24
+
+Table 3: Dyck grammar editing. Cost is the av-erage number of forward and backward moves. MDM-VGB variants achieve higher accuracy with fewer edit moves than AR-VGB variants. Figure 7 and Table 3 show the advantage of MDM-VGB and MDM-VGB-M OMENTUM over the fixed-order backtracking baselines AR-VGB and AR-VGB-M OMENTUM as editing procedures. On Dyck grammar editing, MDM-VGB reaches 99 .41% accuracy with an average cost of 29 .98 moves, compared with 25 .64% accuracy and 127 .63 moves for AR-VGB. Momentum reduces edit cost for both AR and MDM variants: MDM-VGB-M OMENTUM achieves 97 .54% accuracy with 26 .24 
+
+moves, while AR-VGB-M OMENTUM reaches 80 .92% accuracy with 75 .50 moves. For MDM-VGB, momentum trades a small drop in accuracy for fewer moves, while the any-order variant remains substantially more efficient overall. 
+
+5.3 Component Ablations 0 2 4 8 16 32   
+
+> geometric exponent λ
+> 80
+> 85
+> 90
+> 95
+> 100
+> accuracy (%)
+> accuracy
+> moves
+> 20
+> 25
+> 30
+> 35
+> 40
+> 45
+> 50
+> mean repair moves
+> AOAR-VGB AOAR-VGB+Momentum
+
+Figure 8: Dyck grammar editing with varying re-masking strength λ. Moder-ate re-masking strength improves edit-ing accuracy while reducing the average number of moves. We highlight two main ablations: one on the re-masking parameter λ, which controls how strongly re-masking de-cisions are guided by reward values, and one on verifier model size. Additional ablations, including block size and shortlisting rule, are provided in Section F.4. 
+
+Re-masking parameter λ. We ablate the re-masking parameter λ on Dyck grammar editing. We observe that moderate values of λ give the best accuracy–efficiency tradeoff, because the algorithm can focus on editing prob-lematic tokens while retaining enough flexibility to explore alternative moves. Very large λ makes the algorithm more deterministic, producing shorter trajectories but lowering accuracy; see Figure 8. 0.5M 1.0M 1.5M 2.0M 
+
+> Verifier parameters (M)
+> 65
+> 70
+> 75
+> 80
+> 85
+> 90
+> 95
+> 100
+> Pass@95 (%)
+> 0.5M
+> 1.0M
+> 1.5M
+> 2.0M
+> Pass@95
+> FLOPs ratio
+> 0
+> 1
+> 2
+> 3
+> Verifier / Base FLOPs (%)
+
+Figure 9: DNA verifier size tradeoff. Larger verifiers improve Pass@95 at the cost of additional verifier inference. 
+
+Verifier size and amortized cost. We ablate the size of the learned DNA verifier in Figure 9. Increasing verifier size from 0.5M to 2.0M parameters improves Pass@95, while adding less than 3% overhead relative to the base generator FLOPs. This suggests that a stronger verifier can provide more useful guidance for deciding which tokens to reveal or re-mask. To keep this guidance inexpensive, we evaluate only a small shortlisted set of candidate edits: for each selected coordinate, we sample K candidate tokens from the reference model, remove duplicates, and batch the verifier calls. 
+
+## 6 Conclusion and Future Work 
+
+We introduced MDM-VGB, a reward-guided backtracking sampler for masked diffusion and any-order discrete generation. By extending value-guided backtracking from fixed prefix-tree to masked-state graph, MDM-VGB can reveal and re-mask arbitrary coordinates, allowing it to effectively repair faulty tokens. Theoretically, MDM-VGB efficiently target the reward-tilted law on full configurations and tolerate process verifiers noise. Empirically, MDM-VGB and MDM-VGB-Momentum improve the quality–cost frontier over baselines such as best-of-N and action level sampling (MDM-VGR) for 13 reward-tilting generation and editing across scientific-design and constraint-satisfaction tasks, with especially large gains when the base model performs poorly. A key limitation of our work lies in the cost of training high-quality process verifiers, especially in domains with long sequence length and large vocabulary. We plan to improve verifier training through distillation, or to directly learn the MDM-VGB transition weights via fine-tuning. On the inference-time side, we plan to incorporate hierarchical update and combine our method with parallel Monte Carlo sampling Lee et al. [14] . We hope these improvements will make MDM-VGB applicable on larger reasoning and coding benchmarks such as GSM8K, MATH500, HumanEval, and SWE-bench. 
+
+## References 
+
+[1] Sarah Alamdari, Nitya Thakkar, Rianne van den Berg, Alex Lu, Nicolo Fusi, Ava Amini, and Kevin Yang. Protein generation with evolutionary diffusion: sequence is all you need. In 
+
+NeurIPS 2023 Generative AI and Biology (GenBio) Workshop , 2023. 10, 70 [2] Marianne Arriola, Aaron Gokaslan, Justin T. Chiu, Zhihan Yang, Zhixuan Qi, Jiaqi Han, Subham Sekhar Sahoo, and Volodymyr Kuleshov. Block diffusion: Interpolating between autoregressive and diffusion language models. In The Thirteenth International Conference on Learning Representations , 2025. 3 [3] Jacob Austin, Daniel D. Johnson, Jonathan Ho, Daniel Tarlow, and Rianne van den Berg. Struc-tured denoising diffusion models in discrete state-spaces. In Advances in Neural Information Processing Systems , volume 34, pages 17981–17993, 2021. 3, 58 [4] Richard Bickerton, Gaia Paolini, Jérémy Besnard, Sorel Muresan, and Andrew Hopkins. Quantifying the chemical beauty of drugs. Nature chemistry , 4:90–8, 02 2012. doi: 10.1038/nchem.1243. 10, 69 [5] Bradley Brown, Jordan Juravsky, Ryan Ehrlich, Ronald Clark, Quoc V. Le, Christopher Ré, and Azalia Mirhoseini. Large language monkeys: Scaling inference compute with repeated sampling. arXiv preprint arXiv:2407.21787 , 2024. 1, 10, 19 [6] Noam Chomsky and Marcel P. Schützenberger. The algebraic theory of context-free languages. In Computer Programming and Formal Systems , pages 118–161. North-Holland, 1963. 68 [7] Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 ,2021. 19 [8] Hugo Dalla-Torre, Liam Gonzalez, Javier Mendoza-Revilla, Nicolas Lopez Carranza, Adam Henryk Grzywaczewski, Francesco Oteri, Christian Dallago, Evan Trop, Bernardo P. de Almeida, Hassan Sirelkhatim, Guillaume Richard, Marcin Skwark, Karim Beguir, Marie Lopez, and Thomas Pierrot. Nucleotide transformer: building and evaluating robust foun-dation models for human genomics. Nature Methods , 22:287–297, 2025. doi: 10.1038/ s41592-024-02523-z. 10, 69 [9] Bernardo P. de Almeida, Franziska Reiter, Michaela Pagani, and Alexander Stark. DeepSTARR predicts enhancer activity from DNA sequence and enables the de novo design of synthetic enhancers. Nature Genetics , 54:613–624, 2022. 10, 69 [10] dLLM Hub. Qwen3-0.6b-diffusion-mdlm-v0.1. https://huggingface.co/dllm-hub/ Qwen3-0.6B-diffusion-mdlm-v0.1 , 2026. 10, 68 [11] Thomas P. Hayes and Alistair Sinclair. Liftings of tree-structured markov chains. In Approxi-mation, Randomization, and Combinatorial Optimization. Algorithms and Techniques , pages 602–616. Springer, 2010. 2, 7, 8, 46 [12] Audrey Huang, Adam Block, Qinghua Liu, Nan Jiang, Akshay Krishnamurthy, and Dylan J. Foster. Is best-of-N the best of them? coverage, scaling, and optimality in inference-time alignment. arXiv preprint arXiv:2503.21878 , 2025. 10, 19 14 [13] Jaeyeon Kim, Seunggeun Kim, Taekyun Lee, David Z. Pan, Hyeji Kim, Sham Kakade, and Sitan Chen. Fine-tuning masked diffusion for provable self-correction. arXiv preprint arXiv:2510.01384 , 2025. 69 [14] Jihoon Lee, Hoyeon Moon, Kevin Zhai, Arun Kumar Chithanar, Anit Kumar Sahu, Soummya Kar, Chul Lee, Souradip Chakraborty, and Amrit Singh Bedi. Test-time scaling in diffusion llms via hidden semi-autoregressive experts. arXiv preprint arXiv:2510.05040 , 2025. 3, 14 [15] Sanghyun Lee, Sunwoo Kim, Seungryong Kim, Jongho Park, and Dongmin Park. Effective test-time scaling of discrete diffusion through iterative refinement. arXiv preprint arXiv:2511.05562 ,2025. 1, 3 [16] David A. Levin and Yuval Peres. Markov Chains and Mixing Times , volume 107. American Mathematical Society, 2017. 7, 28, 32, 38, 39, 44 [17] Hunter Lightman, Vineet Kosaraju, Yura Burda, Harri Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In The Twelfth International Conference on Learning Representations , 2024. 1 [18] Vladimir N. Maiorov and Gordon M. Crippen. Significance of root-mean-square deviation in comparing three-dimensional structures of globular proteins. Journal of Molecular Biology ,235(2):625–634, 1994. ISSN 0022-2836. doi: https://doi.org/10.1006/jmbi.1994.1017. URL 
+
+https://www.sciencedirect.com/science/article/pii/S0022283684710175 . 10 [19] Kou Misaki and Takuya Akiba. Unmaskfork: Test-time scaling for masked diffusion via deterministic action branching. arXiv preprint arXiv:2602.04344 , 2026. 1, 3 [20] Zijing Ou, Chinmay Pani, and Yingzhen Li. Inference-time scaling of discrete diffusion models via importance weighting and optimal proposal design. arXiv preprint arXiv:2505.22524 , 2025. 3[21] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF International Conference on Computer Vision , 2023. 10, 69 [22] Raghunathan Ramakrishnan, Pavlo O. Dral, Matthias Rupp, and O. Anatole von Lilienfeld. Quantum chemistry structures and properties of 134 kilo molecules. Scientific Data , 1:140022, 2014. 1, 9, 69 [23] Dhruv Rohatgi, Abhishek Shetty, Donya Saless, Yuchen Li, Ankur Moitra, Andrej Risteski, and Dylan J Foster. Taming imperfect process verifiers: A sampling perspective on backtracking. 
+
+arXiv preprint arXiv:2510.03149 , 2025. 1, 2, 3, 4, 5, 6, 7, 8, 10, 19, 24, 32, 46 [24] Subham Sekhar Sahoo, Marianne Arriola, Yair Schiff, Aaron Gokaslan, Edgar Marroquin, Justin T Chiu, Alexander Rush, and Volodymyr Kuleshov. Simple and effective masked diffusion language models. In Advances in Neural Information Processing Systems , volume 37, 2024. 3, 4, 10, 58, 69 [25] Alistair Sinclair and Mark Jerrum. Approximate counting, uniform generation and rapidly mixing markov chains. Information and Computation , 82(1):93–133, 1989. 1, 2, 3, 5, 6, 8 [26] Guanghan Wang, Yair Schiff, Subham Sekhar Sahoo, and Volodymyr Kuleshov. Remasking discrete diffusion models with inference-time scaling. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. 1, 3 [27] Kaiwen Wang, Jin Peng Zhou, Jonathan Chang, Zhaolin Gao, Nathan Kallus, Kianté Brantley, and Wen Sun. Value-guided search for efficient chain-of-thought reasoning. In Advances in Neural Information Processing Systems , 2025. 1 [28] Peiyi Wang, Lei Li, Zhihong Shao, Runxin Xu, Damai Dai, Yifei Li, Deli Chen, Yu Wu, and Zhifang Sui. Math-shepherd: Verify and reinforce LLMs step-by-step without human annotations. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 9426–9439, Bangkok, Thailand, 2024. Association for Computational Linguistics. 1 15 [29] Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. Self-consistency improves chain of thought reasoning in language models. In The Eleventh International Conference on Learning Representations , 2023. 1 [30] Ruidong Wu, Fan Ding, Rui Wang, Rui Shen, Xiwen Zhang, Shitong Luo, Chenpeng Su, Zuofan Wu, Qi Xie, Bonnie Berger, Jianzhu Ma, and Jian Peng. High-resolution de novo structure prediction from primary sequence. bioRxiv preprint , 2022. 10, 70 [31] An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, Chujie Zheng, Dayiheng Liu, Fan Zhou, Fei Huang, Feng Hu, Hao Ge, Haoran Wei, Huan Lin, Jialong Tang, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jing Zhou, Jingren Zhou, Junyang Lin, Kai Dang, Keqin Bao, Kexin Yang, Le Yu, Lianghao Deng, Mei Li, Mingfeng Xue, Mingze Li, Pei Zhang, Peng Wang, Qin Zhu, Rui Men, Ruize Gao, Shixuan Liu, Shuang Luo, Tianhao Li, Tianyi Tang, Wenbiao Yin, Xingzhang Ren, Xinyu Wang, Xinyu Zhang, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yinger Zhang, Yu Wan, Yuqiong Liu, Zekun Wang, Zeyu Cui, Zhenru Zhang, Zhipeng Zhou, and Zihan Qiu. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. 10, 69 [32] Kevin Yang and Dan Klein. FUDGE: Controlled text generation with future discriminators. In Proceedings of the 2021 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies , pages 3511–3535, Online, 2021. Association for Computational Linguistics. 1 [33] Zhao Yang, Hengchang Liu, Chuan Cao, and Bing Su. D3LM: A discrete DNA diffusion language model for bidirectional DNA understanding and generation, 2026. URL https: //arxiv.org/abs/2603.01780 . 10, 69 16 TABLE OF CONTENTS 
+
+1 Introduction 12 Other related works 33 Preliminaries 34 Methods and Theoretical Guarantees 5
+
+4.1 Formulation of MDM-VGB . . . . . . . . . . . . . . . . . . . . . . . . . 54.2 Asymptotic behavior: properties of the stationary distribution . . . . . . . 64.3 Formulation of MDM-VGB-Momentum . . . . . . . . . . . . . . . . . . 8
+
+5 Experiments 9
+
+5.1 Generation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11 5.2 Editing . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12 5.3 Component Ablations . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13 
+
+6 Conclusion and Future Work 13 A Table of Key Notation and Baseline Algorithms 18 
+
+A.1 Baseline Algorithms . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19 
+
+B Shared Setup and Verifier Training 23 C AOAR-VGB 24 
+
+C.1 Setup and Notation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 C.2 Primitive AOAR-VGB . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 C.3 Balanced AOAR-VGB . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 C.4 Theoretical Framework and Inference Algorithms . . . . . . . . . . . . . 34 C.5 Geometric Balanced AOAR-VGB . . . . . . . . . . . . . . . . . . . . . 39 
+
+D Momentum-Balanced AOAR-VGB 46 
+
+D.1 Setup and Notation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 47 D.2 Momentum-Balanced AOAR-VGB . . . . . . . . . . . . . . . . . . . . . 48 D.3 Momentum Lift for Geometric Balanced AOAR-VGB . . . . . . . . . . . 51 D.4 Theoretical Analysis: Depth-Speed Gain with Momentum . . . . . . . . 53 
+
+E Balanced Parallel VGBs for Masked Diffusion 58 
+
+E.1 Balanced MDM-VGB . . . . . . . . . . . . . . . . . . . . . . . . . . . . 58 E.2 Geometric Balanced MDM-VGB . . . . . . . . . . . . . . . . . . . . . . 62 E.3 Momentum Framework for Balanced and Geometric MDM-VGB . . . . 65 
+
+F Experimental Setting and Supplementary Results 67 
+
+F.1 Task Descriptions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 68 F.2 Leaf-start repair protocol . . . . . . . . . . . . . . . . . . . . . . . . . . 70 F.3 Verifier Architecture . . . . . . . . . . . . . . . . . . . . . . . . . . . . 70 F.4 Additional Ablations . . . . . . . . . . . . . . . . . . . . . . . . . . . . 71 17 A Table of Key Notation and Baseline Algorithms 
+
+Table 4: Table of Key Notations 
+
+Symbol Definition Descriptions 
+
+x conditioning context Prompt or source input 
+
+n sequence length Number of token positions 
+
+V finite vocabulary Token alphabet 
+
+Y Vn Fully revealed sequences 
+
+Z (V ∪ { [mask] })n Masked state space 
+
+R (z) {i ∈ [n] : zi̸ = [mask] } Observed coordinates of zk (z) |R (z)| Depth of masked state z
+
+C (z) {y ∈ Y : yi = zi, i ∈ R (z)} Compatible full completions of zπref (y | x) base sequence model Reference distribution 
+
+τ (x, y ) nonnegative reward Leaf-level verifier or reward 
+
+π⋆ (y | x) ∝ πref (y | x) τ (x, y ) Tilted target distribution 
+
+Mref (x, z ) P 
+
+> y∈C (z)
+
+πref (y | x) Base completion mass 
+
+V ⋆ (x, z ) Eπref [τ (x, Y ) | x, Y ∈ C (z)] Conditional-expectation value 
+
+U ⋆ (x, z ) P 
+
+> y∈C (z)
+
+πref (y | x) τ (x, y ) Tilted completion mass 
+
+bV (x, z ) learned approximation of V ⋆ (x, z ) Practical plug-in verifier 
+
+zj←a single-site reveal update Fill masked coordinate j with token az−i single-site re-mask update Re-mask observed coordinate isk depth-dependent edge coefficient Balanced AOAR-VGB coefficient 
+
+λ geometric value-gating exponent Strength of geometric remasking gate 
+
+d d ∈ {↑ , ↓} Momentum direction state 
+
+χ cancellation strength Flow-cancelled momentum parameter 
+
+B subset of coordinates with r = |B| Reveal or re-mask block 
+
+sk,r 
+
+ n−rk
+
+−1 Block-update depth coefficient 
+
+zB←aB block reveal update Fill block B with assignment aB
+
+z−B block re-mask update Mask every coordinate in block B
+
+Throughout the appendix, AOAR-VGB denotes the singleton-block any-order case, while MDM-VGB denotes the block-update method used in the main text. Table 5: Overview of baseline methods. The final column marks whether the theoretical sampler has the exact leaf-conditioned target π⋆(y | x) ∝ πref (y | x)τ (x, y ). Here △ denotes conditional exactness: BoN matches the success-conditioned target when τ ∈ { 0, 1}, while VGR is exact only when bV = V ⋆. Exactness here refers to the ideal asymptotic sampler with full-neighborhood transitions.                       
+
+> Method Uses bV?Backtracking? Exact π⋆law? Base XXX
+> BoN XX△
+> VGR OX△
+> VGB OOO
+> VGB-Momentum OOO
+
+18 AR-VGB 
+
+> [23]
+> AR-VGB Momentum
+> [23]
+> Primitive AOAR-VGB
+> (Section C.2)
+> Balanced AOAR-VGB
+> (Section C.3)
+> Geometric Balanced AOAR-VGB
+> (Section C.5)
+> Momentum-Balanced Geometric AOAR-VGB
+> (Section D.3)
+> Geometric Balanced MDM-VGB
+> (Section E.2)
+> Momentum-Balanced Geometric MDM-VGB
+> (Section E.3)
+> leaf hitting
+> AOAR extension
+> leaf-mass dilution
+> (Remark C.1
+> & Prop. C.3)
+> value-gated remasking
+> leaf hitting
+> MDM extension
+> leaf hitting
+
+Figure 10: Roadmap of the VGB variants studied in the appendix. AR-VGB and its momentum variant follow Rohatgi et al. [23] ; Primitive AOAR-VGB gives the any-order extension; Balanced AOAR-VGB addresses leaf-mass dilution; Geometric Balanced AOAR-VGB adds value-gated remasking; momentum-balanced geometric variants target leaf hitting under finite budgets; and Geometric Balanced MDM-VGB gives the block-update extension. 
+
+A.1 Baseline Algorithms 
+
+We compare MDM-VGB algorithms against baselines that use the same reference model πref . BoN is the terminal-verifier version of the standard best-of-N reranking baseline. VGR keeps the verifier-weighted forward reveal rule from VGB, but disables all re-mask (backtracking) moves. In this subsection, bV (x, z ) denotes the learned verifier score used by value-guided baselines on non-leaf states, while the true reward τ (x, y ) is used at leaves. 
+
+Best-of-N with terminal verifier. BoN is the usual verifier-reranking or best-of-N selection baseline [ 5, 7, 12 ]. It samples N independent complete candidates from a forward-only reference rollout of πref (· | x), and returns the candidate with the largest terminal verifier value τ (x, y ). It therefore tests what can be gained by spending compute on more complete reference samples, without modifying local transitions online. 
+
+Algorithm 1 Best-of-N with terminal verifier (BoN) ( = parallelizable area) 
+
+Require: context x, reference model πref , reward τ , number of samples N
+
+1: Initialize D ← ∅
+
+Parallel candidate generation. For i = 1 , . . . , N , independently sample a com-plete candidate y(i) by a forward-only reference rollout from πref (· | x), and compute si ← τ (x, y (i)).
+
+2: for i = 1 , . . . , N do 
+
+3: Add (y(i), s i) to D
+
+4: end for 
+
+5: i⋆ ← argmax i∈[N ] si
+
+6: return y(i⋆)
+
+Value-guided rollout. VGR is a forward-only value-guided baseline. It is the AOAR/MDM analogue of action-level rejection sampling in Rohatgi et al. [23] : the verifier is used online to choose forward reveal actions, but all re-mask moves are disabled. Thus VGR isolates online value-guided forward selection from the stochastic backtracking mechanism that distinguishes VGB. Since the full forward action space can be large, VGR uses the same forward shortlisting approxi-mation as VGB. At state z, it constructs a shortlisted forward candidate set A(z). For a candidate 19 u = zB←aB , with singleton blocks giving the AOAR case, the VGR weight is 
+
+w(z, u ) := sk(z),|B| πref (YB = aB | x, z ) bV (x, u ).
+
+The geometric factor bV (x, z )λ is omitted because it is common to all forward candidates from the same state and cancels under normalization. We do not report a separate momentum version of VGR: once backward moves are disabled, the reveal/re-mask direction variable is degenerate. 
+
+Algorithm 2 Value-guided rollout (VGR) ( = parallelizable area) 
+
+Require: context x, initial masked state z0, reference model πref , verifier score bV , depth coefficients 
+
+sk,r , step limit T 
+
+> 1:
+
+z ← z0 
+
+> 2:
+
+for t = 1 , . . . , T do  
+
+> 3:
+
+if z ∈ Y then  
+
+> 4:
+
+return z 
+
+> 5:
+
+end if Parallel forward construction. Construct a shortlisted forward candidate set A(z).For every u ∈ A (z), write u = zB←aB , r = |B|, compute 
+
+w(u) = sk(z),r πref (YB = aB | x, z ) bV (x, u ). 
+
+> 6:
+
+if P 
+
+> u∈A (z)
+
+w(u) > 0 then  
+
+> 7:
+
+Sample u ∈ A (z) proportional to w(u) 
+
+> 8:
+
+else  
+
+> 9:
+
+Sample u = zB←aB ∈ A (z) proportional to πref (YB = aB | x, z ) 
+
+> 10:
+
+end if  
+
+> 11:
+
+z ← u 
+
+> 12:
+
+end for  
+
+> 13:
+
+if z / ∈ Y then  
+
+> 14:
+
+Complete remaining masked coordinates using πref (· | x, z ) 
+
+> 15:
+
+end if  
+
+> 16:
+
+return z
+
+MDM-VGB samplers. We next give the block-update VGB samplers. The first algorithm is the generic MDM-VGB with admissible block sizes M; the second applies the lifted momentum construction to the same local forward and backward weights. Formal definitions of these weights and the stationarity guarantees are given in the following sections. The block sets B+ 
+
+> r
+
+(z), B− 
+
+> r
+
+(z) and the full MDM neighborhoods CMDM (z), PMDM (z) are defined in Section E.1. 20 Algorithm 3 MDM-VGB sampler with block coefficients, without a self-loop ( = parallelizable area) 
+
+Input: context x, initial state z, reference block conditionals πref (· | x, z ), verifier bV , reward τ ,admissible sizes M, coefficients sk,r , geometric exponent λ ≥ 0, step limit step_limit 
+
+Output: leaf sample list L 
+
+> 1:
+
+Initialize L ← ∅ and step ← 0
+
+▷ Balanced MDM-VGB uses λ = 0 ; Geometric Balanced MDM-VGB allows λ > 0. 
+
+> 2:
+
+while step < step_limit do  
+
+> 3:
+
+Set k ← k(z) = |R(z)| 
+
+> 4:
+
+Initialize an empty weighted candidate set A 
+
+> 5:
+
+if k < n then Parallel forward construction. For all r ∈ M with r ≤ n − k, all A ∈ B + 
+
+> r
+
+(z), and all aA ∈ V A, independently set uA,a A ← zA←aA and add uA,a A to A with weight 
+
+
+
+sn−r,r πref (YA = aA | x, z )τ (x, u A,a A ), uA,a A ∈ Y ,sk,r πref (YA = aA | x, z ) bV (x, u A,a A ), uA,a A /∈ Y , λ = 0 ,sk,r bV (x, z )λπref (YA = aA | x, z ) bV (x, u A,a A ), uA,a A /∈ Y , λ > 0. 
+
+> 6:
+
+end if  
+
+> 7:
+
+if k > 0 then Parallel backward construction. For all r ∈ M with r ≤ k and all A ∈ B − 
+
+> r
+
+(z),independently set uA ← z−A and add uA to A with weight 
+
+
+
+sn−r,r τ (x, z ), z ∈ Y ,sk−r,r bV (x, z ), z / ∈ Y , λ = 0 ,sk−r,r bV (x, z ) bV (x, u A)λ, z / ∈ Y , λ > 0. 
+
+> 8:
+
+end if  
+
+> 9:
+
+Sample u ∈ A proportional to its weight  
+
+> 10:
+
+Set z ← u 
+
+> 11:
+
+if z ∈ Y then  
+
+> 12:
+
+Append z to L 
+
+> 13:
+
+end if  
+
+> 14:
+
+step ← step + 1  
+
+> 15:
+
+end while  
+
+> 16:
+
+return L
+
+21 Algorithm 4 Momentum MDM-VGB sampler ( = parallelizable area; = momentum area) 
+
+Input: context x, initial lifted state (z, d ) with d ∈ {↓ , ↑} , base local weights wfwd , w bwd for balanced or geometric MDM-VGB, cancellation strength χ ∈ [0 , 1] , step limit step_limit 
+
+Output: leaf sample list L 
+
+> 1:
+
+Initialize L ← ∅ and step ← 0 
+
+> 2:
+
+while step < step_limit do  
+
+> 3:
+
+Set k ← k(z) = |R(z)| 
+
+> 4:
+
+if k = 0 and d =↑ then  
+
+> 5:
+
+Set d ←↓ ROOT DIRECTION RESET 6: end if  
+
+> 7:
+
+if k = n and d =↓ then  
+
+> 8:
+
+Set d ←↑ LEAF DIRECTION RESET 9: end if  
+
+> 10:
+
+Initialize empty weighted candidate sets Afwd , Abwd , and eA 
+
+> 11:
+
+if k < n then Parallel forward construction. For all c ∈ CMDM (z), independently add c to Afwd 
+
+with weight wfwd (z → c). 
+
+> 12:
+
+end if  
+
+> 13:
+
+if k > 0 then Parallel backward construction. For all p ∈ PMDM (z), independently add p to 
+
+Abwd with weight wbwd (z → p). 
+
+> 14:
+
+end if Momentum construction. Set 
+
+F (z) = X
+
+> c∈A fwd
+
+wfwd (z → c),B(z) = X
+
+> p∈A bwd
+
+wbwd (z → p),M (z) = min {F (z), B (z)} .
+
+Populate eA with the following lifted-state weights: 
+
+mode lifted state weight transition mode 
+
+d =↓ (c, ↓), c ∈ A fwd wfwd (z → c) MOVE 
+
+d =↓ (z, ↑) B(z) − χM (z) SWITCH UP
+
+d =↓ (z, ↓) χM (z) STAY DOWN (OPTIONAL )
+
+d =↑ (p, ↑), p ∈ A bwd wbwd (z → p) MOVE 
+
+d =↑ (z, ↓) F (z) − χM (z) SWITCH DOWN 
+
+d =↑ (z, ↑) χM (z) STAY UP (OPTIONAL ) 
+
+> 15:
+
+Sample (u, d ′) ∈ eA proportional to its weight  
+
+> 16:
+
+Set (z, d ) ← (u, d ′) 
+
+> 17:
+
+if z ∈ Y then  
+
+> 18:
+
+Append z to L 
+
+> 19:
+
+end if  
+
+> 20:
+
+step ← step + 1  
+
+> 21:
+
+end while  
+
+> 22:
+
+return L
+
+22 B Shared Setup and Verifier Training 
+
+We first collect the notation shared by all VGB variants. Fix a conditioning context x ∼ ρ, a sequence length n, and a finite vocabulary V. The fully revealed state space and the masked state space are 
+
+Y := Vn, Z := ( V ∪ { [mask] })n ,
+
+where [mask] /∈ V is the masking symbol. For z ∈ Z , let 
+
+R(z) := {i ∈ [n] | zi̸ = [mask] } , k(z) := |R(z)| .
+
+Here R(z) is the set of revealed coordinates and k(z) is the depth of z. The compatible completions of z are 
+
+C(z) := {y ∈ Y | yi = zi for all i ∈ R(z)} .
+
+Equivalently, observing the partial state z restricts the unknown terminal sequence Y to the completion set C(z). As more coordinates are revealed, this set becomes more informative. 
+
+Tilted target. Let πref (y | x) be a reference sequence model and let τ (x, y ) ≥ 0 be a terminal reward. These two objects define the tilted target distribution 
+
+π∗(y | x) := πref (y | x)τ (x, y )
+
+Z(x) , Z(x) := X
+
+> y∈Y
+
+πref (y | x)τ (x, y ).
+
+The goal of the VGB procedures is to sample from π∗(· | x) while using πref as the proposal backbone. 
+
+Completion values. To describe local moves on masked states, we need to know both how much reference probability remains under a partial assignment and how promising that partial assignment is under the reward. The first quantity is the reference completion mass 
+
+Mref (x, z ) := X
+
+> y∈C (z)
+
+πref (y | x) = PY ∼πref (Y ∈ C (z) | x).
+
+This mass determines which masked states are reachable under the reference model: 
+
+Zreach (x) := {z ∈ Z : Mref (x, z ) > 0} .
+
+If z ∈ Z reach (x), we say that z is πref -reachable . When the context is fixed, we write Zreach for 
+
+Zreach (x).The second quantity is the conditional-expectation value 
+
+V ∗(x, z ) := Eπref [τ (x, Y ) | x, Y ∈ C (z)] ,
+
+which is the object approximated by the verifier. For the analysis, it is also convenient to introduce the unnormalized tilted completion mass 
+
+U ∗(x, z ) := X
+
+> y∈C (z)
+
+πref (y | x)τ (x, y ).
+
+We note that these two views are related by 
+
+U ∗(x, z ) = Mref (x, z )V ∗(x, z ).
+
+The quantity U ∗ is useful for stationarity proofs, but learning it directly would also require estimating the completion mass Mref . The VGB framework discussed in later sections avoids this extra estimation problem: its local transitions can be implemented using reference conditionals together with a learned approximation bV of V ∗.23 Verifier training. When a learned verifier is used, we train a masked-state verifier bV (x, z ). During training, we fit a parametric model Vθ (x, z ) and then set bV to the trained model. For a sampled context x, we run several reference rollouts, each producing a terminal completion y.Along the way, the sampler reveals coordinates, producing a trajectory of intermediate masked states. We subsample several snapshots from each trajectory and assign all of them the same terminal label 
+
+r = τ (x, y ).The verifier is trained with the Monte Carlo (MC) rollout regression objective 
+
+Lreg (θ) := Ex,z,y 
+
+h
+
+(Vθ (x, z ) − τ (x, y )) 2i
+
+,
+
+where z is a sampled intermediate state from a rollout that terminates at y. The following proposition reveals the population target of this regression. 
+
+Proposition B.1 (MC regression recovers V ⋆). Consider the population rollout law Pref over triples (x, z, y ). Suppose this law is reference-consistent: whenever z ∈ Z reach (x),
+
+Pref (Y = y | x, z ) = πref (y | x, Y ∈ C (z)) .
+
+Then the population regression objective 
+
+Lreg (V ) := EPref 
+
+h V (x, z ) − τ (x, Y )2i
+
+recovers V ⋆ as its population optimum: 
+
+V ⋆ = argmin 
+
+> V
+
+Lreg (V ) Pref -a.e. Proof. For fixed (x, z ), the squared loss is minimized by the conditional mean 
+
+EPref [τ (x, Y ) | x, z ] .
+
+Therefore, reference consistency gives 
+
+EPref [τ (x, Y ) | x, z ] = Eπref [τ (x, Y ) | x, Y ∈ C (z)] = V ⋆(x, z ),
+
+which proves the claim. By Proposition B.1, under a reference-consistent population rollout law Pref , the population target of MC rollout regression is exactly V ⋆(x, z ). Thus, bV plays the role of an intermediate-state value function, analogous to the prefix-state value function in Rohatgi et al. [23] , but lifted here to any-order partial states. The training procedure is summarized in Algorithm 5. 
+
+## C AOAR-VGB 
+
+We now extend the VGB perspective of Rohatgi et al. [23] from left-to-right prefix trees to any-order masked states. The key difference is that the state is no longer a prefix. Instead, a state is a masked partial sequence z ∈ Z , and a forward move reveals one currently masked coordinate. A backward move re-masks one currently revealed coordinate. This gives a natural random walk on the graph of masked states. 
+
+C.1 Setup and Notation 
+
+We use the shared notation from the previous section. In particular, for a masked state z ∈ Z , R(z)
+
+denotes the set of revealed coordinates, k(z) = |R(z)| denotes its depth, and C(z) denotes the set of full sequences compatible with z.We write ∅ for the fully masked state, so R(∅) = ∅. The fully revealed states are exactly the leaves 
+
+Y = Vn.For an unrevealed coordinate j / ∈ R(z) and token a ∈ V , define the single-site reveal update zj←a by 
+
+ zj←a 
+
+> i
+
+=
+
+a, i = j, zi, i̸ = j. 
+
+24 Algorithm 5 Training the shared masked-state verifier 
+
+Require: context distribution ρ, reference model πref , reward τ , parametric verifier Vθ , snapshots per rollout K, number of rollouts N 
+
+> 1:
+
+Initialize snapshot dataset Dsnap ← ∅ 
+
+> 2:
+
+for i = 1 , . . . , N do  
+
+> 3:
+
+Sample x ∼ ρ 
+
+> 4:
+
+Run a reference rollout using πref (· | x) to obtain a terminal completion y and snapshots z(1) , . . . , z (K) 
+
+> 5:
+
+Compute r ← τ (x, y ) 
+
+> 6:
+
+Add (x, z (k), r ) Kk=1 to Dsnap  
+
+> 7:
+
+end for  
+
+> 8:
+
+Update θ by minimizing 
+
+θ ← argmin 
+
+> θ′
+
+1
+
+|D snap |
+
+X
+
+> (x,z,r )∈D snap
+
+(Vθ′ (x, z ) − r)2 
+
+> 9:
+
+Define bV (x, z ) ← Vθ (x, z ) 
+
+> 10:
+
+return trained verifier bV
+
+For a revealed coordinate i ∈ R(z), define the single-site re-masking update z−i by 
+
+ z−i 
+
+> ℓ
+
+=
+
+[mask] , ℓ = i, zℓ, ℓ̸ = i. 
+
+The AOAR neighbor sets are 
+
+CAOAR (z) := zj←a | j / ∈ R(z), a ∈ V , M ref (x, z j←a) > 0 , (Child neighborhood) 
+
+PAOAR (z) := z−i | i ∈ R(z) , (Parent neighborhood) and 
+
+NAOAR (z) := CAOAR (z) ∪ PAOAR (z). (AOAR neighborhood) Thus, CAOAR (z) contains one-step reveal states, and PAOAR (z) contains one-step re-masked states. The AOAR oracle assumption is that for every reachable state z and every j / ∈ R(z), we can evaluate the single-coordinate reference conditional 
+
+πref (Yj = a | x, z ) := Pπref (Yj = a | x, Y ∈ C (z)) , a ∈ V .
+
+Equivalently, 
+
+πref (Yj = a | x, z ) = Mref (x, z j←a)
+
+Mref (x, z ) .
+
+We first record the basic identities that will be used in the weighted-graph construction and the stationary analysis below. 
+
+Lemma C.1 (Single-site partition identity) . Fix a reachable state z and coordinate j / ∈ R(z). Then 
+
+C(z) = G
+
+> a∈V
+
+C(zj←a).
+
+Consequently, 
+
+X
+
+> a∈V
+
+U ∗(x, z j←a) = U ∗(x, z ), X
+
+> a∈V
+
+Mref (x, z j←a) = Mref (x, z ).
+
+Proof. Every full sequence y ∈ C (z) has a unique value yj = a at coordinate j. Hence y belongs to exactly one set C(zj←a). This proves the disjoint union. Summing the masses πref (y | x)τ (x, y )
+
+over this partition gives the identity for U ∗. Setting τ ≡ 1 gives the identity for Mref .25 Proposition C.1 (AOAR Bellman identity) . For every reachable state z and every j / ∈ R(z),
+
+V ∗(x, z ) = X
+
+> a∈V
+
+πref (Yj = a | x, z )V ∗(x, z j←a).
+
+Proof. By the law of total expectation, 
+
+V ∗(x, z ) = Eπref [τ (x, Y ) | x, Y ∈ C (z)] .
+
+Conditioning further on the value of Yj , we obtain 
+
+V ∗(x, z ) = X
+
+> a∈V
+
+Pπref (Yj = a | x, Y ∈ C (z)) Eπref [τ (x, Y ) | x, Y ∈ C (z), Y j = a] .
+
+The event {Y ∈ C (z), Y j = a} is exactly Y ∈ C (zj←a) . Therefore the inner conditional expecta-tion is V ∗(x, z j←a).
+
+Proposition C.2 (Exact target conditional) . For every reachable state z with U ∗(x, z ) > 0, every 
+
+j / ∈ R(z), and every a ∈ V ,
+
+π∗(Yj = a | x, z ) = U ∗(x, z j←a)
+
+U ∗(x, z ) = πref (Yj = a | x, z ) V ∗(x, z j←a)
+
+V ∗(x, z ) .
+
+Proof. By definition of conditional probability under the tilted target, 
+
+π∗(Yj = a | x, z ) = Pπ∗ (Y ∈ C (zj←a) | x)
+
+Pπ∗ (Y ∈ C (z) | x) .
+
+Since 
+
+Pπ∗ (Y ∈ C (zj←a) | x) = U ∗(x, z j←a)
+
+Z(x)
+
+and 
+
+Pπ∗ (Y ∈ C (z) | x) = U ∗(x, z )
+
+Z(x) ,
+
+the first equality follows. For the second equality, use 
+
+U ∗(x, z ) = Mref (x, z )V ∗(x, z )
+
+and 
+
+Mref (x, z j←a) = Mref (x, z )πref (Yj = a | x, z ).
+
+C.2 Primitive AOAR-VGB 
+
+The most direct AOAR extension of AR-VGB uses the same local rule as the prefix-tree AR-VGB walk: forward moves are weighted by the reference conditional times the verifier value of the child, and backward moves are weighted by the verifier value of the current state. Let bV (x, z ) denote the trained verifier. We use terminal anchoring : whenever the terminal reward is available at a leaf, the verifier is fixed to the true reward, 
+
+bV (x, y ) := τ (x, y ), y ∈ Y .
+
+Definition C.1 (γ-held primitive AOAR-VGB local kernel) . Fix a holding parameter γ ≥ 0. For a reachable state z, define the primitive AOAR-VGB local weights by FORWARD : w(z → zj←a) := πref (Yj = a | x, z ) bV (x, z j←a), j / ∈ R(z),
+
+BACKWARD : w(z → z−i) := bV (x, z ), i ∈ R(z).
+
+26 Let 
+
+WPM (z) := X
+
+> v∈NAOAR (z)
+
+w(z → v).
+
+The associated non-self move kernel is 
+
+KPM (z, u ) := w(z → u)
+
+WPM (z) , u ∈ NAOAR (z).
+
+The γ-held primitive AOAR-VGB kernel is 
+
+P (γ)PM (z, z ) = γ
+
+1 + γ ,
+
+and, for u ∈ NAOAR (z),
+
+P (γ)PM (z, u ) = 11 + γ KPM (z, u ) = 11 + γw(z → u)
+
+P 
+
+> v∈NAOAR (z)
+
+w(z → v) .
+
+When γ = 1 , this recovers the usual 1/2-lazy kernel. When γ = 0 , it is the non-lazy local random walk. Although Mref is not needed to implement the transition, it is useful to temporarily reintroduce it in the analysis. Multiplying the learned value by the reference completion mass Mref gives the plug-in tilted mass bU (x, z ) := Mref (x, z ) bV (x, z ).
+
+Theorem C.1 (Weighted-graph representation and exact leaf law) . Construct an undirected graph on reachable masked states by connecting z and zj←a whenever j / ∈ R(z) and zj←a is reachable. Assign the symmetric edge weight 
+
+fPM (z, z j←a) := bU (x, z j←a) = Mref (x, z j←a) bV (x, z j←a).
+
+For a state z, let its weighted degree be 
+
+DPM (z) := X
+
+> u∼z
+
+fPM (z, u ),
+
+where u ∼ z means that u and z are connected by an edge in the AOAR weighted graph. Then, for every γ ≥ 0, the γ-held primitive AOAR-VGB kernel P (γ)PM from Definition C.1 is exactly the γ-held weighted random walk on this graph. Also, its stationary distribution is 
+
+μPM (z) = DPM (z)
+
+P 
+
+> z′
+
+DPM (z′) .
+
+Moreover, if bV (x, y ) = τ (x, y ) on all leaves y ∈ Y , then the stationary law conditioned on the leaves is exactly the tilted target: 
+
+μPM (y | y ∈ Y ) = π∗(y | x).
+
+Proof. Fix a reachable state z. For a forward neighbor zj←a, we have 
+
+fPM (z, z j←a)
+
+Mref (x, z ) = Mref (x, z j←a)
+
+Mref (x, z ) bV (x, z j←a) = πref (Yj = a | x, z ) bV (x, z j←a).
+
+This is exactly the forward local weight. For a backward neighbor z−i, the edge between z−i and z has weight 
+
+fPM (z−i, z ) = bU (x, z ) = Mref (x, z ) bV (x, z ).
+
+Dividing by the same state-dependent factor Mref (x, z ) gives the backward local weight 
+
+bV (x, z ).
+
+27 Thus, from every state z, the local weights in Definition C.1 are exactly the incident edge weights divided by the common positive factor Mref (x, z ). This common factor cancels under normalization. Therefore the non-self move kernel is the weighted random walk on the graph with edge weights 
+
+fPM :
+
+KPM (z, u ) = fPM (z, u )
+
+DPM (z) , u ∼ z. 
+
+This is the standard random walk on a network with conductances fPM (z, u ) in the sense of Levin and Peres [16]. We now verify stationarity directly. Let 
+
+Dtot := X
+
+> z′
+
+DPM (z′), μPM (z) := DPM (z)
+
+Dtot 
+
+.
+
+For two distinct neighboring states z ∼ u, the γ-held kernel satisfies 
+
+P (γ)PM (z, u ) = 11 + γfPM (z, u )
+
+DPM (z) .
+
+Therefore 
+
+μPM (z)P (γ)PM (z, u ) = DPM (z)
+
+Dtot 
+
+· 11 + γfPM (z, u )
+
+DPM (z)= fPM (z, u )(1 + γ)Dtot 
+
+.
+
+Since fPM (z, u ) = fPM (u, z ), the same calculation gives 
+
+μPM (u)P (γ)PM (u, z ) = fPM (z, u )(1 + γ)Dtot 
+
+.
+
+Thus detailed balance holds on every non-self edge. For the self-loop terms, 
+
+μPM (z)P (γ)PM (z, z ) = μPM (z) γ
+
+1 + γ ,
+
+so detailed balance is immediate. Therefore P (γ)PM is reversible with respect to μPM , and hence μPM 
+
+is stationary. Now consider a leaf y ∈ Y . It has exactly n parents, one for each coordinate that can be re-masked. For each parent y−i, the edge weight is 
+
+fPM (y−i, y ) = Mref (x, y ) bV (x, y ) = πref (y | x)τ (x, y ).
+
+Here we used terminal anchoring. Hence 
+
+DPM (y) = n π ref (y | x)τ (x, y ).
+
+The factor n is constant across leaves. Therefore 
+
+μPM (y | y ∈ Y ) = πref (y | x)τ (x, y )
+
+P 
+
+> y′∈Y
+
+πref (y′ | x)τ (x, y ′) = π∗(y | x).
+
+When the verifier is exact, every γ-held primitive AOAR-VGB chain has a particularly simple stationary law. 
+
+Corollary C.1 (Exact primitive stationary law) . For any γ ≥ 0, if bV = V ∗, then the stationary distribution of P (γ)PM satisfies 
+
+μ∗
+
+> PM
+
+(z) ∝ U ∗(x, z ).
+
+28 Proof. When bV = V ∗, we have bU = U ∗. For a state z of depth k = k(z), every backward edge contributes U ∗(x, z ), and there are k such edges. For each unrevealed coordinate j / ∈ R(z),Lemma C.1 gives X
+
+> a∈V
+
+U ∗(x, z j←a) = U ∗(x, z ).
+
+There are n − k unrevealed coordinates, so the total forward incident weight is (n − k)U ∗(x, z ).Hence 
+
+DPM (z) = kU ∗(x, z ) + ( n − k)U ∗(x, z ) = nU ∗(x, z ).
+
+By Theorem C.1, for every γ ≥ 0,
+
+μ∗
+
+> PM
+
+(z) ∝ DPM (z).
+
+Therefore 
+
+μ∗
+
+> PM
+
+(z) ∝ U ∗(x, z ).
+
+However, we note that the same stationary law also exposes a depth-allocation problem: although the conditional law on leaves is correct, the primitive chain assigns exponentially small marginal mass to the leaf layer, as follows: 
+
+Proposition C.3 (Exponential leaf-mass dilution of primitive AOAR-VGB) . For any γ ≥ 0, assume 
+
+bV = V ∗. Then the stationary mass of depth k under P (γ)PM is 
+
+μ∗
+
+> PM
+
+(k(z) = k) = 
+
+ nk
+
+
+
+2n .
+
+In particular, 
+
+μ∗
+
+> PM
+
+(Y) = 2 −n.
+
+Proof. For any fixed depth k, double-counting identity gives 
+
+X 
+
+> z:k(z)= k
+
+U ∗(x, z ) = X
+
+> z:k(z)= k
+
+X
+
+> y∈C (z)
+
+πref (y | x)τ (x, y )= X
+
+> y∈Y
+
+πref (y | x)τ (x, y ) X
+
+> z:k(z)= k
+
+1 {y ∈ C (z)} =
+
+nk
+
+
+
+Z(x).
+
+Indeed, each full sequence y ∈ Y contributes the mass πref (y | x)τ (x, y ) to exactly  nk
+
+ masked states of depth k, one for each choice of k revealed coordinates. Therefore 
+
+X
+
+> z∈Z
+
+U ∗(x, z ) = 
+
+> n
+
+X
+
+> k=0
+
+X
+
+> z:k(z)= k
+
+U ∗(x, z ) = 
+
+> n
+
+X
+
+> k=0
+
+nk
+
+
+
+Z(x) = 2 nZ(x).
+
+By Corollary C.1, the primitive stationary law is proportional to U ∗, so 
+
+μ∗
+
+> PM
+
+(k(z) = k) = 
+
+ nk
+
+Z(x)2nZ(x) =
+
+ nk
+
+
+
+2n .
+
+Taking k = n gives μ∗
+
+> PM
+
+(Y) = 2 −n.Thus, primitive AOAR-VGB has the correct leaf-conditioned distribution, but the stationary chain spends exponentially little mass on leaves. We therefore introduce Balanced AOAR-VGB, a depth-balanced variant designed to resolve this leaf-mass dilution problem. 
+
+C.3 Balanced AOAR-VGB 
+
+Primitive AOAR-VGB treats every single-site edge symmetrically. In the AOAR graph, however, the number of states at each depth grows as  nk
+
+. As a result, the primitive stationary law puts most of its mass around the middle depths. Balanced AOAR-VGB rescales forward and backward moves as a function of depth to suppress this combinatorial depth bias. 29 Definition C.2 (γ-held depth-rescaled AOAR-VGB local kernel) . Fix a holding parameter γ ≥ 0
+
+and positive coefficients 
+
+β0, β 1, . . . , β n−1 > 0, α1, α 2, . . . , α n > 0.
+
+For a reachable state z with k = k(z), define the depth-rescaled local weights by FORWARD : w(k)(z → zj←a) := βk πref (Yj = a | x, z ) bV (x, z j←a), j / ∈ R(z),
+
+BACKWARD : w(k)(z → z−i) := αk bV (x, z ), i ∈ R(z).
+
+Let 
+
+WBAL (z) := X
+
+> u∈NAOAR (z)
+
+w(k)(z → u).
+
+The associated non-self move kernel is 
+
+KBAL (z, u ) := w(k)(z → u)
+
+WBAL (z) , u ∈ NAOAR (z).
+
+The γ-held balanced AOAR-VGB kernel is 
+
+P (γ)BAL (z, z ) = γ
+
+1 + γ ,P (γ)BAL (z, u ) = 11 + γ KBAL (z, u ) = 11 + γw(k)(z → u)
+
+P 
+
+> v∈NAOAR (z)
+
+w(k)(z → v) , u ∈ NAOAR (z).
+
+When γ = 1 , this recovers the usual 1/2-lazy kernel. When γ = 0 , it is the non-lazy local random walk. In the Proposition C.4 below, we use the word “move” to mean a non-self transition. Thus, condition-ing on move means conditioning on the event that the kernel does not take the holding self-loop and instead chooses a neighbor in NAOAR (z). The events forward and backward mean that the selected neighbor lies in CAOAR (z) or PAOAR (z), respectively. Since the holding probability is common to all non-self moves, the conditional directional probabilities below do not depend on γ.
+
+Proposition C.4 (Exact directional masses and balanced condition) . Assume bV = V ∗. Let z be a reachable state of interior depth 1 ≤ k ≤ n − 1 with V ∗(x, z ) > 0. Then the exact total forward and backward local masses are 
+
+W (k),∗ 
+
+> fwd
+
+(x, z ) = ( n − k)βkV ∗(x, z ), W (k),∗ 
+
+> bwd
+
+(x, z ) = kα kV ∗(x, z ).
+
+Therefore, conditional on making a non-self move, 
+
+P(forward | x, z, move) = (n − k)βk
+
+(n − k)βk + kα k
+
+,
+
+P(backward | x, z, move) = kα k
+
+(n − k)βk + kα k
+
+.
+
+In particular, the forward and backward directions are exactly balanced at depth k if and only if 
+
+(n − k)βk = kα k.
+
+Proof. For each unrevealed coordinate j / ∈ R(z), Proposition C.1 gives 
+
+X
+
+> a∈V
+
+πref (Yj = a | x, z )V ∗(x, z j←a) = V ∗(x, z ).
+
+There are n − k unrevealed coordinates, so the total forward mass is 
+
+W (k),∗ 
+
+> fwd
+
+(x, z ) = X
+
+> j / ∈R(z)
+
+X
+
+> a∈V
+
+βkπref (Yj = a | x, z )V ∗(x, z j←a) = ( n − k)βkV ∗(x, z ).
+
+30 There are k revealed coordinates, and each backward move has weight αkV ∗(x, z ). Hence 
+
+W (k),∗ 
+
+> bwd
+
+(x, z ) = X
+
+> i∈R(z)
+
+αkV ∗(x, z ) = kα kV ∗(x, z ).
+
+The conditional directional probabilities follow by normalizing the forward and backward masses among non-self moves. The common holding factor 1/(1 + γ) cancels after conditioning on move .Exact balance is therefore equivalent to 
+
+(n − k)βkV ∗(x, z ) = kα kV ∗(x, z ),
+
+or simply (n − k)βk = kα k.
+
+Remark C.1 (Primitive AOAR-VGB as the unrescaled case) . Primitive AOAR-VGB corresponds to the unrescaled choice 
+
+βk = 1 , αk = 1 
+
+at every interior depth. Under this choice, Proposition C.4 gives 
+
+P(forward | x, z, move) = n − kn , P(backward | x, z, move) = kn .
+
+Thus, the primitive chain strongly favors forward moves near the root and strongly favors backward moves near the leaves. This local depth bias is consistent with the global pathology in Proposition C.3: under the exact primitive stationary law, the depth marginal is binomial and the leaf layer receives only 2−n
+
+stationary mass. Balanced AOAR-VGB removes this local directional bias by choosing αk, β k so that 
+
+(n − k)βk = kα k,
+
+making the forward and backward directions equally likely after conditioning on a non-self move. We next give the stationary law for the balanced chain. The following edge-coefficient representation is the cleanest way to see that terminal exactness is preserved even when bV is imperfect. Let g1 > 0 be arbitrary, and define g2, . . . , g n recursively by 
+
+gk+1 = gk
+
+βk
+
+αk
+
+, k = 1 , . . . , n − 1.
+
+We set β0 = αn = 1 . These boundary choices do not affect the normalized transition, since only forward moves are available at the root and only backward moves are available at the leaves. 
+
+Theorem C.2 (Weighted-graph representation of balanced AOAR-VGB) . Construct an undirected graph on reachable masked states with single-site AOAR edges. For an edge between a depth-k
+
+parent z and its child zj←a, assign the symmetric edge weight 
+
+fBAL (z, z j←a) := gk+1 Mref (x, z j←a) bV (x, z j←a).
+
+Then, for every γ ≥ 0, the balanced AOAR-VGB kernel from Definition C.2 is exactly the γ-held weighted random walk on this graph. Hence its stationary distribution is 
+
+μBAL (z) = DBAL (z)
+
+P 
+
+> z′
+
+DBAL (z′) , DBAL (z) := X
+
+> u∼z
+
+fBAL (z, u ).
+
+If bV (x, y ) = τ (x, y ) for all leaves y ∈ Y , then 
+
+μBAL (y | y ∈ Y ) = π∗(y | x).
+
+Proof. Let z be a state of depth k. First consider a forward edge z → zj←a. Then 
+
+fBAL (z, z j←a)
+
+Mref (x, z ) = gk+1 
+
+Mref (x, z j←a)
+
+Mref (x, z ) bV (x, z j←a)= gk+1 πref (Yj = a | x, z ) bV (x, z j←a).
+
+31 For a backward edge from z to z−i, the child in the edge is z, so 
+
+fBAL (z−i, z )
+
+Mref (x, z ) = gk bV (x, z ).
+
+For an interior state, the recursion gk+1 
+
+gk
+
+= βk
+
+αk
+
+implies gk+1 /β k = gk/α k. Thus, at every interior depth k, the incident edge weights divided by 
+
+Mref (x, z ) are proportional to the local depth-rescaled weights in Definition C.2. The proportionality factor is common across all outgoing neighbors of z, and hence cancels under normalization. At the root and leaves, we use the boundary convention β0 = αn = 1 . Since only forward moves are available at the root and only backward moves are available at the leaves, these boundary choices do not change the normalized transition. Therefore P (γ)BAL is exactly the γ-held weighted random walk on the graph with edge weights fBAL :
+
+P (γ)BAL (z, z ) = γ
+
+1 + γ , P (γ)BAL (z, u ) = 11 + γfBAL (z, u )
+
+DBAL (z) , u ∼ z. 
+
+We now verify the stationary distribution directly. This is the standard random walk on a network with conductances fBAL (z, u ), for which the stationary distribution is proportional to the vertex conductance DBAL (z) [16]. For completeness, we check detailed balance. Let 
+
+Dtot := X
+
+> z′
+
+DBAL (z′), μBAL (z) := DBAL (z)
+
+Dtot 
+
+.
+
+For two distinct neighboring states z ∼ u,
+
+μBAL (z)P (γ)BAL (z, u ) = DBAL (z)
+
+Dtot 
+
+· 11 + γfBAL (z, u )
+
+DBAL (z) = fBAL (z, u )(1 + γ)Dtot 
+
+.
+
+Since the edge weight is symmetric, fBAL (z, u ) = fBAL (u, z ), the same calculation gives 
+
+μBAL (u)P (γ)BAL (u, z ) = fBAL (z, u )(1 + γ)Dtot 
+
+.
+
+Thus, detailed balance holds on every non-self edge. For the self-loop terms, 
+
+μBAL (z)P (γ)BAL (z, z ) = μBAL (z) γ
+
+1 + γ ,
+
+so detailed balance is trivial. Therefore P (γ)BAL is reversible with respect to μBAL , and hence μBAL is stationary. Now let y ∈ Y be a leaf. Each of its n incident edges has weight 
+
+gnMref (x, y ) bV (x, y ) = gnπref (y | x)τ (x, y ).
+
+Thus 
+
+DBAL (y) = ng nπref (y | x)τ (x, y ).
+
+The factor ng n is constant over leaves, so conditioning on Y gives 
+
+μBAL (y | y ∈ Y ) = πref (y | x)τ (x, y )
+
+P 
+
+> y′∈Y
+
+πref (y′ | x)τ (x, y ′) = π∗(y | x).
+
+Remark C.2 (Zero holding in the practical sampler) . The holding parameter γ is useful for connecting the balanced AOAR-VGB transition to the standard lazy random-walk formalism, but explicit self-loop steps have limited algorithmic value in implementation and directly add computational cost. Following the practical convention in Rohatgi et al. [23] , we therefore set γ = 0 in our AOAR-VGB implementation and use the non-lazy local move kernel. The stationarity argument in Theorem C.2 32 is stated for every γ ≥ 0, so this practical choice does not change the leaf-conditioned stationary law. When the verifier is exact, the weighted-degree expression from Theorem C.2 simplifies to the tilted mass U ∗ multiplied by a depth-dependent coefficient. 
+
+Corollary C.2 (Exact balanced stationary law) . Assume bV = V ∗. Define 
+
+d0 := ng 1, dn := ng n, dk := kg k + ( n − k)gk+1 (1 ≤ k ≤ n − 1) .
+
+Then, for every γ ≥ 0, the exact balanced stationary law satisfies 
+
+μ∗
+
+> BAL
+
+(z) ∝ dk(z) U ∗(x, z ).
+
+Proof. Let z have depth k. If 1 ≤ k ≤ n − 1, its backward incident edges contribute 
+
+kg kU ∗(x, z ).
+
+For each unrevealed coordinate j / ∈ R(z), Lemma C.1 gives 
+
+X
+
+> a∈V
+
+gk+1 U ∗(x, z j←a) = gk+1 U ∗(x, z ).
+
+There are n − k unrevealed coordinates, so the forward incident weight is 
+
+(n − k)gk+1 U ∗(x, z ).
+
+Thus 
+
+D∗
+
+> BAL
+
+(z) = ( kg k + ( n − k)gk+1 ) U ∗(x, z ).
+
+The root and leaf cases give d0 = ng 1 and dn = ng n, respectively. By Theorem C.2, the stationary distribution is proportional to D∗ 
+
+> BAL
+
+for every γ ≥ 0, which proves the claim. 
+
+Corollary C.3 (Canonical balanced AOAR-VGB) . Set 
+
+βk = k, αk = n − k, 1 ≤ k ≤ n − 1.
+
+Then, the exact forward and backward directional probabilities are both 1/2 at every interior depth. Choosing g1 = 1 , the corresponding edge coefficients are 
+
+gk = 1
+
+ n−1
+
+> k−1
+
+ , 1 ≤ k ≤ n. 
+
+Moreover, under bV = V ∗, for every γ ≥ 0,
+
+μ∗
+
+> BAL
+
+(Y) = 12n .
+
+Proof. The balanced condition follows immediately: 
+
+(n − k)βk = ( n − k)k = k(n − k) = kα k.
+
+The recursion for gk becomes 
+
+gk+1 = gk
+
+kn − k .
+
+Starting from g1 = 1 , this gives 
+
+gk =
+
+> k−1
+
+Y
+
+> r=1
+
+rn − r = (k − 1)!( n − k)! (n − 1)! = 1
+
+ n−1
+
+> k−1
+
+ .
+
+For 1 ≤ k ≤ n − 1,
+
+dk = kg k + ( n − k)gk+1 = kg k + kg k = 2 kg k = 2n
+
+ nk
+
+ .
+
+33 At the boundaries, 
+
+d0 = dn = n. 
+
+Using the double-counting identity 
+
+X 
+
+> z:k(z)= k
+
+U ∗(x, z ) = X 
+
+> z:k(z)= k
+
+X
+
+> y∈C (z)
+
+πref (y | x)τ (x, y )= X
+
+> y∈Y
+
+πref (y | x)τ (x, y ) X 
+
+> z:k(z)= k
+
+1 {y ∈ C (z)} =
+
+nk
+
+
+
+Z(x),
+
+we can compute the unnormalized stationary weight layer by layer. For the root layer, P  
+
+> z:k(z)=0
+
+U ∗(x, z ) = Z(x) and d0 = n, so its total stationary weight is nZ (x). For the leaf layer, P  
+
+> z:k(z)= n
+
+U ∗(x, z ) = Z(x) and dn = n, so its total stationary weight is also nZ (x). For each interior depth 1 ≤ k ≤ n − 1, the total stationary weight is 
+
+dk
+
+X 
+
+> z:k(z)= k
+
+U ∗(x, z ) = 2n
+
+ nk
+
+nk
+
+
+
+Z(x) = 2 nZ (x).
+
+Hence the total weight over all depths is 
+
+nZ (x) + nZ (x) + ( n − 1)2 nZ (x) = 2 n2Z(x).
+
+The leaf layer has weight nZ (x), so 
+
+μ∗
+
+> BAL
+
+(Y) = nZ (x)2n2Z(x) = 12n .
+
+Thus, canonical balanced AOAR-VGB keeps the exact target law on leaves while increasing the stationary leaf mass from 2−n to order 1/n .
+
+C.4 Theoretical Framework and Inference Algorithms 
+
+We now state the mixing framework for canonical balanced AOAR-VGB. The argument follows the same high-level principle as VGB on a prefix tree: stochastic backtracking defines a reversible walk whose leaf-conditioned stationary law is exact, and whose conductance can be controlled under a multiplicative value-approximation assumption. 
+
+Assumption C.1 (Uniform multiplicative verifier accuracy) . There exists κ ≥ 1 such that for every reachable non-leaf state z,
+
+κ−1V ∗(x, z ) ≤ bV (x, z ) ≤ κV ∗(x, z ).
+
+At leaves, we use terminal anchoring: 
+
+bV (x, y ) = τ (x, y ), y ∈ Y .
+
+The canonical balanced AOAR graph can be viewed as an average of fixed-order VGB trees. Let 
+
+Perm n denote the set of coordinate orders, i.e., permutations of [n]. For ω = ( ω1, . . . , ω n) ∈ Perm n,define the fixed-order state set 
+
+Zω := {z ∈ Z | R(z) = {ω1, . . . , ω k} for some k ∈ { 0, . . . , n }} .
+
+This is a tree whose forward move at depth k reveals coordinate ωk+1 . On this tree, define the edge weight 
+
+fω (z, z ωk+1 ←a) := Mref (x, z ωk+1 ←a) bV (x, z ωk+1 ←a).
+
+Lemma C.2 (Fixed-order tree conductance) . We call 
+
+Dω (z) := X
+
+> u∼z
+
+fω (z, u ), μω (z) := Dω (z)
+
+P 
+
+> z′
+
+Dω (z′) .
+
+34 the weighted degree and the degree-normalized stationary law, respectively. For any nonempty set 
+
+A ⊊ Zω , define its set conductance and the tree conductance by 
+
+Φω (A) := 
+
+P 
+
+> z∈A, u / ∈A
+
+fω (z, u )
+
+P 
+
+> z∈A
+
+Dω (z) , Φω := inf  
+
+> A⊆Z ω
+> 0<μ ω(A)≤1/2
+
+Φω (A).
+
+Assuming Assumption C.1, the random walk on each fixed-order tree Zω satisfies 
+
+Φω ≥ 14κ2n .
+
+Furthermore, its stationary leaf mass satisfies 
+
+μω (Y) = X
+
+> y∈Y
+
+μω (y) ≥ 14κn .
+
+Proof. Write 
+
+bU (x, z ) := Mref (x, z ) bV (x, z ).
+
+For non-leaf states, Assumption C.1 gives 
+
+κ−1U ∗(x, z ) ≤ bU (x, z ) ≤ κU ∗(x, z ).
+
+On leaves, terminal anchoring gives bU (x, y ) = U ∗(x, y ).For a fixed-order tree, the weighted degree Dω (z) is the sum of the parent edge and the child edges incident to z. If k = k(z), then 
+
+Dω (z) = 1 {k > 0} bU (x, z ) + 1 {k < n } X
+
+> a∈V
+
+bU (x, z ωk+1 ←a).
+
+Using bU ≤ κU ∗ and the partition identity for the next reveal coordinate, 
+
+Dω (z) ≤ κ1 {k > 0} U ∗(x, z ) + κ1 {k < n } X
+
+> a∈V
+
+U ∗(x, z ωk+1 ←a)= κ 1 {k > 0} + 1 {k < n }U ∗(x, z ) ≤ 2κU ∗(x, z ).
+
+Let Dω, tot := P 
+
+> z∈Z ω
+
+Dω (z) denote the total unnormalized stationary weight of the fixed-order tree. Then 
+
+Dω, tot ≤ 2κ
+
+> n
+
+X
+
+> k=0
+
+X 
+
+> z:k(z)= k, z ∈Z ω
+
+U ∗(x, z ).
+
+For each fixed depth in a fixed-order tree, the compatible states partition the leaves, so 
+
+X 
+
+> z:k(z)= k, z ∈Z ω
+
+U ∗(x, z ) = Z(x).
+
+Hence Dω, tot ≤ 2κ(n + 1) Z(x). Let 
+
+Dω, leaf := X
+
+> y∈Y
+
+Dω (y)
+
+denote the total degree of the leaf layer. In the fixed-order tree, each leaf y has exactly one incident non-self edge, namely its parent edge, whose weight is bU (x, y ). From the terminal anchoring in Assumption C.1, 
+
+Dω, leaf = X
+
+> y∈Y
+
+U ∗(x, y ) = Z(x).
+
+Since the stationary distribution of the fixed-order weighted walk is degree-normalized, 
+
+μω (Y) = Dω, leaf 
+
+Dω, tot 
+
+≥ Z(x)2κ(n + 1) Z(x) = 12κ(n + 1) ≥ 14κn ,
+
+35 where the last inequality uses n ≥ 1.We next lower bound the conductance. Let A be a connected subset of the fixed-order tree that does not contain the root. Let v ∈ A be the unique minimum-depth node in A. Since A does not contain the root, v has a parent p(v). By the minimality of k(v), we have p(v) /∈ A, and hence the edge 
+
+{p(v), v } leaves A. By Assumption C.1, its weight is 
+
+bU (x, v ) ≥ κ−1U ∗(x, v ).
+
+For ℓ ∈ { 0, . . . , n − k(v)}, let 
+
+Cℓω (v) := {u ∈ Z ω | u is a descendant of v, k (u) = k(v) + ℓ}
+
+be the set of descendants of v at relative depth ℓ. Define the total weighted degree of the descendant subtree of v by 
+
+Dω, sub (v) := 
+
+> n−k(v)
+
+X
+
+> ℓ=0
+
+X 
+
+> u∈Cℓω(v)
+
+Dω (u).
+
+Applying the pointwise degree bound above to the descendant subtree of v, we have 
+
+Dω, sub (v) ≤ 2κ
+
+> n−k(v)
+
+X
+
+> ℓ=0
+
+X 
+
+> u∈Cℓω(v)
+
+U ∗(x, u ).
+
+For every descendant level ℓ,
+
+X 
+
+> u∈Cℓω(v)
+
+U ∗(x, u ) = X 
+
+> u∈Cℓω(v)
+
+X
+
+> y∈C (u)
+
+πref (y | x)τ (x, y ) = X
+
+> y∈C (v)
+
+πref (y | x)τ (x, y ) = U ∗(x, v ),
+
+because the completion sets C(u) : u ∈ Cℓω (v) partition C(v). Therefore 
+
+Dω, sub (v) ≤ 2κ(n − k(v) + 1) U ∗(x, v ) ≤ 2κ(n + 1) U ∗(x, v ).
+
+Since A is connected in the tree and v is its unique minimum-depth node, A is contained in the descendant subtree of v. Hence P 
+
+> z∈A
+
+Dω (z) ≤ Dω, sub (v). The cut numerator P 
+
+> z∈A, u / ∈A
+
+fω (z, u )
+
+in the tree conductance Φω (A) contains the single boundary edge from v to its parent, because v ∈ A
+
+and p(v) /∈ A. Therefore 
+
+X
+
+> z∈A, u / ∈A
+
+fω (z, u ) ≥ fω (v, p (v)) = fω (p(v), v ) = bU (x, v ) ≥ κ−1U ∗(x, v ).
+
+Combining this boundary lower bound with the descendant-subtree volume upper bound gives 
+
+Φω (A) := 
+
+P 
+
+> z∈A, u / ∈A
+
+fω (z, u )
+
+P 
+
+> z∈A
+
+Dω (z) ≥ κ−1U ∗(x, v )2κ(n + 1) U ∗(x, v ) = 12κ2(n + 1) ≥ 14κ2n .
+
+This proves the bound for connected sets that do not contain the root. If A is disconnected and does not contain the root, decompose it into connected components 
+
+A1, . . . , A m. Let 
+
+Br := X 
+
+> z∈Ar, u / ∈Ar
+
+fω (z, u ), Vr := X
+
+> z∈Ar
+
+Dω (z).
+
+Since the fixed-order graph is a tree, there are no edges between distinct components of A, and therefore 
+
+Φω (A) = 
+
+Pmr=1 Br
+
+Pmr=1 Vr
+
+=
+
+> m
+
+X
+
+> r=1
+
+Vr
+
+Pms=1 Vs
+
+Φω (Ar ) ≥ min  
+
+> r∈[m]
+
+Φω (Ar ).
+
+If an admissible set A contains the root, then Ac does not. Since μω (A) ≤ 1/2, we have P 
+
+> z∈A
+
+Dω (z) ≤ P 
+
+> z∈Ac
+
+Dω (z), and therefore Φω (A) ≥ Φω (Ac). Applying the previous argu-ment to the connected components of Ac proves Φω ≥ 1/(4 κ2n).The next two statements show that conductance survives summing weighted graphs, and that canonical balanced AOAR is exactly such a sum over fixed coordinate orders. 36 Lemma C.3 (Conductance of a sum of weighted graphs) . Let G1, . . . , G m be weighted graphs on the same vertex set with nonnegative symmetric weights fG1 , . . . , f Gm . Let G be the weighted graph with edge weight 
+
+fG(z, u ) := 
+
+> m
+
+X
+
+> r=1
+
+fGr (z, u ).
+
+Then for every set A,
+
+ΦG(A) ≥ min  
+
+> r∈[m]
+
+ΦGr (A).
+
+Consequently, 
+
+ΦG ≥ min  
+
+> r∈[m]
+
+ΦGr .
+
+Proof. Write 
+
+DGr (z) := X 
+
+> u∼Gr z
+
+fGr (z, u ), DG(z) := X
+
+> u∼Gz
+
+fG(z, u ) = 
+
+> m
+
+X
+
+> r=1
+
+DGr (z).
+
+For any set A,
+
+ΦG(A) = 
+
+P 
+
+> z∈A, u / ∈A
+
+fG(z, u )
+
+P 
+
+> z∈A
+
+DG(z) .
+
+Using fG = Pmr=1 fGr and DG = Pmr=1 DGr , this becomes 
+
+ΦG(A) = 
+
+Pmr=1 
+
+P 
+
+> z∈A, u / ∈A
+
+fGr (z, u )
+
+Pmr=1 
+
+P 
+
+> z∈A
+
+DGr (z) .
+
+We use the elementary fact that for ar ≥ 0 and br > 0,
+
+Pmr=1 ar
+
+Pmr=1 br
+
+≥ min 
+
+> r∈[m]
+
+ar
+
+br
+
+.
+
+Therefore 
+
+ΦG(A) ≥ min 
+
+> r∈[m]
+
+P 
+
+> z∈A, u / ∈A
+
+fGr (z, u )
+
+P 
+
+> z∈A
+
+DGr (z) = min  
+
+> r∈[m]
+
+ΦGr (A).
+
+Taking the infimum over admissible A gives the conductance bound. 
+
+Proposition C.5 (Canonical balanced AOAR as a sum of fixed-order VGB trees) . Consider the canonical balanced AOAR-VGB weighted graph whose depth-k parent-child edge coefficient is 
+
+gk+1 = 1
+
+ n−1
+
+> k
+
+ , 0 ≤ k ≤ n − 1.
+
+Then, the sum of the fixed-order tree graphs over all ω ∈ Perm n is exactly (n − 1)! times this canonical balanced AOAR-VGB weighted graph. Proof. Consider an AOAR edge between a depth-k state z and a child zj←a, where j / ∈ R(z). This edge appears in exactly those fixed orders ω for which the first k coordinates are precisely R(z), in any order, and the (k + 1) -st coordinate is j. The number of such permutations is 
+
+k!( n − k − 1)! .
+
+Therefore, in the sum of fixed-order tree graphs, the coefficient multiplying Mref (x, z j←a) bV (x, z j←a)
+
+is 
+
+k!( n − k − 1)! = (n − 1)! 
+
+ n−1
+
+> k
+
+ .
+
+This is exactly (n − 1)! gk+1 for the canonical balanced coefficient in the proposition. Combining the fixed-order conductance bound with the sum-of-graphs representation gives the main canonical balanced mixing guarantee. 37 Theorem C.3 (Mixing guarantee for canonical balanced AOAR-VGB) . Assume Assumption C.1. Let PBAL be the canonical balanced AOAR-VGB lazy kernel, and let μBAL be its stationary distribution. For a set A, write 
+
+QBAL (A, A c) := X
+
+> z∈A
+
+μBAL (z)PBAL (z, A c), Φ( PBAL ) := min 
+
+> A⊆Z reach
+> 0<μ BAL (A)≤1/2
+
+QBAL (A, A c)
+
+μBAL (A)
+
+for conductance. We write 
+
+γ(PBAL ) := 1 − max {| λ| : λ ∈ Λ( PBAL ), λ ̸ = 1 }
+
+for the spectral gap, where Λ( PBAL ) denotes the set of eigenvalues of PBAL . Then 
+
+Φ( PBAL ) = Ω 
+
+ 1
+
+κ2n
+
+
+
+, γ(PBAL ) = Ω 
+
+ 1
+
+κ4n2
+
+
+
+, μBAL (Y) = Ω 
+
+ 1
+
+κn 
+
+
+
+.
+
+Moreover, the stationary law conditioned on the leaves is exactly 
+
+μBAL (· | Y ) = π∗(· | x).
+
+Consequently, if ZT is the state after T lazy balanced AOAR-VGB Markov chain steps initialized at Z0 ∈ Z with μBAL (Z0) > 0, then for any δ > 0,
+
+T = O
+
+
+
+κ4n2 log κn δμ BAL (Z0)
+
+
+
+suffices to guarantee 
+
+dTV (L(ZT | ZT ∈ Y ), π ∗(· | x)) ≤ δ and P[ZT ∈ Y ] = Ω 
+
+ 1
+
+κn 
+
+
+
+> a
+
+.
+
+For example, if Z0 = ∅, then 
+
+T = O
+
+
+
+κ4n2 log κn δ
+
+
+
+.      
+
+> aL(ZT)denote the law of ZTand dTV denote the total variation distance.
+
+Proof. By Proposition C.5, the canonical balanced AOAR weighted graph is a sum of fixed-order VGB tree graphs. By Lemma C.2, each fixed-order graph has conductance Ω(1 /(κ2n)) . Lemma C.3 therefore implies 
+
+Φ( PBAL ) = Ω 
+
+ 1
+
+κ2n
+
+
+
+.
+
+Since the chain is lazy and reversible, Cheeger’s inequality [16] gives 
+
+γ(PBAL ) ≥ 12 Φ( PBAL )2 = Ω 
+
+ 1
+
+κ4n2
+
+
+
+.
+
+The leaf-mass lower bound follows by the same ratio-of-sums argument. Indeed, let 
+
+Dω, leaf := X
+
+> y∈Y
+
+Dω (y), Dω, tot := X
+
+> z∈Z ω
+
+Dω (z).
+
+Then μω (Y) = Dω, leaf /D ω, tot , or equivalently Dω, leaf = Dω, tot μω (Y). The global factor (n − 1)! 
+
+in Proposition C.5 cancels after normalization, so the leaf mass of the canonical balanced AOAR graph satisfies 
+
+μBAL (Y) = 
+
+P 
+
+> ω∈Perm n
+
+Dω, leaf 
+
+P 
+
+> ω∈Perm n
+
+Dω, tot 
+
+=
+
+P 
+
+> ω∈Perm n
+
+Dω, tot μω (Y)
+
+P 
+
+> ω∈Perm n
+
+Dω, tot 
+
+≥ min 
+
+> ω∈Perm n
+
+μω (Y) ≥ 14κn = Ω 
+
+ 1
+
+κn 
+
+
+
+.
+
+The exact leaf law follows from Theorem C.2, since terminal anchoring gives bV (x, y ) = τ (x, y ) on leaves. 38 Finally, since PBAL is lazy and reversible, the standard spectral estimate for reversible chains [ 16 ]gives the mixing time bound from Z0 ∈ Z as follows: 
+
+∥P t
+
+> BAL
+
+(Z0, ·) − μBAL ∥TV ≤ 12 e−tγ (PBAL )μBAL (Z0)−1/2.
+
+In particular, the mixing time from Z0 is, 
+
+T (Z0)mix (ε) = O 1
+
+γ(PBAL ) log 1
+
+εpμBAL (Z0)
+
+!
+
+. (1) Let νT := P T
+
+> BAL
+
+(Z0, ·). If dTV (νT , μ BAL ) ≤ ε and ε ≤ μBAL (Y)/2, then νT (Y) ≥ μBAL (Y)/2 = Ω   1
+
+> κn
+
+; this follows from |νT (Y) − μBAL (Y)| ≤ dTV (νT , μ BAL ). Then, from the definition of total variation (TV) distance, 
+
+dTV (νT (· | Y ), μ BAL (· | Y )) = 12
+
+X
+
+> y∈Y
+
+νT (y)
+
+νT (Y) − μBAL (y)
+
+μBAL (Y)
+
+= 12
+
+X
+
+> y∈Y
+
+νT (y) − μBAL (y)
+
+νT (Y) + μBAL (y)
+
+ 1
+
+νT (Y) − 1
+
+μBAL (Y)
+
+
+
+≤ 12νT (Y)
+
+X
+
+> y∈Y
+
+|νT (y) − μBAL (y)| + |νT (Y) − μBAL (Y)|
+
+2νT (Y)
+
+≤ 2εμBAL (Y) + εμBAL (Y) ≤ 3εμBAL (Y) .
+
+Here the partial-sum bound used above is 
+
+X
+
+> y∈Y
+
+|νT (y) − μBAL (y)| ≤ X
+
+> z∈Z
+
+|νT (z) − μBAL (z)| = 2 dTV (νT , μ BAL ) ≤ 2ε. 
+
+Thus, taking ε := δ μ BAL (Y)/3 ensures that the leaf-conditioned law is within δ of the stationary leaf-conditioned law. Plugging this choice into (1), and using μBAL (Y) = Ω(1 /(κn )) , gives 
+
+T = O κ4n2 log 1
+
+εpμBAL (Z0)
+
+!
+
+= O
+
+
+
+κ4n2 log κn δμ BAL (Z0)
+
+
+
+(2) Since μBAL (· | Y ) = π∗(· | x), the claim follows. Next, consider the case Z0 = ∅. It remains to lower bound its stationary mass μBAL (∅). For a fixed order ω, the root degree satisfies 
+
+Dω (∅) = X
+
+> a∈V
+
+bU (x, ∅ω1←a) ≥ κ−1 X
+
+> a∈V
+
+U ∗(x, ∅ω1←a) = κ−1 X
+
+> y∈Y
+
+πref (y | x)τ (x, y ) = κ−1Z(x),
+
+where the middle equality uses that the first-reveal completion sets {C (∅ω1←a)}a∈V partition Y. The total-degree bound in Lemma C.2 gives Dω, tot ≤ 2κ(n + 1) Z(x). Therefore μω (∅) ≥ 1/(2 κ2(n +1)) . Averaging over ω as above, with the global factor (n − 1)! canceling after normalization, yields 
+
+μBAL (∅) = Ω 
+
+ 1
+
+κ2n
+
+
+
+.
+
+Plugging into (2) finishes the proof. 
+
+C.5 Geometric Balanced AOAR-VGB Geometric balanced AOAR-VGB formulation. We take one further step beyond the depth-balanced AOAR-VGB local kernel in Definition C.2. In that kernel, a backward move from a non-leaf state z has weight proportional to bV (x, z ) for every revealed coordinate i ∈ R(z). Hence, once 39 Geometric AOAR-VGB transition on 𝑵 𝑨𝑶𝑨𝑹 𝒛    
+
+> parent states (𝒌 − 𝟏)
+> current state (𝒌)
+> child states (𝒌 + 𝟏)
+
+𝒛 −𝒊 𝟏 𝒛 −𝒊 𝟐 
+
+## 𝒛 
+
+𝒛 𝒋 𝟏 ←𝒂 𝒛 𝒋 𝟐 ←𝒃  
+
+> Self-loop for laziness (optional)
+> masked state
+> Backward /
+
+re-mask : 𝒘 𝐛𝐰𝐝 𝒛 = 𝒔 𝒌−𝟏 ෡𝑽 𝒙, 𝒛 ෡𝑽 𝒙, 𝒛 −𝒊 𝝀 
+
+Forward / reveal: 𝒘 𝐟𝐰𝐝 𝒛 = 𝒔 𝒌 ෡𝑽 𝒙, 𝒛 𝝀 ෡𝑽 𝒙, 𝒛 𝒋←𝒂 𝝅 𝒓𝒆𝒇 𝒀 𝒋 = 𝒂 𝒙, 𝒛 Figure 11: Illustration of one geometric balanced AOAR-VGB transition from a masked state z.Forward reveal moves use the reference conditional times the child verifier value, with the common gate bV (x, z )λ. Backward re-masking moves use the current verifier value and the parent gate 
+
+bV (x, z −i)λ. Setting λ = 0 removes the geometric gates and recovers balanced AOAR-VGB. the chain decides to move backward, the index to re-mask is selected uniformly among revealed coordinates. This is a natural depth-balancing rule, but it ignores an extra degree of freedom that is absent in AR prefix trees: in AOAR, the sampler can choose which revealed coordinate should be erased. This motivates a value-gated remasking rule. When considering a backward move z → z−i, we would like to favor coordinates whose remasked parent z−i remains promising under the verifier. We implement this through a clean geometric edge-weight construction: the child side carries the tilted completion mass bU (x, z j←a), while the parent side contributes through bV (x, z −i)λ. This preserves the usual VGB forward ranking and makes the backward index choice depend on the verifier signal of the remasked parent. Figure 11 illustrates the resulting local transition rule. The geometric gate leaves the forward candidate ranking unchanged up to the state-wise factor bV (x, z )λ, while the backward weights distinguish revealed coordinates through the verifier values of their remasked parents. 
+
+Definition C.3 (Geometric balanced AOAR edge weights) . Fix λ ≥ 0 and positive depth coeffi-cients 
+
+s0, s 1, . . . , s n−1 > 0.
+
+For neighboring states u ∼ v, let p(u, v ) denote the lower-depth endpoint and c(u, v ) denote the higher-depth endpoint. Thus c(u, v ) = p(u, v )j←a for a unique revealed coordinate and token. If c(u, v ) /∈ Y , define the non-leaf edge weight by 
+
+fBG (u, v ) = fBG (v, u ) := sk(p(u,v )) bU (x, c (u, v )) bV (x, p (u, v )) λ.
+
+If c(u, v ) = y ∈ Y , define the leaf-corrected edge weight by 
+
+fBG (u, v ) = fBG (v, u ) := sn−1U ∗(x, y ) = sn−1πref (y | x)τ (x, y ).
+
+Local implementation weights. Although Definition C.3 is written in terms of bU and U ∗, the local weights below do not require evaluating these tilted masses directly. Let z have depth k = k(z).40 For a non-leaf child c = zj←a /∈ Y , we have 
+
+bU (x, c ) = Mref (x, z )πref (Yj = a | x, z ) bV (x, c ).
+
+Dividing all incident non-leaf edge weights at current state z by the common factor Mref (x, z ) gives 
+
+wBG ,fwd (z → c) = sk bV (x, z )λπref (Yj = a | x, z ) bV (x, c ).
+
+The factor bV (x, z )λ is common across all forward candidates from the same current state z. Hence the forward candidate ranking is the same as in ordinary VGB: 
+
+wBG ,fwd (z → c) ∝ πref (Yj = a | x, z ) bV (x, z j←a).
+
+For a backward move from a non-leaf state z to u = z−i, the relevant edge has child endpoint z and parent endpoint u. Thus 
+
+fBG (u, z ) = sk−1 bU (x, z ) bV (x, u )λ = sk−1Mref (x, z ) bV (x, z ) bV (x, u )λ.
+
+Dividing by the current-state common factor Mref (x, z ) gives 
+
+wBG ,bwd (z → z−i) = sk−1 bV (x, z ) bV (x, z −i)λ.
+
+Thus backward moves prefer revealed coordinates whose remasked parent has high verifier value. At the leaf boundary, the leaf-corrected edge gives the local forward weight directly. If y = zj←a ∈ Y ,then 
+
+fBG (z, y ) = sn−1U ∗(x, y ) = sn−1Mref (x, z )πref (Yj = a | x, z )τ (x, y ),
+
+and dividing by Mref (x, z ) gives 
+
+wBG ,fwd (z → y) = sn−1πref (Yj = a | x, z )τ (x, y ).
+
+Similarly, from a leaf y to a parent y−i,
+
+wBG ,bwd (y → y−i) = sn−1τ (x, y ).
+
+Remark C.3 (λ = 0 recovers balanced AOAR-VGB) . When λ = 0 , the geometric gate disappears and the local weights reduce to the balanced AOAR-VGB weights with depth coefficients sk.
+
+Theorem C.4 (Stationarity and exact leaf law of geometric balanced AOAR) . Let PBG be the random walk on the reachable AOAR graph with edge weights fBG from Definition C.3. That is, 
+
+PBG (z, u ) = fBG (z, u )
+
+DBG (z) , DBG (z) := X
+
+> v∼z
+
+fBG (z, v ).
+
+Then PBG is reversible with stationary distribution 
+
+μBG (z) = DBG (z)
+
+P 
+
+> z′
+
+DBG (z′) .
+
+Moreover, under terminal anchoring, its leaf-conditioned stationary law is exact: 
+
+μBG (y | y ∈ Y ) = π∗(y | x).
+
+Proof. Since fBG is a nonnegative symmetric edge weight, the random walk is a standard weighted-graph random walk. For neighboring distinct states z ∼ u,
+
+μBG (z)PBG (z, u ) = fBG (z, u )
+
+P 
+
+> z′
+
+DBG (z′) = μBG (u)PBG (u, z ),
+
+so detailed balance holds. Now let y ∈ Y be a leaf. Its AOAR parents are y−i for i ∈ [n]. By the leaf correction, 
+
+fBG (y−i, y ) = sn−1U ∗(x, y )
+
+41 for every i. Hence 
+
+DBG (y) = 
+
+> n
+
+X
+
+> i=1
+
+fBG (y−i, y ) = ns n−1U ∗(x, y ).
+
+The factor ns n−1 is constant over leaves, and therefore 
+
+μBG (y | y ∈ Y ) = U ∗(x, y )
+
+P 
+
+> y′∈Y
+
+U ∗(x, y ′) = π∗(y | x).
+
+Mixing analysis of geometric balanced VGB. We next transfer the canonical balanced mixing guarantee to the geometric kernel. The only care point is that zero target-mass states should not create spurious components. We therefore work on the positive target-support component, which is stable under all positive-weight moves. 
+
+Lemma C.4 (Positive target support is closed under AOAR moves) . Assume Z(x) > 0 and Assumption C.1. Define the positive target support 
+
+Z+(x) := z ∈ Z reach : U ⋆(x, z ) > 0 .
+
+Then ∅ ∈ Z +(x). Moreover, Z+(x) is closed under all positive-weight balanced and geometric AOAR moves. More precisely: 1. If z ∈ Z +(x) and i ∈ R(z), then z−i ∈ Z +(x).2. If z ∈ Z +(x), j / ∈ R(z), and c = zj←a /∈ Z +(x), then the AOAR edge {z, c } has zero balanced edge weight and zero geometric edge weight. Proof. Since Z(x) > 0,
+
+U ⋆(x, ∅) = Z(x) > 0,
+
+so ∅ ∈ Z +(x).For the first claim, let p = z−i. Since p is obtained by re-masking one revealed coordinate of z, we have 
+
+C(z) ⊆ C (p).
+
+Thus 
+
+U ⋆(x, p ) = X
+
+> y∈C (p)
+
+πref (y | x)τ (x, y ) ≥ X
+
+> y∈C (z)
+
+πref (y | x)τ (x, y ) = U ⋆(x, z ) > 0.
+
+Hence p ∈ Z +(x).For the second claim, let c = zj←a /∈ Z +(x). If c is not πref -reachable, then it is not an admissible child edge. Otherwise, Mref (x, c ) > 0 and U ⋆(x, c ) = 0 , hence V ⋆(x, c ) = 0 . By Assumption C.1, 
+
+bV (x, c ) = 0 , bU (x, c ) := Mref (x, c ) bV (x, c ) = 0 .
+
+Therefore the balanced edge weight, which is proportional to bU (x, c ) for non-leaf children and to 
+
+U ⋆(x, c ) for leaf children, is zero. The same is true for the geometric edge weight: for non-leaf children it is proportional to 
+
+bU (x, c ) bV (x, z )λ,
+
+and for leaf children it is proportional to U ⋆(x, c ). Hence no positive-weight edge leaves Z+(x).On this component, the geometric graph differs from the canonical balanced graph only through the parent value gate bV (x, p )λ on non-leaf edges. The next assumption prevents this gate from creating an additional bottleneck. 42 Assumption C.2 (Bounded geometric verifiers) . Consider the canonical geometric balanced AOAR-VGB graph with 
+
+sk = 1
+
+ n−1
+
+> k
+
+ , 0 ≤ k ≤ n − 1.
+
+Fix λ > 0. Assume there exist constants 
+
+0 < m ≤ 1 ≤ M < ∞
+
+such that, for every non-leaf state z ∈ Z +(x),
+
+m ≤ bV (x, z ) ≤ M. 
+
+Theorem C.5 (Mixing stability for geometric balanced AOAR-VGB) . Assume Assumption C.1 and Assumption C.2. Let PBG be the lazy canonical geometric balanced AOAR-VGB kernel on Z+(x)
+
+with Z(x) > 0, and let μBG be its stationary distribution. Then 
+
+μBG (· | Y ) = π∗(· | x).
+
+Moreover, its conductance satisfies 
+
+Φ( PBG ) = Ω 
+
+ mM
+
+λ 1
+
+κ2n
+
+
+
+,
+
+and hence, by Cheeger’s inequality for lazy reversible chains, its spectral gap satisfies 
+
+γ(PBG ) = Ω 
+
+ mM
+
+2λ 1
+
+κ4n2
+
+
+
+.
+
+The stationary leaf and root masses satisfy 
+
+μBG (Y) = Ω 
+
+ 1
+
+M λκn 
+
+
+
+, μBG (∅) = Ω 
+
+ mM
+
+λ 1
+
+κ2n
+
+
+
+.
+
+Consequently, if ZT is the state after T lazy geometric AOAR-VGB transitions initialized at 
+
+Z0 ∈ Z +(x) with μBG (Z0) > 0, then for any δ > 0,
+
+T = O
+
+ Mm
+
+2λ
+
+κ4n2 log M λκn δμ BG (Z0)
+
+!
+
+suffices to guarantee 
+
+dTV (L(ZT | ZT ∈ Y ), π ∗(· | x)) ≤ δ and P[ZT ∈ Y ] = Ω 
+
+ 1
+
+M λκn 
+
+
+
+.
+
+For example, if Z0 = ∅, then 
+
+T = O
+
+ Mm
+
+2λ
+
+κ4n2 log (M/m )λκn δ
+
+!
+
+.
+
+In particular, if m, M are constants independent of n and λ is fixed, the geometric chain’s mixing time is of the same order as canonical balanced AOAR-VGB. Proof. Let fBAL be the canonical balanced AOAR edge weight and let fBG be the canonical geomet-ric balanced AOAR edge weight. For an edge e = {p, c }, let p be the lower-depth endpoint and c the higher-depth endpoint. If c / ∈ Y , then by Definition C.3, 
+
+fBG (e) = bV (x, p )λfBAL (e).
+
+If c ∈ Y , the leaf correction gives 
+
+fBG (e) = fBAL (e).
+
+Therefore, using Assumption C.2 and m ≤ 1 ≤ M , every positive-weight edge in the component satisfies 
+
+mλfBAL (e) ≤ fBG (e) ≤ M λfBAL (e).
+
+43 For any set A, write 
+
+QBG (A, A c) := X
+
+> e={u,v }
+> u∈A, v / ∈A
+
+fBG (e), vol BG (A) := X
+
+> u∈A
+
+X
+
+> v∼u
+
+fBG (u, v ),
+
+and define QBAL and vol BAL analogously. The edge comparison gives 
+
+QBG (A, A c) ≥ mλQBAL (A, A c), vol BG (A) ≤ M λvol BAL (A).
+
+Thus, for any admissible A,
+
+ΦBG (A) = QBG (A, A c)vol BG (A) ≥
+
+ mM
+
+λ QBAL (A, A c)vol BAL (A) =
+
+ mM
+
+λ
+
+ΦBAL (A).
+
+Taking the infimum over admissible A and applying Theorem C.3 gives 
+
+Φ( PBG ) = Ω 
+
+ mM
+
+λ 1
+
+κ2n
+
+
+
+.
+
+Since the lazy geometric chain is reversible, Cheeger’s inequality gives 
+
+γ(PBG ) = Ω 
+
+ mM
+
+2λ 1
+
+κ4n2
+
+
+
+.
+
+The exact leaf-conditioned law follows from Theorem C.4, since laziness does not change the stationary distribution. For the leaf mass, leaf-corrected edges have the same weight as in the canonical balanced graph. Writing DBG and DBAL for weighted degrees, 
+
+μBG (Y) = 
+
+P 
+
+> y∈Y
+
+DBAL (y)
+
+P 
+
+> z
+
+DBG (z) ≥
+
+P 
+
+> y∈Y
+
+DBAL (y)
+
+M λ P 
+
+> z
+
+DBAL (z) = 1
+
+M λ μBAL (Y) = Ω 
+
+ 1
+
+M λκn 
+
+
+
+.
+
+Similarly, the root degree is at least mλ times the balanced root degree, while the total degree is at most M λ times the balanced total degree, so 
+
+μBG (∅) ≥
+
+ mM
+
+λ
+
+μBAL (∅) = Ω 
+
+ mM
+
+λ 1
+
+κ2n
+
+
+
+.
+
+Finally, the standard start-state spectral bound for lazy reversible chains [16] gives 
+
+P T
+
+> BG
+
+(Z0, ·) − μBG TV ≤ 12 e−T γ (PBG )μBG (Z0)−1/2.
+
+As in the proof of Theorem C.3, taking the full-chain TV error to be at most 
+
+ε := δ μ BG (Y)3
+
+implies 
+
+dTV (L(ZT | ZT ∈ Y ), μ BG (· | Y )) ≤ δ and P[ZT ∈ Y ] ≥ μBG (Y)/2 = Ω 
+
+ 1
+
+M λκn 
+
+
+
+.
+
+Substituting the bounds on γ(PBG ) and μBG (Y), while retaining the start-state factor μBG (Z0),yields the general mixing time. The lower bound on μBG (∅) gives the root-start example. Since 
+
+μBG (· | Y ) = π∗(· | x), the claim follows. 
+
+Forward/backward mass analysis. We now return from global mixing to the local behavior of the geometric transition. The next proposition measures how the forward-versus-backward move probabilities change under the exact verifier setup. 
+
+Proposition C.6 (Directional masses under the exact verifier) . Assume bV = V ∗ on all non-leaf states. Let z be a non-leaf interior state of depth 1 ≤ k ≤ n − 2 with V ∗(x, z ) > 0, so that its one-step forward children are also non-leaf. Define the parent-value ratio 
+
+r∗ 
+
+> i
+
+(z) := V ∗(x, z −i)
+
+V ∗(x, z ) , i ∈ R(z).
+
+44 Then the exact forward and backward masses are 
+
+F ∗ 
+
+> λ
+
+(z) = sk(n − k)V ∗(x, z )1+ λ,
+
+and 
+
+B∗
+
+> λ
+
+(z) = sk−1V ∗(x, z )1+ λ X
+
+> i∈R(z)
+
+r∗ 
+
+> i
+
+(z)λ.
+
+Consequently, 
+
+P(forward | x, z, move) = sk(n − k)
+
+sk(n − k) + sk−1
+
+P 
+
+> i∈R(z)
+
+r∗ 
+
+> i
+
+(z)λ ,
+
+and 
+
+P(backward | x, z, move) = sk−1
+
+P 
+
+> i∈R(z)
+
+r∗ 
+
+> i
+
+(z)λ
+
+sk(n − k) + sk−1
+
+P 
+
+> i∈R(z)
+
+r∗ 
+
+> i
+
+(z)λ .
+
+Proof. For the forward mass, using the AOAR Bellman identity, 
+
+F ∗ 
+
+> λ
+
+(z) = X
+
+> j / ∈R(z)
+
+X
+
+> a∈V
+
+skV ∗(x, z )λπref (Yj = a | x, z )V ∗(x, z j←a)= skV ∗(x, z )λ X
+
+> j / ∈R(z)
+
+V ∗(x, z ) = sk(n − k)V ∗(x, z )1+ λ.
+
+For backward moves, 
+
+B∗
+
+> λ
+
+(z) = X
+
+> i∈R(z)
+
+sk−1V ∗(x, z )V ∗(x, z −i)λ
+
+= sk−1V ∗(x, z )1+ λ X
+
+> i∈R(z)
+
+ V ∗(x, z −i)
+
+V ∗(x, z )
+
+λ
+
+.
+
+Normalizing the forward and backward masses gives the probabilities in the proposition. 
+
+Remark C.4 (Reference-target mismatch interpretation) . By the exact target conditional, 
+
+π∗(Yi = zi | x, z −i) = πref (Yi = zi | x, z −i) V ∗(x, z )
+
+V ∗(x, z −i) , r∗ 
+
+> i
+
+(z) = πref (Yi = zi | x, z −i)
+
+π∗(Yi = zi | x, z −i) .
+
+Thus r∗ 
+
+> i
+
+(z) > 1 means πref favors zi more than π∗ and increases the remasking weight of coordinate 
+
+i, while r∗ 
+
+> i
+
+(z) < 1 means π∗ gives stronger support and the remasking weight is reduced. In other words, the chain preferentially erases tokens that look base-plausible but target-weak, and keeps tokens that are target-supported. 
+
+Remark C.5 (Penultimate-depth directional masses) . When z is a penultimate-depth state with 
+
+k(z) = n − 1, any forward move reaches a leaf. The leaf correction resets the forward edge to 
+
+sn−1U ∗(x, y ) rather than the non-leaf product edge. Hence, under the exact verifier, 
+
+F ∗ 
+
+> λ
+
+(z) = sn−1V ∗(x, z ),
+
+whereas 
+
+B∗
+
+> λ
+
+(z) = sn−2V ∗(x, z ) X
+
+> i∈R(z)
+
+V ∗(x, z −i)λ.
+
+This boundary rule is intentional: it keeps the leaf degree proportional to U ∗(x, y ), and therefore preserves the exact leaf-conditioned stationary law. 45 Remark C.6 (Canonical depth anchor versus exact 1/2 balance) . The linear balanced choice 
+
+sk(n − k) = ks k−1
+
+does not give exact 1/2–1/2 balance for λ > 0 in the clean geometric chain. Under this choice, away from the leaf boundary, 
+
+P(backward | x, z, move) = 
+
+P 
+
+> i∈R(z)
+
+r∗ 
+
+> i
+
+(z)λ
+
+k + P 
+
+> i∈R(z)
+
+r∗ 
+
+> i
+
+(z)λ , k = |R(z)| .
+
+Thus sk(n − k) = ks k−1 is best interpreted as the canonical depth-neutral anchor : it recovers exact balance when λ = 0 , while the λ > 0 correction changes the backward probability according to the verifier value of the remasked parent states. More quantitatively, for small λ,
+
+r∗ 
+
+> i
+
+(z)λ = exp( λ log r∗ 
+
+> i
+
+(z)) = 1 + λ log r∗ 
+
+> i
+
+(z) + O λ2 log 2 r∗ 
+
+> i
+
+(z) .
+
+Define the first empirical log-moment of the parent-value ratios 
+
+¯m1(z) := 1
+
+k
+
+X
+
+> i∈R(z)
+
+log V ∗(x, z −i)
+
+V ∗(x, z ) .
+
+Then X
+
+> i∈R(z)
+
+r∗ 
+
+> i
+
+(z)λ = k + λk ¯m1(z) + O λ2k ¯m2(z) ,
+
+where 
+
+¯m2(z) := 1
+
+k
+
+X
+
+> i∈R(z)
+
+log 2 V ∗(x, z −i)
+
+V ∗(x, z ) .
+
+Substituting this into the backward probability gives 
+
+P(backward | x, z, move) = 12 + λ
+
+4 ¯m1(z) + O λ2 ¯m2(z) + λ2 ¯m1(z)2 .
+
+Equivalently, 
+
+P(forward | x, z, move) = 12 − λ
+
+4 ¯m1(z) + O λ2 ¯m2(z) + λ2 ¯m1(z)2 .
+
+Therefore, the leading-order deviation from 1/2 is not a combinatorial depth bias. It is the value-gated remasking signal induced by the geometric parent factor. 
+
+## D Momentum-Balanced AOAR-VGB 
+
+Balanced AOAR-VGB fixes the depth-allocation pathology of primitive AOAR-VGB by balancing forward and backward directions at each interior depth in the ideal exact-value case. However, the resulting walk can still be locally diffusive: after revealing a coordinate, the chain may immediately re-mask a coordinate, and after re-masking it may immediately reveal again. Such re-masking/revealing oscillations waste Markov steps and can be computationally inefficient, especially for long sequences where each transition may require evaluating many candidate child states. This issue is closely related to the diffusive behavior of reversible random walks studied in the lifting literature. A lifting replaces each state by several copies and defines a larger Markov chain whose projection preserves the desired stationary law, while using non-reversible momentum to reduce unnecessary direction changes [ 11 ]. In the present AOAR setting, the two natural directions are downward reveal moves and upward re-masking moves. We therefore introduce a two-copy momentum lift of balanced AOAR-VGB. The construction is inspired by the momentum version of VGB in Rohatgi et al. [23] and by the flow-cancellation principle of Hayes and Sinclair [11] , but is adapted here to the any-order masked-state graph. 46 D.1 Setup and Notation 
+
+Throughout this section, we use the balanced AOAR-VGB notation from Section C.3. In particular, 
+
+KBAL denotes the self-loop-free balanced AOAR-VGB move kernel induced by the local weights in Definition C.2 with γ = 0 , and μBAL denotes its stationary distribution from Theorem C.2. 
+
+Directional neighborhoods and masses. Recall the AOAR child and parent neighborhoods 
+
+CAOAR (z) := zj←a : j / ∈ R(z), a ∈ V , M ref (x, z j←a) > 0 ,PAOAR (z) := z−i : i ∈ R(z) .
+
+A move to CAOAR (z) is called a downward (↓) or forward move, because it reveals one additional coordinate. A move to PAOAR (z) is called an upward (↑) or backward move, because it re-masks one coordinate. For the self-loop-free balanced kernel, define the directional masses 
+
+p↓(z) := X
+
+> c∈CAOAR (z)
+
+KBAL (z, c ), p↑(z) := X
+
+> p∈PAOAR (z)
+
+KBAL (z, p ).
+
+Thus p↓(z) + p↑(z) = 1 . At the boundaries, these definitions give 
+
+p↓(∅) = 1 , p↑(∅) = 0 , p↓(y) = 0 , p↑(y) = 1 (y ∈ Y ).
+
+In the exact canonical balanced case, where βk = k, αk = n − k for 1 ≤ k ≤ n − 1, and bV = V ∗,Proposition C.4 gives 
+
+p↓(z) = p↑(z) = 12
+
+for every interior reachable state. In practical plug-in samplers, however, bV may break this exact equality. 
+
+Lifted tuple state space. Momentum is represented by augmenting the masked state with a direction variable. We use tuple states 
+
+(z, ↓), (z, ↑).
+
+As introduced above, the label ↓ means that the chain is currently in a downward, forward-revealing momentum mode, while ↑ means that it is currently in an upward, backtracking momentum mode. Let ZBAL ,+ be a reachable component of Zreach on which WBAL (z) > 0 for every state z. We keep both direction labels for every state in this component: 
+
+eZBAL := ZBAL ,+ × {↓ , ↑} .
+
+Thus, states in this component, including its root and leaf boundary states, have two momentum copies. Some boundary copies are only used as switch states. For example, from (∅, ↑) the chain switches to (∅, ↓) before moving downward, while from (y, ↓) a leaf switches to (y, ↑) before moving upward. We write 
+
+proj (z, d ) := z, d ∈ {↓ , ↑} ,
+
+for the projection from a lifted state to its current masked state. For a probability distribution eν on 
+
+eZBAL , its current-state marginal is 
+
+proj # eν(z) = eν(z, ↓) + eν(z, ↑).
+
+Stationary split. The goal of the momentum lift is to change path geometry without changing the stationary law after projection. Thus the lifted chain should have a stationary distribution on the two-copy space whose projection is exactly the balanced AOAR-VGB stationary law μBAL . We take the simplest such target: an equal split of the base stationary mass across the two momentum modes, 
+
+eμBAL (z, ↓) := 12 μBAL (z), eμBAL (z, ↑) := 12 μBAL (z).
+
+This choice does not bias the chain toward either momentum direction at stationarity, and projecting out the momentum label immediately recovers the desired base stationary law: 
+
+proj # eμBAL (z) = μBAL (z).
+
+47 D.2 Momentum-Balanced AOAR-VGB 
+
+We now define the flow-cancelled switch lift. When the chain is in downward mode, it keeps the child moves of the balanced AOAR kernel and replaces the total parent-move mass by a switch to upward mode. When the chain is in upward mode, it keeps the parent moves and replaces the total child-move mass by a switch to downward mode.        
+
+> (z, ↓)
+> (z, ↑)
+> p↑−χm p↓−χm
+> χm
+> χm
+> m= min {p↓, p ↑}
+
+Figure 12: Flow cancellation at state z.For a fixed masked state z, the two lifted copies are (z, ↓)
+
+and (z, ↑). If both momentum modes assign positive prob-ability to switching between these two copies, the smaller of the two switch probabilities is merely a symmetric back-and-forth exchange. We remove this common ex-change and turn it into same-copy holding probability, leaving only the residual imbalance as an actual momen-tum switch. This is the direct analogue of crossing-flow cancellation in lifted Markov chains: when there is crossing flow in both directions between two lifted copies, the common part can be cancelled without changing the projected stationary flow. 
+
+Definition D.1 (Flow-cancelled momentum-balanced AOAR-VGB kernel) . Fix a cancellation strength 
+
+χ ∈ [0 , 1] .
+
+For each reachable state z, define 
+
+m(z) := min {p↓(z), p ↑(z)}.
+
+The flow-cancelled lifted kernel eKfc ,χ  
+
+> BAL
+
+on eZBAL is defined as follows. 
+
+Downward copy. From (z, ↓), the chain moves to a child while keeping downward momentum with probability 
+
+eKfc ,χ 
+
+> BAL
+
+ (z, ↓), (c, ↓) := KBAL (z, c ), c ∈ CAOAR (z). (C HILD MOVE )It switches to upward momentum with residual opposite-direction probability 
+
+eKfc ,χ 
+
+> BAL
+
+ (z, ↓), (z, ↑) := p↑(z) − χm (z), (S WITCH UP)and it stays in the same lifted state with the cancelled crossing mass 
+
+eKfc ,χ 
+
+> BAL
+
+ (z, ↓), (z, ↓) := χm (z). (S TAY DOWN )
+
+Upward copy. From (z, ↑), the chain moves to a parent while keeping upward momentum with probability 
+
+eKfc ,χ 
+
+> BAL
+
+ (z, ↑), (p, ↑) := KBAL (z, p ), p ∈ PAOAR (z). (P ARENT MOVE )It switches to downward momentum with residual opposite-direction probability 
+
+eKfc ,χ 
+
+> BAL
+
+ (z, ↑), (z, ↓) := p↓(z) − χm (z), (S WITCH DOWN )and it stays in the same lifted state with the cancelled crossing mass 
+
+eKfc ,χ 
+
+> BAL
+
+ (z, ↑), (z, ↑) := χm (z). (S TAY UP)All other transition probabilities are zero. The parameter χ acts as a cancellation knob, analogous to a friction coefficient in underdamped Langevin dynamics: it controls how strongly the lifted chain suppresses direction changes and preserves momentum persistence. Larger χ removes more symmetric back-and-forth switching and keeps more probability in the current momentum copy. The case χ = 0 performs no cancellation. 48 The case χ = 1 maximally cancels opposing switch flows. In particular, if p↓(z) = p↑(z) = 1 /2 as in the exact canonical balanced case with bV = V ∗, then the switch probabilities at z become zero and the cancelled mass becomes a same-copy holding probability 1/2.
+
+Remark D.1 (Implementation as a categorical distribution) . Recall that w(k) denotes the depth-rescaled balanced AOAR-VGB local weight from Definition C.2. Let 
+
+F (z) := X
+
+> c∈CAOAR (z)
+
+w(k(z)) (z → c), B(z) := X
+
+> p∈PAOAR (z)
+
+w(k(z)) (z → p),
+
+and 
+
+M (z) := min {F (z), B (z)} .
+
+Then 
+
+p↓(z) = F (z)
+
+F (z) + B(z) , p↑(z) = B(z)
+
+F (z) + B(z) , m(z) = M (z)
+
+F (z) + B(z) .
+
+Equivalently, the kernel can be implemented by unnormalized categorical weights. In downward mode, sample from 
+
+A↓(z) := 
+
+n
+
+c ∈ CAOAR (z) : weight w(k(z)) (z → c)
+
+o
+
+∪ { switch_up : weight B(z) − χM (z)} ∪ { stay_down : weight χM (z)} .
+
+If a child is sampled, the chain moves to (c, ↓). If switch_up is sampled, it moves to (z, ↑). If 
+
+stay_down is sampled, it remains at (z, ↓).In upward mode, sample from 
+
+A↑(z) := 
+
+n
+
+p ∈ PAOAR (z) : weight w(k(z)) (z → p)
+
+o
+
+∪ { switch_down : weight F (z) − χM (z)} ∪ { stay_up : weight χM (z)} .
+
+If a parent is sampled, the chain moves to (p, ↑). If switch_down is sampled, it moves to (z, ↓). If 
+
+stay_up is sampled, it remains at (z, ↑).The sampler implementation is the singleton-block restriction of the momentum MDM-VGB sampler in Algorithm 4: set M = {1} and use the AOAR local forward/backward weights. Thus each MDM child/parent block is a single revealed or re-masked coordinate. 
+
+Proposition D.1 (Markov property) . For every χ ∈ [0 , 1] , the kernel eKfc ,χ  
+
+> BAL
+
+is a Markov kernel on 
+
+eZBAL .Proof. Since m(z) ≤ p↓(z) and m(z) ≤ p↑(z), all transition probabilities are nonnegative. For the downward copy, 
+
+X
+
+> c∈CAOAR (z)
+
+eKfc ,χ 
+
+> BAL
+
+ (z, ↓), (c, ↓) + eKfc ,χ 
+
+> BAL
+
+ (z, ↓), (z, ↑) + eKfc ,χ 
+
+> BAL
+
+ (z, ↓), (z, ↓)
+
+= p↓(z) +  p↑(z) − χm (z) + χm (z) = p↓(z) + p↑(z) = 1 .
+
+The upward row is identical: 
+
+X
+
+> p∈PAOAR (z)
+
+eKfc ,χ 
+
+> BAL
+
+ (z, ↑), (p, ↑) + eKfc ,χ 
+
+> BAL
+
+ (z, ↑), (z, ↓) + eKfc ,χ 
+
+> BAL
+
+ (z, ↑), (z, ↑)
+
+= p↑(z) +  p↓(z) − χm (z) + χm (z) = 1 .
+
+Thus every row sums to one. 49 Theorem D.1 (Stationarity of flow-cancelled momentum-balanced AOAR-VGB) . Assume terminal anchoring, 
+
+bV (x, y ) = τ (x, y ), y ∈ Y .
+
+Let KBAL be the self-loop-free ( γ = 0 ) balanced AOAR-VGB move kernel from Definition C.2, restricted to a reachable component where WBAL (z) > 0 for every state z. Then, from Theorem C.2 
+
+KBAL is reversible with respect to μBAL , and μBAL (· | Y ) = π∗(· | x).For every χ ∈ [0 , 1] , the lifted measure 
+
+eμBAL (z, ↓) = eμBAL (z, ↑) = 12 μBAL (z)
+
+is stationary for eKfc ,χ 
+
+> BAL
+
+. Moreover, 
+
+proj # eμBAL = μBAL .
+
+Consequently, the flow-cancelled lifted chain has the exact tilted target as its leaf-conditioned current-state law: 
+
+proj # eμBAL (· | Y ) = π∗(· | x).
+
+Proof. We verify stationarity by checking incoming flow into each lifted copy. First consider (z, ↓).Incoming flow comes from three sources: parents of z in downward mode, the switch from (z, ↑),and the self-loop at (z, ↓).The incoming move-flow from parent states u ∈ PAOAR (z) is 
+
+12
+
+X
+
+> u∈PAOAR (z)
+
+μBAL (u)KBAL (u, z ).
+
+Using reversibility of KBAL ,
+
+12
+
+X
+
+> u∈PAOAR (z)
+
+μBAL (u)KBAL (u, z ) = 12 μBAL (z) X
+
+> u∈PAOAR (z)
+
+KBAL (z, u ) = 12 μBAL (z)p↑(z).
+
+The incoming switch-flow from (z, ↑) is 
+
+12 μBAL (z) p↓(z) − χm (z),
+
+and the self-loop flow at (z, ↓) is 
+
+12 μBAL (z)χm (z).
+
+Therefore the total incoming flow into (z, ↓) is 
+
+12 μBAL (z)p↑(z) + 12 μBAL (z) p↓(z) − χm (z) + 12 μBAL (z)χm (z)= 12 μBAL (z) p↑(z) + p↓(z) = 12 μBAL (z) = eμBAL (z, ↓).
+
+The proof for (z, ↑) is symmetric. Incoming move-flow comes from children v ∈ CAOAR (z):
+
+12
+
+X
+
+> v∈CAOAR (z)
+
+μBAL (v)KBAL (v, z ) = 12 μBAL (z) X
+
+> v∈CAOAR (z)
+
+KBAL (z, v ) = 12 μBAL (z)p↓(z),
+
+where the first equality uses reversibility of KBAL . The incoming switch-flow from (z, ↓) is 
+
+12 μBAL (z) p↑(z) − χm (z),
+
+and the self-loop flow at (z, ↑) is 
+
+12 μBAL (z)χm (z).
+
+50 Geometric AOAR-VGB-Momentum transition on 𝑵 𝑨𝑶𝑨𝑹 𝒛    
+
+> parent states (𝒌 − 𝟏)
+> current state (𝒌)
+> child states (𝒌 + 𝟏)
+
+𝒛 −𝒊 𝟏 𝒛 −𝒊 𝟐 
+
+> (𝒛, ↑)
+
+𝒛 𝒋 𝟐 ←𝒃 
+
+𝒛 𝒋 𝟏 ←𝒂  
+
+> Self-loop for laziness (optional)
+> Backward /
+
+re-mask : 𝒘 𝐛𝐰𝐝 𝒛 = 𝒔 𝒌−𝟏 ෡𝑽 𝒙, 𝒛 ෡𝑽 𝒙, 𝒛 −𝒊 𝝀 
+
+Forward / reveal: 𝒘 𝐟𝐰𝐝 𝒛 = 𝒔 𝒌 ෡𝑽 𝒙, 𝒛 𝝀 ෡𝑽 𝒙, 𝒛 𝒋←𝒂 𝝅 𝒓𝒆𝒇 𝒀 𝒋 = 𝒂 𝒙, 𝒛 
+
+(𝒛, ↓)         
+
+> 𝒘 𝒇𝒍𝒊𝒑 𝒛, ↓ = 𝑩 𝒛 − 𝝌𝑴(𝒛)
+> Momentum change:
+> 𝒘 𝒇𝒍𝒊𝒑 𝒛, ↑ = 𝑭 𝒛 − 𝝌𝑴(𝒛)
+
+Figure 13: Illustration of the momentum lift for geometric balanced AOAR-VGB. Forward moves preserve downward momentum, backward moves preserve upward momentum, and residual opposite-direction mass switches between lifted copies; the cancelled common mass may be kept as an optional stay probability. Thus the total incoming flow into (z, ↑) is 
+
+12 μBAL (z)p↓(z) + 12 μBAL (z) p↑(z) − χm (z) + 12 μBAL (z)χm (z) = 12 μBAL (z).
+
+Therefore eμBAL is stationary. Finally, 
+
+proj # eμBAL (z) = eμBAL (z, ↓) + eμBAL (z, ↑) = μBAL (z).
+
+By Theorem C.2, terminal anchoring implies μBAL (· | Y ) = π∗(· | x). Since the lifted current-state marginal is μBAL , the same leaf-conditioned law holds after projection. 
+
+D.3 Momentum Lift for Geometric Balanced AOAR-VGB 
+
+Let KBG denote the non-lazy move kernel induced by Definition C.3, and let μBG be its stationary law from Theorem C.4. Define directional probabilities 
+
+p↓(z) := X
+
+> c∈CAOAR (z)
+
+KBG (z, c ), p↑(z) := X
+
+> p∈PAOAR (z)
+
+KBG (z, p ).
+
+Then p↓(z) + p↑(z) = 1 at non-isolated states. The same flow-cancelled lift used above applies to this geometric base chain. Figure 13 illustrates the lifted transition. The downward copy keeps forward reveal moves, the upward copy keeps backward re-masking moves, and the residual opposite-direction mass switches the momentum label. 
+
+Definition D.2 (Flow-cancelled momentum geometric AOAR kernel) . Fix χ ∈ [0 , 1] and set 
+
+m(z) := min {p↓(z), p ↑(z)} .
+
+On the lifted state space 
+
+eZBG := Z+(x) × {↓ , ↑} ,
+
+define the lifted kernel eKfc ,χ  
+
+> BG
+
+as follows. 51 Downward copy. From (z, ↓), the chain moves to a child while keeping downward momentum with probability 
+
+eKfc ,χ 
+
+> BG
+
+ (z, ↓), (c, ↓) := KBG (z, c ), c ∈ CAOAR (z). (C HILD MOVE )It switches to upward momentum with residual opposite-direction probability 
+
+eKfc ,χ 
+
+> BG
+
+ (z, ↓), (z, ↑) := p↑(z) − χm (z). (S WITCH UP)and it stays in the same lifted state with the cancelled crossing mass 
+
+eKfc ,χ 
+
+> BG
+
+ (z, ↓), (z, ↓) := χm (z). (S TAY DOWN )
+
+Upward copy. From (z, ↑), the chain moves to a parent while keeping upward momentum with probability 
+
+eKfc ,χ 
+
+> BG
+
+ (z, ↑), (p, ↑) := KBG (z, p ), p ∈ PAOAR (z). (P ARENT MOVE )It switches to downward momentum with residual opposite-direction probability 
+
+eKfc ,χ 
+
+> BG
+
+ (z, ↑), (z, ↓) := p↓(z) − χm (z). (S WITCH DOWN )and it stays in the same lifted state with the cancelled crossing mass 
+
+eKfc ,χ 
+
+> BG
+
+ (z, ↑), (z, ↑) := χm (z). (S TAY UP)All other transition probabilities are zero. 
+
+Theorem D.2 (Momentum preserves the geometric AOAR leaf law) . Define 
+
+eμBG (z, ↓) = eμBG (z, ↑) := 12 μBG (z).
+
+Then eμBG is stationary for eKfc ,χ  
+
+> BG
+
+for every χ ∈ [0 , 1] . Moreover, its current-state projection is 
+
+μBG , and therefore 
+
+proj # eμBG (· | Y ) = π∗(· | x).
+
+Proof. We prove stationarity for the downward copy; the upward proof is symmetric. Incoming flow into (z, ↓) has three parts. First, parent states u ∈ PAOAR (z) in downward mode contribute 
+
+12
+
+X
+
+> u∈PAOAR (z)
+
+μBG (u)KBG (u, z ).
+
+Since KBG is reversible with respect to μBG , this equals 
+
+12 μBG (z) X
+
+> u∈PAOAR (z)
+
+KBG (z, u ) = 12 μBG (z)p↑(z).
+
+Second, the switch from (z, ↑) contributes 
+
+12 μBG (z)( p↓(z) − χm (z)) .
+
+Third, the self-loop at (z, ↓) contributes 
+
+12 μBG (z)χm (z).
+
+The total incoming flow is therefore 
+
+12 μBG (z) {p↑(z) + p↓(z)} = 12 μBG (z) = eμBG (z, ↓).
+
+The upward-copy calculation is identical with parents and children exchanged. Projection gives 
+
+eμBG (z, ↓) + eμBG (z, ↑) = μBG (z).
+
+The leaf law follows from Theorem C.4. 52 D.4 Theoretical Analysis: Depth-Speed Gain with Momentum 
+
+We now focus on the depth-wise behavior of Balanced AOAR-VGB (the λ = 0 , non-geometric chain) and its flow-cancelled momentum lift. We note that this theoretical analysis is restricted to this balanced chain, rather than the geometric variants above. In AOAR-VGB without momentum, even when forward and backward moves are locally balanced, the reversible chain still behaves like a diffusive random walk along the depth axis, leading to a quadratic first-leaf hitting time. We show that, under a near-balance condition on the realized forward and backward masses, the no-momentum chain remains diffusive with first-leaf hitting time of order 
+
+n2, whereas the maximally flow-cancelled momentum lift can accelerate this depth traversal to order 
+
+n steps. This is the quantity most aligned with practical VGB-style implementations, which often stop the Markov chain once it first reaches a leaf. 
+
+Definition D.3 (Depth process and hitting time) . For a masked state z, let k(z) = |R(z)|. For the balanced chain with current masked state ZBAL  
+
+> t
+
+, define 
+
+τ BAL  
+
+> t
+
+:= k(ZBAL  
+
+> t
+
+), T BAL  
+
+> n
+
+:= inf {t ≥ 0 : τ BAL  
+
+> t
+
+= n}.
+
+For a lifted momentum chain eZt = ( ZBAL ,Mo  
+
+> t
+
+, D t), define 
+
+τ BAL ,Mo  
+
+> t
+
+:= k(ZBAL ,Mo  
+
+> t
+
+), T BAL ,Mo  
+
+> n
+
+:= inf {t ≥ 0 : τ BAL ,Mo  
+
+> t
+
+= n}.
+
+Assumption D.1 (Uniform directional near-balance) . There exists εn ∈ [0 , 1) such that for every reachable interior state z,
+
+|p↓(z) − p↑(z)| ≤ εn.
+
+Equivalently, since p↓(z) + p↑(z) = 1 ,
+
+1 − εn
+
+2 ≤ p↓(z), p ↑(z) ≤ 1 + εn
+
+2 .
+
+The exact canonical balanced case corresponds to εn = 0 . The near-balanced speedup regime is 
+
+εn = O(1 /n ).
+
+Intuitively, this says that the plug-in verifier may break exact 1/2, 1/2 balance, but only by the same order as the inverse sequence length 1/n .
+
+Lemma D.1 (Biased reflecting walk hitting time) . Consider a birth-death chain on {0, 1, . . . , n }
+
+with absorbing state n, deterministic transition 0 → 1, and for 1 ≤ k ≤ n − 1,
+
+k → k + 1 with probability p, k → k − 1 with probability q := 1 − p. 
+
+Let (Kt)t≥0 denote this birth-death chain, and define the hitting time of depth n by 
+
+T (p) 
+
+> n
+
+:= inf {t ≥ 0 : Kt = n} .
+
+Set 
+
+H(p)0 := E
+
+h
+
+T (p) 
+
+> n
+
+| K0 = 0 
+
+i
+
+.
+
+If p̸ = q, then 
+
+H(p)0 = np − q − 2pq 
+
+(p − q)2
+
+
+
+1 −
+
+ qp
+
+n
+
+.
+
+If p = q = 1 /2, then 
+
+H(1 /2) 0 = n2.
+
+Moreover, for every fixed c > 0, if 
+
+p − 12 ≤ c
+
+2n ,
+
+53 then 
+
+H(p)0 = Θ c(n2).
+
+Proof. Let 
+
+hk := E
+
+h
+
+T (p) 
+
+> n
+
+| K0 = k
+
+i
+
+.
+
+Then hn = 0 , and the reflecting root gives h0 = 1 + h1. For 1 ≤ k ≤ n − 1,
+
+hk = 1 + ph k+1 + qh k−1.
+
+Define finite differences ∆k := hk − hk−1 for 1 ≤ k ≤ n. The boundary equation gives ∆1 = −1,and the interior recurrence is equivalent to 
+
+p∆k+1 − q∆k = −1.
+
+If p̸ = q, set 
+
+r := qp , Sn(r) := 
+
+> n−1
+
+X
+
+> ℓ=0
+
+rℓ.
+
+Then the solution is 
+
+∆k =
+
+
+
+−1 + 1
+
+p − q
+
+
+
+rk−1 − 1
+
+p − q .
+
+Since hn = 0 ,
+
+−h0 = hn − h0 =
+
+> n
+
+X
+
+> k=1
+
+∆k =
+
+
+
+−1 + 1
+
+p − q
+
+
+
+Sn(r) − np − q .
+
+Rearranging and using Sn(r) = (1 − rn) / (1 − r) gives 
+
+h0 = Sn(r) + n − Sn(r)
+
+p − q = np − q − 2pq 
+
+(p − q)2
+
+
+
+1 −
+
+ qp
+
+n
+
+.
+
+If p = q = 1 /2, the recurrence becomes hk = 1 + 12 hk+1 + 12 hk−1, and the solution satisfying 
+
+hn = 0 and h0 = 1 + h1 is hk = n2 − k2. Thus h0 = n2.Finally suppose |p − 1/2| ≤ c/ (2 n). Then |p − q| ≤ c/n . If p = q, the claim follows from h0 = n2.It remains to consider p̸ = q. Recall that r = q/p ; equivalently, 
+
+r = qp = 1 − (p − q)1 + ( p − q)
+
+because p + q = 1 . For n ≥ 2c, we have |p − q| ≤ 1/2. The mean-value theorem then gives 
+
+|log r| = |log (1 − (p − q)) − log (1 + ( p − q)) | ≤ 4 |p − q| .
+
+Therefore, for 0 ≤ ℓ ≤ n − 1,
+
+e−4c ≤ e−4|p−q|n ≤ rℓ ≤ e4|p−q|n ≤ e4c.
+
+Summing these bounds gives 
+
+ne −4c ≤ Sn(r) = 
+
+> n−1
+
+X
+
+> ℓ=0
+
+rℓ ≤ ne 4c,
+
+so Sn(r) = Θ c(n). The finitely many cases n < 2c are absorbed into the constants hidden by Θc.Moreover, 
+
+n − Sn(r) = 
+
+> n−1
+
+X
+
+> ℓ=0
+
+(1 − rℓ) = (1 − r)
+
+> n−1
+
+X
+
+> ℓ=1
+> ℓ−1
+
+X
+
+> j=0
+
+rj , |1 − r| = Θ c(|p − q|).
+
+The double sum is Θc(n2), again because all powers rj stay within constant factors. Thus 
+
+|n − Sn(r)| = Θ c(|p − q| n2), and (n − Sn(r)) /(p − q) = Θ c(n2). Substituting into h0 =
+
+Sn(r) + ( n − Sn(r)) /(p − q) gives h0 = Θ c(n2).54 Proposition D.2 (No-momentum remains diffusive under near-balance) . Assume Assumption D.1 with εn ≤ c/n for a fixed constant c > 0. Consider the self-loop-free no-momentum balanced AOAR-VGB depth process, started from depth 0. Then 
+
+E T BAL  
+
+> n
+
+| τ BAL 0 = 0  = Θ c(n2).
+
+Proof. At every interior state, the probability of increasing the depth is between 
+
+p− := 1 − εn
+
+2 and p+ := 1 + εn
+
+2 .
+
+Because the conditional probability of increasing depth at each interior step is always in [p−, p +],the no-momentum depth process can be coupled between two reflecting birth-death chains using common uniform random variables at each step. The favorable chain increases depth with probability 
+
+p+ and reaches depth n no later than the AOAR depth process, while the unfavorable chain increases depth with probability p− and reaches depth n no earlier. Therefore, 
+
+H(p+)0 ≤ E T BAL  
+
+> n
+
+| τ BAL 0 = 0  ≤ H(p−)0 .
+
+Since |p± − 1/2| ≤ c/ (2 n), Lemma D.1 gives H(p+)0 = Θ c(n2) and H(p−)0 = Θ c(n2). Hence 
+
+E[T BAL  
+
+> n
+
+| τ BAL 0 = 0] = Θ c(n2).
+
+Theorem D.3 (First-leaf hitting for near-maximal flow cancellation) . Assume Assumption D.1. Run the flow-cancelled momentum chain eKfc ,χ  
+
+> BAL
+
+from the initial lifted state (∅, ↓), where χ ∈ [0 , 1] .Then 
+
+E
+
+h
+
+T BAL ,Mo  
+
+> n
+
+| eZ0 = ( ∅, ↓)
+
+i
+
+≤
+
+ 4n
+
+1 − εn
+
++ 1 
+
+  2 − χ(1 − εn)1 − εn
+
+n
+
+.
+
+In particular, if εn ≤ min {c/n, 1/2} and 1 − χ ≤ cχ/n for fixed constants c, c χ > 0, then 
+
+E
+
+h
+
+T BAL ,Mo  
+
+> n
+
+| eZ0 = ( ∅, ↓)
+
+i
+
+= Oc,c χ (n).
+
+For χ = 1 , this recovers the maximally flow-cancelled bound. Proof. Let qε := (1 − εn)/2. Under Assumption D.1, at every interior state z, p↓(z), p ↑(z) ≥ qε.From (z, ↓), the flow-cancelled kernel has downward move probability p↓(z), switch-up probability 
+
+p↑(z) − χm (z), and same-copy holding probability χm (z), where m(z) := min {p↓(z), p ↑(z)}.Thus, while in downward mode, the probability of a downward depth increment is at least qε.We decompose the trajectory into downward attempts. A downward attempt starts in downward mode. It succeeds if the chain reaches depth n while remaining in downward mode, and it fails if the chain switches from downward mode to upward mode before reaching depth n.Same-copy holding steps do not change either the depth or the momentum label. For the success-probability calculation, condition them out and look only at decisive steps, namely steps on which either a downward move or an upward switch occurs. Given the current lifted state (z, ↓),
+
+P(downward move | decisive , z, ↓) = p↓(z)
+
+p↓(z) + p↑(z) − χm (z)= p↓(z)1 − χm (z) ≥ qε
+
+1 − χq ε
+
+:= αχ,ε = 1 − εn
+
+2 − χ(1 − εn) .
+
+To succeed from depth k, an attempt only needs the next n − k decisive outcomes to be downward moves. Therefore, with sχ,ε,n := α nχ,ε ,
+
+P(attempt succeeds from depth k) ≥ α n−kχ,ε ≥ α nχ,ε .
+
+Thus every downward attempt succeeds with probability at least sχ,ε,n , uniformly over the past. Next, we bound the expected duration of one attempt cycle, counting Markov transitions including same-copy holding steps. During the downward part, every transition in downward mode increases 55 the depth with probability at least qε. To upper-bound the time cost, ignore early switch failures and wait until n downward depth increments have occurred. If Gr is the waiting time for the r-th such increment after the (r − 1) -st one, then P(Gr > t ) ≤ (1 − qε)t and E[Gr ] ≤ 1/q ε. Hence the expected duration of the downward part is at most n/q ε.If the attempt fails, the chain has switched to upward mode before reaching depth n. We upper-bound the cost of preparing the next attempt by a conservative reset: move upward until the root and then take the boundary switch back to downward mode. Returning to the root requires at most n
+
+upward depth decrements, each occurring with probability at least qε. Thus the reset duration is at most n/q ε + 1 in expectation, and one complete attempt cycle has expected duration at most 
+
+Lε := 2 n/q ε + 1 .Let Natt be the number of attempts until the first successful one. Since each attempt succeeds with conditional probability at least sχ,ε,n , we have P(Natt > m ) ≤ (1 − sχ,ε,n )m and therefore 
+
+E[Natt ] ≤ 1/s χ,ε,n .Let Cj denote the duration of the j-th attempt cycle. The cycle-length bound above is uniform over the past, so E[Cj | H j−1] ≤ Lε whenever the j-th cycle starts. Since T BAL ,Mo  
+
+> n
+
+≤ P 
+
+> j≥1
+
+1{Natt ≥
+
+j}Cj , we obtain 
+
+E[T BAL ,Mo  
+
+> n
+
+] ≤ Lε
+
+X
+
+> j≥1
+
+P(Natt ≥ j) = LεE[Natt ] ≤
+
+ 2nqε
+
++ 1 
+
+
+
+α−nχ,ε .
+
+Substituting qε = (1 − εn)/2 and αχ,ε = (1 − εn)/(2 − χ(1 − εn)) gives 
+
+E[T BAL ,Mo  
+
+> n
+
+] ≤
+
+ 4n
+
+1 − εn
+
++ 1 
+
+  2 − χ(1 − εn)1 − εn
+
+n
+
+.
+
+Finally, suppose εn ≤ min {c/n, 1/2} and 1 − χ ≤ cχ/n . Then 
+
+2 − χ(1 − εn)1 − εn
+
+= 1 + 1 − χ + εn(1 + χ)1 − εn
+
+= 1 + Oc,c χ
+
+ 1
+
+n
+
+
+
+.
+
+Therefore its n-th power is Oc,c χ (1) , while (4 n)/(1 − εn) + 1 = Oc(n). Hence 
+
+E
+
+h
+
+T BAL ,Mo  
+
+> n
+
+| eZ0 = ( ∅, ↓)
+
+i
+
+= Oc,c χ (n).
+
+Corollary D.1 (Depth-axis speedup with near-maximal momentum) . Assume Assumption D.1 with 
+
+εn ≤ min 
+
+ cn , 12
+
+
+
+for a fixed constant c > 0. Let the flow-cancelled momentum parameter satisfy 
+
+1 − χ ≤ cχ
+
+n
+
+for a fixed constant cχ > 0. Then the no-momentum balanced AOAR-VGB depth process satisfies 
+
+E T BAL  
+
+> n
+
+| τ BAL 0 = 0  = Θ c(n2),
+
+while the flow-cancelled momentum lift satisfies 
+
+E
+
+h
+
+T BAL ,Mo  
+
+> n
+
+| eZ0 = ( ∅, ↓)
+
+i
+
+= Oc,c χ (n).
+
+Thus, under the same near-balance condition and near-maximal cancellation, 
+
+E[T BAL  
+
+> n
+
+| τ BAL 0 = 0] 
+
+E[T BAL ,Mo  
+
+> n
+
+| eZ0 = ( ∅, ↓)] = Ω c,c χ (n).
+
+The maximally flow-cancelled case χ = 1 is included by taking cχ = 0 .
+
+56 Proof. This follows immediately from Proposition D.2 and Theorem D.3. 
+
+Corollary D.2 (Ratio form of the near-balance condition) . Suppose there exists ρn ≥ 1 such that for every reachable interior state z,
+
+1
+
+ρn
+
+≤ p↓(z)
+
+p↑(z) ≤ ρn.
+
+Then 
+
+|p↓(z) − p↑(z)| ≤ ρn − 1
+
+ρn + 1 .
+
+Consequently, if there are fixed constants c, c χ > 0 such that 
+
+ρn − 1
+
+ρn + 1 ≤ min 
+
+ cn , 12
+
+
+
+, 1 − χ ≤ cχ
+
+n ,
+
+then the depth-axis speedup in Corollary D.1 applies. In particular, the ratio condition holds asymptotically when ρn = 1 + O(1 /n ), provided the cancellation is near-maximal. Proof. Let p = p↓(z) and q = p↑(z). Since p + q = 1 and p/q ≤ ρn, we have p ≤ ρnq = ρn(1 − p),so p ≤ ρn/(1 + ρn). Similarly, q/p ≤ ρn gives p ≥ 1/(1 + ρn). Therefore, 
+
+p − 12 ≤ ρn − 12( ρn + 1) .
+
+Since |p − q| = |2p − 1|, we obtain |p − q| ≤ (ρn − 1) /(ρn + 1) . The displayed condition above gives Assumption D.1 with εn ≤ min {c/n, 1/2} and the near-maximal cancellation condition 
+
+1 − χ ≤ cχ/n , so Corollary D.1 applies. If ρn = 1 + O(1 /n ) and 1 − χ = O(1 /n ), then these conditions hold for all sufficiently large n.
+
+Corollary D.3 (Implication of multiplicative verifier accuracy) . Assume the canonical balanced coefficients βk = k and αk = n − k for 1 ≤ k ≤ n − 1. Suppose the plug-in verifier satisfies the multiplicative accuracy condition 
+
+κ−1V ∗(x, z ) ≤ bV (x, z ) ≤ κV ∗(x, z )
+
+on all relevant non-leaf states. Then, for every reachable interior state z,
+
+1
+
+κ2 ≤ p↓(z)
+
+p↑(z) ≤ κ2.
+
+Therefore, by Corollary D.2, the linear first-leaf hitting guarantee is certified whenever, for fixed constants c, c χ > 0,
+
+κ2 − 1
+
+κ2 + 1 ≤ min 
+
+ cn , 12
+
+
+
+, 1 − χ ≤ cχ
+
+n .
+
+Asymptotically, certifying this condition from κ alone requires κ2 = 1 + O(1 /n ), equivalently 
+
+κ = 1 + O(1 /n ), together with near-maximal cancellation. Proof. Let F (z) and B(z) denote the plug-in forward and backward total masses at z. Under the exact value V ∗, the canonical balanced choice gives F ∗(z) = B∗(z) by Proposition C.4. Under the multiplicative verifier condition, the plug-in forward total satisfies 
+
+κ−1F ∗(z) ≤ F (z) ≤ κF ∗(z),
+
+because each child value bV (x, c ) is within a factor κ of V ∗(x, c ). Similarly, 
+
+κ−1B∗(z) ≤ B(z) ≤ κB ∗(z).
+
+57 Since F ∗(z) = B∗(z), it follows that 
+
+1
+
+κ2 ≤ F (z)
+
+B(z) ≤ κ2.
+
+But p↓(z)
+
+p↑(z) = F (z)/(F (z) + B(z)) 
+
+B(z)/(F (z) + B(z)) = F (z)
+
+B(z) .
+
+Applying Corollary D.2 with ρn = κ2 gives the stated sufficient condition. In particular, to certify the linear first-leaf hitting guarantee from this multiplicative bound alone, it is enough asymptotically that κ2 = 1 + O(1 /n ), equivalently κ = 1 + O(1 /n ), together with 1 − χ = O(1 /n ).
+
+## E Balanced Parallel VGBs for Masked Diffusion 
+
+The previous AOAR sections study single-site reveal and re-mask moves. In this section, we extend the same VGB principle to parallel masked-diffusion style updates, motivated by discrete and masked diffusion language models [ 3, 24 ]. The resulting MDM-VGB family allows a move to reveal or re-mask multiple coordinates at once. The construction proceeds in three steps. First, we define a leaf-corrected balanced MDM-VGB, which is the direct block-update analogue of Balanced AOAR-VGB. Second, we introduce a clean geometric balanced MDM-VGB whose backward remasking rule is value-gated while avoiding any explicit Mref correction in the local implementation. Third, we add a unified flow-cancelled momentum framework that applies to either base kernel once its local forward and backward weights have been specified. In particular, AOAR-VGB is recovered by the singleton-block restriction M = {1}. Under this restriction, the MDM algorithms below also serve as the implementation templates for the AOAR samplers. 
+
+E.1 Balanced MDM-VGB Setup and notation. We reuse the shared notation from Sections B and C. In particular, x is the conditioning context, Y = Vn is the set of fully revealed sequences, Z = ( V ∪ { [mask] })n is the masked state space, R(z) is the set of revealed coordinates, k(z) = |R(z)| is the depth of z, and C(z)
+
+is the compatible completion set. Recall that 
+
+U ∗(x, z ) = Mref (x, z )V ∗(x, z )
+
+is the tilted completion mass, and recall the reachable masked-state set 
+
+Zreach := {z ∈ Z : Mref (x, z ) > 0} .
+
+Let M ⊆ { 1, . . . , n } be a nonempty set of admissible update sizes. We assume 1 ∈ M , so every non-root state has at least one possible backward update and every non-leaf state has at least one possible forward update. For a reachable state z and a block size r ∈ M , define 
+
+B+ 
+
+> r
+
+(z) := {A ⊆ [n] \ R(z) : |A| = r} , B− 
+
+> r
+
+(z) := {A ⊆ R(z) : |A| = r} .
+
+For a forward block A ∈ B + 
+
+> r
+
+(z) and assignment aA ∈ V A, write zA←aA for the state obtained by filling all coordinates in A with aA. For a backward block A ∈ B − 
+
+> r
+
+(z), write z−A for the state obtained by re-masking all coordinates in A.The MDM oracle assumption is that, for every reachable z, every A ⊆ [n]\R(z), and every aA ∈ V A,we can evaluate the joint reference conditional 
+
+πref (YA = aA | x, z ) := Pπref [YA = aA | x, Y ∈ C (z)] .
+
+Equivalently, 
+
+πref (YA = aA | x, z ) = Mref (x, z A←aA )
+
+Mref (x, z ) .
+
+58 Remark E.1 (Practical joint conditionals) . In a practical masked diffusion model, the exact joint conditional πref (YA = aA | x, z ) may not be directly available. One may replace it by a factorized approximation, for example 
+
+gπref (YA = aA | x, z ) := Y
+
+> i∈A
+
+πref (Yi = ai | x, z ).
+
+This factorized plug-in is a practical approximation: the exact stationarity statements below use the exact joint conditional. 
+
+Block identities. We first collect the block analogues of the single-coordinate partition and Bellman identities. 
+
+Lemma E.1 (Block partition identity) . Fix a reachable state z and a block A ⊆ [n] \ R(z). Then 
+
+C(z) = G
+
+> aA∈V A
+
+C(zA←aA ).
+
+Consequently, 
+
+X
+
+> aA∈V A
+
+U ∗(x, z A←aA ) = U ∗(x, z ), X
+
+> aA∈V A
+
+Mref (x, z A←aA ) = Mref (x, z ).
+
+Proof. Every full sequence y ∈ C (z) has a unique restriction yA ∈ V A. Hence y belongs to exactly one completion set C(zA←aA ), namely the one with aA = yA. Summing πref (y | x)τ (x, y ) over this disjoint partition gives the U ∗ identity. Setting τ ≡ 1 gives the Mref identity. 
+
+Proposition E.1 (Block Bellman identity) . For every reachable state z and every block A ⊆
+
+[n] \ R(z),
+
+V ∗(x, z ) = X
+
+> aA∈V A
+
+πref (YA = aA | x, z )V ∗(x, z A←aA ).
+
+Proof. By the law of total expectation, 
+
+V ∗(x, z ) = Eπref [τ (x, Y ) | x, Y ∈ C (z)] = X
+
+> aA∈V A
+
+Pπref [YA = aA | x, z ] Eπref [τ (x, Y ) | x, Y ∈ C (z), Y A = aA] .
+
+The event {Y ∈ C (z), Y A = aA} is exactly Y ∈ C (zA←aA ) . Therefore the inner conditional expectation equals V ∗(x, z A←aA ).
+
+Proposition E.2 (Exact block target conditional) . For every reachable state z with U ∗(x, z ) > 0,every block A ⊆ [n] \ R(z), and every aA ∈ V A,
+
+π∗(YA = aA | x, z ) = U ∗(x, z A←aA )
+
+U ∗(x, z ) = πref (YA = aA | x, z ) V ∗(x, z A←aA )
+
+V ∗(x, z ) .
+
+Proof. The first equality follows from conditional probability under the tilted target: 
+
+π∗(YA = aA | x, z ) = Pπ∗ (Y ∈ C (zA←aA ) | x)
+
+Pπ∗ (Y ∈ C (z) | x) = U ∗(x, z A←aA )
+
+U ∗(x, z ) .
+
+For the second equality, use U ∗(x, z ) = Mref (x, z )V ∗(x, z ) and 
+
+Mref (x, z A←aA ) = Mref (x, z )πref (YA = aA | x, z ).
+
+59 Leaf-corrected balanced MDM edge weights. For each update size r ∈ M , define the depth-size edge coefficient 
+
+sk,r := 1
+
+ n−rk
+
+ , 0 ≤ k ≤ n − r. 
+
+Then n − kr
+
+
+
+sk,r =
+
+kr
+
+
+
+sk−r,r 
+
+whenever r ≤ k ≤ n − r. This is the multi-token analogue of the single-site balanced coefficient 
+
+sk = 1 / n−1
+
+> k
+
+.For a reachable state z, define the MDM child, parent, and full neighborhoods by 
+
+CMDM (z) := zA←aA : r ∈ M , A ∈ B + 
+
+> r
+
+(z), a A ∈ V A, z A←aA ∈ Z reach ,PMDM (z) := z−A : r ∈ M , A ∈ B − 
+
+> r
+
+(z) , NMDM (z) := CMDM (z) ∪ PMDM (z).
+
+Definition E.1 (Leaf-corrected balanced MDM edge weights) . Consider a parent state z of depth 
+
+k = k(z) and a child u = zA←aA , where A ∈ B + 
+
+> r
+
+(z) and r = |A|. Thus u has depth k + r. Define the symmetric edge weight 
+
+fMDM (z, u ) := 
+
+(sk,r Mref (x, u ) bV (x, u ), u / ∈ Y ,sn−r,r Mref (x, u )τ (x, u ), u ∈ Y .
+
+Equivalently, using bU (x, u ) := Mref (x, u ) bV (x, u ) and U ∗(x, y ) = Mref (x, y )τ (x, y ) for leaves, 
+
+fMDM (z, u ) = 
+
+(
+
+sk,r bU (x, u ), u / ∈ Y ,sn−r,r U ∗(x, u ), u ∈ Y .
+
+The edge weight is understood symmetrically on the undirected block-update graph. 
+
+Local implementation weights. The edge weights contain Mref , but the local implementation does not require estimating it. From a fixed current state z, all incident edge weights share the common factor Mref (x, z ), which cancels after normalization. 
+
+Definition E.2 (γ-held balanced MDM-VGB local kernel) . Let z be a reachable state of depth 
+
+k = k(z). We use terminal anchoring on leaves, 
+
+bV (x, y ) = τ (x, y ), y ∈ Y .
+
+Define the local implementation weights by FORWARD : wMDM ,fwd (z → u) := sk,r πref (YA = aA | x, z ) bV (x, u ),
+
+BACKWARD : wMDM ,bwd (z → u) := sk−r,r bV (x, z ),
+
+where 
+
+u = zA←aA , A ∈ B + 
+
+> r
+
+(z) for forward moves ,u = z−A, A ∈ B − 
+
+> r
+
+(z) for backward moves .
+
+Let wMDM (z → u) denote the corresponding forward or backward weight, and set 
+
+WMDM (z) := X
+
+> u∈CMDM (z)
+
+wMDM ,fwd (z → u) + X
+
+> u∈PMDM (z)
+
+wMDM ,bwd (z → u).
+
+The non-lazy move kernel is 
+
+KMDM (z, u ) := wMDM (z → u)
+
+WMDM (z) , u ∈ NMDM (z).
+
+60 This formula is used only at states with WMDM (z) > 0. The γ-held kernel is obtained by setting 
+
+P (γ)MDM (z, z ) = γ
+
+1 + γ , P (γ)MDM (z, u ) = 11 + γ KMDM (z, u ).
+
+Theorem E.1 (Weighted-graph representation and exact leaf law) . The local kernel in Definition E.2 is the weighted random walk on the graph with symmetric edge weights from Definition E.1. Therefore, its stationary distribution is 
+
+μMDM (z) = DMDM (z)
+
+P 
+
+> z′
+
+DMDM (z′) , DMDM (z) := X
+
+> u∼z
+
+fMDM (z, u ).
+
+Moreover, the leaf-conditioned stationary law is exact: 
+
+μMDM (y | y ∈ Y ) = π∗(y | x).
+
+Proof. Fix a state z and a forward child u = zA←aA of size r. If u / ∈ Y , then 
+
+fMDM (z, u )
+
+Mref (x, z ) = sk(z),r 
+
+Mref (x, u )
+
+Mref (x, z ) bV (x, u )= sk(z),r πref (YA = aA | x, z ) bV (x, u ),
+
+which is the forward local weight. If u ∈ Y , the same calculation gives 
+
+fMDM (z, u )
+
+Mref (x, z ) = sn−r,r πref (YA = aA | x, z )τ (x, u ).
+
+For a backward move from z to u = z−A, the edge is the same edge with child endpoint z. Dividing its edge weight by Mref (x, z ) gives sk(z)−r,r bV (x, z ) if z / ∈ Y , and sn−r,r τ (x, z ) if z ∈ Y . Thus the local weights are proportional to incident edge weights by a state-dependent common factor, which cancels under normalization. The stationary law of a random walk on a symmetric weighted graph is proportional to weighted degree. It remains to check the leaf law. For any leaf y ∈ Y , every admissible backward block 
+
+A ⊆ [n] of size r ∈ M gives a parent y−A, and the corresponding leaf edge has weight 
+
+fMDM (y−A, y ) = sn−r,r U ∗(x, y ).
+
+Therefore 
+
+DMDM (y) = U ∗(x, y ) X
+
+> r∈M
+> r≤n
+
+nr
+
+
+
+sn−r,r .
+
+The multiplicative factor is constant over leaves. Since U ∗(x, y ) = πref (y | x)τ (x, y ), conditioning on Y gives 
+
+μMDM (y | y ∈ Y ) = πref (y | x)τ (x, y )
+
+P 
+
+> y′∈Y
+
+πref (y′ | x)τ (x, y ′) = π∗(y | x).
+
+Proposition E.3 (Exact directional balance under exact values) . Assume bV = V ∗ on all non-leaf states and terminal anchoring on leaves. Let z be an interior state of depth k. For a fixed block size r ∈ M with r ≤ min {k, n − k}, the exact forward and backward masses of size r satisfy 
+
+W ∗ 
+
+> fwd ,r
+
+(z) = W ∗ 
+
+> bwd ,r
+
+(z).
+
+Consequently, if at an interior state only paired sizes 
+
+Mpair (z) := {r ∈ M : r ≤ min {k(z), n − k(z)}} 
+
+are used, then the exact move-conditioned forward and backward probabilities are both 1/2.
+
+61 Geometric MDM-VGB transition on 𝑵 𝑴𝑫𝑴 𝒛    
+
+> parent states (𝒌 − |𝑩|)
+> current state (𝒌)
+> child states (𝒌 + |𝑩|)
+
+𝒛 −𝑩 𝟏 
+
+𝒛 −𝑩 𝟐 
+
+𝒛  
+
+> 𝒛 𝑩 𝟏 ←𝒂 𝑩 𝟏
+> 𝒛 𝑩 𝟐 ←𝒂 𝑩 𝟐
+> Self-loop for laziness (optional)
+> masked
+> state
+> Backward /
+
+re-mask : 𝒘 𝐛𝐰𝐝 𝒛 = 𝒔 𝒌− 𝑩 , 𝑩 ෡𝑽 𝒙, 𝒛 ෡𝑽 𝒙, 𝒛 −𝑩 𝝀 
+
+Forward / reveal: 𝒘 𝐟𝐰𝐝 𝒛 = 𝒔 𝒌, 𝑩 ෡𝑽 𝒙, 𝒛 𝝀 ෡𝑽 𝒙, 𝒛 𝑩←𝒂 𝑩 𝝅 𝒓𝒆𝒇 𝒀 𝑩 = 𝒂 𝑩 𝒙, 𝒛 Figure 14: Illustration of one geometric balanced MDM-VGB transition. Forward moves reveal an admissible block using the joint reference conditional and the child verifier value, while backward moves re-mask an admissible block using the verifier value of the remasked parent. Setting λ = 0 
+
+recovers balanced MDM-VGB. 
+
+Proof. Fix r ≤ min {k, n − k}. Using Proposition E.1, for each A ∈ B + 
+
+> r
+
+(z),
+
+X
+
+> aA∈V A
+
+πref (YA = aA | x, z )V ∗(x, z A←aA ) = V ∗(x, z ).
+
+There are  n−kr
+
+ forward blocks of size r, so 
+
+W ∗ 
+
+> fwd ,r
+
+(z) = 
+
+n − kr
+
+
+
+sk,r V ∗(x, z ).
+
+For backward blocks of size r, there are  kr
+
+ choices, and each backward weight is sk−r,r V ∗(x, z ).Hence 
+
+W ∗ 
+
+> bwd ,r
+
+(z) = 
+
+kr
+
+
+
+sk−r,r V ∗(x, z ).
+
+The coefficient identity in Section E.1 gives equality. Summing over paired sizes preserves equality. 
+
+E.2 Geometric Balanced MDM-VGB 
+
+Balanced MDM-VGB gives the block-update analogue of the balanced AOAR walk. We now add the same value-gated remasking idea used in the geometric AOAR variant. The goal is to preserve the forward VGB ranking while making the backward block choice depend on the verifier value of the remasked parent. Figure 14 shows the corresponding block-update transition. The only change from the AOAR case is that each reveal or re-mask candidate is now an admissible block A ∈ M , with joint reference conditionals used on forward block reveals. 
+
+Definition E.3 (Clean geometric balanced MDM edge weights) . Fix λ ≥ 0. For every admissible size r ∈ M , let 
+
+sk,r := 
+
+n − rk
+
+−1
+
+, 0 ≤ k ≤ n − r, 
+
+be the canonical balanced depth-size coefficient. Consider neighboring states z, u with 
+
+|k(u) − k(z)| = r. Let p(z, u ) be the lower-depth endpoint and c(z, u ) be the higher-depth 62 endpoint, so that 
+
+c(z, u ) = p(z, u )A←aA
+
+for a unique block A of size r and assignment aA.If c(z, u ) /∈ Y , define 
+
+fBGM (z, u ) = fBGM (u, z ) := sk(p(z,u )) ,r bU (x, c (z, u )) bV (x, p (z, u )) λ.
+
+If c(z, u ) = y ∈ Y , define the leaf-corrected edge by 
+
+fBGM (z, u ) = fBGM (u, z ) := sn−r,r U ∗(x, y ).
+
+Local implementation weights. Let z have depth k. For a non-leaf forward child u = zA←aA /∈ Y 
+
+with |A| = r,
+
+wBGM ,fwd (z → u) = sk,r bV (x, z )λπref (YA = aA | x, z ) bV (x, u ).
+
+The factor bV (x, z )λ is common across all forward candidates from the same current state z, so the forward ranking remains 
+
+πref (YA = aA | x, z ) bV (x, z A←aA ).
+
+For a backward move from a non-leaf state z to u = z−A,
+
+wBGM ,bwd (z → z−A) = sk−r,r bV (x, z ) bV (x, z −A)λ.
+
+Thus backward moves prefer blocks whose remasked parent has high verifier value. At the leaf boundary, if y = zA←aA ∈ Y , then 
+
+wleaf BGM ,fwd (z → y) = sn−r,r πref (YA = aA | x, z )τ (x, y ),
+
+and from a leaf y to a parent y−A,
+
+wBGM ,bwd (y → y−A) = sn−r,r τ (x, y ).
+
+Remark E.2 (λ = 0 recovers balanced MDM-VGB) . When λ = 0 , the geometric gate disappears, and the local weights in Section E.2 reduce to the balanced MDM-VGB weights in Definition E.2. 
+
+Theorem E.2 (Stationarity and exact leaf law for clean geometric MDM) . Let PBGM be the weighted random walk on the block-update graph with edge weights from Definition E.3. Then 
+
+μBGM (z) = DBGM (z)
+
+P 
+
+> z′
+
+DBGM (z′) , DBGM (z) := X
+
+> u∼z
+
+fBGM (z, u ),
+
+is stationary. Moreover, 
+
+μBGM (y | y ∈ Y ) = π∗(y | x).
+
+Proof. The stationarity proof is the standard detailed-balance proof for a symmetric weighted graph. For neighboring states z ∼ u,
+
+μBGM (z)PBGM (z, u ) = DBGM (z)
+
+P 
+
+> z′
+
+DBGM (z′)
+
+fBGM (z, u )
+
+DBGM (z) = fBGM (z, u )
+
+P 
+
+> z′
+
+DBGM (z′) .
+
+This expression is symmetric in z and u, hence detailed balance holds. Now take a leaf y ∈ Y . For every admissible block size r ∈ M and every block A ⊆ [n] with 
+
+|A| = r, the parent is y−A and the leaf edge has weight 
+
+fBGM (y−A, y ) = sn−r,r U ∗(x, y ).
+
+Therefore 
+
+DBGM (y) = U ∗(x, y ) X
+
+> r∈M
+> r≤n
+
+nr
+
+
+
+sn−r,r .
+
+63 The multiplier is independent of y, so conditioning on leaves yields 
+
+μBGM (y | y ∈ Y ) = U ∗(x, y )
+
+P 
+
+> y′∈Y
+
+U ∗(x, y ′) = π∗(y | x).
+
+Proposition E.4 (Exact block directional masses) . Assume bV = V ∗ on non-leaf states. Let z have depth k with V ∗(x, z ) > 0, and fix an admissible size r with r ≤ k and k + r < n , so that the size-r forward children are non-leaf. For a backward block A ⊆ R(z) with |A| = r, define 
+
+r∗
+
+> A
+
+(z) := V ∗(x, z −A)
+
+V ∗(x, z ) .
+
+Then the exact size-r forward and backward masses are 
+
+F ∗ 
+
+> λ,r
+
+(z) = sk,r 
+
+n − kr
+
+
+
+V ∗(x, z )1+ λ,
+
+and 
+
+B∗ 
+
+> λ,r
+
+(z) = sk−r,r V ∗(x, z )1+ λ X
+
+> A⊆R(z)
+> |A|=r
+
+r∗
+
+> A
+
+(z)λ.
+
+Proof. For each forward block A ∈ B + 
+
+> r
+
+(z), the block Bellman identity gives 
+
+X
+
+> aA∈V A
+
+πref (YA = aA | x, z )V ∗(x, z A←aA ) = V ∗(x, z ).
+
+There are  n−kr
+
+ forward blocks, hence 
+
+F ∗ 
+
+> λ,r
+
+(z) = sk,r V ∗(x, z )λ
+
+n − kr
+
+
+
+V ∗(x, z ) = sk,r 
+
+n − kr
+
+
+
+V ∗(x, z )1+ λ.
+
+For backward blocks, 
+
+B∗ 
+
+> λ,r
+
+(z) = X
+
+> A⊆R(z)
+> |A|=r
+
+sk−r,r V ∗(x, z )V ∗(x, z −A)λ
+
+= sk−r,r V ∗(x, z )1+ λ X
+
+> A⊆R(z)
+> |A|=r
+
+ V ∗(x, z −A)
+
+V ∗(x, z )
+
+λ
+
+.
+
+Remark E.3 (Canonical MDM depth anchor) . For the balanced MDM chain, the canonical coeffi-cient 
+
+sbal  
+
+> k,r
+
+= 1
+
+ n−rk
+
+
+
+satisfies n − kr
+
+
+
+sbal  
+
+> k,r
+
+=
+
+kr
+
+
+
+sbal  
+
+> k−r,r
+
+.
+
+For the clean geometric MDM chain with λ > 0, this coefficient no longer gives exact 1/2–1/2
+
+balance in general. Instead, it is the canonical depth-neutral anchor: it recovers exact balance at 
+
+λ = 0 , while the λ > 0 correction changes backward probabilities according to the verifier values of remasked parent states. The sampler in Algorithm 3 specializes to the AOAR sampler when M = {1}, since each admissible block is a singleton coordinate. 64 Geometric MDM-VGB-Momentum transition on 𝑵 𝑴𝑫𝑴 𝒛      
+
+> parent states (𝒌 − 𝑩 )
+> current state (𝒌)
+> child states (𝒌 + 𝑩 )
+
+𝒛 −𝑩 𝟏 
+
+𝒛 −𝑩 𝟐  
+
+> (𝒛, ↑)
+> 𝒛 𝑩 𝟐 ←𝒂 𝑩 𝟐
+> 𝒛 𝑩 𝟏 ←𝒂 𝑩 𝟏
+> Self-loop for laziness (optional)
+> Backward /
+
+re-mask : 𝒘 𝐛𝐰𝐝 𝒛 = 𝒔 𝒌− 𝑩 , 𝑩 ෡𝑽 𝒙, 𝒛 ෡𝑽 𝒙, 𝒛 −𝑩 𝝀 
+
+Forward / reveal: 𝒘 𝐟𝐰𝐝 𝒛 = 𝒔 𝒌, 𝑩 ෡𝑽 𝒙, 𝒛 𝝀 ෡𝑽 𝒙, 𝒛 𝑩←𝒂 𝑩 𝝅 𝒓𝒆𝒇 𝒀 𝑩 = 𝒂 𝑩 𝒙, 𝒛         
+
+> 𝒘 𝒇𝒍𝒊𝒑 𝒛, ↓ = 𝑩 𝒛 − 𝝌𝑴(𝒛)
+> Momentum change:
+> 𝒘 𝒇𝒍𝒊𝒑 𝒛, ↑ = 𝑭 𝒛 − 𝝌𝑴(𝒛)
+> (𝒛, ↓)
+
+Figure 15: Illustration of the flow-cancelled momentum lift for geometric MDM-VGB. The downward copy keeps block reveal moves, the upward copy keeps block re-mask moves, and residual opposite-direction mass switches momentum; the cancelled common mass may be retained as an optional stay probability. 
+
+E.3 Momentum Framework for Balanced and Geometric MDM-VGB 
+
+We now add momentum after both base MDM kernels have been defined. This separation is useful because the same lifted transition only needs the local forward and backward weights of the chosen base kernel. Figure 15 illustrates the momentum construction for the geometric MDM base kernel. The same diagram also applies to balanced MDM-VGB after setting λ = 0 in the local block weights. Let 
+
+B ∈ { MDM , BGM }
+
+denote either the balanced MDM-VGB base kernel or the clean geometric balanced MDM-VGB base kernel. Let 
+
+wB,fwd (z → c), wB,bwd (z → p)
+
+be its local forward and backward weights, as defined in Definition E.2 for B = MDM and in Section E.2 for B = BGM .Define the forward and backward total masses 
+
+FB(z) := X
+
+> c∈CMDM (z)
+
+wB,fwd (z → c), BB(z) := X
+
+> p∈PMDM (z)
+
+wB,bwd (z → p).
+
+The non-lazy base move kernel is 
+
+KB(z, u ) := wB(z → u)
+
+FB(z) + BB(z) , u ∈ NMDM (z),
+
+where wB denotes the appropriate forward or backward local weight. Let μB be its stationary law. By Theorem E.1 for B = MDM and Theorem E.2 for B = BGM , the projected leaf-conditioned law is exact: 
+
+μB(· | Y ) = π∗(· | x).
+
+Let ZB,+ be the positive-weight component of KB, i.e., the component on which FB(z) + BB(z) > 0.For z ∈ Z B,+, define directional probabilities 
+
+pB 
+
+> ↓
+
+(z) := X
+
+> c∈CMDM (z)
+
+KB(z, c ) = FB(z)
+
+FB(z) + BB(z) ,
+
+65 and 
+
+pB 
+
+> ↑
+
+(z) := X
+
+> p∈PMDM (z)
+
+KB(z, p ) = BB(z)
+
+FB(z) + BB(z) .
+
+Thus pB 
+
+> ↓
+
+(z) + pB 
+
+> ↑
+
+(z) = 1 whenever FB(z) + BB(z) > 0.
+
+Definition E.4 (Flow-cancelled momentum MDM kernel) . Fix a base kernel B ∈ { MDM , BGM }
+
+and a cancellation strength χ ∈ [0 , 1] . Set 
+
+mB(z) := min pB 
+
+> ↓
+
+(z), p B 
+
+> ↑
+
+(z) .
+
+On the lifted state space 
+
+eZB := ZB,+ × {↓ , ↑} ,
+
+define eKfc ,χ  
+
+> B
+
+as follows. 
+
+Downward copy. From (z, ↓), the chain moves to a child while keeping downward momentum with probability 
+
+eKfc ,χ 
+
+> B
+
+ (z, ↓), (c, ↓) := KB(z, c ), c ∈ CMDM (z). (C HILD MOVE )It switches to upward momentum with residual opposite-direction probability 
+
+eKfc ,χ 
+
+> B
+
+ (z, ↓), (z, ↑) := pB 
+
+> ↑
+
+(z) − χm B(z), (S WITCH UP)and stays in the same lifted state with cancelled crossing mass 
+
+eKfc ,χ 
+
+> B
+
+ (z, ↓), (z, ↓) := χm B(z). (S TAY DOWN , OPTIONAL )
+
+Upward copy. From (z, ↑), the chain moves to a parent while keeping upward momentum with probability 
+
+eKfc ,χ 
+
+> B
+
+ (z, ↑), (p, ↑) := KB(z, p ), p ∈ PMDM (z). (P ARENT MOVE )It switches to downward momentum with residual opposite-direction probability 
+
+eKfc ,χ 
+
+> B
+
+ (z, ↑), (z, ↓) := pB 
+
+> ↓
+
+(z) − χm B(z), (S WITCH DOWN )and stays in the same lifted state with cancelled crossing mass 
+
+eKfc ,χ 
+
+> B
+
+ (z, ↑), (z, ↑) := χm B(z). (S TAY UP, OPTIONAL )All other transition probabilities are zero. 
+
+Proposition E.5 (Markov property) . For every χ ∈ [0 , 1] and every B ∈ { MDM , BGM }, eKfc ,χ  
+
+> B
+
+is a Markov kernel. Proof. All transition probabilities are nonnegative because mB(z) ≤ pB 
+
+> ↓
+
+(z) and mB(z) ≤ pB 
+
+> ↑
+
+(z). For the downward copy, 
+
+X
+
+> c∈CMDM (z)
+
+eKfc ,χ 
+
+> B
+
+ (z, ↓), (c, ↓) + eKfc ,χ 
+
+> B
+
+ (z, ↓), (z, ↑) + eKfc ,χ 
+
+> B
+
+ (z, ↓), (z, ↓)
+
+= pB 
+
+> ↓
+
+(z) +  pB 
+
+> ↑
+
+(z) − χm B(z) + χm B(z) = 1 .
+
+The upward row is identical. 
+
+Theorem E.3 (Momentum preserves the MDM leaf law) . Fix B ∈ { MDM , BGM } and χ ∈ [0 , 1] .Define 
+
+eμB(z, ↓) = eμB(z, ↑) := 12 μB(z).
+
+66 Then eμB is stationary for eKfc ,χ  
+
+> B
+
+. Moreover, 
+
+proj # eμB = μB,
+
+and hence 
+
+proj # eμB(· | Y ) = π∗(· | x).
+
+Proof. We verify stationarity for the downward copy; the upward copy is symmetric. Incoming flow into (z, ↓) comes from three sources: parents of z in downward mode, the switch from (z, ↑), and the self-loop at (z, ↓).The incoming move-flow from parents is 
+
+12
+
+X
+
+> u∈PMDM (z)
+
+μB(u)KB(u, z ) = 12 μB(z) X
+
+> u∈PMDM (z)
+
+KB(z, u )= 12 μB(z)pB 
+
+> ↑
+
+(z),
+
+where reversibility of KB was used. The switch-flow from (z, ↑) is 
+
+12 μB(z)  pB 
+
+> ↓
+
+(z) − χm B(z) ,
+
+and the self-loop flow is 
+
+12 μB(z)χm B(z).
+
+The total incoming flow is therefore 
+
+12 μB(z)  pB 
+
+> ↑
+
+(z) + pB 
+
+> ↓
+
+(z) = 12 μB(z) = eμB(z, ↓).
+
+The upward-copy argument is identical after exchanging parents and children. Projection gives 
+
+eμB(z, ↓) + eμB(z, ↑) = μB(z).
+
+The leaf law follows from the corresponding base-chain leaf law. The sampler in Algorithm 4 also specializes to the momentum AOAR sampler when M = {1}.
+
+## F Experimental Setting and Supplementary Results 
+
+This section gives the full task definitions, data sources, backbone models, reward functions, root-start and leaf-start protocols, and hyperparameter grids used in our experiments. Across tasks, the reference model is denoted by πref and the masked-state verifier by bV (x, z ), following the notation in Section A. For hard-constraint tasks, the terminal reward τ (x, y ) is binary. For QM9 and DNA, we first define a real-valued terminal score R(y) and then use the corresponding Pass@95 indicator as the terminal reward when a binary reward is needed. Protein reports Success@1Å and motif RMSD, while its learned verifier uses the smoothed training target defined below. Unless otherwise stated, VGB uses terminal anchoring: at a complete leaf y, bV (x, y ) is replaced by the corresponding exact terminal reward or score. Experiments were run in an Ubuntu PyTorch environment on NVIDIA RTX PRO 6000 Blackwell 96GB and NVIDIA H200 141GB GPUs. 
+
+Common evaluation protocol. For root-start sampling, every method starts from the fully masked state ∅ and produces a completed sample under a fixed step-limit budget. For leaf-start repair, every method starts from the same set of low-reward or invalid completed leaves y0. All comparisons use the same reference model πref and the same task-specific terminal score/reward convention. In matched-budget root-start comparisons, B ON uses N independent full rollouts, while MDM-VGB variants use up to an n × N step budget before forward-only completion. 67 Adjusted NFE. Raw NFE counts realized reference-model forward calls. For tasks with learned verifiers, we additionally report FLOP-adjusted NFE to account for verifier scoring cost. Let Nbase 
+
+be the number of reference-model forward calls, Nverif the number of verifier evaluations, and Cbase 
+
+and Cverif the FLOPs of one base-model and verifier forward pass. We define 
+
+NFE adj = Nbase + Nverif 
+
+Cverif 
+
+Cbase 
+
+.
+
+Thus each verifier query is charged as its equivalent fraction of a base-model forward call. For task-provided exact checkers, this adjustment is not applied unless otherwise stated. 
+
+Pass@ α normalization. For tasks with continuous rewards, let R(y) denote the target task-specific score. To make success rates comparable across tasks, we convert the continuous score into a rare-event indicator using a fixed threshold from an independent B ASE calibration set. Specifically, for 
+
+α ∈ (0 , 1) , let qBase  
+
+> α
+
+(R) be the α-quantile of R(y) on this calibration set, where y ∼ πref . We define 
+
+Pass@ α(y) := 
+
+1{R(y) ≥ qBase  
+
+> α
+
+(R)}, if higher is better ,
+
+1{R(y) ≤ qBase 1−α (R)}, if lower is better .
+
+The reported Pass@95 metric corresponds to α = 0 .95 .
+
+F.1 Task Descriptions Dyck suffix-edit repair. The Dyck language is the canonical language of well-balanced brackets studied in formal-language theory [ 6 ]. It is simple enough to serve as a controlled toy problem, but it still requires hierarchical dependency tracking: for example, [()] is valid, whereas ([)] has the right local symbols in the wrong nesting order. We use this structure to illustrate the difference between prefix-tree backtracking and any-order re-masking. The terminal reward is binary: reward 1 means that all opening brackets are properly paired with closing brackets of the same type and in the correct nested order; reward 0 means that this well-balanced-bracket condition fails. Each repair example is initialized from the fixed corrupted leaf template 
+
+B((([(((([(((XXXXXXXX)))]))))])))E .
+
+Here B and E are special begin/end tokens. The prefix before the marked block is fixed and used as the prompt, while the X’s denote the initially corrupted span of length eight. We generate 10,000 corrupted leaves by sampling random bracket strings for this span and retaining only examples with reward 0. Thus every example starts from an invalid fully revealed leaf. In the main suffix-edit protocol, all bracket positions from the first corrupted token through the token immediately before E are editable. The suffix is not manually restored: if a sampler re-masks or changes a suffix token, it must also repair that token before the exact Dyck checker accepts the sequence. Equivalently, the reward is the exact bracket-validity checker implemented as membership in the accepted terminal set. The base model is a 12.9M-parameter BERT-style masked language model, and the process verifier is a 3.24M-parameter token-state Transformer. 
+
+Letter avoidance. Letter is a simple lexical positive-control task. The fixed task prompt is 
+
+Task prompt. 
+
+> Generate a one-sentence story without using the letter ‘e’:
+
+This is a lipogram-style constraint, where a text is deliberately written while avoiding a specified letter. The terminal reward is exact: 
+
+τ (x, y ) = 
+
+1.0, y is non-empty and contains no ‘e’ ,
+
+0.0, otherwise .
+
+All Letter experiments use the Qwen3-0.6B-diffusion-mdlm-v0.1 reference model [ 10 ]. For partial configurations, we use a heuristic process verifier that checks whether the revealed tokens currently 68 contain the forbidden character. The primary metric is the avoidance rate. We additionally report a Qwen3-32B [ 31 ] judge score on outputs satisfying the lexical constraint. The judge prompt below is used with the task prompt above and each candidate answer; the reported Ovl. score is the returned 
+
+overall field. 
+
+Qwen3-32B overall-score prompt: 
+
+> You are evaluating a candidate answer to a writing task. Score the candidate on four dimensions from 1 to 10, where 10 is best. Dimensions: 1. naturalness: Does the text read like fluent natural English? 2. coherence: Is it internally coherent as a one-sentence story? 3. semantic_plausibility: Does it make semantic sense rather than feeling like token salad or broken text? 4. overall: Overall quality as an answer to the task prompt. Use the task prompt as context when judging overall quality. Return ONLY a JSON object with integer fields naturalness, coherence, semantic_plausibility, overall.
+
+Sudoku. Sudoku is a structured constraint-satisfaction benchmark. Each puzzle is a flattened 9 × 9
+
+grid with fixed clues and editable empty cells. The output is a completed board. The terminal checker is exact: a board solves the puzzle if every row, column, and 3 × 3 box is a permutation of {1, . . . , 9}.The primary metric is exact solve rate. We also report the normalized mean violation count, shown as a percentage: 
+
+Viol( y) = 127 
+
+X 
+
+> U∈U
+
+(9 − | unique( yU )|) ,
+
+where U is the set of the 27 Sudoku units: 9 rows, 9 columns, and 9 boxes. Thus, for a fully filled board with fixed clues preserved, 
+
+Solve( y) = 1 ⇐⇒ Viol( y) = 0 .
+
+We use the Sudoku data provided by Kim et al. [13] , with 48,000 training puzzles and 2,000 test puzzles. Our base model is a 28.6M-parameter DiT-MDM, i.e., a masked discrete diffusion model [ 24 ] with a Diffusion Transformer backbone [ 21 ], trained on this data. For partial configurations, we use a heuristic process verifier that returns the indicator that no Sudoku constraint has yet been violated. 
+
+QM9 molecule generation. QM9 is a small-molecule generation benchmark over organic molecules with up to nine heavy atoms [ 22 ]. We use a split with 127,190 training molecules and 6,695 test molecules, and train a QM9 MDLM 92.4M base model with the MDLM objective using the UDLM-QM9 architecture. The terminal score RQM9 uses QED [ 4 ], a quantitative estimate of drug-likeness: 
+
+RQM9 (y) = 
+
+QED( y), y is a valid molecule ,
+
+0, y is invalid .
+
+Since higher QED is better, the terminal reward used for rare-success guidance and evaluation is 
+
+Pass@95 from the common definition above with R(y) = RQM9 (y). We also report mean QED over valid molecules, validity, and unique Pass@95 where appropriate. 
+
+DNA enhancer design. DNA is a regulatory-sequence design task. The reference model is D3LM [ 33 ], a DNA diffusion language model initialized from Nucleotide Transformer [ 8]. The terminal scorer is DeepSTARR [ 9], which predicts developmental and housekeeping enhancer activity from a 
+
+249 bp DNA sequence. The terminal score uses the developmental enhancer activity: 
+
+RDNA (y) = sDev (y).
+
+For verifier training, we use a smoothed target rather than the sparse Pass@95 indicator. Let 
+
+zDev (y) = clip 
+
+ sDev (y) − μDev 
+
+σDev 
+
+, −3, 3
+
+
+
+, ˜rtrain (y) = exp( ηz Dev (y)) .
+
+69 Here μDev and σDev are computed from base-model calibration samples, and we use η = 1 . This target is used only for process-verifier regression. Since higher developmental enhancer activity is better, the evaluation terminal reward is the Pass@95 indicator 1{sDev (y) ≥ qBase 0.95 (sDev )}.
+
+Protein motif scaffolding. Protein is a motif-scaffolding sequence-design task. The reference model is EvoDiff OADM 38M [ 1]. We use official EvoDiff motif-scaffolding task metadata whenever available: PDB code, motif ranges, fixed motif residues, scaffold length range, and generated motif positions. In our task, all reported Protein experiments use the 1YCR motif-scaffolding target. The generated sequence is folded with OmegaFold [ 30 ]. We compute motif Cα root-mean-square deviation (RMSD) against the reference motif: 
+
+rmotif (y) = RMSD Cα (Fold( y)M, PDB M) .
+
+Here M denotes the motif residue positions, Fold( y) is the OmegaFold-predicted structure, PDB M
+
+contains the reference motif Cα coordinates, and RMSD is computed after optimal rigid alignment. The hard success metric is Success@1Å (y) = 1{rmotif (y) ≤ 1.0Å}.
+
+For verifier training, we use a smoothed RMSD-derived target 
+
+τtrain (y) = exp 
+
+"
+
+−
+
+ rmotif (y)4.0Å
+
+2#
+
+,
+
+where rmotif (y) is the motif Cα RMSD. In implementation, the verifier regresses log τtrain (y) for numerical stability, and we exponentiate its output at inference time to obtain the positive value used by MDM-VGB. This verifier-training target is distinct from the reported Protein metrics: Success@1Å and mean motif RMSD. 
+
+F.2 Leaf-start repair protocol 
+
+For leaf-start repair, we choose bad but repairable leaves. This avoids turning the repair experiment into full regeneration. For the α-sweep in Figure 6, Pass@ α is defined by the same base-calibration rule as in the common evaluation protocol: higher-is-better scores use qBase  
+
+> α
+
+, while lower-is-better scores use qBase 1−α . Each starting group contains completed samples with Pass@95( y0) = 0 but 
+
+Pass@ α(y0) = 1 . Thus larger α selects easier near-miss leaves that are closer to the rare-success boundary. The main-text leaf-start table entries average over α ∈ { 60 , 65 , . . . , 90 }. Unless otherwise stated, the bad-leaf pools are summarized in Table 6. Table 6: Leaf-start bad-leaf pools for the α-sweep.                         
+
+> Task Bad-leaf pool QM9 y0valid, qBase
+> α(QED) ≤QED( y0)< q Base 0.95 (QED)
+> DNA qBase
+> α(RDNA )≤RDNA (y0)< q Base 0.95 (RDNA )
+> Protein qBase 0.05 (rmotif )< r motif (y0)≤qBase 1−α(rmotif )
+
+F.3 Verifier Architecture 
+
+We use task-specific process verifiers. Letter and Sudoku use heuristic process verifiers with no learned parameters, while Dyck, QM9, DNA, and Protein use learned lightweight Transformer verifiers. The learned verifiers are trained by regression to the task-specific targets described in the task descriptions above. • Dyck: a learned token-state Transformer process verifier ( 3.24 M parameters). • Letter: a heuristic process verifier that checks whether the revealed tokens currently contain the forbidden letter; it has no learned parameters. • Sudoku: a heuristic process verifier that checks whether the revealed entries already violate row, column, box, or fixed-clue constraints; it has no learned parameters. 70 • QM9: a learned token Transformer process verifier over SMILES tokens ( 3.24 M parameters). • DNA: a learned Transformer process verifier over D3LM tokens ( 0.97 M parameters). • Protein: a learned Transformer process verifier over amino-acid tokens with motif/editable/mask features ( 1.94 M parameters). We summarize the main inference hyperparameters in Table 7. 
+
+Task Length |V| Lf , L b K
+
+Dyck 34 8 (8 , 8) 8
+
+Letter 32 151 ,670 (8 , 8) 8
+
+Sudoku 89 11 (8 , 8) 8
+
+QM9 32 35 (8 , 32) 8
+
+DNA 48 4107 (8 , 8) 32 
+
+Protein (1YCR) 73 20 (8 , 8) 20 
+
+Table 7: Main inference hyperparameters. Lf and Lb are the numbers of shortlisted forward and backward coordinates or blocks. K is the number of token candidates per forward coordinate. 
+
+F.4 Additional Ablations 
+
+The main text focuses on geometric re-masking and verifier amortization. Here we collect additional ablations on shortlisting and the block size. 
+
+Shortlisting budget. We ablate the local shortlisting budget for MDM-VGB-M OMENTUM by increasing Lf = Lb while holding the task-specific token budget K fixed. On QM9, increasing the shortlist from 1 to 4 substantially improves Pass@95 while also reducing realized search cost, and larger budgets give smaller additional gains. On DNA, Pass@95 peaks around Lf = Lb = 4 ,whereas Lf = Lb = 8 substantially increases adjusted NFE without improving quality. Thus the gains are not explained by simply evaluating an arbitrarily large local neighborhood; a moderate shortlist is sufficient for the verifier to expose useful moves. Lf = Lb            
+
+> 250
+> 300
+> 350
+> Adjusted NFE ↓
+> Lf=Lb
+> 1000
+> 1800
+> 2600
+> Adjusted NFE ↓
+> 1248
+> Lf=Lb
+> 40
+> 60
+> 80
+> Pass@95 (%) ↑
+> 248
+> Lf=Lb
+> 88
+> 92
+> 96
+> Pass@95 (%) ↑
+> QM9 DNA
+> MDM-VGB-Momentum
+
+Figure 16: Shortlisting-budget ablation for MDM-VGB-M OMENTUM on QM9 and DNA. Increasing 
+
+Lf = Lb helps up to a moderate budget, after which quality saturates while adjusted NFE can continue to grow. 71 Block size / MDM precision. We next study how MDM block size affects the finite-budget reward– compute tradeoff for MDM-VGB-M OMENTUM . Singleton AOAR updates give the finest local control, while larger MDM blocks can reduce the number of sequential decisions by revealing or re-masking multiple coordinates at once. This creates a precision–parallelism tradeoff: moderate block sizes may amortize verifier and proposal costs, but overly coarse blocks can make the local edit decisions too blunt. 1 2 4 6   
+
+> MDM block size | B|
+> 200
+> 300
+> 400
+> 500
+> Adjusted NFE ↓
+> 1246
+> MDM block size | B|
+> 50
+> 60
+> 70
+> 80
+> 90
+> Pass@95 (%) ↑
+> MDM-VGB-Momentum
+
+Figure 17: QM9 root-start MDM-VGB-M OMENTUM block-size ablation under a maximum budget corresponding to N = 16 , with Lf = Lb = 4 , K = 4 , and λ = 4 . The left panel reports adjusted NFE, including verifier FLOPs, and the right panel reports Pass@95. Moderate block sizes improve the compute–quality tradeoff, whereas overly large blocks increase cost and degrade reward satisfaction. 72
