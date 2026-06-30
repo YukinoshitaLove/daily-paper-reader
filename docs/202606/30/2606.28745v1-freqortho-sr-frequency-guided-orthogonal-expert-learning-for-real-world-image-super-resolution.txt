@@ -1,0 +1,606 @@
+Title: FreqOrtho-SR: Frequency-Guided Orthogonal Expert Learning for Real-World Image Super-Resolution
+
+URL Source: https://arxiv.org/pdf/2606.28745v1
+
+Published Time: Tue, 30 Jun 2026 00:33:10 GMT
+
+Number of Pages: 37
+
+Markdown Content:
+# FreqOrtho-SR: Frequency-Guided Orthogonal Expert Learning for Real-World Image Super-Resolution 
+
+Minh Son Hoang ⋆, Dinh Phu Tran ⋆, Quyen Nguyen Duc, Dam Hoang Phuong, and Daeyoung Kim ⋆⋆ 
+
+School of Computing, KAIST, Republic of Korea 
+
+{sonhm2910,phutx2000,nguyenducquyen2311,hoangphuong1211,kimd}@kaist.ac.kr 
+
+Abstract. Diffusion prior-based methods have shown impressive results in real-world image super-resolution (ISR), yet two key challenges per-sist: balancing pixel-level fidelity with semantic quality, and adapting to diverse degradations. Existing dual-branch approaches freeze the pixel module during semantic training, but the semantic branch can still ex-pand capacity within the pixel subspace, precluding genuine perceptual improvement. Moreover, using a single static adapter cannot generalize across heterogeneous real-world corruptions. To address both issues, we propose FreqOrtho-SR, which comprises: Freq uency-guided Mixture of LoRA Experts (FreqMoE), it routes inputs to specialized experts via a non-parametric FFT-based degradation-feature extractor that encodes frequency-domain signatures, enabling stable and interpretable special-ization across corruption types; and Ortho gonal Gradient Projection (OGP), which reframes the dual-objective optimization as a subspace-constrained problem: by extracting the pixel-fidelity subspace via SVD on combined expert weight deltas and projecting semantic gradients onto its null space, OGP guarantees orthogonality between the two objectives, enabling genuinely complementary learning without mutual interference. Experiments show that FreqOrtho-SR achieves competitive overall per-formance and a strong fidelity-perception trade-off across multiple bench-marks with efficient single-step inference. The source code of our method can be found at sonhm3029/FreqOrtho-SR .
+
+Keywords: Image Super-Resolution · Frequency-guided Mixture of Ex-perts · Orthogonal Learning · Diffusion Models 
+
+## 1 Introduction 
+
+Image super-resolution (ISR) [53, 62] aims to produce high-resolution (HR) im-ages from degraded low-resolution (LR) inputs. A main challenge in ISR is the  
+
+> ⋆
+
+Equal contribution.  
+
+> ⋆⋆
+
+Corresponding author.   
+
+> arXiv:2606.28745v1 [cs.CV] 27 Jun 2026 2M. S. Hoang, D. P. Tran et al.
+> Fig. 1: Visual and quantitative comparison on DRealSR. Values below each patch denote PSNR ↑/LPIPS ↓, with best in red. Our FreqOrtho-SR achieves the best fidelity and perceptual quality among one-step diffusion methods.
+
+inherent trade-off between perception and distortion [2]. While pixel-level regres-sion methods using L1 or L2 losses achieve high fidelity metrics ( e.g ., PSNR, SSIM), their results are perceptually unsatisfying and overly smooth [30]. Dif-ferently, generative methods create visually appealing textures but also intro-duce artifacts that compromise content fidelity [33]. The challenge becomes even more complex in real-world ISR, which must handle diverse, unknown degrada-tions [59, 76]. Early methods [9, 12, 26, 28, 54, 79] employed deep neural networks trained with pixel-level losses, but struggled with real-world degradations, producing outputs that lacked perceptual realism. GAN-based approaches [30,33,34,59,60] significantly enhanced visual realism by aligning outputs with natural image distributions. However, their limited generative capacity and training instability often lead to unnatural artifacts. Recent text-to-image diffusion models, particu-larly Stable Diffusion (SD), have transformed real-world ISR [35,51,58,67,69–71] by providing powerful generative prior knowledge from vast image datasets and yielding more realistic SR outputs than GAN-based methods. However, the it-erative sampling process inherent to dynamic models typically requires multiple sequential steps, imposing significant latency that hinders practical deployment. Recent efforts [19,51,61,66,70] address these limitations via one-step diffusion models, achieved either by distilling multi-step diffusion models or fine-tuning pre-trained diffusion models with Low-Rank Adaptation (LoRA). OSEDiff [66] improves the process by inputting LR latent features and uses Variational Score Distillation to condense multi-step diffusion into a single step via LoRA fine-tuning. TVT [70] addresses fine-structure preservation by transferring 8 × down-sampled VAE of SD to a variant that supports 4 × downsampling. PiSA-SR [51] pushes the field forward by using a dual-LoRA framework that decouples pixel-level regression from semantic enhancement, better improving both objectives. However, these methods still face two main challenges. First, many mono-lithic architectures apply a uniform balance of fidelity and perceptual quality across different degradation types, failing to adapt to complex scenarios where conflicting restoration needs exist. Second, jointly optimizing pixel-level fidelity FreqOrtho-SR 3
+
+and semantic-level enhancement tends to entangle the two objectives, making it difficult to balance faithful structure preservation and perceptual detail synthe-sis. PiSA-SR [51] addresses this issue by decoupling them into two LoRA modules and freezing the pixel branch during semantic training. However, we argue that this passive decoupling is still insufficient because it does not explicitly control the geometry of semantic updates. Even with the pixel weights frozen, the se-mantic branch can receive update components along the pixel-fidelity subspace and learn features already covered by the pixel branch, leading to redundant subspace overlap. This redundancy hampers the model’s ability to fully utilize its capacity for genuine perceptual enhancement. To mitigate these limitations, we propose FreqOrtho-SR, a novel framework for real-world SR with two key innovations: 1) Frequency-Guided Mixture of Ex-perts (FreqMoE) employs multiple LoRA experts tailored to specific degradation patterns. Using a lightweight Fast Fourier Transform (FFT) based [8] degrada-tion feature extractor to guide a gating network that routes inputs to appro-priate experts, enabling stable and interpretable specialization. 2) Orthogonal Gradient Projection (OGP) to mitigate pixel-subspace gradient interference in multi-objective optimization. Inspired by continual learning techniques, we view fidelity preservation and perceptual enhancement as sequential tasks requiring orthogonality. By projecting away semantic-gradient components that lie in the pixel-level subspace, OGP enables the semantic LoRA to learn in an independent subspace, resulting in significantly improved perceptual quality with minimal fi-delity trade-off. Our main contributions can be summarized as follows: 1. We propose FreqOrtho-SR, a novel method for degradation-adaptive op-timization that introduces a frequency-aware gating mechanism based on explicit FFT-based degradation signatures. This enables stable and inter-pretable expert specialization, where different experts operate at distinct fidelity-perceptual levels tailored to specific degradation characteristics. 2. We introduce orthogonal gradient projection from continual learning to real-world ISR task, reducing overlap between pixel and semantic subspaces and enabling the semantic LoRA to learn more effectively in an independent subspace. 3. Our extensive experiments show that FreqOrtho-SR achieves competitive overall performance, with best or second-best results on several key image quality metrics across multiple datasets. 
+
+## 2 Related Work 
+
+2.1 Diffusion Model-based Super-Resolution 
+
+Latent Diffusion Models (LDMs) [47] extend DDPMs [21] by performing denois-ing in a compressed latent space, yielding the Stable Diffusion (SD) model whose generative priors are now widely used for real-world SR. 4 M. S. Hoang, D. P. Tran et al. 
+
+Multi-step methods employ these priors at 20–50 denoising steps. StableSR [58] injects LR features into a frozen SD model via spatial feature transform layers; DiffBIR [35] first removes degradations and then enhances details with ControlNet [77]; PASD [69] adds pixel-aware cross-attention for structure guid-ance; and SeeSR [67] steers generation with degradation-aware text prompts. Despite strong visual quality, iterative sampling remains a practical bottleneck. One-step alternatives address this cost via consistency distillation (SinSR [61]), residual-shifting Markov chains (ResShift [74]), Variational Score Distillation with LoRA [22] tuning (OSEDiff [66]), adversarial diffusion distillation (AddSR [52]), target score distillation (TSD-SR [13]), diffusion-inversion noise predic-tion (InvSR [73]), VAE transfer from 8× to 4× downsampling (TVT [70]), dual-LoRA decoupling of pixel regression and semantic enhancement (PiSA-SR [51]), and CLIP-guided mixture-of-ranks routing (MoR-DASR [19]). Unlike MoR-DASR, which routes via a frozen CLIP encoder with predefined prompt pairs, our FreqMoE employs non-parametric FFT-based degradation signatures for interpretable routing without external pretrained models. However, all these methods face a fundamental contradiction between pixel-level fidelity and semantic-level enhancement. Monolithic architectures ( e.g ., TVT [70], PiSA-SR [51], OSEDiff [66]) lack the flexibility to adapt to diverse real-world degradations, while dual-branch designs ( e.g ., PiSA-SR [51]) can suffer from subspace overlap between pixel- and semantic-level objectives. FreqOrtho-SR addresses both issues via frequency-guided expert specialization and orthog-onal constraint theory, transforming the dual-branch architecture from a rigid structure into a dynamic, mathematically-constrained framework. 
+
+2.2 Frequency Analysis in Image Processing 
+
+Frequency domain analysis has long been a fundamental aspect of image process-ing [7, 31, 43, 46, 54, 55]. Our insight is that different types of degradation exhibit unique frequency patterns. For example, blur suppresses high frequencies [29,42], Gaussian noise elevates all frequencies uniformly [4,17], JPEG compression intro-duces artifacts in 8 ×8 blocks that are visible in the frequency spectrum [39], and downsampling creates distinct aliasing patterns [3]. These observations have been utilized for various tasks such as blur detection [16,56], noise estimation [37,45], and quality assessment [41, 50]. Recent methods have incorporated frequency information through spectral losses [23] and frequency-domain adversarial train-ing [14]. However, frequency features have not been systematically applied to routing in mixture of experts (MoE) architectures, which remains a significant challenge for effective routing. Traditional gating based on spatial features may suffer from training instability and load imbalance [15,49], leading some experts to dominate routing while others remain underutilized. Additionally, learned spatial representations may struggle to capture underlying degradation patterns without explicit structural priors [44, 80]. We address this gap by integrating explicit frequency-based degradation features into the gating mechanism. FreqOrtho-SR 5 
+
+> Fig. 2: Overall architecture of our FreqOrtho-SR. The FreqMoE and Semantic LoRA modules are optimized for pixel-level and semantic-level enhancements, respectively. FreqMoE utilizes the power of Mixture of LoRA Experts to adaptively handle diverse degradation types via FFT-based gating, while Orthogonal Gradient Projection ensures the semantic LoRA learns in a subspace orthogonal to the pixel-level representations, reducing subspace interference between fidelity and perceptual objectives.
+
+2.3 Continual Learning and Gradient Projection 
+
+Continual learning aims to acquire sequential tasks without forgetting previously acquired knowledge [18,40]. One prominent method is Gradient Projection Mem-ory (GPM) [48], which preserves task-specific knowledge by constraining gradient updates via subspace projection. After learning task A, GPM extracts impor-tant parameter directions using Singular Value Decomposition (SVD) [48] and projects the gradients of subsequent tasks into the null space of this subspace to prevent interference [6,75]. Related methods include Orthogonal Weights Modifi-cation [75] and Gradient Episodic Memory [38], both of which constrain gradient updates to preserve prior knowledge. While these methods are widely used in classification [6, 48] and reinforcement learning [65], they have not yet been ex-plored in ISR. Therefore, we propose orthogonal projection to real-world ISR, treating pixel-level fidelity and semantic-level enhancement as sequential learn-ing tasks. By extracting pixel-level LoRA subspaces via SVD and projecting semantic gradients into the null space, we remove pixel-subspace gradient com-ponents that would otherwise drive redundant semantic updates. This enables semantic LoRA to learn in an independent subspace, thereby improving percep-tual quality while maintaining competitive fidelity. 
+
+## 3 Methodology 
+
+This section first formulates the SD-based SR as a residual learning model. It then introduces our proposed FreqOrtho-SR, a novel framework designed for true subspace disentanglement and adaptive restoration in real-world ISR, aiming to achieve a better balance between fidelity and perceptual quality. In this study, we denote the low-resolution (LR) and high-resolution (HR) images as  xL and 
+
+xH . Their corresponding latent codes are represented as  zL = E(xL) and  zH =
+
+E(xH ). We can approximate that  xL ≈ D (zL) and  xH ≈ D (zH ), where  E and  D
+
+are the encoder and decoder of a pre-trained Variational Autoencoder (VAE). 6 M. S. Hoang, D. P. Tran et al. 
+
+3.1 Model Formulation 
+
+Multi-step DM-based SR methods [35,58,67] perform T -step denoising to trans-form Gaussian noise zT into the HR latent zH , conditioned on xL. This iterative process is computationally expensive and causes instability from random noise sampling. In this work, we adopt a one-step approach that starts directly from 
+
+zL and leverages residual learning scheme: zH = zL − ϵθ (zL), where ϵθ is the SD UNet parameterized by θ, and the noise schedule coefficients are absorbed into ϵθ following [51, 66]. This forces the network to learn the high-frequency difference between zL and zH , accelerating training convergence. Following the dual-LoRA paradigm [51], we introduce two sets of LoRA [22] modules upon the frozen SD weights θsd : a pixel-level LoRA ∆θ pix trained with 
+
+L2 loss for degradation removal, and a semantic-level LoRA ∆θ sem trained with 
+
+L2, Llpips [78], and Lcsd [51, 72] losses for detail and semantic enhancement. The pixel-level LoRA is optimized first, then the semantic-level LoRA is trained while ∆θ pix remains frozen as follows: 
+
+zpix H = zL − ϵθpix (zL), θpix = {θsd , ∆θ pix }, (1) 
+
+zsem H = zL − ϵθf ull (zL), θf ull = {θsd , ∆θ pix , ∆θ sem }. (2) The decoded outputs ˆxpix H = D(zpix H ) and ˆxsem H = D(zsem H ) are used for loss computation in their respective phases. Our overall framework is illustrated in Fig. 2, which extends dual-LoRA paradigm in two ways. First, we replace the single pixel-level LoRA ∆θ pix 
+
+with a robust Frequency-guided Mixture of LoRA Experts (Sec. 3.2), enabling degradation-adaptive restoration rather than applying a static uniform approach. Second, beyond simply freezing ∆θ pix during semantic training, we additionally employ Orthogonal Gradient Projection (Sec. 3.3) to constrain semantic gradi-ents to the null space of the pixel-level subspace, providing a mathematically stronger guarantee against fidelity degradation. 
+
+3.2 Frequency-guided Mixture of LoRA Experts 
+
+Recent DM-based methods [51, 66] employ a single LoRA adapter for pixel-level restoration, applying a uniform strategy regardless of degradation type. Since real-world images exhibit diverse, mixed degradations requiring distinct frequency-domain restoration behaviors (Fig. 3a) [59, 67], a single LoRA lacks the capacity to specialize across such heterogeneous patterns. To address this challenge, we replace the monolithic pixel-level LoRA ∆θ pix with a Frequency-guided Mixture of LoRA Experts (FreqMoE; Fig. 3b). Specifically, each target layer in the UNet now contains N parallel LoRA expert pairs {(Ai, Bi)}Ni=1 ,where Ai ∈ Rr×din and Bi ∈ Rdout ×r are the low-rank down- and up-projection matrices with rank r, respectively. A gating network G routes each input to the top-k most suitable experts using both local spatial features from the layer input and global frequency-domain degradation features extracted from xL. The FreqOrtho-SR 7  
+
+> (a) (b)
+> Fig. 3: (a) FFT magnitude spectra (log scale) of LR images under different degrada-tions. Blur suppresses high-frequency energy (dim outer ring), noise raises it uniformly (bright outer ring), and JPEG introduces periodic block artifacts (grid pattern). These signatures enable our non-parametric extractor to reliably identify degradation types. (b) Structure of the FreqMoE module which routes inputs to specialized LoRA experts based on frequency-domain degradation features.
+
+FreqMoE output for a given layer is represented as follows: 
+
+∆hpix = X
+
+> i∈Top-k(ℓ)
+
+gi(x, f ) · BiAix, (3) where x is the layer input, f ∈ Rdf is the degradation feature vector extracted from xL, ℓ are the gating logits, and gi(x, f ) is the routing weight for expert 
+
+i among the selected top-k experts. This sparse routing reduces computational cost while enabling complementary experts to collaborate when beneficial. Ab-lations on the number of experts, top-k routing, and expert routing behavior are provided in Sec. 11 of the supplementary materials .
+
+Degradation feature extraction. We design a lightweight, non-parametric feature extractor that captures degradation signatures from the LR input xL
+
+in the frequency domain. Real-world LR images are typically corrupted by a composition of multiple degradation types. Following the second-order degrada-tion model of RealESRGAN [59], which cascades blur, resize, noise, and JPEG compression in two sequential rounds, each corruption leaves a characteristic fingerprint in the frequency spectrum (Fig. 3a): blur suppresses high-frequency content [29], noise elevates energy uniformly across frequencies [4], JPEG com-pression introduces periodic artifacts at 8×8 block boundaries [39], and resize operations produce aliasing patterns visible in the radial energy distribution [3]. Given an input image xL ∈ RC×H×W , we first convert it to a grayscale image 
+
+xg and compute its centered 2D FFT magnitude spectrum M = |F (xg )|, where 
+
+F is the shift-centered 2D FFT magnitude operator. The spectrum is divided into 
+
+K concentric radial bands {Rk}Kk=1 from the center (low frequency) to the edges (high frequency), where each band spans the radial range [( k−1) ρ/K, kρ/K )
+
+and ρ is the maximum radius. The normalized energy for each band is: 
+
+¯Mk = 1
+
+|Rk|
+
+X
+
+> (u,v )∈Rk
+
+M(u, v ), ek = ¯Mk
+
+PKk′=1 ¯Mk′
+
+, (4) 8 M. S. Hoang, D. P. Tran et al. 
+
+where |Rk| is the pixel count of band Rk. This area-normalized mean prevents larger outer bands from dominating, yielding a probability distribution e =[e1, . . . , e K ]. We further compute three scalar degradation indicators: 1. Blur score : sblur = e1/(eK +ϵ), measuring the ratio of low- to high-frequency energy. A high score indicates blur-typical low-frequency dominance. 2. JPEG blocking score : sjpeg = ¯ gblock /(¯ gall + ϵ), where ¯gblock is the mean abso-lute gradient at 8×8 block boundaries and ¯gall is the overall mean gradient. Elevated boundary gradients signal JPEG compression artifacts. 3. Noise score : snoise = mean (|L ∗ xL|), where L is the 3×3 Laplacian kernel applied via depthwise convolution. A high Laplacian response indicates the presence of high-frequency noise. The final feature vector f = [ e; sblur ; sjpeg ; snoise ] ∈ Rdf (df = K+3 ) concate-nates the band energies with the three scalar scores. While the three scalar scores target the dominant degradation types, the radial band energies e implicitly cap-ture other corruptions such as resize-induced aliasing, which manifests as char-acteristic shifts in the radial energy distribution. Together, f provides a compact yet comprehensive degradation descriptor. This extractor is non-parametric and computed with gradients disabled, achieving negligible overhead. The effect of the number of frequency bands K is analyzed in Sec. 11 of the supplementary materials .
+
+Frequency-modulated gating network. The gating network G combines spa-tial information from the layer activations with the global degradation features 
+
+f to produce routing weights. Given the layer input x ∈ Rdin and degradation features f ∈ Rdf , the gating logits are computed as: 
+
+ℓ = Wg x + ϕ(f ), (5) where Wg ∈ RN ×din is the base gate projection and ϕ : Rdf → RN is a small MLP consisting of two linear layers with a ReLU activation: ϕ(f ) =
+
+W2 ReLU (W1f ), with W1 ∈ R2df ×df and W2 ∈ RN ×2df .This additive design allows ϕ(f ) to act as a degradation-dependent bias that shifts the base routing logits. Since f is computed once per image and shared across all spatial positions and layers, the frequency bias provides a consis-tent global routing signal. Experts are not pre-assigned to specific degradation types; instead, they emerge through end-to-end training guided by the frequency features. For instance, experts may specialize in high-frequency recovery (acti-vated for blurred inputs) or denoising (activated for noisy inputs), while mixed-degradation images activate multiple experts via top-k routing. For routing, we select the top-k experts per token. The gating weights are obtained by applying softmax over the selected logits: 
+
+gi(x, f ) = 
+
+( exp( ℓi)P   
+
+> j∈Top-kexp( ℓj)
+
+, if i ∈ Top-k(ℓ)0, otherwise  (6) FreqOrtho-SR 9
+
+Top-k(ℓ) returns the indices of k largest logits. This sparse routing lowers com-putation over dense mixtures while still enabling complementary expert collab-oration when useful. For stable training, we initialize Wg with small random values ( σ=0 .01 ) and set the output layer of ϕ to zero, so the gating starts from near-uniform routing and gradually learns degradation-specific specialization. To address expert collapse in MoE frameworks [11, 15, 36], we employ the Load Balancing Loss (LBL) [15], which encourages uniform expert utilization by linking the frequency of expert selection to the routing weights each expert receives. Let  fi be the fraction of tokens directed to expert  i, Pi denote the average routing probability for expert  i, and  N be the total number of experts. The LBL is defined as: Llbl = α · N · PNi=1 fi · Pi.
+
+3.3 Orthogonal Gradient Projection Problem formulation. A core challenge in decoupled real-world ISR is ensur-ing that distinct adapters capture truly independent features. We have identi-fied a fundamental phenomenon in subspace interference: when a semantic-level adapter is trained on top of an existing fidelity-level module, the optimization process often collapses into the subspace already covered by the fidelity weights. Formally, consider the joint inference state  θf ull = {θsd , ∆θ pix , ∆θ sem }. While 
+
+∆θ pix  is optimized for structural alignment, the subsequent optimization of 
+
+∆θ sem  lacks a mechanism to prevent it from re-learning structural features that are already encoded in  ∆θ pix . If the update directions of the semantic LoRA are not constrained to be orthogonal to the fidelity subspace, the model suffers from representational redundancy. This redundancy wastes the model’s limited rank capacity on repetitive structural information instead of capturing novel percep-tual textures. This prevents the model from reaching the optimal or near-optimal boundary of the perception-fidelity trade-off, irrespective of the parameter bud-get. To address this issue, we propose explicitly isolating these objectives by projecting semantic updates into the null space of the fidelity manifold. 
+
+Subspace extraction via SVD. After the first phase, we extract the pixel-level subspace for each layer using Singular Value Decomposition (SVD) [48]. For a layer with weight  W , the pixel LoRA introduces a change ∆W pix = Bpix Apix ∈
+
+Rdout ×din . In a MoE framework with  N experts, we concatenate all expert weight changes to capture the union of their subspaces: 
+
+∆W all = [ ∆W 1 | ∆W 2 | · · · | ∆W N ] ∈ Rdout ×(N ·din )
+
+We then perform SVD on  ∆W all = U ΣV T and retain the top  ˜k singular vectors that account for 95% of the energy: 
+
+˜k = arg min ˜k
+
+( P˜ki=1 σ2
+
+> i
+
+P 
+
+> j
+
+σ2
+
+> j
+
+≥ 0.95 
+
+)
+
+The truncated left singular matrix  U˜k ∈ Rdout ×˜k defines the essential pixel sub-space preserved for Phase 2. This SVD is performed only once offline between 10 M. S. Hoang, D. P. Tran et al. 
+
+training phases, not per iteration, and operates on relatively small matrices. On our hardware, the entire SVD extraction across all layers completes in under 5 seconds, introducing negligible overhead relative to the total training time. Ablations on the SVD energy threshold are provided in Sec. 11 of the supple-mentary materials .
+
+Gradient projection during semantic LoRA training. During the second phase, we register backward hooks on all semantic LoRA B weight matrices. When gradients are computed, the hook projects them into the null space of U˜k:
+
+Gortho = G − U˜k(U T 
+
+> ˜k
+
+G), (7) where G ∈ Rdout ×r is the original gradient of the LoRA B weight. Since U˜k
+
+has orthonormal columns ( U T 
+
+> ˜k
+
+U˜k = I), it follows that U T 
+
+> ˜k
+
+Gortho = 0 , ensuring that the semantic gradient has zero component along the pixel-level subspace directions and removing pixel-subspace gradient interference. As a result, the semantic LoRA is guided to learn in a subspace independent of the pixel-level representations, enabling more effective perceptual enhancement. The projection is computationally efficient with negligible overhead. The projection target choice is further justified and ablated in Sec. 11 of the supplementary materials .
+
+3.4 Training Strategy 
+
+The loss design in both phases builds upon the combination of L2, Llpips , and 
+
+Lcsd losses, which has been shown effective for balancing pixel-level fidelity and semantic enhancement in diffusion-based SR [51,66]. We further use an interme-diate SVD extraction step to enable orthogonal gradient projection. 
+
+Phase 1 - FreqMoE Training. In the first phase, we train the FreqMoE module using the L2 loss to measure pixel-level fidelity between the predicted HQ image and ground truth, combined with the load balancing loss Llbl (Sec. 3.2) to encourage balanced expert utilization. All FreqMoE parameters ∆θ pix are updated in this phase while the pre-trained SD parameters (θsd ) remain frozen. 
+
+SVD-based subspace extraction. Between the two training phases, we extract the pixel-level subspace from the learned FreqMoE weights via SVD as described in Sec. 3.3. The resulting orthogonal bases U˜k are stored and used to construct the projection operators for Phase 2. 
+
+Phase 2 - Semantic LoRA Training with OGP. In this phase, we train the semantic-level LoRA {∆θ sem } while keeping both the pre-trained SD θsd and the pixel-level FreqMoE (∆θ pix ) frozen. The training objective combines three complementary losses: L2 loss to maintain pixel-level consistency, Llpips loss to align high-level features with a pre-trained VGG for perceptual quality, and Lcsd 
+
+loss to leverage semantic priors from the pre-trained SD for detail enhancement. Detailed loss configurations are provided in Sec. 6 of the supplementary ma-terials . Critically, during backpropagation, we employ the orthogonal gradient projection (Sec. 3.3) to all gradients flowing into the semantic LoRA B matrices, FreqOrtho-SR 11 
+
+ensuring the semantic LoRA learns in a subspace orthogonal to the pixel-level representations. 
+
+Inference. In the default setting, both the FreqMoE and semantic LoRA are active, and the SR output is produced in a single forward pass via zH =
+
+zL − ϵθf ull (zL). Our dual-LoRA design also supports an adjustable mode by introducing pixel-level and semantic-level guidance scales λpix and λsem :
+
+ϵθ (zL) = λpix ϵθpix (zL) + λsem 
+
+ ϵθf ull (zL) − ϵθpix (zL), (8) where ϵθpix (zL) is the output with only the FreqMoE active, and ϵθf ull (zL) −
+
+ϵθpix (zL) isolates the semantic-level contribution. Setting λpix =λsem =1 recovers the default single-pass mode. This adjustable mode requires two forward passes but enables controllable fidelity-perception trade-off without re-training. 
+
+## 4 Experiments 
+
+4.1 Experimental Settings Training settings. We train FreqOrtho-SR using the SD 2.1-base [47] for the 
+
+×4 SR task. A pixel-level FreqMoE and semantic LoRA modules are applied to the weights of all convolutional and MLP layers, both initialized using a Gaussian distribution with a rank of 4. The FreqMoE uses N =4 experts with top-
+
+k=2 routing, and the frequency band number is set to K=4 (df =7 ). Following recent methods [19, 51, 66, 70], we use LSDIR [32] and the first 10K images from FFHQ [24] dataset as training data. We generate paired training data using RealESRGAN’s degradation pipeline [59]. The batch size and patch size are set to 16 and 512 ×512. We use the AdamW optimizer [27] with a learning rate of 5e-5. We train Phase 1 and Phase 2 for 4K and 26K iterations, respectively. 
+
+Compared methods. We compare FreqOrtho-SR with several recent one-step DM-based methods: AddSR [52], SinSR [61], OSEDiff [66], MoR-DASR [19], PiSA-SR [51], and TVT [70]. Additional comparisons with GAN-based methods (BSRGAN [76], RealESRGAN [59], LDL [33]) and multi-step DM-based methods (DiffBIR [35], PASD [69], SeeSR [67]) are provided in Sec. 7 and Sec. 8 of the 
+
+supplementary materials , respectively. All comparative results are obtained from officially released codes. 
+
+Test datasets and metrics. Following prior work [19, 51], we test on both synthetic and real-world data. Synthetic test samples are obtained by applying RealESRGAN’s degradation pipeline [59] to DIV2K dataset [1]. Real-world data are center-cropped from the RealSR [5] and DRealSR [64] datasets. To measure fidelity, we use PSNR and SSIM [63], computed on the Y channel in YCbCr color space. We also evaluate perceptual quality using LPIPS [78] and DISTS [10], both computed in RGB space. FID [20] is used to evaluate the distribution similarity between GT and SR images. For image quality assessment without reference GT, we use NIQE [41], CLIPIQA [57], MUSIQ [25], and MANIQA [68]. 12 M. S. Hoang, D. P. Tran et al. 
+
+Table 1: Quantitative comparison among the state-of-the-art one-step DM-based SR methods on synthetic and real-world test datasets. The best and the second-best results are highlighted in red and blue, respectively. “-” indicates metrics not reported in the original paper due to unavailable code.                                                                                                                                                                                                        
+
+> Datasets Methods PSNR ↑SSIM ↑LPIPS ↓DISTS ↓FID ↓NIQE ↓CLIPIQA ↑MUSIQ ↑MANIQA ↑
+> RealSR AddSR 23.12 0.6550 0.3090 0.2703 154.14 6.66 0.5520 67.14 0.4880 SinSR 26.30 0.7354 0.3212 0.2346 137.05 6.31 0.6204 60.41 0.5389 OSEDiff 25.15 0.7341 0.2921 0.2128 123.50 5.65 0.6693 69.09 0.6339 MoR-DASR 25.32 0.7280 0.2910 ---0.6910 69.78 0.512 PiSA-SR 25.50 0.7417 0.2672 0.2044 124.09 5.50 0.6702 70.15 0.6560 TVT 25.81 0.7596 0.2587 0.2061 109.93 5.92 0.6882 69.89 0.6228 FreqOrtho-SR 26.27 0.7481 0.2537 0.1951 108.91 5.32 0.6630 69.39 0.6586 DRealSR AddSR 26.71 0.7380 0.3210 0.2631 164.79 7.72 0.5930 62.13 0.4580 SinSR 28.41 0.7495 0.3741 0.2488 177.05 7.02 0.6367 55.34 0.4898 OSEDiff 27.92 0.7835 0.2968 0.2165 135.29 6.49 0.6963 64.65 0.5899 MoR-DASR 28.37 0.7760 0.3070 ---0.7170 65.94 0.5090 PiSA-SR 28.31 0.7804 0.2960 0.2169 130.61 6.20 0.6970 66.11 0.6156 TVT 28.27 0.7899 0.2900 0.2205 134.19 7.02 0.7220 65.56 0.5783 FreqOrtho-SR 29.08 0.7911 0.2799 0.2110 130.85 6.29 0.6879 65.89 0.6182 DIV2K AddSR 23.26 0.5900 0.3620 0.2344 35.03 5.82 0.5730 63.39 0.4050 SinSR 24.43 0.6012 0.3262 0.2066 35.45 6.02 0.6499 62.80 0.5395 OSEDiff 23.72 0.6108 0.2941 0.1976 26.32 4.71 0.6683 67.97 0.6148 MoR-DASR 24.01 0.6060 0.2890 ---0.6810 68.09 0.4750 PiSA-SR 23.87 0.6058 0.2823 0.1934 25.07 4.55 0.6927 69.68 0.6400 TVT 24.23 0.6292 0.2773 0.1860 24.78 5.60 0.6986 68.67 0.6037 FreqOrtho-SR 24.35 0.6189 0.2748 0.1889 23.54 4.63 0.6702 68.67 0.6355
+
+4.2 Comparisons with State-of-the-Art Methods Quantitative results. Table 1 compares the performance of our FreqOrtho-SR with SOTA one-step DM-based SR methods across both synthetic and real-world test datasets. From this comparison, we can make the following observations: 
+
+– First, our method demonstrates clear advantages over competing methods in full-reference fidelity metrics, such as PSNR and SSIM, as well as in percep-tual quality metrics including LPIPS and DISTS. Notably, these advantages are especially evident on the two real-world datasets, DRealSR and RealSR. 
+
+– Second, FreqOrtho-SR consistently performs well on non-reference metrics like NIQE and MANIQA, which are widely recognized for evaluating real-world ISR. Although PiSA-SR surpasses us on one non-reference metric (MUSIQ), our performance on this metric remains comparable. This is sat-isfactory given that we excel on most of the metrics listed in Table 1. Notably, FreqOrtho-SR manages to achieve competitive results on both fidelity and perceptual quality metrics, which is a significant challenge in real-world ISR. This is achieved through our proposed components: Frequency-guided Mixture of LoRA Experts and orthogonal gradient projection, in a two-phase training setup that mimics a sequential task setup. Generally, there is no single method that consistently improves performance at all metrics; results vary substantially FreqOrtho-SR 13 
+
+Fig. 4: Visual comparisons of one-step DM-based SR methods. Zoom in for best view. 
+
+across metrics. In contrast, FreqOrtho-SR achieves the best or second-best in several cases, indicating substantial improvements in the real-world ISR field. 
+
+Qualitative results. Fig. 4 presents visual comparisons of FreqOrtho-SR with SOTA one-step DM-based SR methods. AddSR [52] and SinSR [61] produce over-smoothed textures, failing to recover fine-grained details. OSEDiff [66] generates more consistent outputs but with limited semantic details. While PiSA-SR [51] and TVT [70] can restore richer textures, they occasionally introduce visual ar-tifacts or structural distortions. In contrast, FreqOrtho-SR reconstructs more accurate structures ( e.g ., the sharp text in the first example) and produces more natural, realistic details ( e.g ., the fine textures in the second example), benefiting from frequency-guided expert learning that effectively disentangles pixel-level and semantic-level enhancements. As described in Sec. 3, our dual-LoRA design naturally supports an adjustable inference mode (Eq. (8)), enabling controllable fidelity-perception trade-off via pixel-semantic guidance scales. De-tailed adjustable SR experiments are provided in Sec. 9 of the supplementary materials .
+
+Table 2: Complexity and perfor-mance of one-step DM-based meth-ods. Time on 128 ×128 inputs (A100). LPIPS/FID on RealSR. †: no code.                           
+
+> Method Time (s) Params (B) LPIPS ↓FID ↓
+> SinSR 0.13 0.18 0.3121 137.05 OSEDiff 0.12 1.77 0.2921 123.50 MoR-DASR †--0.2910 -PiSA-SR 0.09 1.30 0.2672 124.09 TVT 0.28 1.72 0.2587 109.93
+> Ours 0.30 1.30 0.2537 108.91
+
+Complexity analysis. Table 2 re-ports run time, model size, and repre-sentative metrics of recent SOTA meth-ods on RealSR dataset. FreqOrtho-SR has same parameter count as PiSA-SR (1.30 B); lower than OSEDiff (1.77 B) and TVT (1.72 B). For FLOPs/peak memory, PiSA-SR, TVT, and FreqOrtho-SR re-quire 2.23T/3.00 GB, 2.97T/7.31 GB, and 2.25T/3.03 GB, respectively. Thus, our activated compute and memory remain close to PiSA-SR, while being much lower than TVT in memory. 14 M. S. Hoang, D. P. Tran et al.                  
+
+> Table 3: OOD evaluation on RealLR200 [67] (real-world, no GT). The image shows an in-the-wild LR input (left) and our output (right).
+> Method NIQE ↓CLIPIQA ↑MUSIQ ↑MANIQA ↑
+> PiSA-SR 4.00 0.6869 70.5058 0.6271 TVT 4.73 0.6909 70.5275 0.5954
+> Ours 3.90 0.6912 70.6040 0.6321
+
+The additional inference time stems from FreqMoE routing: unlike a single LoRA that can merge into the base weights for free, MoE structure requires computing top-k experts per token along with the lightweight FFT-based gating, yielding a higher run time. Despite this overhead, FreqOrtho-SR has comparable inference time compared to the current SOTA model TVT [70] while achieving the best LPIPS and FID among all compared methods, yielding a favorable quality-efficiency trade-off. We note that MoE inference overhead can potentially be reduced via expert pruning or structured sparsity that we leave for future work. 
+
+OOD real-world evaluation. To further evaluate robustness to unknown real-world degradations, we test on RealLR200 [67], a no-reference real LR benchmark without ground-truth HR images. As shown in Table 3, FreqOrtho-SR achieves the best no-reference scores among the strongest one-step baselines, supporting its generalization beyond the RealESRGAN degradation pipeline. 
+
+4.3 Ablation Study 
+
+We conduct ablation studies on the RealSR dataset to validate all proposed com-ponents of FreqOrtho-SR (Table 4) by progressively removing each component. For a fair comparison, we run all experiments on the same standard settings. Additional branch-design ablations, including applying FreqMoE to both the pixel and semantic branches, are reported in Sec. 11 of the supplementary materials .FreqMoE with spatial-only gating (i.e., without frequency features) in the second row already improves fidelity (PSNR +0 .87 dB, SSIM +0 .015 ), showing the benefit of multi-expert capacity. Adding frequency-guided routing (first row) further improves LPIPS and FID, confirming that FFT-based degradation sig-natures provide a more discriminative routing signal than spatial features alone. OGP (third row) also independently reduces FID, even without multi-expert routing. The complete FreqOrtho-SR (last row), which combines FreqMoE and OGP, achieves the best DISTS, FID, NIQE, and MANIQA scores among all variants, with a slight PSNR trade-off as OGP constrains the semantic LoRA to an independent subspace. The significant FID improvement confirms better output distribution, validating that OGP effectively mitigates subspace-level re-dundancy. FreqOrtho-SR 15 
+
+Table 4: Ablations on the RealSR dataset. We validate the effectiveness of each pro-posed component. The best results are highlighted in red.                                              
+
+> MoE Freq OGP PSNR ↑SSIM ↑LPIPS ↓DISTS ↓FID ↓NIQE ↓MANIQA ↑√√×26.3097 0.7520 0.2517 0.1968 111.45 5.4812 0.6510 √××26.3718 0.7571 0.2584 0.2017 118.35 5.678 0.6560
+> ××√26.1992 0.7432 0.2651 0.2021 113.39 5.4390 0.6557 √√√26.27 0.7481 0.2537 0.1951 108.91 5.3200 0.6586
+
+Fig. 5: Per-layer projec-tion energy ratio onto the pixel-level subspace. 
+
+Subspace orthogonality analysis. To directly ver-ify that OGP enforces subspace independence and ex-plain the perceptual gains when adding OGP to Fre-qMoE in Table 4 (row 1 vs. last row), we measure the per-layer projection energy ratio ∥U (l)⊤   
+
+> ˜k∆W (l)
+> sem ∥2
+> F
+> ∥∆W (l)
+> sem ∥2
+> F
+
+,which quantifies how much of the semantic LoRA weights lie within the pixel-level subspace (lower is better). As shown in Fig. 5, the overlap without OGP is highly non-uniform: the output layer reaches 87% and encoder attention layers up to 32%, meaning nearly all semantic capacity at those layers redundantly duplicates pixel-level features. OGP suppresses the overlap to near-zero across all 258 layers, confirming that the semantic LoRA learns in a truly independent subspace, thereby improving perceptual metrics DISTS, FID, NIQE, and MANIQA simultaneously. 
+
+## 5 Conclusion 
+
+We propose FreqOrtho-SR, a one-step diffusion framework that introduces two novel principles for real-world image super-resolution. FreqMoE introduces fre-quency-domain degradation signatures as a principled routing signal for ex-pert specialization, yielding stable and interpretable gating without additional learned feature extractors. OGP bridges continual learning with multi-objective SR optimization, providing a provable orthogonality guarantee that moves be-yond simple parameter freezing. Together, these contributions demonstrate a strong fidelity-perception balance across RealSR, DRealSR, and DIV2K, with competitive or best performance on key metrics among one-step diffusion meth-ods. 
+
+## Acknowledgements 
+
+This work was supported by the National Research Foundation of Korea (NRF) grant funded by the Korea government (MSIT) (RS-2025-00573160); the Technology In-novation Program (RS-2025-02222776, Development and Demonstration of AI and Lightweight Technology-Based Automated E-Waste Sorting and Retrieval System) funded by the Ministry of Trade, Industry and Resources (MOTIR, Korea); the IITP (Institute of Information & Communications Technology Planning & Evaluation)-ITRC (Information Technology Research Center) grant funded by the Korea government (Ministry of Science and ICT) (IITP-2026-RS-2023-00259703); and the “Advanced GPU Utilization Support Program” funded by the Government of the Republic of Korea (Ministry of Science and ICT). This work was also supported by Hyundai Motor Chung Mong-Koo Global Schol-arship to Dinh Phu Tran (co-first author, equal contribution). 16 M. S. Hoang, D. P. Tran et al. 
+
+## References 
+
+1. Agustsson, E., Timofte, R.: Ntire 2017 challenge on single image super-resolution: Dataset and study. In: Proceedings of the IEEE conference on computer vision and pattern recognition workshops. pp. 126–135 (2017) 2. Blau, Y., Michaeli, T.: The perception-distortion tradeoff. In: Proceedings of the IEEE conference on computer vision and pattern recognition. pp. 6228–6237 (2018) 3. Blu, T., Thévenaz, P., Unser, M.: Linear interpolation revitalized. IEEE Transac-tions on Image Processing 13 (5), 710–719 (2004) 4. Buades, A., Coll, B., Morel, J.M.: A review of image denoising algorithms, with a new one. Multiscale modeling & simulation 4(2), 490–530 (2005) 5. Cai, J., Zeng, H., Yong, H., Cao, Z., Zhang, L.: Toward real-world single im-age super-resolution: A new benchmark and a new model. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 3086–3095 (2019) 6. Chaudhry, A., Rohrbach, M., Elhoseiny, M., Ajanthan, T., Dokania, P., Torr, P., Ranzato, M.: Continual learning with tiny episodic memories. In: Workshop on Multi-Task and Lifelong Reinforcement Learning (2019) 7. Chen, K., Li, L., Liu, H., Li, Y., Tang, C., Chen, J.: Swinfsr: Stereo image super-resolution using swinir and frequency domain knowledge. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 1764–1774 (2023) 8. Cooley, J.W., Tukey, J.W.: An algorithm for the machine calculation of complex fourier series. Mathematics of computation 19 (90), 297–301 (1965) 9. Dai, T., Cai, J., Zhang, Y., Xia, S.T., Zhang, L.: Second-order attention network for single image super-resolution. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 11065–11074 (2019) 10. Ding, K., Ma, K., Wang, S., Simoncelli, E.P.: Image quality assessment: Unify-ing structure and texture similarity. IEEE transactions on pattern analysis and machine intelligence 44 (5), 2567–2581 (2020) 11. Do, G., Le, H., Tran, T.: Simsmoe: Toward efficient training mixture of experts via solving representational collapse. In: Findings of the Association for Computational Linguistics: NAACL 2025. pp. 2012–2025 (2025) 12. Dong, C., Loy, C.C., He, K., Tang, X.: Image super-resolution using deep convo-lutional networks. IEEE transactions on pattern analysis and machine intelligence 
+
+38 (2), 295–307 (2015) 13. Dong, L., Fan, Q., Guo, Y., Wang, Z., Shan, Q., Li, J., Liu, J., Liao, Y., Cheng, S., Pei, S.: TSD-SR: One-step diffusion with target score distillation for real-world image super-resolution. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (2025) 14. Durall, R., Keuper, M., Keuper, J.: Watch your up-convolution: Cnn based gen-erative deep neural networks are failing to reproduce spectral distributions. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recog-nition. pp. 7890–7899 (2020) 15. Fedus, W., Zoph, B., Shazeer, N.: Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity. Journal of Machine Learning Research 
+
+23 (120), 1–39 (2022) 16. Ferzli, R., Karam, L.J.: A no-reference objective image sharpness metric based on the notion of just noticeable blur (jnb). IEEE transactions on image processing 
+
+18 (4), 717–728 (2009) FreqOrtho-SR 17 17. Foi, A., Katkovnik, V., Egiazarian, K.: Pointwise shape-adaptive dct for high-quality denoising and deblocking of grayscale and color images. IEEE transactions on image processing 16 (5), 1395–1411 (2007) 18. French, R.M.: Catastrophic forgetting in connectionist networks. Trends in cogni-tive sciences 3(4), 128–135 (1999) 19. He, X., Tu, Z., Cheng, K., Zhu, M., Hu, J., Wang, N., Gao, X.: Mixture of ranks with degradation-aware routing for one-step real-world image super-resolution. arXiv preprint arXiv:2511.16024 (2025) 20. Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., Hochreiter, S.: Gans trained by a two time-scale update rule converge to a local nash equilibrium. Advances in neural information processing systems 30 (2017) 21. Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models. Advances in neural information processing systems 33 , 6840–6851 (2020) 22. Hu, E.J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., Chen, W.: LoRA: Low-rank adaptation of large language models. In: International Conference on Learning Representations (2022) 23. Jiang, L., Dai, B., Wu, W., Loy, C.C.: Focal frequency loss for image reconstruc-tion and synthesis. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 13919–13929 (2021) 24. Karras, T., Laine, S., Aila, T.: A style-based generator architecture for generative adversarial networks. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 4401–4410 (2019) 25. Ke, J., Wang, Q., Wang, Y., Milanfar, P., Yang, F.: Musiq: Multi-scale image quality transformer. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 5148–5157 (2021) 26. Kim, J., Lee, J.K., Lee, K.M.: Accurate image super-resolution using very deep convolutional networks. In: Proceedings of the IEEE conference on computer vision and pattern recognition. pp. 1646–1654 (2016) 27. Kingma, D.P.: Adam: A method for stochastic optimization. arXiv preprint arXiv:1412.6980 (2014) 28. Kong, X., Zhao, H., Qiao, Y., Dong, C.: Classsr: A general framework to accelerate super-resolution networks by data characteristic. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 12016–12025 (2021) 29. Kundur, D., Hatzinakos, D.: Blind image deconvolution. IEEE signal processing magazine 13 (3), 43–64 (1996) 30. Ledig, C., Theis, L., Huszár, F., Caballero, J., Cunningham, A., Acosta, A., Aitken, A., Tejani, A., Totz, J., Wang, Z., et al.: Photo-realistic single image super-resolution using a generative adversarial network. In: Proceedings of the IEEE conference on computer vision and pattern recognition. pp. 4681–4690 (2017) 31. Li, X., Zhang, Y., Yuan, J., Lu, H., Zhu, Y.: Discrete cosin transformer: Image modeling from frequency domain. In: Proceedings of the IEEE/CVF Winter Con-ference on Applications of Computer Vision. pp. 5468–5478 (2023) 32. Li, Y., Zhang, K., Liang, J., Cao, J., Liu, C., Gong, R., Zhang, Y., Tang, H., Liu, Y., Demandolx, D., et al.: Lsdir: A large scale dataset for image restoration. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 1775–1787 (2023) 33. Liang, J., Zeng, H., Zhang, L.: Details or artifacts: A locally discriminative learning approach to realistic image super-resolution. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 5657–5666 (2022) 18 M. S. Hoang, D. P. Tran et al. 34. Liang, J., Zeng, H., Zhang, L.: Efficient and degradation-adaptive network for real-world image super-resolution. In: European Conference on Computer Vision. pp. 574–591. Springer (2022) 35. Lin, X., He, J., Chen, Z., Lyu, Z., Dai, B., Yu, F., Qiao, Y., Ouyang, W., Dong, C.: Diffbir: Toward blind image restoration with generative diffusion prior. In: European conference on computer vision. pp. 430–448. Springer (2024) 36. Liu, A., Feng, B., Xue, B., Wang, B., Wu, B., Lu, C., Zhao, C., Deng, C., Zhang, C., Ruan, C., et al.: Deepseek-v3 technical report. arXiv preprint arXiv:2412.19437 (2024) 37. Liu, X., Tanaka, M., Okutomi, M.: Single-image noise level estimation for blind denoising. IEEE transactions on image processing 22 (12), 5226–5237 (2013) 38. Lopez-Paz, D., Ranzato, M.: Gradient episodic memory for continual learning. Advances in neural information processing systems 30 (2017) 39. Luo, W., Huang, J., Qiu, G.: Jpeg error analysis and its applications to digital image forensics. IEEE Transactions on Information Forensics and Security 5(3), 480–491 (2010) 40. McCloskey, M., Cohen, N.J.: Catastrophic interference in connectionist networks: The sequential learning problem. In: Psychology of learning and motivation, vol. 24, pp. 109–165. Elsevier (1989) 41. Mittal, A., Soundararajan, R., Bovik, A.C.: Making a “completely blind” image quality analyzer. IEEE Signal processing letters 20 (3), 209–212 (2012) 42. Narvekar, N.D., Karam, L.J.: A no-reference image blur metric based on the cumu-lative probability of blur detection (cpbd). IEEE Transactions on Image Processing 
+
+20 (9), 2678–2683 (2011) 43. Pratt, W.K.: Digital image processing: PIKS Scientific inside, vol. 4. Wiley Online Library (2007) 44. Puigcerver, J., Riquelme, C., Mustafa, B., Houlsby, N.: From sparse to soft mixtures of experts. arXiv preprint arXiv:2308.00951 (2023) 45. Pyatykh, S., Hesser, J., Zheng, L.: Image noise level estimation by principal com-ponent analysis. IEEE transactions on image processing 22 (2), 687–699 (2012) 46. Rao, Y., Zhao, W., Zhu, Z., Lu, J., Zhou, J.: Global filter networks for image clas-sification. Advances in neural information processing systems 34 , 980–993 (2021) 47. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution image synthesis with latent diffusion models. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 10684–10695 (2022) 48. Saha, G., Garg, I., Roy, K.: Gradient projection memory for continual learning. arXiv preprint arXiv:2103.09762 (2021) 49. Shazeer, N., Mirhoseini, A., Maziarz, K., Davis, A., Le, Q., Hinton, G., Dean, J.: Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. arXiv preprint arXiv:1701.06538 (2017) 50. Sheikh, H.R., Bovik, A.C.: Image information and visual quality. IEEE Transac-tions on image processing 15 (2), 430–444 (2006) 51. Sun, L., Wu, R., Ma, Z., Liu, S., Yi, Q., Zhang, L.: Pixel-level and semantic-level adjustable super-resolution: A dual-lora approach. In: Proceedings of the Computer Vision and Pattern Recognition Conference. pp. 2333–2343 (2025) 52. Tai, Y., Xie, R., Zhao, C., Zhang, K., Zhang, Z., Zhou, J., Yang, J.: Addsr: Acceler-ating diffusion-based blind super-resolution with adversarial diffusion distillation. Pattern Recognition p. 113012 (2026) 53. Tran, D.P., Do, T., Wazir, S., Kim, S., Kim, S.K., Kim, D.: Sat: Selective aggre-gation transformer for image super-resolution. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 4982–4992 (2026) FreqOrtho-SR 19 54. Tran, D.P., Hung, D.D., Kim, D.: Channel-partitioned windowed attention and fre-quency learning for single image super-resolution. arXiv preprint arXiv:2407.16232 (2024) 55. Tran, D.P., Hung, D.D., Kim, D.: Vsrm: A robust mamba-based framework for video super-resolution. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 14711–14721 (2025) 56. Vu, C.T., Phan, T.D., Chandler, D.M.: S3: a spectral and spatial measure of local perceived sharpness in natural images. IEEE transactions on image processing 
+
+21 (3), 934–945 (2011) 57. Wang, J., Chan, K.C., Loy, C.C.: Exploring clip for assessing the look and feel of images. In: Proceedings of the AAAI conference on artificial intelligence. vol. 37, pp. 2555–2563 (2023) 58. Wang, J., Yue, Z., Zhou, S., Chan, K.C., Loy, C.C.: Exploiting diffusion prior for real-world image super-resolution. International Journal of Computer Vision 
+
+132 (12), 5929–5949 (2024) 59. Wang, X., Xie, L., Dong, C., Shan, Y.: Real-esrgan: Training real-world blind super-resolution with pure synthetic data. In: Proceedings of the IEEE/CVF in-ternational conference on computer vision. pp. 1905–1914 (2021) 60. Wang, X., Yu, K., Wu, S., Gu, J., Liu, Y., Dong, C., Qiao, Y., Change Loy, C.: Esrgan: Enhanced super-resolution generative adversarial networks. In: Proceed-ings of the European conference on computer vision (ECCV) workshops. pp. 0–0 (2018) 61. Wang, Y., Yang, W., Chen, X., Wang, Y., Guo, L., Chau, L.P., Liu, Z., Qiao, Y., Kot, A.C., Wen, B.: Sinsr: diffusion-based image super-resolution in a single step. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 25796–25805 (2024) 62. Wang, Z., Chen, J., Hoi, S.C.: Deep learning for image super-resolution: A survey. IEEE transactions on pattern analysis and machine intelligence 43 (10), 3365–3387 (2020) 63. Wang, Z., Bovik, A.C., Sheikh, H.R., Simoncelli, E.P.: Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing 
+
+13 (4), 600–612 (2004) 64. Wei, P., Xie, Z., Lu, H., Zhan, Z., Ye, Q., Zuo, W., Lin, L.: Component divide-and-conquer for real-world image super-resolution. In: European conference on computer vision. pp. 101–117. Springer (2020) 65. Wołczyk, M., Zając, M., Pascanu, R., Kuciński, Ł., Miłoś, P.: Continual world: A robotic benchmark for continual reinforcement learning. Advances in Neural Information Processing Systems 34 , 28496–28510 (2021) 66. Wu, R., Sun, L., Ma, Z., Zhang, L.: One-step effective diffusion network for real-world image super-resolution. Advances in Neural Information Processing Systems 
+
+37 , 92529–92553 (2024) 67. Wu, R., Yang, T., Sun, L., Zhang, Z., Li, S., Zhang, L.: Seesr: Towards semantics-aware real-world image super-resolution. In: Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition. pp. 25456–25467 (2024) 68. Yang, S., Wu, T., Shi, S., Lao, S., Gong, Y., Cao, M., Wang, J., Yang, Y.: Maniqa: Multi-dimension attention network for no-reference image quality assessment. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recog-nition. pp. 1191–1200 (2022) 69. Yang, T., Wu, R., Ren, P., Xie, X., Zhang, L.: Pixel-aware stable diffusion for real-istic image super-resolution and personalized stylization. In: European conference on computer vision. pp. 74–91. Springer (2024) 20 M. S. Hoang, D. P. Tran et al. 70. Yi, Q., Li, S., Wu, R., Sun, L., Wu, Y., Zhang, L.: Fine-structure preserved real-world image super-resolution via transfer vae training. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 12415–12426 (2025) 71. Yu, F., Gu, J., Li, Z., Hu, J., Kong, X., Wang, X., He, J., Qiao, Y., Dong, C.: Scaling up to excellence: Practicing model scaling for photo-realistic image restoration in the wild. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 25669–25680 (2024) 72. Yu, X., Guo, Y.C., Li, Y., Liang, D., Zhang, S.H., Qi, X.: Text-to-3d with classifier score distillation. arXiv preprint arXiv:2310.19415 (2023) 73. Yue, Z., Liao, K., Loy, C.C.: Arbitrary-steps image super-resolution via diffusion inversion. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (2025) 74. Yue, Z., Wang, J., Loy, C.C.: Resshift: Efficient diffusion model for image super-resolution by residual shifting. IEEE Transactions on Pattern Analysis and Ma-chine Intelligence (2024) 75. Zeng, G., Chen, Y., Cui, B., Yu, S.: Continual learning of context-dependent pro-cessing in neural networks. Nature Machine Intelligence 1(8), 364–372 (2019) 76. Zhang, K., Liang, J., Van Gool, L., Timofte, R.: Designing a practical degradation model for deep blind image super-resolution. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 4791–4800 (2021) 77. Zhang, L., Rao, A., Agrawala, M.: Adding conditional control to text-to-image diffusion models. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 3836–3847 (2023) 78. Zhang, R., Isola, P., Efros, A.A., Shechtman, E., Wang, O.: The unreasonable effectiveness of deep features as a perceptual metric. In: Proceedings of the IEEE conference on computer vision and pattern recognition. pp. 586–595 (2018) 79. Zhang, Y., Li, K., Li, K., Wang, L., Zhong, B., Fu, Y.: Image super-resolution using very deep residual channel attention networks. In: Proceedings of the European conference on computer vision (ECCV). pp. 286–301 (2018) 80. Zhou, Y., Lei, T., Liu, H., Du, N., Huang, Y., Zhao, V., Dai, A.M., Le, Q.V., Laudon, J., et al.: Mixture-of-experts with expert choice routing. Advances in Neu-ral Information Processing Systems 35 , 7103–7114 (2022) FreqOrtho-SR: Frequency-Guided Orthogonal Expert Learning for Real-World Image Super-Resolution 
+
+## Supplementary Material 
+
+Minh Son Hoang ⋆, Dinh Phu Tran ⋆, Quyen Nguyen Duc, Dam Hoang Phuong, and Daeyoung Kim ⋆⋆ 
+
+> School of Computing, KAIST, Republic of Korea
+> {sonhm2910,phutx2000,nguyenducquyen2311,hoangphuong1211,kimd}@kaist.ac.kr
+
+This supplementary material provides additional implementation details, the-oretical analysis, extended comparisons, and visualizations for the main paper “FreqOrtho-SR: Frequency-Guided Orthogonal Expert Learning for Real-World Image Super-Resolution.” 
+
+We organize the supplementary as follows: 
+
+– Sec. 6 : Implementation details including training configurations, hardware setup, and hyperparameters. 
+
+– Sec. 7, 8 : Extended comparisons with GAN-based and multi-step DM-based methods. 
+
+– Sec. 9 : Experiments on adjustable SR with pixel-semantic guidance scales. 
+
+– Sec. 10 : Distinction between our orthogonal gradient projection and continual-learning orthogonal projection methods. 
+
+– Sec. 11 : Additional ablation studies on SVD energy threshold, number of experts and top-k, FreqMoE expert routing, number of frequency bands, OGP projection target, and effect of applying FreqMoE to both branches. 
+
+– Sec. 12 : More qualitative results. 
+
+– Sec. 13 : Limitations and future works. 
+
+## 6 Implementation Details 
+
+In this section, we provide additional training details that complement Sec. 4.1 of the main paper, which covers the experimental settings. For fair comparison, we use the training settings (e.g., training data, degradation pipeline, patch size, and evaluation protocol) from recent one-step diffusion-based SR works [6,9,12]. While the two-phase training strategy, loss functions, and architectural choices are discussed in the main paper, we now detail the hardware setup, optimizer configuration, and remaining hyperparameters. As described in Sec. 3.4 of the main paper, training proceeds in two phases. In Phase 1 (Pixel LoRA Training) , the FreqMoE module is trained with: 
+
+Lphase1 = λl2 L2 + λlbl Llbl . (9)   
+
+> ⋆Equal contribution.
+> ⋆⋆ Corresponding author.
+
+2 M. S. Hoang, D. P. Tran et al. 
+
+Table 4: Summary of key hyperparameters for FreqOrtho-SR. Category Parameter Value Training Optimizer AdamW ( β1=0 .9, β2=0 .999 , ϵ=10 −8)Learning rate 5 × 10 −5 (constant, 500 warmup steps) Weight decay 10 −2                         
+
+> Batch size 16 (2 per device ×8 GPUs) Training iterations 4K (Phase 1) + 26K (Phase 2) Mixed precision FP16 FreqMoE Number of experts ( N)4Top-krouting 2LoRA rank (pixel) 4Number of frequency bands ( K)4Frequency feature dimension ( df)7 ( K+3 )Semantic LoRA LoRA rank (semantic) 4SVD energy threshold ( τ)0.95 Loss weights
+> λl2(both phases) 1.0
+> λlpips (Phase 2 only) 2.0
+> λcsd (Phase 2 only) 1.0
+> λlbl (Phase 1 only) 0.01
+
+After Phase 1, we extract the pixel-level subspace via SVD (Sec. 3.3 of the main paper). In Phase 2 (Semantic LoRA Training with OGP) , the semantic LoRA is trained under orthogonal gradient projection with: 
+
+Lphase2 = λl2 L2 + λlpips Llpips + λcsd Lcsd . (10) All training is conducted on 8 NVIDIA A100 (40 GB) GPUs with FP16 mixed precision using the Accelerate framework. We use the AdamW optimizer with 
+
+β1=0 .9, β2=0 .999 , ϵ=10 −8, and weight decay 10 −2. The learning rate is set to 
+
+5 × 10 −5 with a constant schedule after 500 warmup steps, shared across both phases. In Phase 2, the CFG scale is set to 1.0 with timestep ratios sampled from [0 .02 , 0.98] . Table 4 provides a complete summary of all hyperparameters. 
+
+## 7 Comparison with GAN-based Methods 
+
+We compare FreqOrtho-SR with three GAN-based SR methods: RealESRGAN [8], BSRGAN [14], and LDL [2] in Table 5. FreqOrtho-SR achieves the best no-reference metrics (NIQE, CLIPIQA, MUSIQ, MANIQA) and the best LPIPS across all three datasets, while maintaining competitive fidelity (PSNR, SSIM) and DISTS. 
+
+## 8 Comparison with Multi-step DM-based Methods 
+
+We compare FreqOrtho-SR with multi-step DM-based SR methods: DiffBIR [3] (50 steps), PASD [11] (20 steps), and SeeSR [10] (50 steps) in Table 6. FreqOrtho-SR, using just one diffusion step, achieves the highest fidelity (PSNR, SSIM) and reference-based perceptual metrics (LPIPS, DISTS, FID) across all three FreqOrtho-SR 3
+
+Table 5: Quantitative comparison with GAN-based SR methods on synthetic and real-world test datasets. The best and the second-best results are highlighted in red and blue, respectively. Datasets Methods PSNR ↑ SSIM ↑ LPIPS ↓ DISTS ↓ FID ↓ NIQE ↓ CLIPIQA ↑ MUSIQ ↑ MANIQA ↑                                                                                                            
+
+> RealSR RealESRGAN 25.69 0.7616 0.2727 0.2063 135.18 5.83 0.4449 60.18 0.5487 BSRGAN 26.39 0.7654 0.2670 0.2121 141.28 5.66 0.5001 63.21 0.5399 LDL 25.28 0.7567 0.2766 0.2121 142.71 6.00 0.4477 60.82 0.5485 Ours 26.27 0.7481 0.2537 0.1951 108.91 5.32 0.6630 69.39 0.6586 DRealSR RealESRGAN 28.64 0.8053 0.2847 0.2089 147.62 6.69 0.4422 54.18 0.4907 BSRGAN 28.75 0.8031 0.2883 0.2142 155.63 6.52 0.4915 57.14 0.4878 LDL 28.21 0.8126 0.2815 0.2132 155.53 7.13 0.4310 53.85 0.4914 Ours 29.08 0.7911 0.2799 0.2110 130.85 6.29 0.6879 65.89 0.6182 DIV2K RealESRGAN 24.29 0.6371 0.3112 0.2141 37.64 4.68 0.5277 61.06 0.5501 BSRGAN 24.58 0.6269 0.3351 0.2275 44.23 4.75 0.5071 61.20 0.5247 LDL 23.83 0.6344 0.3256 0.2227 42.29 4.85 0.5180 60.04 0.5350 Ours 24.35 0.6189 0.2748 0.1889 23.54 4.63 0.6702 68.67 0.6355
+
+datasets. On the two real-world datasets, RealSR and DRealSR, which consist of real photographic images, FreqOrtho-SR achieves the highest scores across most no-reference quality metrics. On the synthetic DIV2K dataset, which con-sists entirely of artificially generated images for super-resolution benchmarking, multi-step methods such as PASD and SeeSR achieve slightly better no-reference scores (CLIPIQA, MUSIQ, MANIQA). This is expected, as their iterative refine-ment across many steps progressively synthesizes richer texture details, yielding higher no-reference quality scores regardless of fidelity to the ground truth [9], as evidenced by their inferior full-reference metrics. Moreover, FreqOrtho-SR also allows a controllable fidelity-perception trade-off through its guidance scales (see Sec. 9), enabling users to boost perceptual quality as needed, unlike less flexi-ble multi-step methods. Taken together, these results indicate that single-step FreqOrtho-SR offers a favorable trade-off between restoration quality and com-putational efficiency, particularly for real-world scenarios where inference cost is a practical concern alongside quantitative performance. 
+
+## 9 Experiments on Adjustable SR 
+
+We validate the adjustable inference capability of FreqOrtho-SR by fixing one guidance scale ( λpix or λsem ) at 1.0 and varying the other on the RealSR test dataset (Table 7). PSNR and SSIM measure pixel-level fidelity, LPIPS and DISTS assess perceptual similarity, and FID evaluates distributional distance to the GT, while NIQE, CLIPIQA, MUSIQ, and MANIQA are no-reference image quality metrics. 
+
+Effect of λpix . Increasing λpix progressively removes degradations and enhances edges, leading to a continuous improvement in no-reference metrics. However, the reference-based metrics exhibit a rise-and-fall pattern: PSNR peaks at λpix = 0 .54 M. S. Hoang, D. P. Tran et al. 
+
+Table 6: Quantitative comparison with multi-step DM-based SR methods on synthetic and real-world test datasets. The best and the second-best results are highlighted in red and blue, respectively. Datasets Methods PSNR ↑ SSIM ↑ LPIPS ↓ DISTS ↓ FID ↓ NIQE ↓ CLIPIQA ↑ MUSIQ ↑ MANIQA ↑                                                                                                            
+
+> RealSR DiffBIR-S50 24.88 0.6673 0.3567 0.2290 124.56 5.63 0.6412 64.66 0.6231 PASD-S20 25.22 0.6809 0.3392 0.2259 123.08 5.18 0.6502 68.74 0.6461 SeeSR-S50 25.33 0.7273 0.2985 0.2213 125.66 5.38 0.6594 69.37 0.6439 Ours 26.27 0.7481 0.2537 0.1951 108.91 5.32 0.6630 69.39 0.6586 DRealSR DiffBIR-S50 26.84 0.6660 0.4446 0.2706 167.38 6.02 0.6292 60.68 0.5902 PASD-S20 27.48 0.7051 0.3854 0.2535 157.36 5.57 0.6714 64.55 0.6130 SeeSR-S50 28.26 0.7698 0.3197 0.2306 149.86 6.52 0.6672 64.84 0.6026 Ours 29.08 0.7911 0.2799 0.2110 130.85 6.29 0.6879 65.89 0.6182 DIV2K DiffBIR-S50 23.67 0.5653 0.3541 0.2129 30.93 4.71 0.6652 65.66 0.6204 PASD-S20 23.14 0.5489 0.3607 0.2219 29.32 4.40 0.6711 68.83 0.6484 SeeSR-S50 23.71 0.6045 0.3207 0.1967 25.83 4.82 0.6857 68.49 0.6239 Ours 24.35 0.6189 0.2748 0.1889 23.54 4.63 0.6702 68.67 0.6355
+
+(26.95 dB), and LPIPS is minimized at λpix = 0 .8 (0.2490), indicating the best perceptual similarity to the GT. Further increasing λpix causes over-smoothing, degrading both PSNR and LPIPS. 
+
+Effect of λsem . Increasing λsem synthesizes richer semantic details, yielding a higher upper bound on no-reference metrics than pixel-level adjustments (MUSIQ reaches 71.38 and MANIQA reaches 0.6970 at λsem = 1 .5). Meanwhile, PSNR generally decreases, and LPIPS first improves and peaks at λsem = 0 .8 (0.2427) before deteriorating, as excessive semantic enhancement introduces content de-viations from the GT. These results confirm that FreqOrtho-SR offers effective and controllable fidelity-perception trade-off to accommodate diverse user pref-erences. 
+
+Table 7: Results of FreqOrtho-SR with different pixel-semantic guidance scales on the RealSR test dataset. 
+
+λpix λsem PSNR ↑ SSIM ↑ LPIPS ↓ DISTS ↓ FID ↓ NIQE ↓ CLIPIQA ↑ MUSIQ ↑ MANIQA ↑
+
+0.0 1.0 26.1976 0.7114 0.3110 0.2106 137.07 4.5874 0.3717 46.8565 0.4440 0.2 1.0 26.6115 0.7310 0.2831 0.1955 123.32 4.6710 0.4297 52.9328 0.4841 0.5 1.0 26.9534 0.7507 0.2533 0.1862 107.22 5.0093 0.5214 61.2985 0.5557 0.8 1.0 26.7719 0.7553 0.2490 0.1908 105.64 5.2900 0.6015 67.1483 0.6229 1.0 1.0 26.27 0.7481 0.2537 0.1951 108.91 5.3200 0.6630 69.39 0.6586 1.2 1.0 25.7816 0.7413 0.2620 0.1986 117.53 5.5887 0.6869 69.7382 0.6758 1.5 1.0 24.8135 0.7238 0.2715 0.2011 125.90 6.2119 0.6735 69.4345 0.6805 1.0 0.0 27.7503 0.7972 0.2925 0.2344 148.59 9.0197 0.3119 51.0414 0.4089 1.0 0.2 27.7616 0.7971 0.2754 0.2252 143.51 8.8588 0.3585 53.7260 0.4448 1.0 0.5 27.5683 0.7913 0.2491 0.2054 128.33 7.8136 0.4342 58.3332 0.5344 1.0 0.8 27.0207 0.7740 0.2427 0.1931 114.67 6.1587 0.5757 65.3324 0.6159 1.0 1.0 26.27 0.7481 0.2537 0.1951 108.91 5.3200 0.6630 69.39 0.6586 1.0 1.2 25.4375 0.7151 0.2797 0.2043 112.02 5.1726 0.7009 70.7966 0.6824 1.0 1.5 23.8350 0.6501 0.3239 0.2212 120.19 5.6872 0.6879 71.3780 0.6970 FreqOrtho-SR 5   
+
+> Fig. 6: Qualitative adjustable SR results with different pixel-semantic guidance scales. The vertical axis varies the pixel-level guidance scale λpix , while the horizontal axis varies the semantic-level guidance scale λsem .
+
+Qualitative analysis. Fig. 6 further visualizes the effect of the two guidance scales on an in-the-wild low-quality input. Increasing λpix mainly strengthens low-level restoration: blur is progressively reduced and facial structures become more stable, but overly large pixel-level guidance tends to suppress fine stochastic textures. In contrast, increasing λsem enriches semantic details such as wrinkles, skin texture, and beard strands, producing sharper and more realistic results. However, excessive semantic-level guidance may also amplify synthesized details beyond the input evidence. This qualitative behavior is consistent with Table 7: 
+
+λpix primarily controls fidelity-oriented restoration, whereas λsem provides a stronger handle for perceptual enhancement, enabling users to select the desired fidelity-perception trade-off at inference time. 6 M. S. Hoang, D. P. Tran et al. 
+
+## 10 Distinction from Continual-Learning Orthogonal Projection 
+
+Orthogonal gradient projection is a well-established technique in continual learn-ing [1,5,7,13], where it is used to prevent catastrophic forgetting: the subspace of previous tasks is identified from input activations or accumulated gradient direc-tions , and new-task gradients are projected into the null space of that subspace so that previously learned knowledge is preserved. While the projection formula, 
+
+Gortho = G − U˜k(U T 
+
+> ˜k
+
+G), (11) is a standard orthogonal complement operation, our approach differs from the continual-learning setting in three key aspects: 
+
+(i) Subspace from weight deltas of MoE experts, not from activations or gradients. Continual-learning methods typically construct the protected subspace from input activations [13] or gradient outer products [1] accumulated over training. These proxies characterize what the network has seen , not what the network has learned to do . In contrast, we first concatenate the weight deltas across all N FreqMoE experts and then perform SVD to extract the pixel-level subspace: 
+
+∆W all = [ ∆W 1 | · · · | ∆W N ] ∈ Rdout ×(N ·din ), ∆W all = U ΣV T , (12) where the top ˜k left singular vectors U˜k ∈ Rdout ×˜k capture the output directions that the pixel-level module has learned to modify , providing a direct characteri-zation of the fidelity subspace and serving as the projection basis U˜k in Eq. (11). Moreover, concatenation naturally accounts for the union of all expert subspaces, which is specific to our MoE architecture and has no counterpart in standard continual-learning formulations. 
+
+(ii) LoRA-aware projection: B-only sufficiency. Because our adapters use the LoRA parameterization ∆W = BA , orthogonality of the full weight change, 
+
+U T 
+
+> ˜k
+
+∆W sem = U T 
+
+> ˜k
+
+(Bsem Asem ) = ( U T 
+
+> ˜k
+
+Bsem ) Asem = 0, (13) is guaranteed by projecting only the B matrix gradients , regardless of A (see Sec. 11.5 for the formal argument and ablation). This structural insight, arising from the low-rank factorization, is absent in continual-learning methods that operate on full-rank weight matrices. 
+
+(iii) Objective: specialization, not forgetting prevention. Taken together, the above technical choices reflect a fundamentally different objective. In con-tinual learning, projection protects previously learned tasks from being over-written. In our setting, the pixel-level FreqMoE and the semantic LoRA are 
+
+co-existing branches that operate simultaneously at inference. The projection en-forces that these two branches capture complementary information rather than collapsing into the same subspace, directly addressing the representational re-dundancy problem identified in Sec. 3.3 of the main paper. FreqOrtho-SR 7
+
+Table 8: Ablation study on SVD energy threshold (projection ratio) of the OGP module on the RealSR dataset. The threshold τ controls the fraction of singular value energy retained for the pixel-level subspace. The best results are highlighted in red.                                                             
+
+> τ˜k(avg.) PSNR ↑SSIM ↑LPIPS ↓DISTS ↓FID ↓NIQE ↓CLIPIQA ↑MUSIQ ↑MANIQA ↑
+> 0.80 5.78 26.34 0.7517 0.2526 0.1950 112.93 5.49 0.6556 68.72 0.6529 0.85 6.68 26.25 0.7515 0.2540 0.1971 113.17 5.49 0.6594 68.86 0.6548 0.90 7.79 26.35 0.7508 0.2620 0.2003 115.52 5.70 0.6621 68.76 0.6507 0.95 9.20 26.27 0.7481 0.2537 0.1951 108.91 5.32 0.6630 69.39 0.6586 0.99 11.48 26.55 0.7579 0.2545 0.1975 114.22 5.57 0.6496 68.62 0.6500
+
+## 11 More Ablation Studies 
+
+11.1 Effect of SVD Energy Threshold (Projection Ratio) 
+
+The SVD energy threshold τ controls how many singular vectors define the pixel-level subspace U˜k, where ˜k denotes the average number of retained singular vectors across all LoRA layers. A higher τ retains more singular vectors (larger 
+
+˜k), yielding a more complete description of the pixel-level subspace and thus a stricter orthogonal constraint on semantic LoRA updates. Results on the RealSR dataset are shown in Table 8. The results reveal a clear and systematic trade-off controlled by τ . Lower thresholds ( τ =0 .80 , ˜k≈5.78 ) impose a looser orthogonal constraint, allowing the semantic LoRA to partially overlap with the pixel-level subspace; this preserves slightly better fidelity metrics (best LPIPS and DISTS) but limits perceptual improvement. As τ increases, the constraint becomes stricter and the seman-tic LoRA is forced to learn in a truly independent subspace, progressively im-proving perceptual quality. At τ =0 .95 (˜k≈9.20 ), the model achieves the best FID (108.91), NIQE (5.32), and all no-reference scores (CLIPIQA, MUSIQ, MANIQA), while the fidelity degradation remains marginal compared to the best. Interestingly, pushing the threshold further to τ =0 .99 (˜k≈11 .48 ) yields the highest PSNR (26.55 dB) and SSIM (0.7579), but at the cost of notably de-graded perceptual metrics across the board. This suggests that an overly strict constraint leaves too little room for the semantic LoRA to learn meaningful per-ceptual improvements, effectively over-preserving the pixel-level subspace. This controlled trade-off validates the OGP design: the orthogonal projection effec-tively decouples the two learning objectives, and τ =0 .95 provides the best overall perception-fidelity balance, which we adopt as the default setting. 
+
+11.2 Effect of Number of Experts and Top-k
+
+We study the impact of the number of LoRA experts N and the top-k routing parameter on FreqMoE performance. Table 9 evaluates different configurations on the RealSR dataset. Our default setting uses N =4 experts with top-k=2 
+
+routing. The single-expert baseline ( N =1 ) uses only OGP without MoE routing. In-creasing N generally improves fidelity (e.g., N =8 , top-k=2 achieves the best 8 M. S. Hoang, D. P. Tran et al. 
+
+Table 9: Ablation study on the number of experts ( N ) and top-k routing in FreqMoE on the RealSR dataset. The best results are highlighted in red and the second best in blue.                                                                                                     
+
+> NTop-kPSNR ↑SSIM ↑LPIPS ↓DISTS ↓FID ↓NIQE ↓CLIPIQA ↑MUSIQ ↑MANIQA ↑
+> 1126.20 0.7432 0.2651 0.2021 113.39 5.44 0.6646 69.13 0.6557 2126.42 0.7516 0.2594 0.2005 115.67 5.49 0.6543 68.89 0.6481 2226.44 0.7548 0.2591 0.2021 113.23 5.52 0.6470 68.72 0.6457 4226.27 0.7481 0.2537 0.1951 108.91 5.32 0.6630 69.39 0.6586 4426.31 0.7523 0.2549 0.1963 109.99 5.49 0.6549 68.73 0.6513 6226.35 0.7550 0.2550 0.1972 116.26 5.68 0.6607 68.60 0.6505 6326.33 0.7538 0.2586 0.2001 119.30 5.67 0.6630 68.64 0.6534 8226.56 0.7575 0.2508 0.1948 109.70 5.44 0.6512 68.25 0.6454 8426.53 0.7584 0.2585 0.1998 117.34 5.51 0.6650 68.77 0.6466
+
+Fig. 7: Pearson correlation between degradation features and expert routing probabil-ities in FreqMoE, computed over 150 RealESRGAN degradation runs. Each heatmap corresponds to a different UNet component (encoder, decoder, others). Rows represent degradation features: radial frequency band energies (Band0–Band3, from low to high frequency) and scalar degradation indicators (Blur, JPEG, Noise). Columns represent the four experts (E0–E3). Distinct correlation patterns across experts confirm that frequency-guided routing enables meaningful degradation-aware specialization. 
+
+PSNR, LPIPS, and DISTS), but perceptual quality does not scale accordingly. 
+
+N =4 , top-k=2 yields the best perceptual metrics (FID 108.91, NIQE 5.32, MANIQA 0.6586) while still improving over the baseline by +0 .07 dB PSNR and −4.48 FID. For top-k, activating more experts generally hurts perceptual quality ( N =6 : k=2 vs. k=3 ; N =8 : k=2 vs. k=4 ), indicating that sparse routing encourages better expert specialization. We adopt N =4 , top-k=2 for the best perceptual-fidelity balance with lower computational cost. 
+
+11.3 Effect of FreqMoE on Expert Routing 
+
+To further validate that FreqMoE learns interpretable expert specialization, we compute the Pearson correlation between the degradation feature vector f
+
+(Sec. 3.2 of the main paper) and the routing probabilities assigned to each expert across 150 images generated by the RealESRGAN degradation pipeline. Fig. 7 FreqOrtho-SR 9
+
+Table 10: Ablation study on the number of frequency bands K in the degradation feature extractor on the RealSR dataset. The feature dimension is df = K + 3 . The best results are highlighted in red and the second best in blue.                                        
+
+> K d fPSNR ↑SSIM ↑LPIPS ↓DISTS ↓FID ↓NIQE ↓CLIPIQA ↑MUSIQ ↑MANIQA ↑
+> 2526.48 0.7561 0.2528 0.1968 113.18 5.75 0.6407 68.28 0.6454 4726.27 0.7481 0.2537 0.1951 108.91 5.32 0.6630 69.39 0.6586 811 26.44 0.7542 0.2582 0.1994 113.94 5.46 0.6526 68.76 0.6498
+
+shows the resulting correlation heatmaps for the encoder, decoder, and other (mid-block and skip connections) layers of the UNet. Several observations emerge. First, experts exhibit distinct correlation pro-files with respect to different degradation features, confirming that the frequency-guided gating network learns to specialize experts rather than routing uniformly. Second, the correlation patterns vary across UNet components: encoder layers tend to show stronger differentiation among experts for high-frequency features (Band3, Noise), while decoder layers exhibit more pronounced specialization for structural degradations (Blur, JPEG). This is consistent with the hierarchical nature of UNet, where encoder layers process increasingly abstract features and decoder layers reconstruct spatial details. Third, no single expert dominates across all degradation types, indicating that the load balancing loss effectively prevents expert collapse and that the top-k=2 routing allows complementary experts to collaborate on mixed-degradation inputs. To complement the above aggregate analysis, Fig. 8 visualizes the spatial routing decisions across encoder layers for a single real-world image. The visual-ization confirms that FreqMoE not only adapts routing based on global degra-dation characteristics, but also differentiates expert assignments spatially within each image, assigning different expert combinations to structurally distinct re-gions such as text, edges, and smooth backgrounds. 
+
+11.4 Effect of Number of Frequency Bands ( K)
+
+The number of radial frequency bands K determines the granularity at which the degradation feature extractor captures the spectral energy distribution (Sec. 3.2 of the main paper). Since the degradation feature vector has dimension df =
+
+K + 3 (frequency band energies plus three scalar degradation scores), K also affects the input dimensionality of the frequency-modulated gating network. Our default setting uses K=4 , motivated by the four principal degradation types in the RealESRGAN pipeline [8]: blur (low-frequency suppression), resize (mid-frequency aliasing), noise (high-frequency elevation), and JPEG compression (block artifacts). Table 10 evaluates K ∈ { 2, 4, 8} on the RealSR dataset. 
+
+K=2 achieves the highest fidelity scores (PSNR 26 .48 dB, SSIM 0.7561 ,LPIPS 0.2528 ), yet its coarse two-band decomposition (low vs. high frequency) cannot distinguish degradation types that occupy overlapping spectral regions (e.g., blur vs. resize aliasing in low-mid frequencies), leading to the worst per-10 M. S. Hoang, D. P. Tran et al. 
+
+> Fig. 8:  Spatial routing visualization across encoder layers for a real-world image from the RealSR dataset. Top row: expert assignment maps at each encoder layer, where colors indicate the selected top-k experts at each spatial location. Bottom row: corresponding routing confidence maps. The routing patterns reveal that FreqMoE adapts expert selection spatially: structurally complex regions (e.g., text, sign edges) and smooth background regions activate different expert combinations. Moreover, the routing evolves across layers: early encoder layers exhibit fine-grained spatial differentiation, while deeper layers show coarser, more semantically coherent routing. This per-image spatial view complements the aggregate correlation analysis in Fig. 7, confirming that FreqMoE achieves both image-level degradation adaptation and spatially-aware expert specialization within each image.
+
+FreqOrtho-SR 11 
+
+Table 11: Ablation study on OGP projection target on RealSR. “ B only” (default) projects semantic gradients onto the null space of U˜k for B matrices. “Both A and B”additionally projects A matrix gradients onto the null space of V˜k . The best results are highlighted in red. OGP Target PSNR ↑ SSIM ↑ LPIPS ↓ DISTS ↓ FID ↓ NIQE ↓ CLIPIQA ↑ MUSIQ ↑ MANIQA ↑                      
+
+> Both Aand B26.43 0.7527 0.2611 0.1975 115.89 5.59 0.6616 68.35 0.6456
+> Bonly (Ours) 26.27 0.7481 0.2537 0.1951 108.91 5.32 0.6630 69.39 0.6586
+
+ceptual quality across all no-reference metrics. K=8 provides finer spectral res-olution and also improves fidelity over K=4 (PSNR +0 .17 dB), but the highly correlated adjacent bands introduce redundancy into the gating signal, biasing routing toward pixel-level optimization at the expense of expert specialization for perceptual quality: FID increases by 5.03 , NIQE by 0.14 , and CLIPIQA, MUSIQ, MANIQA all drop compared to K=4 . K=4 achieves the best overall fidelity-perception balance, aligning with the intuition that four bands naturally correspond to the four principal degradation categories in the RealESRGAN pipeline: blur, resize, noise, and JPEG compression. 
+
+11.5 Effect of OGP Projection Target 
+
+By default, OGP projects gradients only on the semantic LoRA B matrices (up-projection, Bsem ∈ Rdout ×r ). We first provide a theoretical justification for this choice, then validate it empirically. 
+
+Theoretical justification. The goal of OGP is to ensure that the effective weight change of the semantic LoRA, ∆W sem = Bsem Asem , has no component in the pixel-level subspace spanned by U˜k, i.e., U T 
+
+> ˜k
+
+∆W sem = 0. We show that constraining only Bsem is sufficient to achieve this. Expanding the orthogonality condition: 
+
+U T 
+
+> ˜k
+
+∆W sem = U T 
+
+> ˜k
+
+(Bsem Asem ) = ( U T 
+
+> ˜k
+
+Bsem ) Asem . (14) If OGP ensures that each column of Bsem lies in the null space of U T 
+
+> ˜k
+
+, i.e., 
+
+U T 
+
+> ˜k
+
+Bsem = 0, then Eq. (14) yields U T 
+
+> ˜k
+
+∆W sem = 0 · Asem = 0, regardless of 
+
+Asem . Therefore, projecting Bsem gradients alone provides a complete guarantee 
+
+that the full semantic weight change ∆W sem is orthogonal to the pixel-level subspace for any Asem .Conversely, projecting only Asem gradients using the right singular vectors V˜k
+
+does not provide the same guarantee. Even if Asem lies in the null space of V T 
+
+> ˜k
+
+,the product U T 
+
+> ˜k
+
+Bsem Asem can still be nonzero whenever Bsem has components along U˜k. Hence, B-only projection is both necessary and sufficient for output-space orthogonality, while A-only projection is neither. 
+
+Empirical validation. One might still ask whether additionally projecting A
+
+matrix gradients onto the null space of V˜k could yield further benefits. We com-pare both strategies in Table 11. 12 M. S. Hoang, D. P. Tran et al. 
+
+Table 12: Ablation study on applying FreqMoE to both branches vs. the default design (FreqMoE for pixel branch only) on RealSR. Applying FreqMoE to both branches im-proves fidelity metrics (PSNR, SSIM) but degrades perceptual and no-reference quality metrics. The best results are highlighted in red. Configuration PSNR ↑ SSIM ↑ LPIPS ↓ DISTS ↓ FID ↓ NIQE ↓ CLIPIQA ↑ MUSIQ ↑ MANIQA ↑                  
+
+> Both 26.47 0.7567 0.2583 0.2008 115.67 5.47 0.6594 68.43 0.6484 Pixel only (Ours) 26.27 0.7481 0.2537 0.1951 108.91 5.32 0.6630 69.39 0.6586
+
+Projecting both A and B improves pixel-fidelity metrics (PSNR: +0 .16 dB, SSIM: +0 .005 ). However, this comes at the cost of degraded perceptual quality: LPIPS worsens by 0.007 , DISTS increases by 0.002 , and FID degrades notably (+6 .98 ). No-reference metrics (MUSIQ, MANIQA) also drop. These results are consistent with the theoretical analysis above. Projecting 
+
+B alone already provides a complete orthogonality guarantee (Eq. (14)), so the additional A-projection does not further reduce subspace interference but instead over-constrains the semantic LoRA’s learning capacity. By restricting both the output and input subspaces, the “Both A and B” variant reduces the effective rank of ∆W sem , pushing the model toward higher fidelity at the expense of perceptual enhancement. The B-only strategy preserves the semantic branch’s freedom to explore complementary perceptual features in the input space while fully preventing overlap in the output space. 
+
+11.6 Effect of Applying FreqMoE to Both Branches 
+
+We investigate whether applying the FreqMoE module to both the pixel and semantic branches improves performance, compared to our default design that uses FreqMoE only for the pixel branch and a standard LoRA for the semantic branch. Table 12 presents the comparison on RealSR. Applying FreqMoE to both branches improves pixel-fidelity metrics (PSNR: 
+
++0 .20 dB, SSIM: +0 .009 ). However, this comes at the cost of degraded perceptual and no-reference quality: LPIPS increases by 0.005 , CLIPIQA drops by 0.004 ,MUSIQ drops by 1.0, and MANIQA drops by 0.010 .This result supports our architectural choice. The semantic branch is designed to learn complementary perceptual features that enhance visual quality beyond pixel-level fidelity. Applying frequency-guided routing to the semantic branch biases it toward the same degradation-aware, pixel-oriented optimization as the pixel branch, effectively constraining its capacity for semantic enhancement. In contrast, using a standard LoRA for the semantic branch, combined with OGP to ensure orthogonality, allows it to freely explore the perceptual quality manifold without being anchored to frequency-domain degradation patterns. FreqOrtho-SR 13 
+
+## 12 More Qualitative Results 
+
+We provide additional visual comparisons of FreqOrtho-SR with state-of-the-art methods. As shown in Fig. 9, FreqOrtho-SR consistently produces sharper and more detailed outputs compared to other one-step DM-based methods, which tend to suffer from blurriness or hallucinated textures. Fig. 10 and Fig. 11 further com-pare with GAN-based and multi-step DM-based methods, respectively, where similar observations hold: competing methods either over-smooth fine details or introduce artifacts that deviate from the ground truth, while FreqOrtho-SR maintains faithful and high-quality reconstructions across all scenes.  
+
+> Fig. 9: Additional visual comparisons between FreqOrtho-SR and competing methods from the main paper. Please zoom in for a better view.
+
+14 M. S. Hoang, D. P. Tran et al. 
+
+Fig. 10: Visual comparisons between FreqOrtho-SR and GAN-based SR methods. Please zoom in for a better view. FreqOrtho-SR 15 
+
+Fig. 11: Visual comparisons between FreqOrtho-SR and multi-step SR methods. Please zoom in for a better view. 16 M. S. Hoang, D. P. Tran et al. 
+
+## 13 Limitations and Future Works 
+
+Limitations. While FreqOrtho-SR achieves strong results on the perception-fidelity trade-off, its current OGP design relies on a fixed SVD basis extracted once between the two training phases. In our setting, this basis remains valid during Phase 2 because the pixel-level FreqMoE is frozen, so the pixel subspace does not drift. This fixed-basis design may be insufficient in future settings where pixel- and semantic-level branches are updated jointly or co-evolve during train-ing. 
+
+Future works. Our results demonstrate that orthogonal gradient projection is a promising principle for mitigating subspace interference between pixel-fidelity and semantic-enhancement objectives in real-world SR. While null-space projec-tion has been extensively studied in continual learning [4, 5, 13], its application to multi-objective image super-resolution remains largely unexplored, and we believe there is significant room for further investigation. For future co-evolving branch settings, more advanced techniques could be explored to make the projec-tion adaptive, task-aware, and geometrically principled. Such extensions could further improve the pixel-semantic decoupling and push the perception-fidelity Pareto frontier in real-world image super-resolution. FreqOrtho-SR 17 
+
+## References 
+
+1. Farajtabar, M., Azizan, N., Mott, A., Li, A.: Orthogonal gradient descent for con-tinual learning. In: International Conference on Artificial Intelligence and Statis-tics. pp. 3762–3773 (2020) 2. Liang, J., Zeng, H., Zhang, L.: Details or artifacts: A locally discriminative learning approach to realistic image super-resolution. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 5657–5666 (2022) 3. Lin, X., He, J., Chen, Z., Lyu, Z., Dai, B., Yu, F., Qiao, Y., Ouyang, W., Dong, C.: Diffbir: Toward blind image restoration with generative diffusion prior. In: European conference on computer vision. pp. 430–448. Springer (2024) 4. Lopez-Paz, D., Ranzato, M.: Gradient episodic memory for continual learning. Advances in neural information processing systems 30 (2017) 5. Saha, G., Garg, I., Roy, K.: Gradient projection memory for continual learning. arXiv preprint arXiv:2103.09762 (2021) 6. Sun, L., Wu, R., Ma, Z., Liu, S., Yi, Q., Zhang, L.: Pixel-level and semantic-level adjustable super-resolution: A dual-lora approach. In: Proceedings of the Computer Vision and Pattern Recognition Conference. pp. 2333–2343 (2025) 7. Wang, S., Li, X., Sun, J., Xu, Z.: Training networks in null space of feature co-variance for continual learning. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 184–193 (2021) 8. Wang, X., Xie, L., Dong, C., Shan, Y.: Real-esrgan: Training real-world blind super-resolution with pure synthetic data. In: Proceedings of the IEEE/CVF in-ternational conference on computer vision. pp. 1905–1914 (2021) 9. Wu, R., Sun, L., Ma, Z., Zhang, L.: One-step effective diffusion network for real-world image super-resolution. Advances in Neural Information Processing Systems 
+
+37 , 92529–92553 (2024) 10. Wu, R., Yang, T., Sun, L., Zhang, Z., Li, S., Zhang, L.: Seesr: Towards semantics-aware real-world image super-resolution. In: Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition. pp. 25456–25467 (2024) 11. Yang, T., Wu, R., Ren, P., Xie, X., Zhang, L.: Pixel-aware stable diffusion for real-istic image super-resolution and personalized stylization. In: European conference on computer vision. pp. 74–91. Springer (2024) 12. Yu, F., Gu, J., Li, Z., Hu, J., Kong, X., Wang, X., He, J., Qiao, Y., Dong, C.: Scaling up to excellence: Practicing model scaling for photo-realistic image restoration in the wild. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 25669–25680 (2024) 13. Zeng, G., Chen, Y., Cui, B., Yu, S.: Continual learning of context-dependent pro-cessing in neural networks. Nature Machine Intelligence 1(8), 364–372 (2019) 14. Zhang, K., Liang, J., Van Gool, L., Timofte, R.: Designing a practical degradation model for deep blind image super-resolution. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 4791–4800 (2021)

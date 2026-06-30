@@ -1,0 +1,389 @@
+Title: Diffusion Model Attribution via Spectral Coupling of Denoiser Responses
+
+URL Source: https://arxiv.org/pdf/2606.28092v1
+
+Published Time: Mon, 29 Jun 2026 00:59:47 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Diffusion Model Attribution via Spectral Coupling of Denoiser Responses 
+
+Pragati Shuddhodhan Meshram Varun Chandrasekaran 
+
+Department of Electrical and Computer Engineering University of Illinois Urbana-Champaign 
+
+{psm12,varunc}@illinois.edu 
+
+## Abstract 
+
+Attributing a generated image to its source diffusion model is a fundamental challenge in provenance verification and intellectual property protection. This problem is particularly difficult because diffusion models trained on different datasets can converge to similar score functions and thus similar output distribu-tions, making the generated images themselves unreliable as attribution evidence. Existing non-invasive methods either fail on architecturally similar variants or rely on signals that vanish when models share the same autoencoder. We pro-pose Spectral Denoising Signatures (SDS), a non-invasive attribution method that identifies the source model by fingerprinting each candidate model’s denoising behavior. Our key insight is that a model’s denoising score function exhibits a distinctive spectral geometry, reflected in how it redistributes energy across spatial frequency bands during denoising. By probing this behavior with frequency-controlled perturbations, SDS extracts a stable signature that is intrinsic to the model, requiring only standard forward passes with no inversion, optimization, or generation-time enrollment. Our results demonstrate that SDS achieves ≈ 99 .9% 
+
+accuracy across eight diverse diffusion models and 96 .2% under cross-domain prompt shift, outperforming the non-invasive baselines across variations in training data, architecture, and training procedure, establishing spectral geometry as a prin-cipled and practical basis for diffusion model attribution. Our code is available at 
+
+https://github.com/Pragati-Meshram/SGS .
+
+## 1 Introduction 
+
+Diffusion models have become the dominant paradigm for large-scale generative modeling, with systems such as Stable Diffusion [Rombach et al., 2022], SDXL [Podell et al., 2023], and PixArt-
+
+α [Chen et al., 2023] enabling high-fidelity image synthesis at unprecedented scale. As these models are widely distributed and fine-tuned in open ecosystems, the need to verify model provenance has become increasingly critical for ownership verification, provenance tracking, and misuse detection. In particular, given a generated image, can we reliably determine which model produced it? 
+
+This problem is fundamentally challenging. Diffusion models generate images through a stochastic, multi-step denoising process, in which noise is gradually transformed into a final image via a learned score function, rather than through a single forward mapping. Prior work has shown that even models trained on different datasets can converge to remarkably similar score functions, producing visually indistinguishable outputs [Kadkhodaie et al., 2023]. Attribution methods that rely solely on generated images therefore face an inherent ambiguity, with limited discriminative signal in the output space. Existing approaches to model attribution fall into two broad families, each with fundamental limi-tations. Invasive methods such as watermarking require retraining or fine-tuning and may degrade generation quality [Zhao et al., 2023, Fernandez et al., 2023, Yuan et al., 2024]. Non-invasive methods 
+
+> Preprint.
+> arXiv:2606.28092v1 [cs.CV] 26 Jun 2026
+
+Figure 1: Pipeline for Spectral Denoising Signatures (SDS) . Prototype Construction (top): for each candidate model                     
+
+> M, reference images are encoded via a shared VAE to latent z0. The spectral probe injects band-limited noise η(k, S )into frequency ring k, runs a single denoiser forward pass, and measures cross-band energy in the residual r, forming coupling matrix. Repeating over all Krings and Tntimesteps yields signature ϕ(M, z 0); averaging over Nsuch signatures produces prototype ψ(M). Source Attribution (bottom): a query image of unknown origin is encoded and probed identically. The resulting signature ϕ(M∗, z 0)is compared against stored prototypes using classification techniques; the source model Mkis identified as the nearest prototype.
+
+avoid model modification but remain limited in what they can distinguish. Among these, classifier-based approaches [Xu et al., 2025, Corvi et al., 2023] operate purely on generated images and struggle to separate architecturally similar variants that produce visually similar outputs. Inversion-based methods such as RONAN [Wang et al., 2023] and L ATENT TRACER [Wang et al., 2024] go further by querying model internals, but require iterative optimization per candidate and lose discriminative power when candidates share the same autoencoder: reconstruction losses become uninformative regardless of which model is queried [Wang et al., 2024]. The fundamental gap is the same across all non-invasive approaches: no existing method probes the denoising function itself without costly inversion or reliance on output-space signals that vanish for similar models. A complementary line of work targets model ownership verification rather than source attribution. Teng et al. [2025] introduced F INGER INV , the first non-invasive fingerprinting method for diffusion models, establishing the important principle that model-specific signal resides in the denoiser, not in generated outputs. However, its signature is highly tied to a specific chosen image rather than being intrinsic to the model, limiting generalization to arbitrary generated images. In this work, we take a different perspective. Instead of attributing images by analyzing what a model generates , we attribute them by characterizing how a model denoises . To this end, we propose 
+
+Spectral Denoising Signatures (SDS), a non-invasive model attribution method that characterizes diffusion models through the spectral structure of their score function (see Fig. 1). Our key insight is that each model exhibits a distinctive spectral geometry , reflected in how it redistributes energy across spatial frequency bands during the denoising process. By injecting frequency-controlled perturbations and measuring cross-band energy transfer over timesteps, SDS extracts a stable signature that is intrinsic to the model. The method requires only standard forward passes, with no inversion, optimization, or model modification. Beyond proposing a new attribution method, we also aim to understand what factors give rise to model identity . We evaluate SDS on a challenging closed-set task spanning eight diffusion models that differ in training data, architecture, and training procedure. This enables us to answer key questions left open by prior work: can models with identical architectures but different datasets be distinguished? Can fingerprints persist across different architectures trained on similar data? Does distillation leave a detectable imprint on an otherwise identical model? Our results show that SDS reliably captures all three sources of variation, providing a unified view of how diffusion models encode their identity. In summary, we make three contributions: (1) we propose SDS, a non-invasive attribution method that probes the denoiser’s spectral geometry via forward pass alone, requiring no inversion, optimization, or model modification; (2) we demonstrate that spectral coupling signatures are model-intrinsic, 2distortion-robust, and discriminative across all sources of model variation including architecture, training data, and training procedure, with only a 3.8pp accuracy drop under cross-domain prompt shift; and (3) we show that probing the denoiser rather than the decoder resolves the fundamental failure mode of existing inversion-based baselines. 
+
+## 2 Background & Related Work 
+
+Diffusion denoising. Latent diffusion models [Rombach et al., 2022] define a forward process that gradually corrupts a latent z0 with Gaussian noise across T timesteps [Ho et al., 2020], producing 
+
+zt = √¯αt z0 + √1−¯αt η where η ∼ N (0 , I ). A denoising network ˆϵθ (zt, t ) is trained to reverse this process by estimating the noise component at each noise level, which is equivalent to approximating the score function ∇zt log pt(zt) of the data distribution [Song et al., 2020b]. At inference, a sampler such as DDIM [Song et al., 2020a] iteratively applies the denoiser from t=T down to t=0 to produce a clean image from pure noise. Because this network parameterizes the score function of the training distribution, any model-specific inductive bias must manifest through it, making it the right object to probe for attribution. 
+
+Fingerprinting diffusion models. Diffusion models trained on non-overlapping subsets of a dataset converge to nearly identical score functions [Kadkhodaie et al., 2023], suggesting that output-based attribution is fundamentally limited when training distributions are similar. Teng et al. [2025] propose FINGER INV for model ownership verification, which identifies models via inversion trajectories of generated images. Other approaches embed fingerprints directly into models through weight modulation or decoder fine-tuning for user attribution [Tripathi et al., 2025, Fei et al., 2025], but these require modifying model parameters and training pipelines. In contrast, we show that despite apparent convergence, diffusion models exhibit distinct spectral dynamics during denoising, enabling intrinsic and non-invasive fingerprinting. 
+
+Non-invasive model attribution. A growing line of work addresses source attribution without modifying the model or its outputs. Classifier-based methods [Xu et al., 2025, Bonechi et al., 2025] train on output-space artifacts to identify source generators, achieving strong performance across diverse models but struggling to separate architecturally similar variants that produce visually similar outputs. Inversion-based detectors such as RONAN [Wang et al., 2023] and L ATENT TRACER [Wang et al., 2024] attribute an image to the model that reconstructs it with the smallest calibrated loss; they are alteration-free yet slow (one optimisation per candidate) and lose discriminative power when models share the same auto-encoder. In contrast, SDS probes the denoising function directly, succeeding where decoder-level and output-level signals collapse. In summary, existing non-invasive methods exploit output-space or decoder-level signals that collapse for shared-autoencoder models. Ownership verification methods probe the denoiser but require prior enrollment and solve a different problem. No existing method probes the denoising function directly without costly inversion or prior enrollment. This gap motivates SDS, introduced after establishing the empirical basis for denoiser-level probing in the next section. Additional background on watermarking methods for diffusion models and model fingerprinting in neural networks is provided in Appendix B. 
+
+## 3 Where Does Model Identity Reside? 
+
+We identify a deliberately hard attribution setting to probe where discriminative signal resides: 
+
+SD v1.4 1 vs. SD v1.5 2, two models sharing nearly all of their weights, the same UNet-860M backbone, encoder, and KL-f8 VAE [Rombach et al., 2022]. We ask: where does discriminative signal actually reside, if not in outputs? 
+
+The denoiser is the right object of study. The answer lies in the denoising function itself [Teng et al., 2025]. The denoiser parameterizes the score function ∇z log p(z), which encodes the full statistical geometry of the training distribution, including its cross-frequency covariance structure. Any model-specific inductive bias arising from training data, architecture, or fine-tuning must manifest through this function. Unlike output images, which are mediated by specific prompts and noise seeds, the denoiser is an intrinsic, input-independent object : it is shared across all generations and directly reflects what the model has learned. This motivates us to probe the denoiser directly, rather than analyzing its outputs. 
+
+> 1https://huggingface.co/CompVis/stable-diffusion-v1-4
+> 2https://huggingface.co/runwayml/stable-diffusion-v1-5
+
+3Figure 2: Spectral coupling signatures are linearly separable; image features are not. LR decision score distributions for SD v1.4 (blue) vs. SD v1.5 (red) after PCA-64 + L 2 normalisation. Pixel and FFT scores overlap completely, confirming the absence of any linear signal. Spectral Coupling Tn = 1 and Tn = 5 show clearly separated distributions, directly visualising the global mean-shift that enables ≥ 98% classification accuracy from a 192-dimensional signature. 
+
+Setup. We generate N =1 ,000 images (500 per model) using 500 prompts from the Stable Diffusion Prompts dataset, 3 at 512 ×512 resolution with 50 DDIM steps and classifier-free guidance (CFG) scale 7.5. We compare three feature families: pixel-space statistics, FFT power spectrum, and spectral coupling signatures derived from denoiser responses. For fair comparison, all features are preprocessed identically: standardization, PCA to 64 dimensions, and ℓ2 normalization. We evaluate three classifiers: LinearSVC on raw features, PCA-LR on compressed features, and cosine-kNN. Results are in Figure 2, which shows LR decision score distributions for all four feature types. 
+
+P1: Output features carry no signal. We evaluate pixel-space features ( 786 , 000 dimensions) and FFT power spectrum features ( 262 , 000 dimensions) as standard output-based representations. Despite their dimensional advantage, all three classifiers achieve near-chance performance. The failure is structural: SD v1.4 and SD v1.5 share the same VAE, so their output distributions are statistically indistinguishable at the level of spatial and spectral statistics that these features capture. 
+
+Takeaway 1. For models sharing the same autoencoder, output-space features provide negligible discriminative signal regardless of (high) dimensionality. This structural failure defines the hard regime where existing non-invasive methods collapse. 
+
+P2: Model identity emerges in denoiser responses. We probe the denoiser’s response to controlled frequency perturbations. For each spatial frequency band k, we inject band-limited noise at a single probe timestep ( Tn=1 , t=25 , where Tn denotes the number of timesteps used for probing, distinct from the total diffusion steps T =50 ), chosen to sit in the mid-noise regime where the denoiser Jacobian Jθ = ∂ˆϵθ /∂z t (formalized in §C) captures both global and local structure and measure how the injected energy is redistributed across output bands. This yields a spectral coupling matrix 
+
+C ∈ RK×K , where K is the number of frequency rings (a design parameter, set to K=8 here) and C[k, j ] quantifies how energy injected in ring k is routed to ring j by the denoiser. We probe at randomly chosen S=3 perturbation amplitudes {1.0, 1.25 , 1.5}, yielding a 192-dimensional signature ( S·K2 = 3 ·64 = 192 ). Detailed method is provided in § 4.2. LinearSVC achieves 98 .5% accuracy on this compact 192-dimensional representation, compared to near-chance performance for image-based features with over 10 5 dimensions. PCA-LR (64-dimensional subspace) reaches 90 .2% , confirming that the discriminative signal is preserved under strong compression. In contrast, cosine-kNN performs substantially worse ( 56 .1% ), indicating that separation does not arise from tight local clustering. Instead, the signal manifests as a global mean shift : class centroids are well separated, while individual samples overlap locally. As a result, linear classifiers recover the signal, whereas neighborhood-based methods fail to capture it. More broadly, these results show that the discriminative information is not in raw outputs themselves, but in how the denoiser transforms structured perturbations .
+
+Takeaway 2. A single-timestep spectral response linearly separates two very identical models from a 192-dimensional signature. The signal arises from the denoiser’s Jacobian structure and is therefore intrinsic to the model, not an artifact of the probing procedure. 
+
+P3: Identity accumulates across timesteps. We extend the probe to Tn=5 evenly spaced timesteps spanning [0 .2T, T ], concatenating coupling matrices at each step to yield a 960-dimensional signature (S · Tn · K2 = 3 · 5 · 64 = 960 ). LinearSVC reaches 99 .9% and PCA-LR reaches 98 .4% , both improving consistently over the single-timestep result. The gain reflects genuine complementarity 
+
+> 3https://huggingface.co/datasets/Gustavosta/Stable-Diffusion-Prompts
+
+4rather than added dimensionality: at high noise levels, the Jacobian primarily encodes low-frequency global structure, while at low noise levels it encodes high-frequency texture [Kadkhodaie et al., 2023]. Timesteps therefore probe orthogonal aspects of the model’s spectral geometry, and their signals accumulate. 
+
+Takeaway 3. Aggregating responses across Tn=5 timesteps improves attribution accuracy, indicating that different timesteps contribute complementary model-specific information that accumulates along the denoising trajectory. Together, these results show that model identity is encoded in the spectral geometry of the denoiser’s Jacobian, not in generated outputs. These findings motivate SDS: a method that fingerprints models by probing spectral coupling at multiple timesteps, requiring only standard forward passes with no inversion or model modification. 
+
+## 4 Spectral Denoising Signatures 
+
+We now formalize the extraction of spectral coupling signatures from diffusion model denoisers into a complete attribution pipeline, translating the empirical observations of § 3 into a principled method. 
+
+4.1 Problem Formulation Task. We consider closed-set model attribution : given a generated image x0 and a finite registry of candidate models M = {M1, . . . , M n}, identify which model in M produced x0. The registry may contain models that differ in training data, architecture, or training procedures, including near-clone variants (e.g., fine-tuned derivatives with high weight overlap). 
+
+Verifier access. SDS assumes white-box access to candidate models: the verifier queries the denoiser forward pass ˆϵθ (zt, t, ∅) with arbitrary inputs, where ∅ denotes the empty text embedding used for unconditional denoising, requiring only forward passes with no gradients, optimization, or knowledge of generation parameters. 
+
+4.2 Our Approach Preliminaries. Before probing, we standardize conditions across all candidate models to ensure signatures reflect genuine model-specific behavior rather than artifacts of mismatched latent spaces or sampling parameters. Each input image x0 is encoded to a latent z0 = E(x0) using a single shared VAE, regardless of which candidate model is being probed, yielding consistent latent dimensions across all models. A shared scheduler is used for all models, ensuring timestep indices refer to the same noise levels. The denoiser is called with an empty text embedding ∅ throughout, removing prompt-dependent signal and ensuring the signature reflects the model’s intrinsic denoising geometry rather than its response to any particular text. 
+
+1) Partition. We partition the H × W frequency plane of the latent into K concentric radial rings. The normalised radial coordinate of frequency (u, v ) is ρ(u, v ) = √u2+v2  
+
+> √H2+W2
+
+, for k ∈ { 0, . . . , K −1},ring k contains all frequencies whose normalised radius ρ falls in  kK , k+1 
+
+> K
+
+ Mk ∈ { 0, 1}H×W . Ring 
+
+0 covers the DC component and lowest spatial frequencies (global structure); ring K−1 covers the highest frequencies (fine texture). 
+
+2) Probe. As established in § 3, the spectral coupling matrix C[k, j ] is a frequency-domain projection of the denoiser Jacobian ∂ ˆεθ /∂z t, directly measuring how the score function’s local geometry routes energy across frequency bands. We now formalize this measurement. A formal derivation connecting 
+
+C[k, j ] to the denoiser Jacobian is provided in Appendix C. 
+
+Band-limited probe noise. Given i.i.d. Gaussian noise η ∼ N (0 , I ), we confine its energy to ring k
+
+by masking in the Fourier domain and renormalising to match the original noise energy: 
+
+η(k) = F−1 F(η) ⊙ Mk
+
+ · σ(η)
+
+σ(F−1(F(η) ⊙ Mk)) + δ (1) The renormalisation ( δ = 10 −8) ensures all rings are probed at comparable signal levels. A scaled version with amplitude s is then η(k,s ) = s · η(k).
+
+Denoiser query. We construct the noisy latent and query the denoiser: 
+
+zt = √¯αt z0 + √1−¯αt η(k,s ), (2) 
+
+ˆη = ˆ ϵθ (zt, t, ∅) (3) 5The residual r = ˆ η − η(k,s ) measures how the model’s predicted noise deviates from the injected perturbation. If the model were a perfect noise estimator for band k, the residual would be zero; any nonzero residual reveals which frequencies the denoiser maps energy into or out of. 
+
+Coupling matrix entry. For a fixed latent z0, the denoiser response to a band-limited perturbation is stochastic; we therefore average over R independently drawn noise samples to obtain a stable estimate of ring-k to ring-j energy routing: 
+
+Cs,t [k, j ] = 1
+
+R
+
+> R
+
+X
+
+> i=1
+
+|F (r(k,s,t ) 
+
+> i
+
+)|2, M j (4) Row k of Cs,t encodes the denoiser’s output energy distribution when ring k is perturbed, capturing which output frequency bands this model routes that energy to 
+
+Row normalisation. Each row is ℓ1-normalised so that it sums to one: 
+
+Cs,t [k, ·] ← Cs,t [k, ·]
+
+∥Cs,t [k, ·]∥1 + δ (5) This converts absolute energies into a distribution over output bands, removing content-dependent scale variation so that the coupling pattern reflects the model’s learned behavior rather than image brightness. 
+
+3) Aggregate. We collect coupling measurements across multiple timesteps and perturbation am-plitudes to build a complete model signature that captures spectral routing behavior along the full denoising trajectory. 
+
+Timestep selection. We sample Tn evenly spaced timesteps in T , spanning overall denoising behavior as motivated by Takeaway 3 in § 3. 
+
+Multi-scale probing. We evaluate the denoiser’s response across S perturbation amplitudes, chosen to span a range of noise magnitudes while remaining within the model’s operational noise regime. Aggregating across scales captures how spectral coupling behaves under different perturbation strengths, providing complementary discriminative signal with minimal computational overhead. 
+
+Signature tensor and final vector. The full measurement is collected into: 
+
+A ∈ RS×Tn×K×K , A[s, t, k, j ] = Cs,t [k, j ] (6) The SDS signature is the flattened tensor: 
+
+Φ( M, z 0) = vec( A) ∈ RS·Tn·K2
+
+(7) Each dimension encodes one specific query: at timestep t and amplitude s, if energy is injected in ring k, what fraction of the denoiser residual appears in ring j?
+
+4) Identify. Given a query image, we compare its signature against stored model prototypes to determine the source model, either via nearest-prototype matching or a trained linear classifier. 
+
+Prototype construction. Given N reference images {x(i)0 } generated by model M , the model prototype is the mean signature: 
+
+Ψ( M ) = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+Φ
+
+
+
+M, E(x(i)0 )
+
+
+
+(8) Averaging suppresses content-dependent noise, recovering the model’s intrinsic centroid in signature space. The row normalisation in Eq. 5 removes content-scale variation by design, which is why a small N suffices. 
+
+Zero-training identification (argmin). Given a test image from an unknown model M ∗, we assign it to the nearest prototype: 
+
+ˆM = arg min  
+
+> M∈M
+
+dcos (Φ( M ∗, E(x)) , Ψ( M )) , (9) where dcos (u, v ) = 1−u⊤v 
+
+> (∥u∥∥ v∥)
+
+. This requires no classifier training; identification is immediate once prototypes are computed. 
+
+Classifier-based identification. When labelled signatures are available, a LinearSVC trained on raw signatures substantially improves over argmin, particularly when model weight overlap is high. That a linear classifier suffices reflects the global mean-shift structure from § 3: model classes are linearly separable in signature space, making nonlinear alternatives unnecessary. The full algorithm is in Algorithm 1 (Appendix A). 65 Experimental Setup 
+
+We design a single closed-set attribution experiment spanning eight diffusion models representing distinct combinations of training data, architecture, and training procedure. We additionally evaluate under six strong image-level distortions i.e., rotation ( 75 ◦), JPEG compression (Q=25), centre crop ( 75% ), brightness scaling ( ×1.5), Gaussian blur ( σ=8 ), and additive noise ( σ=0 .1), to assess robustness. 
+
+Training data variation (fixed “1.x” latent architecture). Stable Diffusion v1.4, v1.5, Dreamshaper-84, and Realistic Vision v5 5 all build on the same SD 1.x UNet-860M latent diffusion backbone, but differ in training data distribution, ranging from base LAION [Schuhmann et al., 2022] training to domain-specific fine-tuning. Stable Diffusion v2.1 extends this family with updated data curation and an OpenCLIP text encoder, while remaining a latent diffusion model in the same overall design space. 
+
+Architecture variation. SDXL (UNet-2.6B with dual CLIP encoders) [Podell et al., 2023] and PixArt-α (DiT transformer with T5-XXL) [Chen et al., 2023] differ from the UNet-860M family in both denoiser architecture and text encoder. 
+
+Training procedure variation. SDXL-Turbo [Sauer et al., 2024] shares the SDXL architecture but is trained via adversarial distillation rather than standard diffusion training, isolating the effect of training procedure. Together these eight models form a challenging attribution setting. 
+
+Data. For each model we generate signatures from N =50 images and evaluate on Ntest =500 held-out images from SD prompt dataset. We additionally evaluate cross-domain generalization by testing the same prototypes on MS-COCO prompts [Lin et al., 2014] generated images. 
+
+Metrics. We report Top-1 attribution accuracy for all classifiers across all experiments. 
+
+SDS implementation. We use the SD v1.5 KL-f8 VAE as the shared encoder ( 512 ×512 input, 
+
+64 ×64 latents). The probe scheduler is DDIM with T =50 steps. We use K=8 frequency rings, 
+
+S=3 amplitude scales {1.0, 1.25 , 1.5}, R=10 noise repeats, and Tn=5 evenly spaced timesteps in [0 .2T, T ], giving signature dimension S·Tn·K2=960 . LinearSVC is trained on raw signatures using 5-fold cross-validation. The choice of K and S is studied in the ablation (Appendix E); R=10 
+
+and Tn=5 were selected based on convergence of the coupling estimate and accuracy saturation respectively. 
+
+Baselines. We compare SDS against two non-invasive attribution methods that, like SDS, attribute generated images to their source model without modifying model parameters. Both are evaluated under identical conditions: the same eight models, the same test images, and the same evaluation protocol as SDS. L ATENT TRACER [Wang et al., 2024] attributes images by inverting the VAE decoder and measuring reconstruction fidelity under each candidate model. RONAN [Wang et al., 2023] attributes images via gradient-based input inversion with random initialization, reverse-engineering the latent input of each candidate model. 
+
+## 6 Results 
+
+Our evaluation addresses following core questions: 1. Attribution accuracy (§6.1): Can SDS reliably identify the source model across eight diverse diffusion models spanning different architectures, training data, and fine-tuning procedures? 2. Cross-domain generalization (§6.2): Do SDS signatures remain stable when query images are drawn from a completely different prompt distribution than the prototypes? 3. Robustness (§6.3): Do SDS signatures remain stable when query images are subject to common post-processing distortions? 4. Baseline comparison (§6.4): How does SDS perform compared to the non-invasive attribution baseline, on the same eight-model closed-set task? 
+
+6.1 Attribution Accuracy 
+
+Figure 3 shows confusion matrices for PCA-LR and LinearSVC at five probe timesteps. Attri-bution accuracy scales directly with model difference: SDXL, PixArt-α, and SDXL-Turbo are attributed perfectly across all settings, as are SD v2.1, Dreamshaper-8, and Realistic Vision v5 despite sharing the UNet-860M backbone. The only errors occur between SD v1.4 and SD v1.5 
+
+> 4https://huggingface.co/Lykon/dreamshaper-8
+> 5https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE
+
+7(significant weight overlap), the hardest possible case. LinearSVC achieves ≈ 100% overall ac-curacy, eliminating all confusion between this pair. PCA-LR retains ∼1.5% residual confusion even at Tn=5 , consistent with PCA compression discarding marginal discriminative signal. t-SNE visualizations confirming the geometric separability of SDS signatures are provided in Appendix D. 
+
+Figure 3: Confusion matrices for SDS attribution on the SD-Prompts dataset (M =8 models, Ntest =500 per model). PCA-LR and LinearSVC at Tn=5 .
+
+6.2 Prompt Robustness and Cross-Domain Generalization 
+
+We test whether signatures reflect the model or the images used to construct them. Prototypes are built from SD-Prompts images and evaluated unchanged on MS-COCO images, a com-pletely different prompt dis-tribution, without any up-date (Table 1).                      
+
+> Classifier SD-Prompts MS-COCO Drop (pp)
+> Argmin †78.33% 78.40% +0.07 LinearSVC 99.98% 96.20% −3.80 PCA-LR 99.62% 92.50% −7.12 Random Forest 96.23% 83.60% −12.63 PCA-SVM (RBF) 91.83% 80.30% −11.53 PCA-kNN ( k=5 )82.37% 74.20% −8.17
+
+Table 1: Top-1 accuracy across prompt distributions. Pro-totypes from SD-Prompts ( N =50 , Tn=5 , M =8 , Ntest =500 ), evaluated unchanged on MS-COCO. Drop: absolute Top-1 de-crease. † training-free. 
+
+Two patterns emerge. First, the argmin vari-ant (Eq. 9) is essentially unaffected ( +0 .07 pp), confirming that prototype centroids are content-invariant by design: row normalisation (Eq. 5) and unconditional conditioning remove content-scale variation so completely that the centroid does not shift under distribution change. Second, classifier-based methods show larger drops, with LinearSVC losing 3.78 pp ( 99 .98% →96 .20% )and other classifiers dropping by 7–13 pp. This reflects a different mechanism: classifiers trained on SD-Prompts signatures learn deci-sion boundaries that are partially distribution-specific, and these boundaries shift slightly under MS-COCO. LinearSVC is the most robust because its linear decision surface exploits the global mean-shift structure, which is more stable than the nonlinear boundaries learned by Random Forest or SVM-RBF. LinearSVC still achieves 96 .20% on MS-COCO with no retraining; an evidence that the underlying signatures are substantially model-intrinsic, even if the classifier boundary is not fully distribution-invariant. 
+
+6.3 Robustness to Image Distortions                                       
+
+> SD-Prompts MS-COCO Distortion Argmin PCA-LR LinearSVC Argmin PCA-LR LinearSVC
+> Rotation ( 75 ◦)77.5% 90.6% 91.9% 62.5% 90.0% 90.6% JPEG (Q=25) 76.2% 91.2% 93.1% 55.6% 86.9% 85.0% Crop (75%) + resize 78.1% 91.2% 90.6% 56.3% 86.9% 87.5% Brightness ( ×1.5)75.6% 88.8% 88.8% 48.8% 86.3% 85.6% Noise ( σ=0 .1)61.9% 92.5% 93.8% 58.1% 93.8% 92.5% Blur ( σ=8 )51.9% 95.6% 95.6% 21.3% 99.4% 99.9%
+
+Table 2: Robustness of SDS to strong image-level distortions (M =8 , N =50    
+
+> per model, 20 test images per model, Ntest =160 total per distortion). Each distortion is applied to the query image before signature extraction; prototypes are always built from clean images. Distortions are intentionally chosen at challenging magnitudes that substantially degrade perceptual image quality.
+
+We evaluate SDS against six strong post-processing distor-tions applied to query images before signature extraction (Ta-ble 2). These distortions are in-tentionally chosen at challenging magnitudes that substantially de-grade perceptual image quality; prototypes are always built from clean images. The six distortions split into two behaviours. Rotation, JPEG, cropping, and brightness cause no meaningful degradation ( ≤1.3pp argmin drop; LinearSVC ≥88% ) because they preserve latent structure. Noise and blur hurt argmin substantially ( 61 .9% and 51 .9% ), but classifier accuracy is 
+
+higher than baseline: LinearSVC reaches 93 .8% under noise and 99 .9% under blur on MS-COCO. This is not paradoxical; strong distortions add isotropic noise that blurs individual-sample distances but leaves class centroids intact, and LinearSVC operates on centroids. The takeaway is fundamental i.e., SDS measures denoiser spectral routing, not pixel statistics, so pixel-space distortions cannot 8erase the fingerprint regardless of strength. Additional ablation results are provided in the appendix: sensitivity to prototype set size is studied in Appendix F, where we justify the choice of N =50 ; and sensitivity to probe design is studied in Appendix E, where we show that attribution saturates at K=6 ,
+
+S=3 (99 .6% ), with the baseline K=8 , S=3 operating in this saturated regime. 
+
+6.4 Baseline Comparison Model RONAN LatentTracer SDS (ours)                            
+
+> SD v1.4 21.4% 22.1% 100.0%
+> SD v1.5 20.2% 19.7% 100.0%
+> SD v2.1 22.2% 26.6% 100.0%
+> Dreamshaper-8 21.2% 22.1% 99.8%
+> Realistic V. v5 20.4% 20.9% 100.0%
+> SDXL 48.4% 59.2% 100.0%
+> PixArt-α55.4% 79.0% 100.0%
+> SDXL-Turbo 35.0% 67.0% 100.0% Overall Top-1 30.5% 44.8% 99.9%
+
+Table 3: Baseline comparison on the 8-model closed-set task (Ntest =500 per model, Top-1 accuracy per model). Both baselines exploit decoder reconstruction fidelity and collapse for all five models sharing the SD KL-f8 VAE. SDS probes the denoiser and succeeds across all models. 
+
+Table 3 reveals a structural gap. Both baselines rely on decoder reconstruction as their discrimi-native signal, effective when autoencoders differ (L ATENT TRACER : 59 -79% ; RONAN: 35 -55% 
+
+on SDXL, PixArt-α, SDXL-Turbo), but collaps-ing to 20 -27% for all five shared-VAE models, indistinguishable from the 20% random baseline. This is structural: shared decoders produce iden-tical reconstruction losses regardless of which candidate is queried. SDS probes the denoiser instead, achieving perfect attribution on all eight models i.e., a 55 pp gain over L ATENT TRACER 
+
+and 70 pp over RONAN, with the entire gap on exactly the model pairs that matter most. 
+
+## 7 Conclusion and Discussion 
+
+SDS achieves perfect attribution across eight diverse diffusion models, succeeding precisely where existing non-invasive baselines collapse. Our results reveal that model identity is encoded in the denoiser’s spectral geometry rather than generated outputs: training data, architecture, and training procedure each leave distinct imprints on frequency-band energy routing, grounding attribution in the learned score function. Beyond the empirical results, our work raises broader questions. First, the mean-shift structure, where class centroids are linearly separable while individual samples overlap , suggests that spectral coupling signatures may generalize beyond attribution to other model analysis tasks such as detecting fine-tuning, quantization artifacts, or distillation. Second, the modest cross-domain drop ( 3.8pp for LinearSVC under a completely different prompt distribution) raises the question of what would be required to deliberately evade SDS: an adversary would need to modify the latent representation of an image to mimic a different model’s denoising geometry, a substantially harder task than pixel-level post-processing. Third, the collapse of decoder-based baselines points to a general principle: attribution signal should be sought in the component that varies most across models i.e., the denoiser, not the decoder. SDS is a provenance tool; it answers which model produced an image, not whether the image has been modified after generation, and should be combined with tamper detection when image integrity cannot be assumed. Natural extensions include open-set attribution, where the source model may not appear in the registry, and scaling prototype construction to larger model registries. 
+
+## 8 Limitations and Broader Impact 
+
+Limitations. SDS has two limitations worth noting. First, it operates in a closed-set setting where the source model must appear in the registry; open-set attribution, where the query image may originate from an unknown model, remains an open problem. Second, it requires white-box access to candidate model weights to run denoiser forward passes; this is satisfied by all open-source diffusion models but precludes attribution against proprietary APIs where weights are unavailable. Finally, SDS does not detect post-generation tampering; combining it with tamper detection is an important direction for future work. 
+
+Broader impact. SDS addresses a genuine need in responsible AI deployment: verifying the prove-nance of generated images for ownership verification, misuse detection, and content moderation. By enabling attribution without model modification or watermarking, it is applicable to the large ecosys-tem of existing open-source diffusion models that cannot be retroactively enrolled in watermarking schemes. Attribution tools of this kind are more likely to support accountability than to enable misuse. One potential concern is that knowledge of SDS’s mechanism could inform adversarial attacks designed to spoof or evade attribution; studying such attacks and defenses is an important direction for future work. 9References 
+
+Simone Bonechi, Paolo Andreini, and Barbara Toniella Corradini. Who made this? fake detection and source attribution with diffusion features. arXiv preprint arXiv:2510.27602 , 2025. Xiaoyu Cao, Jinyuan Jia, and Neil Zhenqiang Gong. Ipguard: Protecting intellectual property of deep neural networks via fingerprinting the classification boundary. In Proceedings of the 2021 ACM asia conference on computer and communications security , pages 14–25, 2021. Junsong Chen, Jincheng Yu, Chongjian Ge, Lewei Yao, Enze Xie, Yue Wu, Zhongdao Wang, James Kwok, Ping Luo, Huchuan Lu, et al. Pixart-α: Fast training of diffusion transformer for photorealistic text-to-image synthesis. arXiv preprint arXiv:2310.00426 , 2023. Riccardo Corvi, Davide Cozzolino, Giovanni Poggi, Koki Nagano, and Luisa Verdoliva. Intriguing properties of synthetic images: from generative adversarial networks to diffusion models. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 973–982, 2023. Jianwei Fei, Yunshu Dai, Zhihua Xia, Fangjun Huang, and Jiantao Zhou. Omnimark: Efficient and scalable latent diffusion model fingerprinting. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 39, pages 16550–16558, 2025. Pierre Fernandez, Guillaume Couairon, Hervé Jégou, Matthijs Douze, and Teddy Furon. The stable signature: Rooting watermarks in latent diffusion models. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 22466–22477, 2023. Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. Yuepeng Hu, Zhengyuan Jiang, Moyang Guo, and Neil Gong. Stable signature is unstable: Removing image watermark from diffusion models. arXiv preprint arXiv:2405.07145 , 2024. Zahra Kadkhodaie, Florentin Guth, Eero P Simoncelli, and Stéphane Mallat. Generalization in diffusion models arises from geometry-adaptive harmonic representations. arXiv preprint arXiv:2310.02557 , 2023. Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays, Pietro Perona, Deva Ramanan, Piotr Dollár, and C Lawrence Zitnick. Microsoft coco: Common objects in context. In European conference on computer vision , pages 740–755. Springer, 2014. Nils Lukas, Yuxuan Zhang, and Florian Kerschbaum. Deep neural network fingerprinting by conferrable adversarial examples. arXiv preprint arXiv:1912.00888 , 2019. Sen Peng, Yufei Chen, Cong Wang, and Xiaohua Jia. Intellectual property protection of diffusion models via the watermark diffusion process. In International Conference on Web Information Systems Engineering , pages 290–305. Springer, 2025. Zirui Peng, Shaofeng Li, Guoxing Chen, Cheng Zhang, Haojin Zhu, and Minhui Xue. Fingerprinting deep neural networks globally via universal adversarial perturbations. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 13430–13439, 2022. Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe Penna, and Robin Rombach. Sdxl: Improving latent diffusion models for high-resolution image synthesis. arXiv preprint arXiv:2307.01952 , 2023. Yuhui Quan, Huan Teng, Ruotao Xu, Jun Huang, and Hui Ji. Fingerprinting deep image restoration models. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 13285–13295, 2023. Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF confer-ence on computer vision and pattern recognition , pages 10684–10695, 2022. Axel Sauer, Dominik Lorenz, Andreas Blattmann, and Robin Rombach. Adversarial diffusion distillation. In European Conference on Computer Vision , pages 87–103. Springer, 2024. 10 Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon, Ross Wightman, Mehdi Cherti, Theo Coombes, Aarush Katta, Clayton Mullis, Mitchell Wortsman, et al. Laion-5b: An open large-scale dataset for training next generation image-text models. Advances in neural information processing systems , 35:25278–25294, 2022. Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020a. Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 , 2020b. Huan Teng, Yuhui Quan, Chengyu Wang, Jun Huang, and Hui Ji. Fingerprinting denoising diffusion probabilistic models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 28811–28820, 2025. Subarna Tripathi et al. Paladin: Robust neural fingerprinting for text-to-image diffusion models. 
+
+arXiv preprint arXiv:2506.03170 , 2025. Zhenting Wang, Chen Chen, Yi Zeng, Lingjuan Lyu, and Shiqing Ma. Where did i come from? origin attribution of ai-generated images. Advances in neural information processing systems , 36: 74478–74500, 2023. Zhenting Wang, Vikash Sehwag, Chen Chen, Lingjuan Lyu, Dimitris N Metaxas, and Shiqing Ma. How to trace latent generative model generated images without artificial watermark? arXiv preprint arXiv:2405.13360 , 2024. Katherine Xu, Lingzhi Zhang, and Jianbo Shi. Detecting origin attribution for text-to-image diffusion models. In 2025 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pages 8775–8785. IEEE, 2025. Zihan Yuan, Li Li, Zichi Wang, and Xinpeng Zhang. Watermarking for stable diffusion models. IEEE Internet of Things Journal , 11(21):35238–35249, 2024. Yunqing Zhao, Tianyu Pang, Chao Du, Xiao Yang, Ngai-Man Cheung, and Min Lin. A recipe for watermarking diffusion models. arXiv preprint arXiv:2303.10137 , 2023. 11 APPENDIX A Algorithm 
+
+Input: Denoiser ˆϵθ , latent z0, rings K, timesteps T , scales S, repeats R
+
+Output: Signature Φ ∈ RS·Tn·K2
+
+Compute ring masks {Mk }K−1 
+
+> k=0
+
+;
+
+A ← 0S×Tn×K×K ;
+
+for each repeat r = 1 , . . . , R do for each (s, t ) ∈ S × T do for each ring k = 0 , . . . , K − 1 do 
+
+η(k,s ) ← s · F −1(F(η) ⊙ Mk ) ; // band-limited perturbation 
+
+zt ← √¯αt z0 + √1 − ¯αt η(k,s ) ; // inject into diffusion 
+
+ˆη ← ˆϵθ (zt, t, ∅) ; // denoiser forward pass 
+
+r ← ˆη − η(k,s ) ; // residual = model response 
+
+A[s, t, k, ·] += ⟨|F (r)|2, M j ⟩K−1 
+
+> j=0
+
+; // energy redistribution 
+
+A ← A/R ;Row-normalise: A[s, t, k, ·] ← A[s, t, k, ·] / ∥A[s, t, k, ·]∥1;
+
+return vec( A);
+
+Algorithm 1: Spectral Geometry Signature (SGS) extraction. The algorithm probes a diffusion model by injecting band-limited perturbations into latent space and measuring how the denoiser redistributes energy across frequency bands over timesteps and scales, producing a model-specific signature 
+
+## B Extended Related Work 
+
+Watermarking for diffusion models. A dominant line of work on protecting diffusion model intellectual property is watermarking , which embeds identifiable signals into model parameters or generated outputs. Existing approaches introduce watermarks through training-time modifications, such as embedding triggers in the data [Zhao et al., 2023, Peng et al., 2025], fine-tuning model components [Yuan et al., 2024], or altering the decoder to encode persistent signatures in generated images [Fernandez et al., 2023]. While effective, these methods are inherently invasive , requiring retraining or fine-tuning and potentially affecting generation quality or model usability. Moreover, watermarks can be removed or degraded through post-processing or model modifications [Hu et al., 2024], motivating the need for non-invasive alternatives. 
+
+Model fingerprinting in neural networks. Non-invasive fingerprinting aims to identify intrinsic characteristics of a model without modifying its parameters. In classification models, prior work exploits decision boundary geometry or adversarial examples to construct model-specific signa-tures [Cao et al., 2021, Lukas et al., 2019, Peng et al., 2022]. In image restoration, fingerprinting methods identify critical points near the performance boundary that produce distinctive responses across models [Quan et al., 2023]. These approaches rely on the observation that models differ in how they behave on carefully chosen inputs. However, extending these ideas to diffusion models is non-trivial, as diffusion models are probabilistic generative systems that map noise distributions to images rather than deterministic input-output mappings. 
+
+## C Theoretical Grounding 
+
+Score function and spectral geometry. The denoising network ˆϵθ (zt, t ) is related to the score function via ∇zt log pt(zt) ∝ − ˆϵθ (zt, t ) [Song et al., 2020b]. The score field ∇zt log pt(zt) encodes the statistical geometry of the (noisy) data distribution at noise level t, including how energy is correlated across spatial frequency bands. Concretely, the Hessian ∇2 
+
+> zt
+
+log pt(zt) characterizes the local covariance structure: its off-diagonal blocks in the frequency domain reflect how variations in one frequency band couple to variations in another. Different training datasets imprint different covariance structures, and different architectures impose different inductive biases on how this structure is represented [Kadkhodaie et al., 2023]. Both effects manifest in the Jacobian of the 12 denoiser Jθ (zt, t ) = ∂ˆϵθ (zt, t )/∂z t, which inherits the spectral geometry of the learned score function. 
+
+Spectral coupling as a Jacobian projection. The coupling matrix C[k, j ] is a Monte Carlo estimate of this Jacobian structure in the frequency domain. To see this, consider a first-order expansion of the denoiser response to a band-limited perturbation η(k,s ) confined to ring k:
+
+ˆϵθ (zt, t, ∅) ≈ ˆϵθ (z0, t, ∅) + Jθ (z0, t ) √1−¯αt η(k,s ), (10) where zt = z0 + √1−¯αt η(k,s ). The output residual δ ˆη = ˆ ϵθ (zt, t, ∅) − ˆϵθ (z0, t, ∅) therefore reflects how Jθ maps ring-k inputs to outputs across all rings. The coupling entry C[k, j ] measures the energy of this residual in ring j, averaged over noise samples. If η(k,s ) is isotropic within ring k, then 
+
+C[k, j ] ∝ Pj Jθ (z0, t ) Pk 
+
+> 2
+> F
+
+, (11) where Pk denotes projection onto ring k. Since Jθ is determined by the learned score function, the expected couplings C[k, j ] are intrinsic to the model and, after averaging over images, largely independent of image content. 
+
+## D Signature Separability Across Models 
+
+Figure 4: t-SNE visualization of SDS signatures before and after classifier projection. (a) Pre-classifier : t-SNE of dimensionally reduced SDS signatures, with no classifier applied. Four of the eight models form visually distinct clusters, confirming that the signature space carries strong intrinsic structure without any learned transformation. The only overlap occurs between SD v1.4 - SD v1.5, and Dreamshaper-8 - Realistic Vision v5, which are the hardest pairs in our evaluation. (b) Post-classifier : t-SNE of signatures after LR projection. All eight clusters are cleanly separated, consistent with the high attribution accuracy reported in confusion matrix 3. 
+
+The t-SNE visualization in Figure 4 provides direct geometric evidence for the quality of SDS signatures. Even before any classifier is applied, the raw signature space already separates most of the models into distinct, compact clusters. This intrinsic separability confirms that the spectral coupling representation captures genuine model-specific structure rather than fitting to classifier artifacts. A linear classifier resolves this residual ambiguity entirely, as shown in panel (b), consistent with the global mean-shift structure established in § 3. 
+
+## E Sensitivity to Probe Design 
+
+Table 4 reports attribution accuracy across all combinations of K and S, evaluated at Tn=1 to isolate the effect of spatial resolution and multi-scale probing from temporal aggregation. Both parameters independently and substantially affect performance. At K=2 , even the full S=3 configuration reaches only 77 .4% with LinearSVC, near chance for an 8-way task. Increasing K from 2 to 4 with 
+
+S=3 jumps performance to 97 .2% , confirming that spectral resolution is critical: coarser frequency partitions cannot distinguish the subtle cross-band routing differences that encode model identity. Performance saturates beyond K=6 , with K=6 , S=3 already achieving 99 .6% . The baseline 13 K S Sig. dim Argmin LinearSVC 
+
+2 1 4 52.3% 52.4% 2 8 53.5% 65.3% 3 12 60.9% 77.4% 4 1 16 65.1% 90.2% 2 32 66.8% 94.6% 3 48 70.3% 97.2% 6 1 36 69.8% 94.3% 2 72 72.4% 97.0% 3 108 75.0% 99.6% 8 1 64 71.9% 94.2% 2 128 74.2% 97.5% 3∗ 192 76.4% 99.9% 
+
+Table 4: Ablation over frequency rings K and perturbation amplitudes S at a single probe timestep ( Tn=1 , t = 25 ), evaluated on all 8 models ( Ntest =500 per model). S=1 : amplitude {1.0}; S=2 : {1.0, 1.25 }; S=3 : {1.0, 1.25 , 1.5} (full baseline ∗). Sig. dim = S × K2. ∗ baseline used in main experiments. 
+
+configuration ( K=8 , S=3 ) operates in this saturated regime, offering a favorable trade-off between performance and signature dimensionality. The effect of S is consistent across all values of K: adding perturbation amplitudes improves performance by 10 –25 pp at fixed K, with diminishing returns from S=2 to S=3 , suggesting three amplitudes is a practical optimum. Different amplitudes probe the denoiser at different operating points, each revealing complementary model-specific structure. 
+
+## F Sensitivity to Prototype Set Size 
+
+Figure 5: Attribution accuracy vs. number of prototype images per model ( N ). LinearSVC and PCA-LR evaluated on SD-Prompts (in-distribution) and MS-COCO (cross-domain). 
+
+Figure 5 shows how attribution accuracy scales with N , the number of prototype im-ages per model used to train the classifier. At N =8 per model ( 64 total training signa-tures), LinearSVC achieves 84 .0% on SD-Prompts and 80 .7% on MS-COCO, already well above the 12 .5% random baseline. Accuracy improves steadily with N : at 
+
+N =25 , LinearSVC reaches 94 .8% on SD-Prompts and 92 .4% on MS-COCO, and at 
+
+N =50 it reaches 99 .9% and 96 .2% respec-tively. The gap between SD-Prompts and MS-COCO remains stable across all values of N (≈3–4pp), confirming that the cross-domain drop reflects a fixed distribution shift rather than amplified estimation error. PCA-LR follows the same trend, consistently 2–3pp below LinearSVC. These results confirm that N =50 prototypes per model is a practical and sufficient operating point for reliable attribution. 14

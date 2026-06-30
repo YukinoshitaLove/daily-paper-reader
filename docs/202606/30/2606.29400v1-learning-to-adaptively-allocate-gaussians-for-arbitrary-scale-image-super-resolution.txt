@@ -1,0 +1,616 @@
+Title: Learning to Adaptively Allocate Gaussians for Arbitrary-Scale Image Super-Resolution
+
+URL Source: https://arxiv.org/pdf/2606.29400v1
+
+Published Time: Tue, 30 Jun 2026 01:25:30 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Learning to Adaptively Allocate Gaussians for Arbitrary-Scale Image Super-Resolution 
+
+# GIULIO FEDERICO ∗, University of Pisa, Italy and ISTI-CNR, Italy 
+
+# GIUSEPPE AMATO, CLAUDIO GENNARO, FABIO CARRARA, and MARCO DI BENEDETTO, ISTI-CNR, Italy 
+
+In computer graphics, visual content is continuously warped, zoomed and resampled. This adaptation is required when engines upscale frames to na-tive resolutions, users zoom into 3D scenes, or foveated VR applies varying scaling. Handling these dynamic transformations requires Arbitrary-Scale Super-Resolution (ASR) . However, traditional models are designed for fixed integer scales. To achieve continuous scales, they typically predict at a lower fixed scale (e.g., ×4) and rely on sub-optimal interpolation to reach the target resolution, compromising quality. Furthermore, state-of-the-art methods generally process pixels uniformly. Since fine details are typically sparse, uniform processing incurs unnecessary overhead; efficiency dictates con-centrating resources strictly where structural complexity demands it. While implicit models and Gaussian Splatting (GS) enable continuous representa-tion, the latter is particularly advantageous due to its adaptive densification. However, transitioning GS into a generalized feed-forward model to solve the ASR task is not trivial. Standard GS optimization requires high-resolution ground-truth gradients to drive primitive growth. In contrast, when GS is used in a feed-forward model to solve the ASR task, this high-resolution target is unavailable during inference. Therefore, the network must au-tonomously predict the GS densification directly from the low-resolution input. To solve this, we propose QuADA-GS . Our model encodes the input into a latent feature space. A Neural Routing Architecture evaluates local complexity to distribute a global budget, assigning a specific upsampling fac-tor to each feature to avoid redundant processing. Features are dynamically densified based on these factors, forming an irregular topology decoded into 2D Gaussian primitives. To coordinate features before decoding, we introduce Hierarchical Pointer Convolution . This non-grid operator achieves 
+
+O ( 1) neighbor lookup complexity, facilitating efficient spatial communica-tion across varying densities and bypassing dense operation bottlenecks. Extensive experiments show QuADA-GS achieves state-of-the-art ASR per-formance, excelling in perceptual fidelity, while maintaining low latency and a lean memory footprint by dynamically scaling Gaussian count. CCS Concepts: • Computing methodologies → Image representations ;
+
+Reconstruction ; Neural networks ; Learning latent representations ; Rasteriza-tion ; Image processing ; Point-based models .Additional Key Words and Phrases: Gaussian Splatting, arbitrary-scale super-resolution, learned budget allocation, complexity-aware rendering, sparse feature refinement, adaptive quadtrees, memory-efficient neural graphics. 
+
+1 Introduction 
+
+Super-resolution (SR) methods have achieved remarkable recon-struction quality, yet most approaches operate at fixed integer scale factors, an assumption that rarely holds in production pipelines. Applications such as VFX compositing, custom-resolution display 
+
+> ∗Corresponding author. Authors’ Contact Information: Giulio Federico, giulio.federico@isti.cnr.it, University of Pisa, Pisa, Italy and ISTI-CNR, Pisa, Italy; Giuseppe Amato, giuseppe.amato@isti.cnr.it; Claudio Gennaro, claudio.gennaro@isti.cnr.it; Fabio Carrara, fabio.carrara@isti.cnr.it; Marco Di Benedetto, marco.dibenedetto@isti.cnr.it, ISTI-CNR, Pisa, Italy.
+
+rendering, and large-format print output require upscaling to ar-bitrary, non-integer scales imposed by external constraints. To ad-dress this, Arbitrary-Scale SR (ASR) emerged. While Implicit Neural Representations (INRs) [Chen et al . 2021] advanced ASR by decod-ing continuous coordinates via Multi-Layer Perceptrons (MLPs), exhaustive pixel-by-pixel querying causes severe computational bottlenecks at high resolutions. Recently, 2D Gaussian Splatting (GS) [Kerbl et al . 2023] emerged as a powerful continuous alternative. Yet, recent ASR adaptations [Chen et al . 2025a; Hu et al . 2025] completely ignore the input’s spatial complexity, failing to inherit GS’s adaptive densification. By rigidly enforcing a uniform allocation strategy, they blindly expend the same Gaussian budget on flat backgrounds as on intricate textures. 
+
+To break this rigidity, we propose a Qu adtree Ada ptive Gaussian 
+
+Splatting ( QuADA-GS ) model for ASR. Driven by the input complex-ity and target scale, the framework first defines a global Gaussian budget . A dynamic router then learns to optimally allocate this capacity , replacing uniform densification with a spatially adaptive, quadtree-inspired topology. Since this variable-density structure breaks standard grid convolutions, we concurrently propose Hi-erarchical Pointer Convolution (HPC) . HPC efficiently coor-dinates multi-level features across this non-grid topology in O( 1)
+
+time, entirely bypassing the memory overhead of traditional sparse operators. Our main contributions are threefold: 
+
+• Neural Routing Architecture : A module that analyzes the reconstruction complexity of the input image at a given res-olution scale, defines a 2D Gaussian budget, and determines where and how to allocate them. 
+
+• HPC : A novel operator that achieves O( 1) complexity for topological neighbor lookup, enabling efficient feature coor-dination across non-grid topologies without the prohibitive memory overhead of dense or sparse alternatives. 
+
+• State-of-the-art ASR performance : QuADA-GS delivers superior texture reconstruction and optimal memory us-age. Breaking dense uniformity allows scaling to massive Gaussian counts that cause out-of-memory failures in dense competitors. 
+
+2 Related Work 
+
+Training Data and Evaluation. Image super-resolution (SR) aims to recover high-resolution (HR) details from low-resolution (LR) inputs. The SR ecosystem has shifted from rigid LR-HR pairs to per-ceptually guided ground truths [Chen et al . 2023a]. For real-world 
+
+Blind SR , simulating composite corruptions is essential for robust-ness [Wang et al . 2021b; Zhang et al . 2021]. This shift prompted a   
+
+> arXiv:2606.29400v1 [cs.CV] 28 Jun 2026 2•G. Federico et al.
+
+rethinking of evaluation metrics [Chen et al . 2025b], acknowledg-ing that reference images may carry intrinsic flaws and generative models often surpass them in perceived quality. 
+
+Architectural Efficiency. Early convolutional networks expanded receptive fields via increased linear depth [Kim et al . 2016a], deep recursion [Kim et al . 2016b], and Laplacian pyramids [Lai et al .2017]. Efficiency improved drastically by processing features in compressed, low-dimensional spaces and employing Residual-in-Residual structures to focus on high-frequency components [Dong et al . 2016a; Li et al . 2019; Wang et al . 2018; Zhang et al . 2018b,c]. The field then embraced Transformers: SwinIR [Liang et al . 2021] leveraged Swin blocks for deep extraction, ELAN [Zhang et al . 2022] and HAT [Chen et al . 2023b] optimized computational redundancy, and ATD-SR [Zhang et al . 2024] introduced adaptive tokens to overcome the limited receptive fields of standard window-based attention. 
+
+Diffusion Models and Hallucination. A critical issue with diffusion models in SR is their tendency to hallucinate non-existent structures. Mitigation strategies include structure-preserving losses [Chen et al .2024], local error isolation [Liang et al . 2022], and text-prompted semantic coherence [Wu et al . 2024]. Furthermore, fixed-resolution grids and heavy VAE downsampling (e.g., 8×) intrinsically erase micro-structures. While latent alignment [Yi et al . 2025] and mas-sive scaling [Yu et al . 2024] alleviate this, iterative sampling latency remains impractical for large-format images. Following ASR conven-tions , we exclude diffusion baselines: they lack non-integer scaling, risk benchmark leakage via massive priors, and hallucinate rather than strictly reconstruct. 
+
+Arbitrary-Scale SR and Gaussian Splatting. To maintain structural fidelity without being constrained by fixed grids, Arbitrary-Scale Super Resolution (ASR) frames SR as a continuous representation problem. Meta-SR [Hu et al . 2019] and scale-aware plug-ins [Wang et al . 2021a] broke the integer-scale constraint by dynamically pre-dicting filter weights. LIIF [Chen et al . 2021] formalized ASR by training a Multi-Layer Perceptron (MLP) to predict RGB values from continuous spatial coordinates, a paradigm also effective for preserving sharp text in screen content (ITSRN [Yang et al . 2021]). To overcome the MLP’s tendency to suppress high frequencies, LTE [Lee and Jin 2022] mapped textures into 2D Fourier space, while LINF [Yao et al . 2023] modeled local texture distributions via Normalizing Flows. To expand the receptive field, CiaoSR [Cao et al . 2023] introduced implicit attention-in-attention. SRNO [Wei and Zhang 2023] reframed ASR through neural operators to map continuous function spaces, while LIT [Chen et al . 2023c] improved inputs with frequency encodings. Since querying an MLP for every target coordinate is highly memory and time intensive, LMF [He and Jin 2024] introduced a decoupled paradigm, confining heavy computation to the LR latent space and using a lightweight dynamic renderer. Recently, 2D Gaussian Splatting (GS) [Kerbl et al . 2023] has been adapted for ASR. GaussianSR [Hu et al . 2025] assigns a discrete, pre-trained Gaussian kernel to each low-resolution (LR) pixel, computing continuous high-resolution (HR) values by alpha-blending neighboring LR features. To save compute, this applies only to a channel subset, bicubically interpolating the rest. Conversely, GSASR [Chen et al . 2025a] updates learnable Gaussian embeddings via cross- and self-attention, uniformly densifying them through cascaded pixel shuffles. MLPs then predict continuous Gaussian parameters (position, covariance, opacity, color) for custom CUDA rendering. Crucially, both methods upsample uniformly on a regular grid. Consequently, they blindly expend the same Gaussian budget on flat backgrounds as on high-frequency details. 
+
+To break this rigidity, we introduce QuADA-GS . From the ex-tracted LR feature map, a router bypasses dense upsampling by dynamically assigning an ad-hoc upsampling factor to each feature. Smooth regions receive minimal upsampling, while complex tex-tures are densely split, naturally organizing features into a variable-density, quadtree-like topology. Processing non-grid data is typically addressed in 3D point clouds via sparse operators using dynamic Hash tables [Chang et al . 2024; Choy et al . 2019; Graham and van der Maaten 2017; Jayaraman et al . 2018; Peng et al . 2024; Riegler et al . 2017; Sun et al . 2023; Tang et al . 2023; Wang et al . 2017; Yoshai et al . 2026]. However, our 2D topology lacks empty space. Instead, assigning distinct up-sampling factors to latent pixels continuously partitions the plane into multiple resolution levels, naturally forming a dense quadtree. Within this hierarchy, spatial communication is critical: a feature must seamlessly coordinate with its topological neighbors, whether they are equally fine-grained details or coarser background features. To efficiently process this emergent structure, we introduce our 
+
+HPC operator. Using a lightweight pointer grid , HPC retrieves spa-tial neighbors in O( 1) time, dynamically aggregating multi-level context prior to 2D Gaussian decoding. 
+
+3 Method 
+
+While maximizing the number of 2D Gaussians improves SR quality, uniformly splitting LR features (extracted in Sec. 3.1) into dense child representations, later decoded into 2D Gaussians, wastes budget on flat regions. This ignores Gaussians’ inherent ability to span large smooth areas or become highly anisotropic for fine details. Since ASR lacks a densification ground truth, we introduce the Neural Routing Architecture to dynamically predict and distribute a child budget per parent based on local complexity (Sec. 3.2). However, this variable densification breaks the regular grid, precluding standard operations. We therefore present the HPC operator, which identi-fies topological neighbors within the resulting topology to enable seamless cross-density communication (Sec. 3.3). Finally, these co-ordinated features are decoded and rasterized, optimized via joint losses balancing fidelity and efficiency (Sec. 3.4). 
+
+3.1 Feature Extraction and Scale-Conditioned Refinement 
+
+Before our novel routing and hierarchical communication stages, we extract robust features F ∈ R𝐻 ×𝑊 ×𝐶 directly from the input 
+
+𝐼 𝐿𝑅 ∈ R𝐻 ×𝑊 ×3 via an encoder-agnostic backbone. To make the latent features aware of the desired magnification factor, given a target upsampling scale 𝑠 ∈ R+, we explicitly condi-tion the network by linearly projecting the inverse scale 1/𝑠 into a latent vector e𝑠 ∈ R𝐶 . Optimizing a single learnable embedding grid tied to the training resolution strictly limits inference to that exact Learning to Adaptively Allocate Gaussians for Arbitrary-Scale Image Super-Resolution • 3
+
+Fig. 1. Differentiable Neural Routing Architecture. The lightweight router R𝜃 processes refined latent features E(𝑟𝑒 𝑓 𝑖𝑛𝑒𝑑 ) 
+
+> 𝑔𝑠
+
+to predict continuous probability distributions over three upsampling levels. By applying the Gumbel-Softmax trick, these collapse into a discrete routing map M𝑟𝑜𝑢𝑡𝑒 while maintaining differentiability. To prevent over-allocation, the map’s total spatial cost C𝑟𝑜𝑢𝑡𝑒𝑟 is compared to a target budget B𝑡𝑎𝑟𝑔𝑒𝑡 from the structure map. A budget-matching loss minimizes their distance, enforcing global structural constraints while granting the router full spatial autonomy. 
+
+size. To support arbitrary resolutions, following Chen et al . [2025a], we decouple representations via window-based tiling. We initialize a compact, resolution-invariant Gaussian embedding E𝑔𝑠 ∈ R𝑁 ×𝐶 
+
+with positional encodings P𝑔𝑠 , replicating it to tile the full spatial ex-tent of F. Although initially identical, subsequent layers assign each tile a unique spatial identity by modulating it with local features from its corresponding window in F.
+
+Scale-Conditioned Cross-Attention. For completeness, we briefly outline the scale-aware refinement stage, which follows standard attention-based conditioning practices. The tiled embeddings un-dergo a dual-stage refinement to acquire scale-aware, location-specific identities. In the first stage (repeated 𝑁 𝑐 times), the canonical embeddings are modulated by the scale embedding e𝑠 via Multi-Head Attention (MHA), then gather local image context F𝑤𝑖𝑛 via Window Cross-Attention (W-MCA): 
+
+E(1) 
+
+> 𝑔𝑠
+
+= MHA  LN (E𝑔𝑠 + P𝑔𝑠 ), e𝑠 , e𝑠 
+
+ + E𝑔𝑠 (1) 
+
+E(2) 
+
+> 𝑔𝑠
+
+= W-MCA 
+
+
+
+LN (E(1) 
+
+> 𝑔𝑠
+
+), F𝑤𝑖𝑛 , F𝑤𝑖𝑛 
+
+
+
++ E(1) 
+
+> 𝑔𝑠
+
+, (2) where LN denotes Layer Normalization. 
+
+Gaussian Self-Attention. To prevent overlapping artifacts during future rasterization, embeddings must coordinate spatially to en-sure structural coherence. In the second stage (repeated 𝑁 𝑠 times), embeddings are re-conditioned with e𝑠 and communicate internally via Window Self-Attention (W-MSA): 
+
+E(3) 
+
+> 𝑔𝑠
+
+= MHA 
+
+
+
+LN (E(2) 
+
+> 𝑔𝑠
+
++ P𝑔𝑠 ), e𝑠 , e𝑠 
+
+
+
++ E(2) 
+
+> 𝑔𝑠
+
+(3) 
+
+E(4) 
+
+> 𝑔𝑠
+
+= W-MSA 
+
+
+
+LN (E(3) 
+
+> 𝑔𝑠
+
+), E(3) 
+
+> 𝑔𝑠
+
+, E(3)
+
+> 𝑔𝑠
+
+
+
++ E(3) 
+
+> 𝑔𝑠
+
+. (4) To enable cross-boundary awareness between adjacent windows, al-ternating W-MSA layers employ shifted-window partitioning [Liang et al . 2021]. This sequence yields topologically enriched latent fea-tures E(𝑟𝑒 𝑓 𝑖𝑛𝑒𝑑 ) 
+
+> 𝑔𝑠
+
+= E(4) 
+
+> 𝑔𝑠
+
+∈ R𝐻 ×𝑊 ×𝐶 .
+
+3.2 Structure-Guided Adaptive Gaussian Routing 
+
+To transform E(𝑟𝑒 𝑓 𝑖𝑛𝑒𝑑 ) 
+
+> 𝑔𝑠
+
+into 2D Gaussians, naive uniform ×𝐾 upsam-pling expands each feature into a 𝐾 × 𝐾 grid . This content-agnostic strategy severely over-parameterizes flat regions while lacking ca-pacity for complex textures. Instead, each latent pixel acts as a parent generating a computed amount of 𝑁 children. Since these children will eventually decode into 2D Gaussians for rasterization, the expansion factor 𝑁 is dynamically assigned by the proposed 
+
+Differentiable Neural Routing Architecture based on the com-plexity each parent needs to represent. To prevent out-of-memory errors, this factor is restricted to three levels 𝑙 ∈ { 𝐿 0, 𝐿 1, 𝐿 2 }, corre-sponding to splitting each feature into 4, 16 or 64 children. While higher densities improve quality [Chen et al . 2025a], 64 primitives already saturate standard backbones, making further densification redundant. A router R𝜃 processes E(𝑟𝑒 𝑓 𝑖𝑛𝑒𝑑 ) 
+
+> 𝑔𝑠
+
+into logits L ∈ R𝐻 ×𝑊 ×3,whose channels dictate the probability of each latent feature belong-ing to 𝐿 0, 𝐿 1 or 𝐿 2. Using Gumbel-Softmax [Jang et al . 2016] and the Straight-Through Estimator (STE), we sample one-hot vectors to form a discrete routing map M𝑟𝑜𝑢𝑡𝑒 ∈ { 𝐿 0, 𝐿 1, 𝐿 2 }𝐻 ×𝑊 , explicitly dictating spatial expansion while preserving gradient flow (Fig. 1). 
+
+Budget-Constrained Optimization via Structure Tensor. To effec-tively train the routing map, we must make it aware of the cost 
+
+𝑐 𝑙 ∈ { 𝑐 0, 𝑐 1, 𝑐 2 } of its discrete choices. A naive "minimize total cost" objective causes mode collapse (predicting 𝐿 0 everywhere). Con-versely, relying solely on the rendering loss causes severe over-allocation (predicting only 𝐿 2), since maximum splitting mathemati-cally guarantees the lowest rendering error. This raises a critical question: how can we determine an image’s structural complexity to assign a fair budget? To address this, we propose leveraging the structure tensor S. During training, given the ground truth image 𝐼 𝑔𝑡 ∈ R⌊𝑠 ·𝐻 ⌋×⌊ 𝑠 ·𝑊 ⌋× 3, we compute a 2 × 2 local second-moment matrix for each individual pixel . This is done by aggregating the spatial gradients ( 𝐼 𝑥 , 𝐼 𝑦 ) of 𝐼 𝑔𝑡 over a local window centered around the pixel: 
+
+S =
+
+ Í 𝐼 2
+
+> 𝑥
+
+Í 𝐼 𝑥 𝐼 𝑦 
+
+Í 𝐼 𝑥 𝐼 𝑦 
+
+Í 𝐼 2
+
+> 𝑦
+
+
+
+. (5) Its eigenvalues ( 𝜆 1 ≥ 𝜆 2 ≥ 0) elegantly identify the type of local region surrounding the pixel: flat areas ( 𝜆 1 ≈ 𝜆 2 ≈ 0), edges ( 𝜆 1 ≫
+
+𝜆 2 ≈ 0), and textures ( 𝜆 1 ≈ 𝜆 2 ≫ 0). 4 • G. Federico et al. 
+
+Since 2D high-frequency regions demand denser allocation, we compute a raw structural score for each pixel based on its corre-sponding tensor: 
+
+𝑆 𝑚𝑎𝑝 = max (0, 3𝜆 2 + ( 𝜆 1 − 𝜆 2)) . (6) This formulation explicitly prioritizes 2D textures ( 𝜆 2) over anisotropic edges ( 𝜆 1 − 𝜆 2). After normalization, we obtain a final continuous score map: the structure map ˆ𝑆 𝑚𝑎𝑝 ∈ R⌊𝑠 ·𝐻 ⌋×⌊ 𝑠 ·𝑊 ⌋ .We downsample ˆ𝑆 𝑚𝑎𝑝 to the latent resolution of M𝑟𝑜𝑢𝑡𝑒 to estab-lish a global target budget B𝑡𝑎𝑟𝑔𝑒𝑡 . This target is compared against the router’s actively predicted budget C𝑟𝑜𝑢𝑡𝑒𝑟 by summing their respective costs over the spatial grid: 
+
+B𝑡𝑎𝑟𝑔𝑒𝑡 =∑︁ 
+
+> 𝑖,𝑗
+
+𝑐 
+
+
+
+Φ  ˆ𝑆 (𝑖,𝑗 )
+
+> 𝑚𝑎𝑝
+
+
+
+, C𝑟𝑜𝑢𝑡𝑒𝑟 =∑︁ 
+
+> 𝑖,𝑗
+
+𝑐  M(𝑖,𝑗 )
+
+> 𝑟𝑜𝑢𝑡𝑒
+
+ (7) where Φ(·) non-linearly quantizes the continuous scores into dis-crete levels, and 𝑐 (·) retrieves their assigned costs. To enforce this, we apply a budget-matching loss with a tolerance margin 𝜏 :
+
+L𝑏𝑢𝑑𝑔𝑒𝑡 = max (0, |C 𝑟𝑜𝑢𝑡𝑒𝑟 − B 𝑡𝑎𝑟𝑔𝑒𝑡 | − 𝜏 ) (8) Crucially, this global loss dictates the total number of primitives allowed based on the true HR complexity, while granting the router complete spatial autonomy to distribute them wherever they mini-mize the rendering error (Fig. 1). 
+
+3.3 Hierarchical Coordination 
+
+Given refined latent features E(𝑟𝑒 𝑓 𝑖𝑛𝑒𝑑 ) 
+
+> 𝑔𝑠
+
+∈ R𝐻 ×𝑊 ×𝐶 , the Routing Map explicitly dictates a target expansion level 𝐿 𝑡𝑎𝑟𝑔𝑒𝑡 ∈ { 0, 1, 2}
+
+for each parent, corresponding to a ×2, ×4 or ×8 spatial expansion. Heterogeneous expansion permanently breaks the rigid grid struc-ture. A naive dense compute, sparse selection paradigm, i.e. densely upsampling all features to the maximum 8𝐻 × 8𝑊 resolution and strictly selecting only those matching the determined target expan-sion, wastes prohibitive amounts of compute and VRAM. Instead, we decompose the generation into a memory-efficient cascaded sequence (Fig. 2): 
+
+• Phase 1 (Dense Expansion to 𝐿 0): All parent features require at least a baseline ×2 upsampling, efficiently computed via dense operations. We then flatten the tensor to handle the broken spatial arrangement, initializing for each new child feature its current level 𝑙 𝑐𝑢𝑟𝑟 = 0:
+
+E(𝑟𝑒 𝑓 𝑖𝑛𝑒𝑑 ) 
+
+> 𝑔𝑠
+> Dense 2×
+
+−−−−−−−→ R2𝐻 ×2𝑊 ×𝐶 Flatten 
+
+−−−−−→ ˆE(0) 
+
+> 𝑔𝑠
+
+∈ R𝑁 0 ×𝐶 (9) where 𝑁 0 = 4𝐻𝑊 .
+
+• Phase 2 (Selective Split to 𝐿 1): We isolate features demanding further expansion ( 𝐿 𝑡𝑎𝑟𝑔𝑒𝑡 ≥ 1), applying a point-wise 1-to-4 split: 
+
+ˆE(0)  
+
+> 𝑔𝑠
+> 1-to-4 Split (𝐿 𝑡𝑎𝑟𝑔𝑒𝑡 ≥1)
+
+−−−−−−−−−−−−−−−−−−→ ˆE(1) 
+
+> 𝑔𝑠
+
+∈ R𝑁 1 ×𝐶 (10) 
+
+• Phase 3 (Selective Split to 𝐿 2): A final 1-to-4 split strictly targets descendants reaching the finest resolution ( 𝐿 𝑡𝑎𝑟𝑔𝑒𝑡 = 2): 
+
+ˆE(1)  
+
+> 𝑔𝑠
+> 1-to-4 Split (𝐿 𝑡𝑎𝑟𝑔𝑒𝑡 =2)
+
+−−−−−−−−−−−−−−−−−−→ ˆE(2) 
+
+> 𝑔𝑠
+
+∈ R𝑁 2 ×𝐶 (11) 
+
+Fig. 2. Hierarchical Generation Pipeline. For visual clarity, we illustrate the process using a 2 × 2 input E(𝑟𝑒 𝑓 𝑖𝑛𝑒𝑑 ) 
+
+> 𝑔𝑠
+
+with heterogeneous upsampling factors dictated by the Routing Map. Each phase executes a ×2 split followed by topological coordination via the HPC operator. 
+
+Hierarchical Pointer Convolution. While cascaded splitting avoids dense computation, independent expansion strips features of their topological awareness. This lack of coordination prevents joint rea-soning over coarse structures and fine details during the final ras-terization process. To efficiently restore topology without reverting to dense features, we introduce the Hierarchical Pointer Convo-lution via a dense index, sparse compute paradigm. At any phase, we define the maximum-resolution virtual grid P ∈ N8𝐻 ×8𝑊 . This lightweight structure, termed the Pointer Grid , stores simple scalar indices reflecting the hierarchical quadtree topology formed during the current phase. This mechanism unfolds in three phases: it maps the hierarchy onto a discrete space, retrieves topological neighbors via adaptive offsets, and updates each feature by fusing it with gath-ered neighbors through a residual sparse convolution, as detailed below. 
+
+1. Footprint Projection and Cell Subdivision. Prior to any phase, each feature in E(𝑟𝑒 𝑓 𝑖𝑛𝑒𝑑 ) 
+
+> 𝑔𝑠
+
+serves as a root parent receiving a continuous coordinate (𝑥 𝑝 , 𝑦 𝑝 ) ∈ [ 0, 1]2 at the initial resolution 
+
+𝐻 × 𝑊 corresponding exactly to the geometric center of its cell. During a 1-to-4 split, a parent’s spatial domain is recursively quartered. Given a parent at (𝑥 𝑝 , 𝑦 𝑝 ) splitting into children at level 
+
+𝑙 𝑐𝑢𝑟𝑟 , the continuous center coordinates (𝑥 𝑐 , 𝑦 𝑐 ) of the four new sub-cells are deterministically derived as 
+
+(𝑥 𝑐 , 𝑦 𝑐 ) =  𝑥 𝑝 + Δ𝑥, 𝑦 𝑝 + Δ𝑦  , where Δ𝑥, Δ𝑦 ∈
+
+
+
+− 𝑆 𝑐𝑢𝑟𝑟 
+
+2 , 𝑆 𝑐𝑢𝑟𝑟 
+
+2
+
+
+
+.
+
+(12) Here, we define 𝑆 𝑐𝑢𝑟𝑟 = 22−𝑙 𝑐𝑢𝑟𝑟 as the footprint resolution of the feature at the current level. At any phase, given ˆE ∈ R𝑁 ×𝐶 , each feature 𝑓 idx at center (𝑥 𝑐 , 𝑦 𝑐 )
+
+projects a discrete 𝑆 𝑐𝑢𝑟𝑟 × 𝑆 𝑐𝑢𝑟𝑟 footprint onto the Pointer Grid P,defining the bounding box B𝑆 𝑐𝑢𝑟𝑟    
+
+> (𝑥 𝑐 ,𝑦 𝑐 )
+
+. Every cell in B is populated with the feature’s scalar identifier idx (the row index in ˆE): 
+
+P[𝑦, 𝑥 ] = idx , ∀( 𝑥, 𝑦 ) ∈ B 𝑆 𝑐𝑢𝑟𝑟    
+
+> (𝑥 𝑐 ,𝑦 𝑐 )
+
+(13) where finer features ( 𝑙 𝑐𝑢𝑟𝑟 = 2) govern localized 1 × 1 footprints, while coarser features govern broader blocks (Fig. 3). 
+
+2. Adaptive Boundary-Hugging Lookup. P allows us to gather a representative 3 × 3 topological neighborhood for any feature (Fig. Learning to Adaptively Allocate Gaussians for Arbitrary-Scale Image Super-Resolution • 5
+
+Fig. 3. Evolution of the Pointer Grid. Visualization of the Pointer at each phase of the hierarchical example illustrated in Fig. 2. The grid dynamically maps the quadtree topology into a discrete coordinate space, where each cell stores the identifier of its governing feature to facilitate the retrieval of topological neighbors. 
+
+4). To read exactly the neighborhood N ( 𝑓 ), collecting topologically adjacent features regardless of their level, we extract the top-left corner (𝑥 𝑡𝑙 , 𝑦 𝑡𝑙 ) of B and define asymmetric sampling offsets 
+
+O𝑓 = {− 1, ⌊𝑆 𝑐𝑢𝑟𝑟 /2⌋, 𝑆 𝑐𝑢𝑟𝑟 } . (14) The 9 topological neighborhood indices are fetched directly via these boundary-hugging offsets idx (𝑑𝑦,𝑑𝑥 ) = P[𝑦 𝑡𝑙 + 𝑜 𝑑𝑦 , 𝑥 𝑡𝑙 + 𝑜 𝑑𝑥 ], ∀𝑜 𝑑𝑦 , 𝑜 𝑑𝑥 ∈ O 𝑓 . (15) While these offsets efficiently capture immediate neighbors, the true topological neighborhood of a multi-scale region may encompass more than 9 features. To account for this and broaden the spatial receptive field, we stack multiple HPC blocks in sequence (e.g., cascading two 3 × 3 HPCs to emulate a larger 5 × 5 interaction context) (Fig.2). 
+
+3. Sparse Feature Update. Having retrieved the local topology 
+
+N ( 𝑓 ) via integers, we gather the 𝐶 -dimensional features from ˆE
+
+and perform the convolution residually: 
+
+f (𝑜𝑢𝑡 ) = f + 𝜎 ©«
+
+W𝑐𝑜𝑛𝑣 
+
+Ê  
+
+> 𝑖 ∈ N ( 𝑓 )
+
+ˆE[𝑖 ]
+
+ª®¬
+
+(16) where ⊕ denotes channel-wise concatenation, W𝑐𝑜𝑛𝑣 ∈ R𝐶 ×9𝐶 , and 
+
+𝜎 is the GELU activation. 
+
+3.4 2D Gaussian Prediction and Rasterization 
+
+Following the last phase of generation and communication, the flattened features are decoded into 2D Gaussian primitives for final reconstruction. 
+
+Fig. 4. Adaptive Boundary-Hugging Lookup and Feature Update. Il-lustration of the lookup mechanism retrieving the topological neighborhood 
+
+N ( 𝑓 ) for a target feature. By sampling the Pointer Grid at the footprint boundaries, the operator captures adjacent identifiers across varying levels, which are subsequently gathered from the flattened tensor to perform the residual sparse update. 
+
+Gaussian Parameter Prediction. For each feature 𝑓 𝑖 at level 𝑙 𝑖 , a shared MLP predicts: opacity 𝛼 𝑖 ∈ [ 0, 1], color 𝑐 𝑖 ∈ [ 0, 1]3, raw standard deviations ˆ𝜎 𝑥,𝑖 , ˆ𝜎 𝑦,𝑖 > 0, correlation 𝜌 𝑖 ∈ [− 1, 1], and local offset Δ𝜇 𝑖 ∈ R2. Primitives reside in [0, 1]2, with their center 𝜇 𝑖 
+
+refining the discrete anchor (𝑥 𝑐 , 𝑦 𝑐 ):
+
+𝜇 𝑖 =
+
+𝑥 𝑐 /8𝑊 𝑦 𝑐 /8𝐻 
+
+
+
++
+
+Δ𝜇 𝑥,𝑖 /8𝑊 
+
+Δ𝜇 𝑦,𝑖 /8𝐻 
+
+
+
+(17) where 8𝐻, 8𝑊 are maximum grid dimensions. Since coarse 𝐿 0 fea-tures must cover broader spatial regions than finer 𝐿 2 details, forcing a shared MLP to directly regress these varying scale magnitudes destabilizes training. We decouple physical bounds from MLP pre-dictions via level-aware modulation: 
+
+𝜎 𝑥,𝑖 = 𝑚 𝑙 𝑖 ˆ𝜎 𝑥,𝑖 , 𝜎 𝑦,𝑖 = 𝑚 𝑙 𝑖 ˆ𝜎 𝑦,𝑖 (18) where 𝑚 𝑙 𝑖 ∈ { 1.0, 0.5, 0.25 } for 𝐿 0, 𝐿 1, 𝐿 2 respectively. 
+
+Continuous Rasterization. To render an arbitrary 𝑠𝐻 × 𝑠𝑊 image, target pixels (𝑥, 𝑦 ) are mapped back to the continuous normalized space, the native domain where our predicted primitives reside, en-abling scale-agnostic rasterization. Omitting density normalization ensures the spatial exponential peaks exactly at 1, setting 𝛼 𝑖 as the strict physical occlusion bound: 
+
+𝐼 𝑝𝑟𝑒𝑑 (𝑥, 𝑦 ) =
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+𝛼 𝑖 𝑐 𝑖 exp − 12(1 − 𝜌 2 
+
+> 𝑖
+
+)
+
+"
+
+Δ𝑥 2
+
+𝜎 2
+
+> 𝑥,𝑖
+
+− 2𝜌 𝑖 Δ𝑥 Δ𝑦 𝜎 𝑥,𝑖 𝜎 𝑦,𝑖 
+
++ Δ𝑦 2
+
+𝜎 2
+
+> 𝑦,𝑖
+
+# ! 
+
+(19) with normalized distances Δ𝑥 = 𝑥 𝑠𝑊 − 𝜇 𝑥,𝑖 and Δ𝑦 = 𝑦 𝑠𝐻 − 𝜇 𝑦,𝑖 ,preserving sub-pixel accuracy. 
+
+Routing-Aware Optimization. Alongside rendering error and struc-tural budget L𝑏𝑢𝑑𝑔𝑒𝑡 , we introduce the Routing Quality Loss L𝑟𝑜𝑢𝑡 .After rasterizing 𝐼 𝑝𝑟𝑒𝑑 , the detached spatial error E𝑚𝑎𝑝 = |𝐼 𝑝𝑟𝑒𝑑 −𝐼 𝐺𝑇 |
+
+teaches the router the rendering quality cost of its allocations. A pri-ori , allocating coarse 𝐿 0 features mathematically guarantees higher reconstruction errors than 𝐿 1 or 𝐿 2. By adaptively pooling E𝑚𝑎𝑝 to 6 • G. Federico et al. 
+
+match the router’s probability map P ∈ [ 0, 1]3×𝐻 ×𝑊 , we explicitly modulate these probabilities based on local error magnitude: 
+
+L𝑟𝑜𝑢𝑡 = 1
+
+𝐻𝑊 ∑︁ E𝑝𝑜𝑜𝑙 𝑚𝑎𝑝 ⊙  𝛾 0P𝐿 0 + 𝛾 1P𝐿 1
+
+ (20) with penalties 𝛾 0 > 𝛾 1 > 0. This tension ensures L𝑏𝑢𝑑𝑔𝑒𝑡 prevents overallocation, while L𝑟𝑜𝑢𝑡 forces the router to allocate finer levels exactly where needed to minimize error. The total loss is 
+
+L𝑡𝑜𝑡𝑎𝑙 = 𝜆 𝑟𝑒𝑛𝑑𝑒𝑟 L𝑟𝑒𝑛𝑑𝑒𝑟 + 𝜆 𝑏𝑢𝑑𝑔 L𝑏𝑢𝑑𝑔𝑒𝑡 + 𝜆 𝑟𝑜𝑢𝑡 L𝑟𝑜𝑢𝑡 (21) 
+
+4 Experiments 4.1 Setup 
+
+Implementation Details. We train our model on the DIV2K dataset [Timofte et al . 2017] using 48 × 48 low-resolution (LR) patches. These are obtained via bicubic downsampling of (𝑠 · 48 )2 ground-truth crops, with scale 𝑠 ∼ U ( 1.0, 4.0). To refine the initial features 
+
+F ∈ R48 ×48 ×3, we employ Gaussian Embeddings E𝑔𝑠 ∈ R𝑁 ×𝐶 with 
+
+𝑁 = 144 and 𝐶 = 180 . The Scale-Conditioned Cross-Attention utilizes 
+
+𝑁 𝑐 = 1 block and 6 attention heads, while the Gaussian Self-Attention 
+
+phase consists of 𝑁 𝑠 = 6 blocks. For image synthesis, we integrate an efficient tile-based Gaussian rasterization pipeline [Chen et al .2025a]. In the Neural Routing Architecture , the Gumbel-Softmax tem-perature 𝜏 is exponentially annealed from 1.0 to 0.5 (decay rate 0.99). Computational costs for the Routing Map are set to 𝑐 1 = 0.1,
+
+𝑐 2 = 0.25 , and 𝑐 3 = 1.0. The HPC is executed 𝑇 1 = 1 time in the second phase and 𝑇 2 = 2 times in the third. We optimize the model using 𝜆 𝑟𝑒𝑛𝑑𝑒𝑟 = 𝜆 𝑏𝑢𝑑𝑔𝑒𝑡 = 𝜆 𝑟𝑜𝑢𝑡 = 1.0 and router quality weights 
+
+𝛾 0 = 1.0, 𝛾 1 = 0.5. This balanced weighting is enabled by the 50k-step warm-up: using a quantized structure map as a proxy ensures that all loss components are pre-calibrated to comparable scales, effectively stabilizing the training. We train for 500k iterations on 3 NVIDIA H100 GPUs (batch size 12, gradient accumulation 2) with an initial learning rate of 2 × 10 −4, halved at 250k, 350k, 450k, and 500k steps. 
+
+Competitors & Evaluation. We compare QuADA-GS against Meta-SR [Hu et al . 2019], LIIF [Chen et al . 2021], LTE [Lee and Jin 2022], SRNO [Wei and Zhang 2023], LINF [Yao et al . 2023], CiaoSR [Cao et al . 2023], LMF [He and Jin 2024], GaussianSR [Hu et al . 2025], and GSASR [Chen et al . 2025a]. Y-channel (YCbCr space) metrics (PSNR, SSIM [Wang et al . 2004], LPIPS [Zhang et al . 2018a], DISTS [Ding et al . 2022]) are computed for 𝑠 ∈ { 2, 3, 4, 6, 8, 12 } and ex-treme scales up to 30 × on standard benchmark datasets: DIV2K100 [Timofte et al . 2017], General100 [Dong et al . 2016b], LSDIR [Li et al . 2023], BSDS100 [Martin et al . 2001], Manga109 [Matsui et al .2017], Urban100 [Huang et al . 2015], Set5 [Bevilacqua et al . 2012] and Set14 [Zeyde et al . 2012]. Due to space limits, exhaustive bench-mark results and the complete ablation study are deferred to the 
+
+Supplementary Materials . Here, we report quantitative results solely on Urban100 , as its complex structures best validate our model’s capabilities, while our qualitative evaluations span a broader variety of scenarios (see Figs. 5–11). Both efficiency (Table 3) and the in-text ablation study (Table 4) are evaluated on 720 ×720 HR crops from the DIV2K validation set [Chen et al . 2025a], where LR inputs for each scale 𝑠 are generated via bicubic downsampling to (720 /𝑠 ) × ( 720 /𝑠 ).
+
+Table 1. Quantitative comparison on Urban100 [Huang et al . 2015] using the RDN backbone [Zhang et al. 2018c]. Best results are in green .                                                                                                                                                                         
+
+> Scale Metrics Testing Dataset: Urban100 (Backbone: RDN) Meta-SR LIIF LTE SRNO LINF LMF Ciao-SR Gauss-SR GSASR QuADA-GS
+> ×2
+> PSNR ↑33.04 32.84 33.00 33.27 32.87 33.08 33.30 32.96 33.53 33.85
+> SSIM ↑0.9363 0.9353 0.9365 0.9390 0.9350 0.9371 0.9388 0.9363 0.9406 0.9429
+> LPIPS ↓0.0552 0.0569 0.0552 0.0518 0.0569 0.0557 0.0534 0.0563 0.0507 0.0478
+> DISTS ↓0.0666 0.0666 0.0660 0.0640 0.0671 0.0659 0.0638 0.0665 0.0617 0.0609
+> ×3
+> PSNR ↑28.94 28.81 28.96 29.12 28.82 29.11 29.17 28.93 29.35 29.92
+> SSIM ↑0.8677 0.8664 0.8686 0.8714 0.8658 0.8709 0.8716 0.8680 0.8760 0.8839
+> LPIPS ↓0.1381 0.1382 0.1373 0.1332 0.1399 0.1335 0.1334 0.1384 0.1294 0.1211
+> DISTS ↓0.1194 0.1194 0.1186 0.1158 0.1208 0.1167 0.1134 0.1196 0.1126 0.1109
+> ×4
+> PSNR ↑26.71 26.67 26.80 26.97 26.69 26.94 27.10 26.77 27.15 27.66
+> SSIM ↑0.8055 0.8041 0.8074 0.8119 0.8039 0.8104 0.8142 0.8064 0.8177 0.8294
+> LPIPS ↓0.2062 0.2077 0.2047 0.1987 0.2090 0.2020 0.1966 0.2069 0.1953 0.1835
+> DISTS ↓0.1562 0.1612 0.1600 0.1563 0.1636 0.1589 0.1559 0.1610 0.1515 0.1500
+> ×6
+> PSNR ↑24.07 24.19 24.27 24.42 24.18 24.39 24.58 24.16 24.63 25.02
+> SSIM ↑0.6966 0.7028 0.7058 0.7113 0.7010 0.7102 0.7173 0.6996 0.7214 0.7371
+> LPIPS ↓0.3158 0.3099 0.3220 0.3148 0.3155 0.3169 0.2950 0.3241 0.2943 0.2783
+> DISTS ↓0.2084 0.2176 0.2160 0.2110 0.2217 0.2149 0.2111 0.2191 0.2064 0.2069
+> ×12
+> PSNR ↑21.00 21.15 21.22 21.35 21.12 21.33 21.44 20.84 21.47 21.65
+> SSIM ↑0.5317 0.5499 0.5514 0.5571 0.5462 0.5561 0.5637 0.5319 0.5670 0.5833
+> LPIPS ↓0.5332 0.5198 0.5477 0.5374 0.5365 0.5403 0.5005 0.5929 0.4927 0.4745
+> DISTS ↓0.3144 0.3209 0.3216 0.3149 0.3304 0.3216 0.3114 0.3485 0.3072 0.3078
+
+Note that here, the ablation findings are condensed exclusively at the ×4 scale. Standard ASR protocols exclude generative models, prioritizing strict structural fidelity from limited training data over hallucinated details. Nevertheless, purely for the curious reader, an exploratory out-of-scope comparison is provided in the Supplementary. 
+
+4.2 Discussion 
+
+As demonstrated in Tab. 1 and the Suppl. Mat., QuADA-GS sets a new state-of-the-art in reconstruction quality , outperforming existing ASR methods across nearly all fidelity and perceptual met-rics, with a pronounced dominance on the structure-rich Urban100 dataset. Fig. 5 visually validates our approach. The router avoids naive over-allocation by balancing two opposing forces: L𝑏𝑢𝑑𝑔𝑒𝑡 , which leverages the eigenvalues of the local structure tensor to globally constrain the primitive count, and L𝑟𝑜𝑢𝑡 , which pushes finer expan-sions precisely where the local spatial error E𝑚𝑎𝑝 is highest. This dynamic allocation triggers two emergent phenomena: the plausible synthesis of intricate details entirely absent in the LR input, and the 
+
+Table 2. Quantitative comparison on extreme upsampling scales (×16 , ×24 , ×30 ) for DIV2K [Timofte et al . 2017] using the RDN [Zhang et al .2018c] backbone. Best results are in green .                                                                                                                                  
+
+> Scale Metrics Backbone: RDN Testing Dataset: DIV2K Meta-SR LIIF LTE SRNO LINF LMF Ciao-SR Gaussian-SR GSASR QuADA-GS
+> ×16
+> PSNR 24.12 24.30 24.36 24.42 24.30 24.38 24.44 23.93 24.44 24.44
+> SSIM 0.6346 0.6446 0.6452 0.6467 0.6433 0.6456 0.6484 0.6340 0.6487 0.6507
+> LPIPS 0.5606 0.5580 0.5788 0.5739 0.5751 0.5760 0.5572 0.6166 0.5537 0.5517
+> DISTS 0.3117 0.3243 0.3312 0.3288 0.3324 0.3295 0.3268 0.3455 0.3211 0.3232
+> ×24
+> PSNR 22.71 22.87 22.92 22.97 22.87 22.93 22.99 22.49 22.96 22.94 SSIM 0.6041 0.6139 0.6138 0.6145 0.6128 0.6136 0.6166 0.6048 0.6162 0.6180
+> LPIPS 0.6273 0.6301 0.6505 0.6461 0.6423 0.6487 0.6292 0.6939 0.6275 0.6248
+> DISTS 0.3830 0.3865 0.3978 0.3955 0.4008 0.3961 0.3932 0.4224 0.3851 0.3874
+> ×30
+> PSNR 17.25 22.18 22.23 22.27 22.18 22.18 22.28 21.81 22.23 22.21 SSIM 0.5546 0.6016 0.6017 0.6024 0.6010 0.5995 0.6041 0.5947 0.6032 0.6047
+> LPIPS 0.6817 0.6652 0.6833 0.6799 0.6757 0.7009 0.6627 0.7247 0.6633 0.6599
+> DISTS 0.4405 0.4215 0.4359 0.4332 0.4394 0.4361 0.4301 0.4650 0.4213 0.4233
+
+Learning to Adaptively Allocate Gaussians for Arbitrary-Scale Image Super-Resolution • 7
+
+Fig. 5. Qualitative comparisons at ×12 between QuADA-GS (and its routing map) and competitors, using RDN [Zhang et al. 2018c] as image encoder. Table 3. Efficiency on 720 × 720 DIV2K [Timofte et al . 2017] crops using RDN [Zhang et al . 2018c] as image encoder. Green and red denote the absolute best and the best GS-based results, respectively. T: Inference Time (ms), M: GPU Memory (MB). 
+
+Implicit / Traditional Methods GS-based Scale Met. Meta LIIF LTE SRNO LINF LMF CiaoSR GaussianSR GSASR QuADA-GS 
+
+×3 T 104 486 181 163 128 172 2064 955 857 610 ± 130 
+
+M 8454 610 930 6361 3571 6108 10081 5216 6080 14745 ± 4018 
+
+×4 T 82 220 153 150 101 113 1202 824 572 349 ± 79 
+
+M 8344 389 566 6354 3516 5764 3390 5130 3500 8425 ± 2266 
+
+×6 T 69 201 136 118 84 94 736 751 284 164 ± 30 
+
+M 8265 345 315 6350 3475 5517 1625 5301 1658 3872 ± 1027 
+
+×8 T 55 187 128 107 77 80 633 702 206 92 ± 24 
+
+M 8236 328 302 6348 3462 5431 1583 5092 1132 2625 ± 692 
+
+×12 T 58 178 129 114 78 110 546 701 98 65 ± 11 
+
+M 8216 317 293 6347 3451 5369 1549 5291 553 1117 ± 277 
+
+suppression of the over-smoothed textures typical of implicit meth-ods in favor of crisp micro-structures. At extreme upsampling scales 
+
+(𝑠 ≥ 16 , Tab. 2), the severely degraded LR input levels the playing field for implicit models, which traditionally trade complex detail generation for memory efficiency. Despite this detail-starved regime, QuADA-GS remains the most competitive GS-based method against implicit baselines, as it still manages to extract superior structural and perceptual information from the minimal input signal. Regarding computational efficiency (Tab. 3), implicit methods can-not afford complex backbones because they scale with the target HR resolution; adopting robust encoders would lead to prohibitive la-tency and memory bottlenecks (e.g., CiaoSR). Conversely, GS-based models scale with the LR input, permitting the use of sophisticated feature extractors. By employing our dense index, sparse compute 
+
+paradigm, QuADA-GS achieves faster inference than the rigid-grid GSASR. However, it inherently requires a larger VRAM footprint because its quadtree topology ultimately allocates a higher total number of Gaussians to ensure superior texture fidelity. 
+
+4.3 Ablation Study 
+
+Tab. 4 fully summarizes the key takeaways of our core architectural ablations at the representative ×4 scale. Exhaustive evaluations are deferred to the Supplementary Materials for completeness. 
+
+Table 4. Unified Ablation on 720 × 720 DIV2K [Timofte et al . 2017]. Top: average computational savings across scales ( ×2–×12 ). Bottom: component ablations at ×4. Best results in green .
+
+Routing Paradigm (All Scales) Avg. Time Reduction ↓ Avg. Memory Reduction ↓
+
+Dense vs Adaptive ≈ -61% ≈ -35%                                                                                                                                
+
+> Rendering Quality Computational Cost PSNR ↑SSIM ↑LPIPS ↓DISTS ↓Time (ms) ↓Mem (MB) ↓
+> Routing Mechanism
+> Structure Map (SM) 30.91 0.8506 0.2535 0.1295 349 8425 Neural Routing (NR) ( ∗)30.95 0.8502 0.2514 0.1297 349 8425
+> HPC Depth (𝑇 1,𝑇 2)(0,0)30.09 0.8440 0.2580 0.1415 280 6800
+> (1,2)(∗)30.95 0.8502 0.2514 0.1297 349 8425
+> (2,4)30.96 0.8504 0.2510 0.1292 495 11500
+> Level-Aware Modulation ( 𝑚 𝑙 𝑖 )
+> w/o Mod. 30.84 0.8472 0.2533 0.1310 349 8425 w/ Mod. ( ∗)30.95 0.8502 0.2514 0.1297 349 8425
+> Routing Costs (𝑐 1, 𝑐 2, 𝑐 3)
+> Strict (0.06 ,0.25 ,1)30.65 0.8501 0.2526 0.1301 265 6500
+> (∗)(0.15 ,0.25 ,1)30.95 0.8502 0.2514 0.1297 349 8425 Relaxed (0.30 ,0.60 ,1)30.98 0.8505 0.2505 0.1285 620 11200
+> Backbone Analysis
+> EDSR_baseline 30.90 0.8493 0.2523 0.1306 320 8345
+> RDN ( ∗)30.95 0.8502 0.2514 0.1297 349 8425
+> Gaussian Dimension ( 𝐶 )PSNR ↑SSIM ↑Number of Gaussians ( 𝑁 )PSNR ↑SSIM ↑
+> 128 30.69 0.8461 16 30.81 0.8471
+> 180 (∗)30.95 0.8502 64 30.89 0.8489
+> 256 30.99 0.8508 144 (∗)30.95 0.8502
+
+We ablate our architecture against the baseline ( ∗) discussed in Sec. 4.1. Routing Paradigm: Our dense index, sparse compute strategy averages 61% faster execution and uses 35% less memory than dense upsampling. Routing Mechanism: Learned Neural Routing for budget allocation consistently outperforms Structure Map heuristics. 
+
+HPC Depth: Omitting HPC blocks precludes spatial coordination among Gaussians prior to rasterization, severely degrading quality. 
+
+Level-Aware Modulation: Explicit scale modulation (Eq. 18) better assists the MLP in decoding Gaussian features compared to relying on the network to implicitly learn large scale variations. Routing Costs: Balancing upsampling penalties (L0 and L1 closer to L2) enhances quality, albeit with higher time and memory overhead. 
+
+Backbone: RDN extracts the critical high-frequency features we require more effectively than the EDSR baseline (Fig. 11). Gaussian Capacity : Increasing both the dimension and the total number of Gaussians embedding of E𝑔𝑠 significantly boosts perceptual metrics. 8 • G. Federico et al. 
+
+5 Conclusion and Limitations 
+
+We presented QuADA-GS, introducing a Neural Routing Architec-ture for dynamic Gaussian budget allocation and a Hierarchical Pointer Convolution (HPC) for efficient, grid-free quadtree com-munication. This method achieves state-of-the-art arbitrary-scale super-resolution, remaining highly competitive even at extreme scales. While our sparse paradigm improves speed by 60% and mem-ory by 35% over dense baselines, mitigating the absolute memory overhead remains a focus for future work. 
+
+References 
+
+Marco Bevilacqua, Aline Roumy, Christine Guillemot, and Marie Line Alberi-Morel. 2012. Low-complexity single-image super-resolution based on nonnegative neighbor embedding. (2012). Jiezhang Cao, Qin Wang, Yongqin Xian, Yawei Li, Bingbing Ni, Zhiming Pi, Kai Zhang, Yulun Zhang, Radu Timofte, and Luc Van Gool. 2023. Ciaosr: Continuous implicit attention-in-attention network for arbitrary-scale image super-resolution. In Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition .1796–1807. Shuning Chang, Pichao Wang, Jiasheng Tang, Fan Wang, and Yi Yang. 2024. Sparsedit: Token sparsification for efficient diffusion transformer. arXiv preprint arXiv:2412.06028 (2024). Du Chen, Liyi Chen, Zhengqiang Zhang, and Lei Zhang. 2025a. Generalized and Efficient 2D Gaussian Splatting for Arbitrary-scale Super-Resolution. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) . 26435–26445. Du Chen, Jie Liang, Xindong Zhang, Ming Liu, Hui Zeng, and Lei Zhang. 2023a. Human guided ground-truth generation for realistic image super-resolution. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 14082–14091. Du Chen, Tianhe Wu, Kede Ma, and Lei Zhang. 2025b. Toward generalized image quality assessment: Relaxing the perfect reference quality assumption. In Proceedings of the Computer Vision and Pattern Recognition Conference . 12742–12752. Du Chen, Zhengqiang Zhang, Jie Liang, and Lei Zhang. 2024. SSL: A self-similarity loss for improving generative image super-resolution. In Proceedings of the 32nd ACM International Conference on Multimedia . 3189–3198. Hao-Wei Chen, Yu-Syuan Xu, Min-Fong Hong, Yi-Min Tsai, Hsien-Kai Kuo, and Chun-Yi Lee. 2023c. Cascaded Local Implicit Transformer for Arbitrary-Scale Super-Resolution. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) . 18257–18267. Xiangyu Chen, Xintao Wang, Jiantao Zhou, Yu Qiao, and Chao Dong. 2023b. Activating more pixels in image super-resolution transformer. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 22367–22377. Yinbo Chen, Sifei Liu, and Xiaolong Wang. 2021. Learning continuous image represen-tation with local implicit image function. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 8628–8638. Christopher Choy, JunYoung Gwak, and Silvio Savarese. 2019. 4D Spatio-Temporal Con-vNets: Minkowski Convolutional Neural Networks. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) .Keyan Ding, Kede Ma, Shiqi Wang, and Eero P. Simoncelli. 2022. Image Quality Assessment: Unifying Structure and Texture Similarity. IEEE Transactions on Pattern Analysis and Machine Intelligence 44, 5 (2022), 2567–2581. doi:10.1109/TPAMI.2020. 3045810 Chao Dong, Chen Change Loy, and Xiaoou Tang. 2016a. Accelerating the super-resolution convolutional neural network. In European conference on computer vision .Springer, 391–407. Chao Dong, Chen Change Loy, and Xiaoou Tang. 2016b. Accelerating the Super-Resolution Convolutional Neural Network. In Computer Vision – ECCV 2016 , Bastian Leibe, Jiri Matas, Nicu Sebe, and Max Welling (Eds.). Springer International Publish-ing, Cham, 391–407. Benjamin Graham and Laurens van der Maaten. 2017. Submanifold Sparse Convolu-tional Networks. arXiv preprint arXiv:1706.01307 (2017). Zongyao He and Zhi Jin. 2024. Latent Modulated Function for Computational Optimal Continuous Image Representation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) . 26026–26035. Jintong Hu, Bin Xia, Bin Chen, Wenming Yang, and Lei Zhang. 2025. Gaussiansr: High fidelity 2d gaussian splatting for arbitrary-scale image super-resolution. In 
+
+Proceedings of the AAAI Conference on Artificial Intelligence , Vol. 39. 3554–3562. Xuecai Hu, Haoyuan Mu, Xiangyu Zhang, Zilei Wang, Tieniu Tan, and Jian Sun. 2019. Meta-SR: A magnification-arbitrary network for super-resolution. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 1575–1584. Jia-Bin Huang, Abhishek Singh, and Narendra Ahuja. 2015. Single Image Super-Resolution From Transformed Self-Exemplars. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) .Eric Jang, Shixiang Gu, and Ben Poole. 2016. Categorical reparameterization with gumbel-softmax. arXiv preprint arXiv:1611.01144 (2016). Pradeep Kumar Jayaraman, Jianhan Mei, Jianfei Cai, and Jianmin Zheng. 2018. Quadtree Convolutional Neural Networks. In Proceedings of the European Conference on Com-puter Vision (ECCV) .Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, George Drettakis, et al . 2023. 3d gaussian splatting for real-time radiance field rendering. ACM Trans. Graph. 42, 4 (2023), 139–1. Jiwon Kim, Jung Kwon Lee, and Kyoung Mu Lee. 2016a. Accurate Image Super-Resolution Using Very Deep Convolutional Networks. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) .Jiwon Kim, Jung Kwon Lee, and Kyoung Mu Lee. 2016b. Deeply-recursive convolutional network for image super-resolution. In Proceedings of the IEEE conference on computer vision and pattern recognition . 1637–1645. Wei-Sheng Lai, Jia-Bin Huang, Narendra Ahuja, and Ming-Hsuan Yang. 2017. Deep laplacian pyramid networks for fast and accurate super-resolution. In Proceedings of the IEEE conference on computer vision and pattern recognition . 624–632. Jaewon Lee and Kyong Hwan Jin. 2022. Local texture estimator for implicit represen-tation function. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 1929–1938. Yawei Li, Kai Zhang, Jingyun Liang, Jiezhang Cao, Ce Liu, Rui Gong, Yulun Zhang, Hao Tang, Yun Liu, Denis Demandolx, Rakesh Ranjan, Radu Timofte, and Luc Van Gool. 2023. LSDIR: A Large Scale Dataset for Image Restoration. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) Workshops .1775–1787. Zhen Li, Jinglei Yang, Zheng Liu, Xiaomin Yang, Gwanggil Jeon, and Wei Wu. 2019. Feedback Network for Image Super-Resolution. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) .Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, and Radu Timofte. 2021. SwinIR: Image Restoration Using Swin Transformer. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) Workshops . 1833–1844. Jie Liang, Hui Zeng, and Lei Zhang. 2022. Details or artifacts: A locally discriminative learning approach to realistic image super-resolution. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 5657–5666. Bee Lim, Sanghyun Son, Heewon Kim, Seungjun Nah, and Kyoung Mu Lee. 2017. Enhanced Deep Residual Networks for Single Image Super-Resolution. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) Workshops .D. Martin, C. Fowlkes, D. Tal, and J. Malik. 2001. A database of human segmented natural images and its application to evaluating segmentation algorithms and measuring ecological statistics. In Proceedings Eighth IEEE International Conference on Computer Vision. ICCV 2001 , Vol. 2. 416–423 vol.2. doi:10.1109/ICCV.2001.937655 Yusuke Matsui, Kota Ito, Yuji Aramaki, Azuma Fujimoto, Toru Ogawa, Toshihiko Ya-masaki, and Kiyoharu Aizawa. 2017. Sketch-based manga retrieval using manga109 dataset. Multimedia tools and applications 76, 20 (2017), 21811–21838. Bohao Peng, Xiaoyang Wu, Li Jiang, Yukang Chen, Hengshuang Zhao, Zhuotao Tian, and Jiaya Jia. 2024. OA-CNNs: Omni-Adaptive Sparse CNNs for 3D Semantic Segmentation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) . 21305–21315. Gernot Riegler, Ali Osman Ulusoy, and Andreas Geiger. 2017. Octnet: Learning deep 3d representations at high resolutions. In Proceedings of the IEEE conference on computer vision and pattern recognition . 3577–3586. Long Sun, Jiangxin Dong, Jinhui Tang, and Jinshan Pan. 2023. Spatially-Adaptive Feature Modulation for Efficient Image Super-Resolution. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) . 13190–13199. Haotian Tang, Shang Yang, Zhijian Liu, Ke Hong, Zhongming Yu, Xiuyu Li, Guohao Dai, Yu Wang, and Song Han. 2023. TorchSparse++: Efficient Training and Inference Framework for Sparse Convolution on GPUs. In Proceedings of the 56th Annual IEEE/ACM International Symposium on Microarchitecture (Toronto, ON, Canada) 
+
+(MICRO ’23) . Association for Computing Machinery, New York, NY, USA, 225–239. doi:10.1145/3613424.3614303 Radu Timofte, Eirikur Agustsson, Luc Van Gool, Ming-Hsuan Yang, and Lei Zhang. 2017. NTIRE 2017 Challenge on Single Image Super-Resolution: Methods and Results. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) Workshops .Longguang Wang, Yingqian Wang, Zaiping Lin, Jungang Yang, Wei An, and Yulan Guo. 2021a. Learning a single network for scale-arbitrary super-resolution. In Proceedings of the IEEE/CVF international conference on computer vision . 4801–4810. Peng-Shuai Wang, Yang Liu, Yu-Xiao Guo, Chun-Yu Sun, and Xin Tong. 2017. O-CNN: octree-based convolutional neural networks for 3D shape analysis. ACM Trans. Graph. 36, 4, Article 72 (July 2017), 11 pages. doi:10.1145/3072959.3073608 Xintao Wang, Liangbin Xie, Chao Dong, and Ying Shan. 2021b. Real-esrgan: Training real-world blind super-resolution with pure synthetic data. In Proceedings of the IEEE/CVF international conference on computer vision . 1905–1914. Xintao Wang, Ke Yu, Shixiang Wu, Jinjin Gu, Yihao Liu, Chao Dong, Yu Qiao, and Chen Change Loy. 2018. Esrgan: Enhanced super-resolution generative adversarial networks. In Proceedings of the European conference on computer vision (ECCV) Learning to Adaptively Allocate Gaussians for Arbitrary-Scale Image Super-Resolution • 9
+
+workshops . 0–0. Zhou Wang, A.C. Bovik, H.R. Sheikh, and E.P. Simoncelli. 2004. Image quality as-sessment: from error visibility to structural similarity. IEEE Transactions on Image Processing 13, 4 (2004), 600–612. doi:10.1109/TIP.2003.819861 Min Wei and Xuesong Zhang. 2023. Super-Resolution Neural Operator. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) .18247–18256. Rongyuan Wu, Tao Yang, Lingchen Sun, Zhengqiang Zhang, Shuai Li, and Lei Zhang. 2024. Seesr: Towards semantics-aware real-world image super-resolution. In Pro-ceedings of the IEEE/CVF conference on computer vision and pattern recognition .25456–25467. Jingyu Yang, Sheng Shen, Huanjing Yue, and Kun Li. 2021. Implicit Trans-former Network for Screen Content Image Continuous Super-Resolution. In Ad-vances in Neural Information Processing Systems , M. Ranzato, A. Beygelzimer, Y. Dauphin, P.S. Liang, and J. Wortman Vaughan (Eds.), Vol. 34. Curran Asso-ciates, Inc., 13304–13315. https://proceedings.neurips.cc/paper_files/paper/2021/ file/6e7d5d259be7bf56ed79029c4e621f44-Paper.pdf Jie-En Yao, Li-Yuan Tsao, Yi-Chen Lo, Roy Tseng, Chia-Che Chang, and Chun-Yi Lee. 2023. Local Implicit Normalizing Flow for Arbitrary-Scale Image Super-Resolution. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) . 1776–1785. Qiaosi Yi, Shuai Li, Rongyuan Wu, Lingchen Sun, Yuhui Wu, and Lei Zhang. 2025. Fine-structure preserved real-world image super-resolution via transfer vae training. In Proceedings of the IEEE/CVF international conference on computer vision . 12415– 12426. Elad Yoshai, Ariel D Yoshai, and Natan T Shaked. 2026. CAFlow: Adaptive-Depth Single-Step Flow Matching for Efficient Histopathology Super-Resolution. arXiv preprint arXiv:2603.18513 (2026). Fanghua Yu, Jinjin Gu, Zheyuan Li, Jinfan Hu, Xiangtao Kong, Xintao Wang, Jingwen He, Yu Qiao, and Chao Dong. 2024. Scaling up to excellence: Practicing model scaling for photo-realistic image restoration in the wild. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 25669–25680. Roman Zeyde, Michael Elad, and Matan Protter. 2012. On Single Image Scale-Up Using Sparse-Representations. In Curves and Surfaces , Jean-Daniel Boissonnat, Patrick Chenin, Albert Cohen, Christian Gout, Tom Lyche, Marie-Laurence Mazure, and Larry Schumaker (Eds.). Springer Berlin Heidelberg, Berlin, Heidelberg, 711–730. Kai Zhang, Jingyun Liang, Luc Van Gool, and Radu Timofte. 2021. Designing a Practical Degradation Model for Deep Blind Image Super-Resolution. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) . 4791–4800. Leheng Zhang, Yawei Li, Xingyu Zhou, Xiaorui Zhao, and Shuhang Gu. 2024. Tran-scending the limit of local window: Advanced super-resolution transformer with adaptive token dictionary. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 2856–2865. Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shechtman, and Oliver Wang. 2018a. The Unreasonable Effectiveness of Deep Features as a Perceptual Metric. In Proceed-ings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) .Xindong Zhang, Hui Zeng, Shi Guo, and Lei Zhang. 2022. Efficient long-range attention network for image super-resolution. In European conference on computer vision .Springer, 649–667. Yulun Zhang, Kunpeng Li, Kai Li, Lichen Wang, Bineng Zhong, and Yun Fu. 2018b. Image super-resolution using very deep residual channel attention networks. In 
+
+Proceedings of the European conference on computer vision (ECCV) . 286–301. Yulun Zhang, Yapeng Tian, Yu Kong, Bineng Zhong, and Yun Fu. 2018c. Residual dense network for image super-resolution. In Proceedings of the IEEE conference on computer vision and pattern recognition . 2472–2481. 10 • G. Federico et al. 
+
+Fig. 6. Qualitative comparisons at ×4 between QuADA-GS (and its routing map) and competitors, using RDN [Zhang et al. 2018c] as image encoder. 
+
+Fig. 7. Qualitative comparisons at ×6 between QuADA-GS (and its routing map) and competitors, using RDN [Zhang et al. 2018c] as image encoder. 
+
+Fig. 8. Qualitative comparisons at ×8 between QuADA-GS (and its routing map) and competitors, using RDN [Zhang et al. 2018c] as image encoder. Learning to Adaptively Allocate Gaussians for Arbitrary-Scale Image Super-Resolution • 11 
+
+Fig. 9. Qualitative comparisons at ×12 between QuADA-GS (and its routing map) and competitors, using RDN [Zhang et al. 2018c] as image encoder. 
+
+Fig. 10. Qualitative comparisons at ×16 between QuADA-GS (and its routing map) and competitors, using RDN [Zhang et al. 2018c] as image encoder. 
+
+Fig. 11. Qualitative comparisons at ×6 (left) and ×12 (right) evaluating the impact of the backbone architecture on QuADA-GS. We compare QuADA-GS utilizing RDN [Zhang et al . 2018c] against the EDSR_baseline [Lim et al . 2017]. As demonstrated, employing RDN allows the network to extract richer high-frequency features, successfully recovering finer structural details compared to the EDSR baseline.

@@ -1,0 +1,1483 @@
+Title: DiffRGD: An Inference-Time Diffusion Guidance Through Riemannian Gradient Descent
+
+URL Source: https://arxiv.org/pdf/2606.28417v1
+
+Published Time: Tue, 30 Jun 2026 00:07:18 GMT
+
+Number of Pages: 38
+
+Markdown Content:
+# DiffRGD: An Inference-Time Diffusion Guidance Through Riemannian Gradient Descent 
+
+Jia-Wei Liao 1,4 , Li-Xuan Peng 2,Mei-Heng Yueh 3, Min Sun 2, Cheng-Fu Chou 1, Jun-Cheng Chen 4
+
+> 1
+
+National Taiwan University, 2National Tsing Hua University, 3National Taiwan Normal University, 
+
+> 4
+
+Research Center for Information Technology Innovation, Academia Sinica 
+
+Published at ECCV 2026 
+
+Abstract 
+
+Recently, diffusion models have been widely adopted in generative modeling and have served as foundational models for many image generation tasks. To control the generation without costly re-training or fine-tuning, many works seek inference-time guidance methods to steer the latent via a differentiable objective at inference time. However, these methods cannot effectively preserve the original Gaussian distribution because they introduce distribu-tional drift, thereby degrading the sample quality. To address this gap, we propose DiffRGD, a distribution-aware guidance framework that explicitly preserves the latent Gaussian struc-ture. DiffRGD formulates each sampling step as a constrained optimization problem on a spherical manifold induced by the latent Gaussian distribution, and solves it efficiently via Riemannian Gradient Descent (RGD). DiffRGD is a plug-and-play method that can be seam-lessly integrated into any pre-trained diffusion model. Extensive experiments demonstrate that DiffRGD outperforms previous methods in most image restoration and conditional gen-eration tasks. Our codebase is available at https://github.com/jwliao1209/DiffRGD .
+
+# 1 Introduction 
+
+Diffusion models (Sohl-Dickstein et al., 2015; Ho et al., 2020; Song et al., 2020; Lai et al., 2025) have achieved state-of-the-art performance in unconditional and conditional generation. Considering the prohibitively expensive training efforts of large conditional diffusion models (Ho & Salimans, 2021; Zhang et al., 2023), many works seek inference-time guidance, where the sampler is steered by differ-entiable objectives without any re-training or fine-tuning. Most existing methods (Chung et al., 2023; He et al., 2024; Yang et al., 2024) inject external gradients directly into the sampling process (Dhariwal & Nichol, 2021). Specifically, they formulate the guidance for each step as an optimization problem: 
+
+ˆx t−1 ∼ pθ (x t−1|x t ),
+
+x t−1 = argmin    
+
+> x∈N (ˆxt−1)
+
+L (ˆx 0(x , t − 1), y). (1.1) Here ˆ x t−1 denotes the noisy latent sampled from the reverse distribution pθ (x t−1|x t ) parameterized by the model θ . This prediction serves as the reference point for constructing the neighborhood constraint 1
+
+> arXiv:2606.28417v1 [cs.CV] 25 Jun 2026
+
+N (ˆx t−1), which restricts the optimization process as it moves in the guidance direction induced by the guidance loss L (·, y). Note that ˆ x 0(x , t − 1) denotes the model’s estimate of the clean sample (i.e., at timestep t = 0 obtained from timestep t − 1); this estimate is used to compute the guidance loss. xT
+
+Data manifold M
+
+# xt
+
+DiffRGD 
+
+# x0
+
+DPS 
+
+Off -manifold 
+
+St,r 
+
+N (0, In)           
+
+> Figure 1: Illustration of our method: Previ-ous works perform guidance without latent-distribution-aware constraints, which can re-sult in the off-manifold phenomena that hinder the sample quality; DiffRGD pro-poses a latent-distribution-aware geometry constraint tailored to the Gaussian properties of the diffusion model.
+
+However, their guidance operates in the ambient space that cannot preserve the stepwise Gaussian latent distribu-tion. This might elicit distributional drifts induced by the Jensen gap (Chung et al., 2023; Yang et al., 2024), that ul-timately degrade the clean sample quality. A representative example is DPS (Chung et al., 2023), which applies gradi-ents from the guiding loss without any constraints, when the step size is large, the deviation will deteriorate whereas small step size will cause inadequate controllability. These research gaps motivate us to ask: Can we design latent-distribution-aware guidance that ensures the guided sample lies within the original latent distribution? 
+
+In this paper, we propose DiffRGD , an inference-time dif-fusion guidance framework based on Riemannian optimiza-tion (Absil et al., 2008). We follow the problem formulation of previous works defined in Equation 1.1 with our proposed novel geometry constraints. Our key insight is that since each DDIM sampling timestep (Song et al., 2021) defines an 
+
+isotropic Gaussian of latent distribution, we can construct a suitable constraint that respects the Gaussian properties to perform Riemannian Gradient Descent (RGD). DiffRGD con-structs the constraint as a spherical manifold induced from the latent distribution via our proposed polar decomposi-tion property. We also prove that our method converges to a stationary point. In addition, akin to previous methods, DiffRGD is a plug-and-play method and can be seamlessly applied to any pre-trained diffusion model. We conduct extensive experiments, including synthetic data and real-world tasks. We create a 2D synthetic dataset to demonstrate our distribution-preservation superiority over DPS, please refer to the Appendix. In real-world tasks, DiffRGD outperforms previous methods in most image restoration (Lug-mayr et al., 2022; Kawar et al., 2022; Saharia et al., 2023; Wang et al., 2023; Zhu et al., 2023; Song et al., 2023a; Chung et al., 2022, 2023; He et al., 2024; Yang et al., 2024; Zhang et al., 2025) (e.g., inpainting, super-resolution, deblurring) and conditional generation tasks (Yu et al., 2023; Bansal et al., 2024; Song et al., 2023b; He et al., 2024; Yang et al., 2024; Zhang et al., 2025) (e.g., segmentation map, sketch, FaceID). Additionally, we reimplement all the compared methods under the Diffusers framework (von Platen et al., 2022). Our main contributions are summarized as follows: 1. We identify a polar-decomposition property that reveals a distribution-induced geometry for dif-fusion guidance. Leveraging this insight, we propose a Riemannian guidance framework that re-spects the latent distribution geometry and mitigates sample degradation caused by off-manifold distribution drift. 2. We provide an analysis of distribution preservation to validate the effectiveness of the proposed 2method and prove the convergence of the algorithm. In practice, the proposed geometry-aware optimization converges faster than ADMM-based methods. 3. We demonstrate the effectiveness of DiffRGD across four image restoration tasks and three condi-tional generation tasks, achieving state-of-the-art performance without re-training or fine-tuning. 
+
+# 2 Related Work 
+
+2.1 Diffusion Models for Conditional Generation 
+
+Diffusion models have emerged as a dominant class of generative models due to their strong modeling capacity and sample quality (Sohl-Dickstein et al., 2015; Ho et al., 2020; Song et al., 2020, 2021; Karras et al., 2022). Recent advancements have enabled scalable and foundational implementations, such as Stable Diffusion (Rombach et al., 2022; Esser et al., 2024) and FLUX (Labs, 2024a,b), which has been widely adopted in commercial applications. To enable controllable generation, several guidance strategies have been introduced to steer the sampling process. Classifier guidance (CG) (Dhariwal & Nichol, 2021) utilizes an external classifier to steer the sam-pling process, while classifier-free guidance (CFG) (Ho & Salimans, 2021) achieves guidance through in-terpolating conditional and unconditional model outputs without requiring an external classifier. These techniques have been widely adopted to diverse downstream applications, including text-to-image syn-thesis (Rombach et al., 2022), conditional image generation (Nichol et al., 2022; Voynov et al., 2023; Zhang et al., 2023; Yu et al., 2023; Song et al., 2023b; Bansal et al., 2024; Wu et al., 2024; Liao et al., 2025), and test-time adaptation (Tsai et al., 2024). 
+
+2.2 Inference-Time Diffusion Guidance 
+
+Despite the powerful capability of diffusion models, their training demands substantial computational resources and large-scale datasets. Fine-tuning or re-training diffusion models for every new down-stream task or modality is prohibitively expensive and leads to high maintenance overhead. To address this, several works have proposed inference-time guidance methods that refine the latent during infer-ence time without modifying the original model parameters. 
+
+DPS. DPS (Chung et al., 2023) derives the guidance via maximizing posterior likelihood from the inverse problem, and FreeDoM (Yu et al., 2023) derives the guidance via minimizing an energy function measuring the conditional alignment. They both share a similar update rule that does not constrain the updates to respect the latent distribution. Although they are intuitive and effective, they often suffer from off-manifold updates if the step size is too large or insufficient guidance when the step size is too small, both of which will degrade the final clean sample quality. 
+
+MPGD. To alleviate the off-manifold issue, MPGD (He et al., 2024) proposes a Projected Gradient Descent (PGD) framework with a linear manifold hypothesis. At each timestep, it estimates the clean data x 0, projects the guiding gradient onto the tangent space of the data manifold using a VAE encoder, and updates the latent accordingly. While this projection mitigates deviation from the data manifold, it assumes local linearity and introduces instability due to the reliance on a perfect encoder, which in practice is infeasible. This limits its general applicability. 3DSG. Alternatively, DSG (Yang et al., 2024) leverages a Spherical Gaussian structure and projects the guided latent to a fixed radius hypersphere. However, their proposed hypersphere cannot fully adhere to the latent distribution’s Gaussian properties, even degrading to a uniform distribution. In contrast, we propose a polar decomposition directly from the latent and a radius sampling technique to maintain the Gaussian properties for the optimization constraints. 
+
+ADMMDiff. Another line of work, such as ADMMDiff (Zhang et al., 2025), formulates diffusion guid-ance as a constrained optimization problem and incorporates the Alternating Direction Method of Mul-tipliers (ADMM) (Gabay & Mercier, 1976; Chan et al., 2016; Wang & Chan, 2017) into the sampling process. While theoretically grounded, it utilizes the proximal operator and inner-loop iteration, leading to slow convergence. It also requires careful tuning of multiple hyperparameters, making it less flexible in various applications. We seek to address the research gap by proposing a more suitable geometric constraint that is directly induced from the original latent distribution and solving it via Riemannian Gradient Descent (Absil et al., 2008), which provides efficient computation with a convergence guarantee. 
+
+# 3 Method 
+
+Denoising Diffusion Probabilistic Models (DDPM) (Ho et al., 2020) generate data by learning to reverse a forward noising process, in another equivalent view, is learning to perform sampling across different levels of noise-perturbed data distribution (Song & Ermon, 2019; Song et al., 2020). DDIM (Song et al., 2021) generalized the DDPM formulation with parameters σt controlling the noise level during sampling to enable sample acceleration and a unified formulation. Here, we follow their formulation to explain our motivation. Starting from a noisy latent x t at timestep t, DDIM defines the next-step latent x t−1 during sampling, i.e., denoising, as sampling from a Gaussian distribution parametrized by the model prediction. 
+
+x t−1 ∼ N (μt , σ2 
+
+> t
+
+I n),
+
+where the mean is defined by 
+
+μt := p ¯αt−1 ˆx 0(x t , t) + 
+
+q
+
+1 − ¯αt−1 − σ2 
+
+> t
+
+εθ (x t , t),
+
+with given DDIM sampling schedule parameters { ¯αt }Tt=1 and the ˆ x 0(x t , t) is the predicted clean sample, estimated by Tweedie’s formula (Efron, 2011): 
+
+ˆx 0(x t , t) := 1
+
+p ¯αt
+
+ x t − p1 − ¯αt εθ (x t , t) ,
+
+in which the εθ (x t , t) denotes the predicted noise from a diffusion model. In the unconditional sampling settings, all the latent across sampling timesteps will form an isotropic Gaussian coupled with the timestep t. However, when applying inference-time conditional sampling, the guidance often deviates the latent from the original Gaussian distribution. As the sampling step proceeds, the deviation will accumulate, making the final clean sample deviate from the data manifold, resulting in lower quality. To address the off-manifold problem, we propose DiffRGD, an inference-time guidance method based on Riemannian Gradient Descent (RGD) (Absil et al., 2008). Our key insight is: since for each sampling timestep, the latent follows a time-dependent Gaussian distribution, and by 4properties of isotropic Gaussian, we can construct a distribution-induced spherical manifold as a proxy to perform RGD while ensuring the optimized latent still lies within the original Gaussian distribution. The list of notations used in this section is provided in the Appendix. 
+
+3.1 Polar Decomposition of Isotropic Gaussian 
+
+In this section, we characterize the geometric structure induced by the latent distribution at each dif-fusion timestep. We begin by showing that the isotropic Gaussian latent admits a polar decomposition into statistically independent radial and directional components, as stated in the following proposition. 
+
+Proposition 1 (Polar Decomposition of Isotropic Gaussian). At each diffusion timestep t, the la-tent x t ∼ N (μt , σ2 
+
+> t
+
+I n) follows an isotropic Gaussian distribution centered at μt . It admits a polar decomposition: 
+
+x t = μt + σt ru,
+
+where r ∼ χ(n) is a chi-distributed random variable with n degrees of freedom, and u ∼ Unif (Sn−1) is a unit vector uniformly distributed on the sphere. r and u are statistically independent. St,r 
+
+σtr
+
+μt   
+
+> σt·χ(n)
+> radius
+> Figure 2: Gaussian distribution-aware spheri-cal manifold construction.
+
+The insight of Proposition 1 is that we aim to construct the spherical manifold based on the same density as the original Gaussian of x t . The radius σt r follows a scaled-chi distribution centered close to pnσt with two-sided probability decreasing. We show the conceptual illustra-tion in Figure 2. We also provide an asymptotic analysis for our scaled-chi distribution behavior when n is large in the Appendix. This polar decomposition decouples the sampled r and direction u. Here, we propose to fix the sampled r to con-struct the spherical manifold as the feasible set for RGD. The goal is to find a suitable direction u toward the guid-ance. Specifically, the spherical manifold is defined as: 
+
+St,r := x ∈ Rn | ∥ x − μt ∥2 = σt r . (3.1) In contrast to previous unconstrained gradient updates (Chung et al., 2023; Yu et al., 2023), our constraint could preserve the distribution-induced geometry of the diffusion process while allowing the directional refinement toward the guidance direction. 
+
+Problem Formulation. We follow previous works (He et al., 2024) to formulate the per-timestep guidance as a constrained optimization problem. Given a conditional input y, we formulate the latent refinement at each timestep as: 
+
+x t−1 = argmin  
+
+> x∈S t,r
+
+L (ˆx 0(x , t − 1), y). (3.2) Since we constrain the optimization respecting the feasible set defined in Equation 3.1, this optimization naturally respects the Gaussian properties of the diffusion process while improving the sample alignment toward the condition y.5Algorithm 1 DiffRGD 
+
+Input: Reference image y ∈ Rn, Diffusion model εθ , loss function L , DDIM sampling schedule param-eters { ¯αt }Tt=1, noise level σt > 0, guidance strengths {η(k) 
+
+> t
+
+}Tt=1, guidance inner iteration K ∈ N. 
+
+> 1:
+
+x T ∼ N (0, I n). 
+
+> 2:
+
+for t = T to 1 do  
+
+> 3:
+
+r ∼ χ(n). 
+
+> 4:
+
+u ∼ Unif (Sn−1). 
+
+> 5:
+
+μt ← p ¯αt−1 ˆx 0(x t , t) + Æ1 − ¯αt−1 − σ2 
+
+> t
+
+εθ (x t , t). 
+
+> 6:
+
+x (0) 
+
+> t−1
+
+← μt + σt ru. 
+
+> 7:
+
+for k = 0 to K − 1 do  
+
+> 8:
+
+g ← ∇ x (k)
+
+> t−1
+
+L (ˆx 0(x (k)
+
+> t−1
+
+, t − 1), y). ▷ Guidance gradient  
+
+> 9:
+
+grad St,r L ← ΠTx (k) 
+
+> t−1
+> St,r
+
+(g ). ▷ Riemannian gradient  
+
+> 10:
+
+x (k+1) 
+
+> t−1
+
+← Rx (k)
+
+> t−1
+
+(−η(k) 
+
+> t
+
+grad St,r L ). ▷ Retraction  
+
+> 11:
+
+x t−1 ← x (K)
+
+> t−1
+
+.
+
+Return: Guided sample x 0.
+
+3.2 Riemannian Gradient Descent for Diffusion Guidance 
+
+To solve the constrained optimization problem in Equation 3.2, we employ Riemannian Gradient De-scent (RGD) on the spherical manifold St,r . We first define the geometric components for the optimiza-tion step as follows: 
+
+Tangent Space. The tangent space of the spherical manifold St,r at a point x ∈ S t,r consists of all directions orthogonal to the radial vector: 
+
+Tx St,r := v ∈ Rn | (x − μt )⊤ v = 0 .
+
+Riemannian Metric. We endow the manifold St,r with the standard Riemannian metric induced by the Euclidean inner product. For any two vectors in the tangent space v, w ∈ Tx St,r , the inner product is defined as: 
+
+〈v, w 〉x := v⊤ w .
+
+Projection Operator. The projection of a vector v ∈ Rn onto the tangent space T x St,r is given by: 
+
+ΠTx St,r (v) :=
+
+
+
+I n − (x − μt )( x − μt )⊤
+
+∥x − μt ∥22
+
+
+
+v,
+
+This projection removes the radial part of v to ensure the update direction remains tangent to the spherical manifold. 6Retraction. After taking a step along the tangent space, the resulting latent may leave the spherical manifold. We apply a retraction operation to map the updated latent back to the spherical manifold by: 
+
+Rx (v) := μt + σt r · x − μt + v
+
+∥x − μt + v∥2
+
+,
+
+which ensures the latent updates lying on the same spherical manifold specified by the radius σt r.St,r 
+
+## μt
+
+x(0) 
+
+> t−1
+
+−∇ xt−1 L
+
+σtru
+
+Tx(0) 
+
+> t−1
+
+St,r   
+
+> −η(0)
+> tgrad St,r L
+
+x(1) 
+
+> t−1
+
+x(K) 
+
+> t−1
+
+=: xt−1 
+
+> ΠTx(0)
+> t−1
+> St,r (·)
+> Rx(0)
+> t−1
+> (·)
+
+Figure 3: An illustration of DiffRGD. 
+
+Fig. 3 shows the guidance step in DiffRGD. For each diffusion timestep t, given the predicted mean 
+
+μt by DDIM and the radius σt r, the latent x (0) 
+
+> t−1
+
+lies on the constructed spherical manifold St,r before ap-plying guidance. Starting from this initial latent, we perform K Riemannian optimization steps to refine the latent by the guiding loss while ensuring it lies on the constructed manifold. At the core of Riemannian optimization iteration, we compute the naive Euclidean gradient −∇ x (k)
+
+> t−1
+
+L ,where L (·, y) denotes the guidance objective condi-tioned on y, then we use this gradient to obtain the Rie-mannian gradient and perform retraction for the guid-ance update. Specifically, to respect the spherical con-straint, this gradient is first projected onto the tangent space T x (k)
+
+> t−1
+
+St,r , yielding the Riemannian gradient: 
+
+grad St,r L := ΠTx (k)
+
+> t−1
+> St,r
+
+
+
+∇x (k)
+
+> t−1
+
+L (ˆx 0(x (k)
+
+> t−1
+
+, t − 1), y)
+
+
+
+.
+
+Then update the latent along the negative Riemannian gradient direction with guidance strength η(k) 
+
+> t
+
+>
+
+0 via a retraction-based step: 
+
+x (k+1) 
+
+> t−1
+
+= Rx (k)
+
+> t−1
+
+
+
+−η(k) 
+
+> t
+
+grad St,r L
+
+
+
+.
+
+The retraction ensures that each update remains on the spherical manifold St,r , preventing the radial deviation that naive Euclidean gradient updates would otherwise introduce. After K iterations, we obtain the optimized latent x (K)
+
+> t−1
+
+, which serves as the final guided sample x t−1.The full algorithm is shown in Algorithm 1. This framework ensures each optimization step remains on the spherical manifold induced by the isotropic Gaussian, thereby preserving the validity of the sampling process and mitigating quality degradation caused by off-manifold phenomena. A detailed analysis of the distribution preservation property is provided in the Appendix. 
+
+3.3 Convergence Analysis 
+
+To ensure the stability and reliability of our guidance framework, it’s essential to study the convergence behavior of the optimization steps. In this section, we theoretically justify the convergence of our opti-mization loop. In Theorem 1, we show that at each diffusion sampling step, our method asymptotically converges to a stationary point. 7Theorem 1 (Convergence to Stationary Point of DiffRGD). Let f t : St,r → R be the guidance objective at timestep t, defined as f t (x ) := L (ˆx 0(x , t − 1), y), and let {x (k)
+
+> t−1
+
+} denote the sequence produced by Algorithm 1 at timestep t. Assume that f t is L t -smooth on the spherical manifold St,r , and the guidance strength η(k) 
+
+> t
+
+≤ 1 
+
+> Lt
+
+. Then the norm of the Riemannian gradient satisfies 
+
+η(k) 
+
+> t
+
+grad St,r f t (x (k)
+
+> t−1
+
+) 2 → 0 as k → ∞ .
+
+with a convergence rate O ( 1pk ).
+
+This theorem shows that, under the assumption of L-smoothness, Algorithm 1 converges to a sta-tionary point at each timestep with a sublinear rate. In our task-specific application, we observe that the Riemannian gradient norm typically becomes small within three iterations. Therefore, in practice, we fix the number of optimization steps to K = 3, and provide the convergence curves of the gradient norm across several timesteps in the Appendix. 
+
+# 4 Experiment Results 
+
+For a fair comparison, we reimplement several diffusion guidance baselines under identical data and preprocessing, including DPS (Chung et al., 2023), FreeDoM (Yu et al., 2023), MPGD (He et al., 2024), DSG (Yang et al., 2024), and ADMMDiff (Zhang et al., 2025). Detailed algorithmic descriptions of each method, along with the full set of hyperparameters used in our experiments, are provided in the Appendix. We follow the official configurations reported in the original papers wherever available. For methods lacking complete parameter specifications in either the paper or public codebase, we report the best-performing hyperparameter settings. All experiments using the DDIM sampling schedule with 
+
+σt = p(1 − ¯αt−1)/(1 − ¯αt ) · p1 − ¯αt / ¯αt−1 and implemented in PyTorch (Paszke et al., 2019) with HuggingFace diffusers (von Platen et al., 2022) and ran on a single NVIDIA GeForce RTX 4090 GPU. In the following sections, we evaluate baseline methods and our proposed approach on image restoration tasks (Section 4.1) and conditional generation tasks (Section 4.3). 
+
+4.1 Image Restoration 
+
+We evaluate our proposed method alongside representative baseline approaches on four image restora-tion tasks. The objective in each task is to reconstruct a clean image x from a degraded observation y.Each task is formulated as a noisy linear inverse problem (Tikhonov, 1977; Chung et al., 2023) modeled by the forward process: 
+
+y = A (x ) + n, n ∼ N (0, 0.05 2 I)
+
+where A (·) denotes a task-specific linear degradation operator. Given the noisy measurement y, the goal is to reconstruct ˆ x 0 conditioned on a diffusion prior such that A (ˆx 0) remains consistent with y.To enable conditional generation under each inverse setting, we define the guidance objective using an 
+
+ℓ2 reconstruction loss: 
+
+Linv (ˆx 0, y) = ∥A (ˆx 0) − y∥2.
+
+8Table 1: Quantitative results using DDIM 1,000 sampling steps on 150 samples from the FFHQ 256 × 256 validation set for image restoration tasks. Metrics are averaged over 100 bootstrap runs. * indicates a statistically significant improvement ( p < 0.05) over the second-best method. 
+
+Task Method Venue PSNR ↑ SSIM ↑ LPIPS ↓ FID ↓
+
+Inpainting DPS (Chung et al., 2023) ICLR 2023 30.44 0.863 0.153 42.68 MPGD (He et al., 2024) ICLR 2024 27.51 0.724 0.256 68.24 DSG (Yang et al., 2024) ICML 2024 31.03 0.866 0.144 36.30 ADMMDiff (Zhang et al., 2025) CVPR 2025 32.38 0.899 0.119 29.52 DiffRGD (Ours) ECCV 2026 34 .04 ∗ 0.926 ∗ 0.096 ∗ 21 .88 ∗
+
+Super-Resolution 4 ×
+
+DPS (Chung et al., 2023) ICLR 2023 26.03 0.727 0.260 80.05 MPGD (He et al., 2024) ICLR 2024 24.40 0.614 0.354 101.50 DSG (Yang et al., 2024) ICML 2024 26.71 0.737 0.256 74.67 ADMMDiff (Zhang et al., 2025) CVPR 2025 26.48 0.712 0.297 96.69 DiffRGD (Ours) ECCV 2026 27 .77 ∗ 0.783 ∗ 0.220 ∗ 63 .94 ∗
+
+Gaussian Deblurring DPS (Chung et al., 2023) ICLR 2023 25.88 0.721 0.237 69.38 MPGD (He et al., 2024) ICLR 2024 24.07 0.576 0.328 95.12 DSG (Yang et al., 2024) ICML 2024 27 .45 0.751 0.259 75.85 ADMMDiff (Zhang et al., 2025) CVPR 2025 26.57 0.757 0.226 79.30 DiffRGD (Ours) ECCV 2026 26.80 0.757 0.218 ∗ 63 .83 ∗
+
+Motion Deblurring DPS (Chung et al., 2023) ICLR 2023 24.47 0.685 0.271 80.75 MPGD (He et al., 2024) ICLR 2024 23.15 0.569 0.357 106.99 DSG (Yang et al., 2024) ICML 2024 26.80 0.709 0.290 87.96 ADMMDiff (Zhang et al., 2025) CVPR 2025 27 .26 0.778 0.222 72.92 DiffRGD (Ours) ECCV 2026 25.84 0.736 0.250 72 .26 Ground Truth Measurement DPS DiffRGD ( Ours) 
+
+Inpainting 
+
+Super -Resolution 
+
+Gaussian Deblurring   
+
+> MPGD DSG ADMMDiff
+
+Motion Deblurring 
+
+Figure 4: Qualitative comparison for image restoration tasks on FFHQ 256 × 256 validation set. Our proposed method achieves better restoration results with fewer artifacts than other compared methods. 
+
+9Table 2: Quantitative results using DDIM 100 sampling steps on 150 samples from the FFHQ 256 × 256 validation set for deblurring tasks. Metrics are averaged over 100 bootstrap runs. * indicates a statistically significant improvement ( p < 0.05) over the second-best method.                                            
+
+> Method Gaussian Deblurring Motion Deblurring PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> DPS (Chung et al., 2023) 24.28 0.680 0.302 20.63 0.580 0.372 MPGD (He et al., 2024) 24.60 0.610 0.312 23.13 0.579 0.356 DSG (Yang et al., 2024) 27.02 0.758 0.261 24.81 0.705 0.290
+> ADMMDiff (Zhang et al., 2025) 26.01 0.734 0.278 23.16 0.664 0.327 DiffRGD (Ours) 27 .46 ∗0.781 ∗0.235 ∗24 .88 0.717 0.294
+
+Implementation Details. We consider four inverse problem tasks using 150 images from FFHQ 256 
+
+× 256 (Karras et al., 2019) validation datasets. We utilize pre-trained diffusion models provided by (Chung et al., 2023; Dhariwal & Nichol, 2021) as the priors for all guidance frameworks. Each inverse problem is defined by a different degradation operator A : (i) Inpainting: A random binary mask is applied to simulate missing pixels, where each pixel has a 70% chance of being masked. (ii) Super-Resolution: Input images are downsampled by a factor of 4 using bicubic interpolation. (iii) Gaussian Deblurring: A Gaussian blur kernel of size 31 × 31 with standard deviation 3.0 is applied to simulate blur degradation. (iv) Motion Deblurring: A motion blur kernel of size 61 × 61 is applied with an intensity of 0.5, and the direction of motion is randomly sampled. 
+
+Evaluation Protocol. We evaluate performance using PSNR (Jain, 1989), SSIM (Wang et al., 2004), LPIPS (Zhang et al., 2018), and FID (Heusel et al., 2017) (details are provided in the Appendix). To increase the robustness of the metrics and assess statistical significance, we perform bootstrap resam-pling (Tibshirani & Efron, 1993). For each method, we report the mean performance across all metrics over 100 bootstrap runs, where 100 samples are randomly drawn from the 150-sample evaluation set in each run. 
+
+Quantitative Results. Table 1 reports quantitative results using 1,000 DDIM sampling steps, where our method outperforms other baselines on inpainting, super-resolution, and Gaussian deblurring. To assess the robustness of our method with fewer denoising timesteps, we conduct experiments using 100 steps and report in Table 2. As the number of timesteps decreases, DPS and ADMMDiff exhibit notice-able performance degradation, whereas DiffRGD maintains strong performance. We further evaluate inpainting and super-resolution on ImageNet 256 × 256 (Deng et al., 2009) (Table 3), where DiffRGD continues to outperform the baselines. Additional quantitative results are provided in the Appendix. 
+
+Qualitative Results. Figure 4 shows the qualitative results across four image restoration tasks. We can observe that DPS and MPGD introduce some perceptible artifacts in the background across four tasks; DSG performs well on inpainting and super-resolution tasks, but introduces some artifacts in both deblurring tasks. DiffRGD achieves comparable visual quality with ADMMDiff, but with slightly better artifact control and demands less time. 10 Table 3: Quantitative results using DDIM 100 sampling steps on 150 samples from the ImageNet 256 × 256 validation set for inpainting and super-resolution. Metrics are averaged over 100 bootstrap runs. * indicates a statistically significant improvement ( p < 0.05) over the second-best method. 
+
+Method Inpainting Super-Resolution 4×
+
+PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓
+
+DPS (Chung et al., 2023) 23.24 0.633 0.349 20.26 0.500 0.449 MPGD (He et al., 2024) 26.15 0.711 0.323 21.50 0.531 0.478 DSG (Yang et al., 2024) 26.58 0.754 0.255 22.82 0.585 0.415 ADMMDiff (Zhang et al., 2025) 27.97 0.744 0.303 24.45 0.633 0.430 DiffRGD (Ours) 31 .16 ∗ 0.875 ∗ 0.208 ∗ 24 .95 ∗ 0.663 ∗ 0.379 ∗
+
+4.2 Super-Resolution under Various Subsampling Rates 
+
+We further evaluate our method using the Stable Diffusion model (Rombach et al., 2022) under various subsampling rates. Specifically, the original FFHQ images at a resolution of 1024 × 1024 are downsam-pled to 64 × 64 and then super-resolved to 512 ×512 (8 ×) and 768 ×768 (12 ×). As reported in Table 4, DiffRGD consistently outperforms both DPS and DSG across both upsampling scales in terms of quanti-tative metrics. Qualitative results are presented in Figure 5, which shows that higher resolutions yield sharper image details. However, the 12 × outputs show greater discrepancy in fine-grained structures compared to 8 ×, as reflected in Table 4: while the 12 × results achieve higher SSIM, they exhibit lower PSNR. Measurement Ground Truth ×8 ×12 
+
+Figure 5: Qualitative results of super-resolution by our DiffRGD method with Stable Diffusion under ×8 and ×12 subsampling rates. 
+
+11 Table 4: Quantitative results of 8 × and 12 × super-resolution with Stable Diffusion. 
+
+Method ×8 (64 → 512 ) ×12 (64 → 768 )
+
+PSNR ↑ SSIM ↑ PSNR ↑ SSIM ↑
+
+DPS (Chung et al., 2023) 25.67 0.689 24.99 0.689 DSG (Yang et al., 2024) 25.38 0.679 26.02 0.709 
+
+DiffRGD (Ours) 26 .41 0.700 26 .39 0.709 
+
+4.3 Conditional Generation 
+
+We further evaluate our method against representative baselines on three conditional generation tasks: segmentation maps, sketches, and FaceID guidance for human face generation. We also provide style-guided generation results in the Appendix. Given a conditional image y, we extract task-specific features using a pre-trained model ψθ . The conditional guidance loss is then defined as: 
+
+Lcond (ˆx 0, y) = ∥ψθ (ˆx 0) − ψθ (y)∥2.
+
+Implementation Details. We adopt pre-trained diffusion models provided by (Meng et al., 2022) as the generative backbone. The three tasks are defined as follows: (i) Segmentation Map Guidance: 
+
+We use a pre-trained BiSeNet (Yu et al., 2018) to extract face parsing maps from both generated and reference images. (ii) Sketch Guidance: A pre-trained AODA model (Xiang et al., 2022) is used to parse structural cues from input sketches. (iii) FaceID Guidance: We utilize a pre-trained ArcFace model (Deng et al., 2019) to extract identity embeddings for evaluating face similarity. 
+
+Evaluation Protocol. We evaluate our method on three conditional generation tasks using 150 valida-tion images from the CelebA-HQ 256 × 256 (Karras et al., 2018) dataset. To increase the robustness of the metrics, we perform bootstrap resampling (Tibshirani & Efron, 1993). For each method, we report the mean performance across all metrics over 100 bootstrap runs. Details of the evaluation metrics are provided in the Appendix. 
+
+Quantitative Results. Table 5 presents the quantitative results, showing that our method consistently outperforms existing state-of-the-art inference-time methods. The generated samples exhibit improved visual fidelity and demonstrate stronger alignments with the given conditional inputs. 
+
+Qualitative Results. Figure 6 presents the qualitative results. DSG shows unstable control and often produces noticeable artifacts. DiffRGD and ADMMDiff generate samples that align well with the guid-ance, while DiffRGD yields more natural and visually appealing results under the same time constraint. 
+
+4.4 Influence of Guidance Strength 
+
+We investigate the influence of guidance strength ηt on DSG and DiffRGD. Table 6 presents quantitative results on 100 samples from the CelebA-HQ 256 × 256 dataset. DiffRGD enables an optimal ηt that achieves a better trade-off between mIoU and FID than DSG. Qualitative results are provided in the 12 Table 5: Quantitative results using DDIM 100 sampling steps on 150 samples from the CelebA-HQ 256 × 256 validation set for conditional image generation tasks. Metrics are averaged over 100 bootstrap runs. * indicates a statistically significant improvement ( p < 0.05) over the second-best method. 
+
+Method Segmentation Map Sketch FaceID mIoU ↑ FID ↓ KID ↓ Sketch-ℓ2 ↓ FID ↓ KID ↓ FaceID-ℓ2 ↓ FID ↓ KID ↓
+
+FreeDoM (Yu et al., 2023) 0.622 156.02 0.057 30.85 101.90 0.017 0.557 127.05 0.032 DSG (Yang et al., 2024) 0.750 117.48 0.028 21.36 107.00 0.024 0.340 95.27 0.014 ADMMDiff (Zhang et al., 2025) 0.758 101.86 0.031 30.82 97.52 0.014 0.346 100.81 0.014 DiffRGD (Ours) 0.804 ∗ 96 .10 ∗ 0.026 19 .48 ∗ 87 .82 ∗ 0.012 0.303 ∗ 93 .80 0.011 Guidance   
+
+> DSG
+> ADMMDiff
+> DiffRGD ( Ours)
+> Segmentation Map Sketch FaceID
+
+Figure 6: Qualitative results for conditional generation tasks on CelebA-HQ 256 × 256 validation set. (a) seg-mentation maps (b) sketches (c) FaceID. Our method generates results that better align with the given conditions than other state-of-the-art methods. 
+
+Appendix. DiffRGD shows stable performance across guidance strengths, whereas DSG performs poorly across all settings. 
+
+Table 6: Influence of guidance strength ηt on segmentation map conditional generation with DSG and DiffRGD. 
+
+DSG DiffRGD 
+
+ηt 0.05 0.1 0.2 0.3 10 30 50 100 mIoU ↑ 0.53 0.76 0.90 0.93 0.74 0.82 0.84 0.86 FID ↓ 95.69 110.00 157.82 248.77 80.73 89.03 93.47 108.33 
+
+# 5 Conclusion 
+
+To address the sample quality degradation arising from the failure to respect the stepwise Gaussian la-tent structure of diffusion models, we propose a novel inference-time guidance method, DiffRGD . Our method constrains updates to a latent distribution induced spherical manifold and solves each step via Riemannian Gradient Descent, maintaining distributional fidelity while enabling effective condi-13 tioning. On image restoration and conditional generation tasks, DiffRGD matched or surpassed prior inference-time methods, improving task metrics while preserving sample quality. These results indicate that geometry-consistent guidance is a viable alternative to directly applying the gradient in the ambi-ent space or in a restrictive proposed manifold. In sum, respecting diffusion’s latent distribution yields a simple, plug-and-play guidance with strong practical payoff. Additional discussions, limitations, and future work are provided in the Appendix. 
+
+# Acknowledgements 
+
+This research is supported by National Science and Technology Council, Taiwan (R.O.C), under the grant number of NSTC-113-2115-M-003-012-MY2, NSTC-113-2221-E-002-201, NSTC-113-2221-E-007-105-MY3, NSTC-114-2221-E-001-004, NSTC-114-2221-E-002-182-MY3, NSTC-114-2634-F-001-001-MBK, NSTC-114-2634-F-002-004, and Academia Sinica under the grant number of AS-IAIA-114-M10. We sincerely thank Kang-Yang Huang for the discussions and valuable feedback during the rebuttal stage. We also thank Yu-Hsuan Lin and Hsien-Yueh Huang for their continuous encouragement and support throughout this project. 14 References 
+
+P-A Absil, Robert Mahony, and Rodolphe Sepulchre. Optimization algorithms on matrix manifolds . Prince-ton University Press, 2008. Arpit Bansal, Hong-Min Chu, Avi Schwarzschild, Roni Sengupta, Micah Goldblum, Jonas Geiping, and Tom Goldstein. Universal guidance for diffusion models. In International Conference on Learning Representations (ICLR) , 2024. Mikołaj Bi´ nkowski, Danica J Sutherland, Michael Arbel, and Arthur Gretton. Demystifying mmd gans. In International Conference on Learning Representations (ICLR) , 2018. Stanley H Chan, Xiran Wang, and Omar A Elgendy. Plug-and-play admm for image restoration: Fixed-point convergence and applications. IEEE Transactions on Computational Imaging , 2016. Hyungjin Chung, Byeongsu Sim, Dohoon Ryu, and Jong Chul Ye. Improving diffusion models for inverse problems using manifold constraints. In Advances in Neural Information Processing Systems (NeurIPS) ,2022. Hyungjin Chung, Jeongsol Kim, Michael Thompson Mccann, Marc Louis Klasky, and Jong Chul Ye. Dif-fusion posterior sampling for general noisy inverse problems. In International Conference on Learning Representations (ICLR) , 2023. Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2009. Jiankang Deng, Jia Guo, Niannan Xue, and Stefanos Zafeiriou. Arcface: Additive angular margin loss for deep face recognition. In Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2019. Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. In Advances in Neural Information Processing Systems (NeurIPS) , 2021. Bradley Efron. Tweedie’s formula and selection bias. Journal of the American Statistical Association ,2011. Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. Scaling rectified flow transformers for high-resolution image synthesis. In International Conference on Machine Learning (ICML) , 2024. Daniel Gabay and Bertrand Mercier. A dual algorithm for the solution of nonlinear variational problems via finite element approximation. Computers & mathematics with applications , 1976. Yutong He, Naoki Murata, Chieh-Hsin Lai, Yuhta Takida, Toshimitsu Uesaka, Dongjun Kim, Wei-Hsiang Liao, Yuki Mitsufuji, J Zico Kolter, Ruslan Salakhutdinov, et al. Manifold preserving guided diffusion. In International Conference on Learning Representations (ICLR) , 2024. Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. Gans trained by a two time-scale update rule converge to a local nash equilibrium. In Advances in Neural Information Processing Systems (NIPS) , 2017. 15 Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. In NeurIPS Workshop (NeurIPSW) on Deep Generative Models and Downstream Applications , 2021. Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In Advances in Neural Information Processing Systems (NeurIPS) , 2020. Jing-En Huang, Jia-Wei Liao, Ku-Te Lin, Yu-Ju Tsai, and Mei-Heng Yueh. An improved variational method for image denoising. In IEEE International Conference on Advanced Visual and Signal-Based Systems (AVSS) , 2026. Anil K Jain. Fundamentals of digital image processing . Englewood Cliffs, NJ: Prentice Hall, 1989. Tero Karras, Timo Aila, Samuli Laine, and Jaakko Lehtinen. Progressive growing of gans for improved quality, stability, and variation. In International Conference on Learning Representations (ICLR) , 2018. Tero Karras, Samuli Laine, and Timo Aila. A style-based generator architecture for generative adversarial networks. In Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2019. Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-based generative models. In Advances in Neural Information Processing Systems (NeurIPS) , 2022. Bahjat Kawar, Michael Elad, Stefano Ermon, and Jiaming Song. Denoising diffusion restoration models. 
+
+Advances in Neural Information Processing Systems (NeurIPS) , 2022. Black Forest Labs. Flux. https://github.com/black-forest-labs/flux , 2024a. Accessed: 2024-11-14. Black Forest Labs. Official weights of FLUX.1 dev. https://huggingface.co/ black-forest-labs/FLUX.1-dev , 2024b. Accessed: 2024-11-14. Chieh-Hsin Lai, Yang Song, Dongjun Kim, Yuki Mitsufuji, and Stefano Ermon. The principles of diffusion models. arXiv preprint arXiv:2510.21890 , 2025. Jia-Wei Liao, Winston Wang, Tzu-Sian Wang, Li-Xuan Peng, Ju-Hsuan Weng, Cheng-Fu Chou, and Jun-Cheng Chen. DiffQRCoder: Diffusion-based aesthetic QR code generation with scanning robustness guided iterative refinement. In Proceedings of the IEEE /CVF Winter Conference on Applications of Com-puter Vision (WACV) , 2025. Jonathan Long, Evan Shelhamer, and Trevor Darrell. Fully convolutional networks for semantic segmen-tation. In Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,2015. Andreas Lugmayr, Martin Danelljan, Andres Romero, Fisher Yu, Radu Timofte, and Luc Van Gool. Re-paint: Inpainting using denoising diffusion probabilistic models. In Proceedings of the IEEE /CVF Con-ference on Computer Vision and Pattern Recognition (CVPR) , 2022. Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jiajun Wu, Jun-Yan Zhu, and Stefano Ermon. Sdedit: Guided image synthesis and editing with stochastic differential equations. In International Conference on Learning Representations (ICLR) , 2022. 16 Alexander Quinn Nichol, Prafulla Dhariwal, Aditya Ramesh, Pranav Shyam, Pamela Mishkin, Bob Mc-grew, Ilya Sutskever, and Mark Chen. Glide: Towards photorealistic image generation and editing with text-guided diffusion models. In International Conference on Machine Learning (ICML) , 2022. OpenAI. Gpt-5 system card. Technical report, OpenAI, August 2025. URL https://cdn.openai. com/gpt-5-system-card.pdf .Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban Desmaison, Andreas Köpf, Edward Yang, Zachary DeVito, Martin Raison, Alykhan Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu Fang, Junjie Bai, and Soumith Chintala. Pytorch: An imperative style, high-performance deep learning library. 
+
+Advances in Neural Information Processing Systems (NIPS) , 2019. Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervision. In International Conference on Machine Learning (ICML) , 2021. Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2022. Leonid I Rudin, Stanley Osher, and Emad Fatemi. Nonlinear total variation based noise removal algo-rithms. Physica D: nonlinear phenomena , 1992. Chitwan Saharia, Jonathan Ho, William Chan, Tim Salimans, David J Fleet, and Mohammad Norouzi. Image super-resolution via iterative refinement. IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI) , 2023. Babak Saleh and Ahmed Elgammal. Large-scale classification of fine-art paintings: Learning the right metric on the right feature. 2015. Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsupervised learn-ing using nonequilibrium thermodynamics. In International Conference on Machine Learning (ICML) ,2015. Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. In International Conference on Learning Representations (ICLR) , 2021. Jiaming Song, Arash Vahdat, Morteza Mardani, and Jan Kautz. Pseudoinverse-guided diffusion models for inverse problems. In International Conference on Learning Representations (ICLR) , 2023a. Jiaming Song, Qinsheng Zhang, Hongxu Yin, Morteza Mardani, Ming-Yu Liu, Jan Kautz, Yongxin Chen, and Arash Vahdat. Loss-guided diffusion models for plug-and-play controllable generation. In Inter-national Conference on Machine Learning (ICML) , 2023b. Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data distribution. In Advances in Neural Information Processing Systems (NeurIPS) , 2019. Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In International Confer-ence on Learning Representations (ICLR) , 2020. 17 Robert J Tibshirani and Bradley Efron. An introduction to the bootstrap. Monographs on statistics and applied probability , 1993. Andrey Nikolayevich Tikhonov. Solutions of ill posed problems. SIAM Review , 1977. Yun-Yun Tsai, Fu-Chen Chen, Albert YC Chen, Junfeng Yang, Che-Chun Su, Min Sun, and Cheng-Hao Kuo. Gda: Generalized diffusion for robust test-time adaptation. In Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. Patrick von Platen, Suraj Patil, Anton Lozhkov, Pedro Cuenca, Nathan Lambert, Kashif Rasul, Mishig Davaadorj, Dhruv Nair, Sayak Paul, William Berman, Yiyi Xu, Steven Liu, and Thomas Wolf. Diffusers: State-of-the-art diffusion models, 2022. URL https://github.com/huggingface/diffusers .Andrey Voynov, Kfir Aberman, and Daniel Cohen-Or. Sketch-guided text-to-image diffusion models. In 
+
+ACM SIGGRAPH Conference proceedings , 2023. Xiran Wang and Stanley H Chan. Parameter-free plug-and-play admm for image restoration. In Inter-national Conference on Acoustics, Speech and Signal Processing (ICASSP) , 2017. Yinhuai Wang, Jiwen Yu, and Jian Zhang. Zero-shot image restoration using denoising diffusion null-space model. In International Conference on Learning Representations (ICLR) , 2023. Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Simoncelli. Image quality assessment: from error visibility to structural similarity. IEEE Transactions on Image Processing , 2004. Guangyang Wu, Xiaohong Liu, Jun Jia, Xuehao Cui, and Guangtao Zhai. Text2qr: Harmonizing aesthetic customization and scanning robustness for text-guided qr code generation. In Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. Xiaoyu Xiang, Ding Liu, Xiao Yang, Yiheng Zhu, Xiaohui Shen, and Jan P Allebach. Adversarial open domain adaptation for sketch-to-photo synthesis. In Proceedings of the IEEE /CVF Winter Conference on Applications of Computer Vision (WACV) , 2022. Lingxiao Yang, Shutong Ding, Yifan Cai, Jingyi Yu, Jingya Wang, and Ye Shi. Guidance with spherical gaussian constraint for conditional diffusion. In International Conference on Machine Learning (ICML) ,2024. Changqian Yu, Jingbo Wang, Chao Peng, Changxin Gao, Gang Yu, and Nong Sang. Bisenet: Bilateral segmentation network for real-time semantic segmentation. In Proceedings of the European Conference on Computer Vision (ECCV) , 2018. Jiwen Yu, Yinhuai Wang, Chen Zhao, Bernard Ghanem, and Jian Zhang. FreeDoM: Training-free energy-guided conditional diffusion model. In Proceedings of the IEEE /CVF International Conference on Com-puter Vision (ICCV) , 2023. Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In Proceedings of the IEEE /CVF International Conference on Computer Vision (ICCV) , 2023. Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreasonable ef-fectiveness of deep features as a perceptual metric. In Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2018. 18 Youyuan Zhang, Zehua Liu, Zenan Li, Zhaoyu Li, James J Clark, and Xujie Si. Decoupling training-free guided diffusion by admm. In Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2025. Yuanzhi Zhu, Kai Zhang, Jingyun Liang, Jiezhang Cao, Bihan Wen, Radu Timofte, and Luc Van Gool. Denoising diffusion models for plug-and-play image restoration. In Proceedings of the IEEE /CVF Con-ference on Computer Vision and Pattern Recognition Workshop (CVPRW) , 2023. 19 Appendix 
+
+A. Notation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .21 B. Mathematical Details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 C. Implementation Details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 C.1. Algorithms of Compared Methods . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .24 C.2. Hyperparameter Settings . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 C.3. Evaluation Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 D. Detailed Analysis of DiffRGD . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .27 D.1. Distribution Preservation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 D.2. Empirical Convergence of the Riemannian Gradient Norm . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .27 D.3. Influence of Guidance Strength . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 E. Additional Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 E.1. Image Denoising . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 E.2. Style-Guided Generation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 F. Computational Cost and Runtime . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 G. Code and Software Availability . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 H. Limitation and Discussion . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 20 A Notation 
+
+We provide a summary of the notations and symbols adopted in this work, as listed in the following. 
+
+General Mathematics 
+
+I n n-dimensional identity matrix 
+
+Sn−1 (n−1)-dimensional hypersphere in Rn
+
+N (μ, Σ) Gaussian distribution with mean μ and covariance Σ
+
+Unif (A) Uniform distribution on set A
+
+L Loss function 
+
+∇x L Euclidean gradient of L at x
+
+Diffusion Process 
+
+x t Noisy latent variable at diffusion timestep t
+
+¯αt DDIM noise schedule parameter 
+
+μt Predicted mean of DDIM at timestep t
+
+σt Noise standard deviation at timestep t
+
+εθ (x t , t) Output of diffusion model (e.g., UNet) ˆx 0(x t , t) Clean image predicted by Tweedie’s formula 
+
+Diffusion Guidance 
+
+y Conditional input or measurement 
+
+A Task-specific linear degradation operator 
+
+ηt Guidance strength at timestep tRiemannian Geometry 
+
+St,r Spherical manifold at timestep t
+
+Tx M Tangent space of manifold M at point x
+
+ΠTx M Projection operator onto T x M
+
+Rx (v) Retraction operator at point x along vector v
+
+grad M f Riemannian gradient of f on manifold M
+
+# B Mathematical Details 
+
+Proposition 1 (Polar Decomposition of Isotropic Gaussian). At each diffusion timestep t, the la-tent x t ∼ N (μt , σ2 
+
+> t
+
+I n) follows an isotropic Gaussian distribution centered at μt . It admits a polar decomposition: 
+
+x t = μt + σt ru,
+
+where r ∼ χ(n) is a chi-distributed random variable with n degrees of freedom, and u ∼ Unif (Sn−1) is a unit vector uniformly distributed on the sphere. r and u are statistically independent. 
+
+Proof. We can write x t = μt + σt z, where z ∼ N (0, I) is a standard multivariate Gaussian. Our goal is to show that x t admits a decomposition as 
+
+x t = μt + σt ru,
+
+where r ∼ χ(n) and u ∼ Unif (Sn−1) are independent. Let the radius 
+
+r = ∥z∥2 =
+
+q
+
+z21 + · · · + z2 
+
+> n
+
+,
+
+21 and the unit vector 
+
+u = z
+
+∥z∥2
+
+∈ Sn−1.
+
+Then z can be written as z = ru in spherical coordinates. The joint density of z is given by 
+
+pz (z) = ( 2π)−n/2 exp 
+
+
+
+− 12 ∥z∥22
+
+
+
+.
+
+Moreover, in spherical coordinates, the volume element transforms as 
+
+dz = rn−1dr du,
+
+where d u denotes the uniform surface measure on the unit sphere Sn−1. Therefore, the joint density in 
+
+(r, u) coordinates becomes 
+
+pr,u (r, u) = ( 2π)−n/2 exp 
+
+
+
+− 12 r2
+
+
+
+rn−1.
+
+Marginalizing over u gives the marginal density of r:
+
+pr (r) = 
+
+Z
+
+> u∈Sn−1
+
+pr,u (r, u) du = pr,u (r, u) · | Sn−1|
+
+= 12n/2−1Γ (n/2) rn−1 exp 
+
+
+
+− 12 r2
+
+
+
+,
+
+which is the probability density function of the χ(n) distribution. Moreover, the conditional density of 
+
+u given r is uniform over the sphere: 
+
+pu|r (u|r) = pr,u (r, u)
+
+pr (r) = 1
+
+|Sn−1| = pu (u).
+
+Therefore, x t admits the decomposition 
+
+x t = μt + σt ru,
+
+with r ∼ χ(n), u ∼ Unif (Sn−1), and r and u are independent. 
+
+Proposition 2 . Let r ∼ χ(n) be a chi-distributed random variable with n degrees of freedom. Then, as n → ∞ , the expectation and variance of r admit the following asymptotic expansions: 
+
+E[r] = 
+
+Ç
+
+n − 12 + O (n−3/2),Var [r] = 12 + O (n−1).
+
+Proof. The closed-form expression for the expectation of  r is given by 
+
+E[r] = p2 · Γ   n+12
+
+
+
+Γ   n
+
+> 2
+
+ .
+
+To derive its asymptotic expansion, we apply the Legendre duplication formula: 
+
+Γ (z + 12 )
+
+Γ (z) = 21−2z pπ · Γ (2z)
+
+Γ (z)2 .
+
+22 We next apply Stirling’s approximation to second order: 
+
+Γ (z) = 
+
+vt 2π
+
+z
+
+ ze
+
+z 
+
+1 + 112 z + O (z−2)
+
+
+
+.
+
+Combining the above, we obtain 
+
+Γ (z + 12 )
+
+Γ (z) = pz · 1 + 124 z + O (z−2)
+
+1 + 16z + O (z−2)= pz
+
+
+
+1 − 18z + O (z−2)
+
+
+
+.
+
+Substituting z = n/2 yields 
+
+E[r] = pn
+
+
+
+1 − 14n + O (n−2)
+
+
+
+=
+
+Ç
+
+n − 12 + O (n−3/2),
+
+where the final equality follows from the Taylor expansion of 
+
+q
+
+n − 12 .The variance of r is computed via the identity: 
+
+Var [r] = n − E[r]2.
+
+Using the expansion of E[r], we compute 
+
+E[r]2 =
+
+pn
+
+
+
+1 − 14n + O (n−2)
+
+ 2
+
+= n
+
+
+
+1 − 12n + O (n−2)
+
+
+
+= n − 12 + O (n−1).
+
+Therefore, the variance becomes 
+
+Var [r] = n −  n − 12 + O (n−1) = 12 + O (n−1).
+
+Remark. σt r will concentrate around pnσt and the variance converges to σ2 
+
+> t
+
+/2̸ = 0 as n → ∞ . In contrast, DSG Yang et al. (2024) fixed their spherical constraint with pnσt . Therefore, our formulation is more flexible. 
+
+Definition 1 (Stationary Point on Riemannian Manifold). Let f : M → R be a differentiable func-tion on a Riemannian manifold M . A point x ∗ ∈ M is a stationary point if the Riemannian gradient vanishes, i.e., 
+
+grad M f (x ∗) = 0.
+
+23 Theorem 1 (Convergence to Stationary Point of DiffRGD). Let f t : St,r → R be the guidance objective at timestep t, defined as f t (x ) := L (ˆx 0(x , t − 1), y), and let {x (k)
+
+> t−1
+
+} denote the sequence produced by Algorithm 1 at timestep t. Assume that f t is L t -smooth on the spherical manifold St,r , and the guidance strength η(k) 
+
+> t
+
+≤ 1 
+
+> Lt
+
+. Then the norm of the Riemannian gradient satisfies 
+
+η(k) 
+
+> t
+
+grad St,r f t (x (k)
+
+> t−1
+
+) 2 → 0 as k → ∞ .
+
+with a convergence rate O ( 1pk ).
+
+Proof. Since f is Lt -smooth, the standard descent lemma for Riemannian Gradient Descent (Absil et al., 2008) implies: 
+
+f t (x (k+1)) ≤ f t (x (k)) − η(k) 
+
+> t
+
+(1 − Lη(k) 
+
+> t
+> 2
+
+)∥ grad St,r f t (x (k))∥22.
+
+Because η(k) 
+
+> t
+
+≤ 1 
+
+> L
+
+, we have 1 − Lη(k) 
+
+> t
+> 2
+
+≥ 12 . Hence for all K ∈ N we have 
+
+f t (x (0)) − inf  
+
+> x∈S t,r
+
+f t (x ) ≥ η(k)
+
+> t
+
+2
+
+> K
+
+X
+
+> k=0
+
+∥ grad St,r f t (x (k))∥22.
+
+Dividing both sides by K, we obtain 
+
+> η(k)
+> t
+> KK
+
+X
+
+> k=0
+
+∥ grad St,r f t (x (k))∥2 
+
+> F
+
+≤    
+
+> 2
+> 
+> ft(x(0))−
+
+inf  
+
+> x∈S t,r
+
+f (x ) 
+
+> 
+> K
+
+.
+
+Therefore, there exists integer k∗ ∈ [0, K] such that 
+
+∥η(k) 
+
+> t
+
+grad St,r f (x (k∗))∥2 ≤
+
+vut 2
+
+
+
+f t (x (0)) − inf x ∈S t,r f (x )
+
+
+
+K .
+
+This implies that ∥η(k) 
+
+> t
+
+grad St,r f t (x (k))∥2 → 0 as k → ∞ and the convergence rate is O( 1pk ).
+
+# C Implementation Details 
+
+C.1 Algorithms of Compared Methods 
+
+We provide the algorithms of previous methods used in our comparisons: DPS (Chung et al., 2023) in Algorithm 2, MPGD (He et al., 2024) in Algorithm 3, DSG (Yang et al., 2024) in Algorithm 4, and ADMMDiff (Zhang et al., 2025) in Algorithm 5. We also correct several typos in the ADMMDiff algorithm from the original paper. 24 Algorithm 2 DPS (Chung et al., 2023) 
+
+Input: Reference image y ∈ Rn, Diffusion model εθ , loss function L , DDIM sampling schedule param-eters { ¯αt }Tt=1, noise level σt > 0, guidance strengths {ηt }Tt=1. 
+
+> 1:
+
+x T ∼ N (0, I n). 
+
+> 2:
+
+for t = T to 1 do  
+
+> 3:
+
+εt ∼ N (0, I n). 
+
+> 4:
+
+μt ← p ¯αt−1 ˆx 0(x t , t) + Æ1 − ¯αt−1 − σ2 
+
+> t
+
+εθ (x t , t). 
+
+> 5:
+
+ˆx t−1 ← μt + σt εt . 
+
+> 6:
+
+x t−1 ← ˆx t−1 − ηt ∇x t L (ˆx 0(x t , t), y).
+
+Return: Guided sample x 0.
+
+Algorithm 3 MPGD (He et al., 2024) 
+
+Input: Reference image y ∈ Rn, Diffusion model εθ , projector PM , loss function L , DDIM sampling schedule parameters { ¯αt }Tt=1, noise level σt > 0, guidance strengths {ηt }Tt=1. 
+
+> 1:
+
+x T ∼ N (0, I n). 
+
+> 2:
+
+for t = T to 1 do  
+
+> 3:
+
+εt ∼ N (0, I n). 
+
+> 4:
+
+x 0|t ← ˆx 0(x t , t). 
+
+> 5:
+
+ˆx 0|t ← x 0|t − ηt PM (∇x 0|t L (x 0|t , y)) . ▷ PGD  
+
+> 6:
+
+ˆεt ← x t −p¯αt ˆx 0|t
+
+p1− ¯αt
+
+. 
+
+> 7:
+
+μt ← p ¯αt−1 ˆx 0|t + Æ1 − ¯αt−1 − σ2 
+
+> t
+
+ˆεt . 
+
+> 8:
+
+x t−1 ← μt + σt εt .
+
+Return: Guided sample x 0.
+
+Algorithm 4 DSG (Yang et al., 2024) 
+
+Input: Reference image y ∈ Rn, Diffusion model εθ , loss function L , DDIM sampling schedule param-eters { ¯αt }Tt=1, noise level σt > 0, guidance strengths {ηt }Tt=1. 
+
+> 1:
+
+x T ∼ N (0, I n). 
+
+> 2:
+
+for t = T to 1 do  
+
+> 3:
+
+εt ∼ N (0, I n). 
+
+> 4:
+
+u ← σt εt . 
+
+> 5:
+
+g ← ∇ x t L (ˆx 0(x t , t), y) / ∥∇ x t L (ˆx 0(x t , t), y)∥2. 
+
+> 6:
+
+μt ← p ¯αt−1 ˆx 0(x t , t) + Æ1 − ¯αt−1 − σ2 
+
+> t
+
+εθ (x t , t). 
+
+> 7:
+
+d ← (1 − η)u + ηg . ▷ Interpolation  
+
+> 8:
+
+x t−1 ← μt + r d 
+
+> ∥d∥2
+
+. ▷ Normalization 
+
+Return: Guided sample x 0.25 Algorithm 5 ADMMDiff (Zhang et al., 2025) 
+
+Input: Reference image y ∈ Rn, Diffusion model εθ , loss function L , DDIM sampling schedule pa-rameters { ¯αt }Tt=1, noise level σt > 0, guidance strengths {η(k) 
+
+> t
+
+}Tt=1, guidance inner iteration K ∈ N,penalty parameter ρ > 0.  
+
+> 1:
+
+x T ∼ N (0, I n). 
+
+> 2:
+
+zT ← x T . 
+
+> 3:
+
+v T ← 0. 
+
+> 4:
+
+for t = T to 1 do  
+
+> 5:
+
+εt ∼ N (0, I n). 
+
+> 6:
+
+ˆx t ← zt − 1 
+
+> ρ
+
+v t . ▷ x t -subproblem  
+
+> 7:
+
+μt ← p ¯αt−1 ˆx 0(ˆx t , t) + Æ1 − ¯αt−1 − σ2 
+
+> t
+
+εθ (ˆx t , t). 
+
+> 8:
+
+x t−1 ← μt + σt εt . 
+
+> 9:
+
+z(0) 
+
+> t
+
+← zt . ▷ zt -subproblem  
+
+> 10:
+
+for k = 0 to K − 1 do  
+
+> 11:
+
+g ← ∇ z(k)
+
+> t
+
+L (ˆx 0(z(k) 
+
+> t
+
+), y). 
+
+> 12:
+
+z(k+1) 
+
+> t
+
+← z(k) 
+
+> t
+
+− ηt
+
+
+
+g + ρ(z(k) 
+
+> t
+
+− x t−1 − v t )
+
+
+
+. 
+
+> 13:
+
+zt−1 ← z(K) 
+
+> t
+
+. 
+
+> 14:
+
+v t−1 ← v t + ρ(x t−1 − zt−1).
+
+Return: Guided sample x 0.
+
+C.2 Hyperparameter Settings 
+
+We summarize the hyperparameter configurations used in our experiments. Table 14 lists the settings for image restoration tasks on FFHQ 256 × 256 (Karras et al., 2019), and Table 15 lists those for the conditional generation tasks on CelebA-HQ 256 × 256 (Karras et al., 2018). 
+
+C.3 Evaluation Metrics 
+
+Image Restoration. We use Peak Signal-to-Noise Ratio (PSNR) (Jain, 1989), Structural Similarity In-dex Measure (SSIM) (Wang et al., 2004), Learned Perceptual Image Patch Similarity (LPIPS) (Zhang et al., 2018), and Fréchet Inception Distance (FID) (Heusel et al., 2017) as evaluation metrics. PSNR assesses pixel-wise fidelity, while SSIM captures structural similarity based on local luminance and con-trast. LPIPS evaluates perceptual similarity using deep features from pre-trained networks, better re-flecting human judgment. FID measures distributional alignment between generated and real images in the Inception feature space. 
+
+Conditional Generation. We adopt FID and Kernel Inception Distance (KID) (Bi´ nkowski et al., 2018) for all conditional generation tasks. For segmentation map guidance, we report the mean Intersection-over-Union (mIoU) (Long et al., 2015) between the predicted segmentation maps of the generated and reference images. For sketch and FaceID guidance, we use the ℓ2 distance between the outputs of pre-trained parsing models applied to the generated and reference images. 26 D Detailed Analysis of DiffRGD 
+
+D.1 Distribution Preservation 
+
+To evaluate distribution preservation, we design an experiment grounded in the forward diffusion pro-cess. Recall that under forward diffusion, the latent variable follows x fwd  
+
+> t
+
+∼ N  p ¯αt x 0, (1 − ¯αt )I d
+
+.Standardizing the noise component yields 
+
+x fwd  
+
+> t
+
+− p ¯αt x 0
+
+p1 − ¯αt
+
+∼ N (0, I d ), which implies x fwd  
+
+> t
+
+− p ¯αt x 0
+
+p1 − ¯αt
+
+> 22
+
+∼ χ2(d).
+
+In the ideal case, a guidance method that preserves the sampling distribution of x guided  
+
+> t
+
+should not al-ter the statistics of the injected noise. For simplicity, we can check whether e := E
+
+ 1 
+
+> d
+
+∥ x guided  
+
+> t−
+
+p¯αt x 0
+
+p1− ¯αt
+
+∥22
+
+
+
+=
+
+1 during guided sampling. We evaluate five timesteps and report their empirical mean of e over 100 samples. The table below shows that DiffRGD and DPS are comparable at earlier timesteps, while at mid-to-late timesteps DiffRGD is noticeably closer to 1 than DPS. The results indicate that DiffRGD can preserve the intended per-step geometry better, thereby reducing accumulated drift along the sample trajectory compared to DPS. 
+
+Table 7: Distribution preservation comparison between DPS and DiffRGD. 
+
+DDIM Step t = 100 t = 80 t = 60 t = 40 t = 20 
+
+eDPS 0.9998 0.9999 1.0119 1.1017 1.8007 
+
+eDiffRGD 0.9996 1.0002 1.0063 1.0480 1.3743 
+
+D.2 Empirical Convergence of the Riemannian Gradient Norm 
+
+Figure 7 illustrates the relationship over the number of inner iterations and the norm of the Riemannian gradient at different timesteps. While Theorem 1 guarantees a convergence rate of O (1/pk), the figure shows that the norm of the Riemannian gradient already becomes sufficiently small when K = 3 in practice. This supports our experiment settings in Table 14 and Table 15. 1 2 3 4 5
+
+Guidance inner iteration K
+
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> 14
+> (k)
+> t grad  r, t f 2
+> Timestep
+> 1000
+> 800
+> 600
+> 400
+> 200
+
+Figure 7: Norm of Riemannian gradient versus guidance inner iteration across different timesteps. For visualiza-tion purposes, we plot the square root of the gradient norm. 
+
+27 D.3 Influence of Guidance Strength 
+
+We investigate the influence of guidance strength ηt on both DSG and DiffRGD. Figure 8 illustrates qualitative results of DSG and DiffRGD under segmentation map guidance for conditional generation across different guidance strengths. DiffRGD produces images that better align with the conditioning signals while maintaining more natural visual quality across a wide range of guidance strengths. In contrast, DSG exhibits poor controllability at small guidance strengths and severe image degradation at large guidance strengths. These results demonstrate that DiffRGD maintains stable performance across varying guidance strengths. DSG DiffRGD ( Ours) 
+
+Guidance 
+
+## ηt = 0 .05 ηt = 0 .1 ηt = 0 .2 ηt = 0 .3
+
+## ηt = 10 ηt = 30 ηt = 50 ηt = 100  
+
+> Figure 8: Comparison of different guidance strengths for segmentation map-guided conditional generation.
+
+# E Additional Results 
+
+We present additional qualitative results for image restoration in Figure 9 and for conditional generation in Figure 10. We also provide qualitative results under different timestep settings in Figure 13 for comparison. Our method can perform well even with 100 timesteps. These results are consistent with the quantitative results in Table 8, and Table 1 and 2 of the main paper. Additional experiments are presented in the following subsections.    
+
+> Table 8: Quantitative comparison of DDIM 100 sampling steps on 100 samples from the FFHQ 256 ×256 valida-tion set for super-resolution and motion deblurring tasks.
+
+Method Random Inpainting Super-Resolution 4×
+
+PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓
+
+DPS (Chung et al., 2023) 26.09 0.765 0.266 22.46 0.643 0.345 MPGD (He et al., 2024) 28.13 0.764 0.232 24.23 0.618 0.345 DSG (Yang et al., 2024) 31.25 0.854 0.155 27.36 0.753 0.285 ADMMDiff (Zhang et al., 2025) 29.09 0.809 0.235 25.12 0.709 0.314 DiffRGD (Ours) 34 .29 0.927 0.127 28 .35 0.806 0.231 
+
+28 E.1 Image Denoising 
+
+Image denoising is a fundamental image restoration task that aims to recover clean images from noisy observations. Traditional approaches often rely on explicit image priors, such as total variation regular-ization (Rudin et al., 1992; Huang et al., 2026), while diffusion models possess inherent denoising capa-bilities through their learned generative priors. We compare the denoising performance of DPS (Chung et al., 2023), DSG (Yang et al., 2024), and our proposed DiffRGD on ImageNet 256 × 256 validation dataset. The evaluation is conducted under three different noise levels. As shown in Table 9, DiffRGD consistently achieves the best performance across all noise settings. Qualitative results are illustrated in Figure 14. In the top example with σ = 0.3, both DPS and DSG exhibit noticeable residual noise, whereas DiffRGD restores the image with minimal artifacts. In the bottom example, DiffRGD recon-structs the mouse with significantly better visual quality than DPS and DSG.    
+
+> Table 9: Quantitative comparison for denoising tasks on ImageNet 256 ×256.
+
+Method σ = 0.1 σ = 0.2 σ = 0.3 
+
+PSNR ↑ SSIM ↑ PSNR ↑ SSIM ↑ PSNR ↑ SSIM ↑
+
+DPS (Chung et al., 2023) 25.19 0.699 23.14 0.607 20.98 0.476 DSG (Yang et al., 2024) 27.80 0.774 25.70 0.694 24.05 0.607 DiffRGD (Ours) 33 .13 0.892 30 .66 0.845 29 .13 0.808 
+
+E.2 Style-Guided Generation 
+
+We evaluate our method on the style-guided generation task using the Stable Diffusion model (Rombach et al., 2022). Given a style image y, we extract task-specific features using a pre-trained CLIP encoder 
+
+ψθ (Radford et al., 2021). To measure stylistic alignment, we construct the Gram matrix G(·) of the extracted features. The style guidance loss is then defined as: 
+
+Lstyle (ˆx 0, y) = ∥G(ψθ (ˆx 0)) − G(ψθ (y)) ∥2.
+
+Implementation Details. We select five distinct style images from the WikiArt (Saleh & Elgammal, 2015) dataset and generate 20 animal-related prompts using GPT-5.1 (OpenAI, 2025), resulting in 100 unique style-content pairs. All generations are performed using the DDIM sampler with 150 sampling steps. We use Stable Diffusion v1.5 from HuggingFace as the shared backbone for all methods. This choice differs from the original MPGD and FreeDoM settings, where the methods rely on LDMs trained on specific datasets 1. However, we argue that practical inference-time guidance methods should be able to adapt to general foundation models rather than specialized dataset-dependent models. 
+
+Results. Table 10 reveals that while all methods yield comparable CLIP scores, DiffRGD consistently achieves lower Style scores, indicating superior alignment with the target style. Figure 15 further il-lustrates that DiffRGD produces generations that are both visually richer and stylistically more faithful than those of baseline methods. 
+
+> 1https://github.com/KellyYutongHe/mpgd_pytorch/blob/main/nonlinear/SD_style/scripts/ download_models.sh
+
+29 Table 10: Quantitative comparison for style-guided generation with Stable Diffusion. 
+
+Method CLIP-Score ↑ Style-Score ↓
+
+FreeDoM (Yu et al., 2023) 0.183 6.348 MPGD (He et al., 2024) 0.186 6.018 DSG (Yang et al., 2024) 0.184 5.151 DiffRGD (Ours) 0.185 4.848 
+
+# F Computational Cost and Runtime 
+
+Let F denote the runtime of a forward pass, B the runtime of a backward pass, P the runtime of pro-jection, T the number of DDIM sampling steps, K the number of inner iterations, and I the guidance interval. Table 11 provides the forward /backward pass counts and time complexity of different meth-ods. For MPGD, the complexity additionally accounts for the projection cost.  
+
+> Table 11: Forward /backward pass counts and time complexity of different methods.
+
+Method #Forward #Backward Time Complexity 
+
+DPS (Chung et al., 2023) T T O (( F + B)T )
+
+MPGD (He et al., 2024) T T O (( F + B + P)T )
+
+DSG (Yang et al., 2024) T T /I O (( F + B/I)T )
+
+ADMMDiff (Zhang et al., 2025) (K + 1)T K T O (( F (K + 1) + BK )T )
+
+DiffRGD (Ours) T + K T /I K T /I O (( F + ( F + B)K/I)T )
+
+All inference times are measured in seconds per image on a single NVIDIA GeForce RTX 4090 GPU. For image restoration tasks, we report the runtime corresponding to Table 1 of the main paper in Ta-ble 12, where DiffRGD achieves a 1.23 × speedup over ADMMDiff. For conditional generation tasks, we report the runtime corresponding to Table 5 of the main paper in Table 13, where DiffRGD achieves a 
+
+2.8× speedup over ADMMDiff. Although DiffRGD requires more computation time than DPS, MPGD, and DSG, it consistently out-performs these baselines in terms of task performance. Moreover, the qualitative results shown in Fig-ure 6 of the main paper demonstrate that DiffRGD produces superior restoration quality, highlighting its practical value for real-world applications.  
+
+> Table 12: Inference time per image in seconds for image restoration tasks.
+
+Task DPS MPGD DSG ADMMDiff DiffRGD Inpainting 22.09 21.91 22.01 39.61 32.76 Super-Resolution 4 × 22.18 22.06 22.69 39.42 27.77 Gaussian Deblurring 22.35 22.22 22.00 39.64 32.77 Motion Deblurring 23.11 22.92 22.20 40.42 36.09 Avg. Time (Seconds) 22.43 22.28 22.23 39.77 32.35 30 Table 13: Inference time per image in seconds for conditional generation tasks. 
+
+Task FreeDoM DSG ADMMDiff DiffRGD Segmentation Map 4.35 4.36 45.40 16.18 Sketch 4.17 4.18 43.59 15.68 FaceID 4.90 4.90 50.34 17.72 Avg. Time (Seconds) 4.47 4.48 46.44 16.53 
+
+# G Code and Software Availability 
+
+We integrate several representative inference-time guidance methods, including DPS 2, MPGD 3, DSG 4,and ADMMDiff 5, into the Diffusers framework (von Platen et al., 2022), enabling flexible application of these guidance strategies across different tasks. During implementation, we identify and fix several issues in the original GitHub implementations to ensure faithful and stable comparisons. In particular, we find a discrepancy between the ADMMDiff codebase 6 and the algorithm described in the paper: the gradient inside the inner loop is not recomputed with respect to the updated sample. We correct this implementation and tune the corresponding hyperparameters for a fair comparison. We believe these improvements provide a useful resource for the open-source community. 
+
+# H Limitation and Discussion 
+
+Dependence on Strong Pre-trained Model. Inference-time guidance methods rely on a strong pre-trained diffusion model to provide meaningful guidance. In particular, DSG, ADMMDiff, and our DiffRGD impose constraints directly on the model-predicted mean, making their effectiveness dependent on the accuracy of the underlying diffusion model. When the model suffers from bias or produces inaccurate mean predictions, such errors can propagate to the final guided samples. MPGD is similarly affected, with additional potential bias introduced by the imperfect auxiliary autoencoder. 
+
+Computational Overhead from RGD Inner Loop. Our method incurs additional computational over-head due to its inner-loop Riemannian gradient descent. As a result, the inference speed is largely determined by the number of inner iterations required for effective guidance. 
+
+Limited Extension to Deterministic Sampling and Flow Matching. DiffRGD relies on the Gaussian transition structure of diffusion models. Therefore, it cannot be directly applied to flow matching or de-terministic samplers, which do not generally preserve the same transition geometry. Extending DiffRGD to these settings would require redesigning the underlying geometric formulation for the corresponding generative process. 
+
+> 2https://github.com/DPS2022/diffusion-posterior-sampling
+> 3https://github.com/KellyYutongHe/mpgd_pytorch
+> 4https://github.com/LingxiaoYang2023/DSG2024
+> 5https://github.com/youyuan-zhang/ADMMDiff
+> 6https://github.com/youyuan-zhang/ADMMDiff/blob/master/Linear/guided_diffusion/gaussian_ diffusion.py
+
+31 Future Work. In principle, the sampling radius r could be incorporated into an alternating optimiza-tion scheme, where r is jointly optimized while being constrained to remain close to the sampled radius. Such a strategy may potentially yield more optimal samples. However, this approach would introduce additional computational overhead. Exploring more principled optimization schemes for r while main-taining computational efficiency remains an interesting direction for future work. In this paper, we instead adopt a simple and efficient heuristic by sampling r to maintain practical efficiency. 32 Ground Truth Measurement DPS DiffRGD ( Ours) 
+
+Inpainting 
+
+Super -Resolution 
+
+Gaussian Deblurring   
+
+> MPGD DSG ADMMDiff
+
+Motion Deblurring Figure 9: Qualitative comparisons for image restoration tasks on FFHQ 256 × 256 validation set. Please refer to the highlighted regions for detailed comparison. Guidance 
+
+FreeDoM 
+
+DSG 
+
+ADMMDiff 
+
+DiffRGD ( Ours) 
+
+Segmentation Map Sketch FaceID 
+
+> 3
+
+Figure 10: Qualitative comparison for conditional generation tasks on CelebA-HQ 256 × 256 validation set. (a) segmentation maps to human faces (b) sketches to human faces (c) FaceID to human faces. 
+
+33 Ground Truth DPS DSG ADMMDiff DiffRGD ( Ours) 
+
+> 1000 steps 100 steps
+
+MPGD 
+
+Measurement Figure 11: Super-resolution. Ground Truth DPS DSG ADMMDiff DiffRGD ( Ours) 
+
+> 1000 steps 100 steps
+
+MPGD 
+
+Measurement 
+
+Figure 12: Gaussian deblurring. 
+
+Figure 13: Qualitative comparisons on different DDIM timesteps: Compared to 1000 timesteps, our method can perform well even in 100 steps, please refer to the highlighted regions for detailed comparison. Although the quality is close to ADMMDiff, our method demands less time. 
+
+34 Measurement 
+
+Ground Truth 
+
+σ = 0 .1
+
+σ = 0 .2
+
+σ = 0 .3
+
+DPS DSG DiffRGD (Ours) 
+
+Measurement 
+
+Ground Truth 
+
+σ = 0 .1
+
+σ = 0 .2
+
+σ = 0 .3
+
+DPS DSG DiffRGD (Ours) Figure 14: Qualitative comparison for image denoising tasks on ImageNet 256 × 256. Please refer to the high-lighted regions for detailed comparison. 
+
+35 Style 
+
+Imag e
+
+DiffRGD 
+
+(Ours) 
+
+FreeDoM 
+
+MPGD 
+
+DSG Figure 15: Qualitative comparison on the style-guided generation task using the Stable Diffusion v1.5 at a reso-lution of 512 × 512. 
+
+36 Table 14: Hyperparameters used in our image restoration tasks on FFHQ 256 × 256. The guidance interval specifies how frequently guidance is applied during the sampling process; for example, a value of i indicates that guidance is performed once every i steps, which helps accelerate the sampling. 
+
+Methods Tasks DDIM steps T Guidance strength ηt Guidance inner iteration K Guidance interval I
+
+DPS Inpainting 1000 1 1 1Super-Resolution 1000 1 1 1Gaussian Deblurring 1000 1 1 1Motion Deblurring 1000 1 1 1Inpainting 100 1 1 1Super-Resolution 100 1 1 1Gaussian Deblurring 100 1 1 1Motion Deblurring 100 1 1 1MPGD Inpainting 1000 30 /p ¯αt 1 1Super-Resolution 1000 30 /p ¯αt 1 1Gaussian Deblurring 1000 50 /p ¯αt 1 1Motion Deblurring 1000 50 /p ¯αt 1 1Inpainting 100 30 /p ¯αt 1 1Super-Resolution 100 30 /p ¯αt 1 1Gaussian Deblurring 100 50 /p ¯αt 1 1Motion Deblurring 100 50 /p ¯αt 1 1DSG Inpainting 1000 0.2 1 5Super-Resolution 1000 0.2 1 20 Gaussian Deblurring 1000 0.2 1 5Motion Deblurring 1000 0.2 1 5Inpainting 100 0.2 1 1Super-Resolution 100 0.1 1 2Gaussian Deblurring 100 0.1 1 1Motion Deblurring 100 0.1 1 1ADMMDiff Inpainting 1000 (ηt , ρ) = ( 1, 0.9 ) 1 1Super-Resolution 1000 (ηt , ρ) = ( 1, 0.9 ) 1 1Gaussian Deblurring 1000 (ηt , ρ) = ( 1, 0.9 ) 1 1Motion Deblurring 1000 (ηt , ρ) = ( 1, 0.9 ) 1 1Inpainting 100 (ηt , ρ) = ( 2.4, 0.5 ) 10 1Super-Resolution 100 (ηt , ρ) = ( 2.4, 0.5 ) 10 1Gaussian Deblurring 100 (ηt , ρ) = ( 2.4, 0.5 ) 10 1Motion Deblurring 100 (ηt , ρ) = ( 2.4, 0.5 ) 10 1DiffRGD Inpainting 1000 5 3 5Super-Resolution 1000 5 3 10 Gaussian Deblurring 1000 5 3 5Motion Deblurring 1000 2.5 3 4Inpainting 100 5 3 1Super-Resolution 100 5 3 1Gaussian Deblurring 100 7 3 1Motion Deblurring 100 2.5 3 1
+
+37 Table 15: Hyperparameters used in our conditional generation task on CelebA-HQ 256 × 256. 
+
+Methods Guidance DDIM steps T Guidance strength ηt Guidance inner iteration K Guidance interval I
+
+FreeDoM Segmentation 100 10 1 1Sketch 100 0.5 1 1FaceID 100 5 1 1DSG Segmentation 100 0.1 1 1Sketch 100 0.08 1 1FaceID 100 0.025 1 1ADMMDiff Segmentation 100 (ηt , ρ) = ( 5, 0.1 ) 10 1Sketch 100 (ηt , ρ) = ( 2, 0.5 ) 10 1FaceID 100 (ηt , ρ) = ( 3, 0.2 ) 10 1DiffRGD Segmentation 100 30 3 1Sketch 100 2 3 1FaceID 100 5 3 1
+
+38
