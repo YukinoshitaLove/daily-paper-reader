@@ -6,49 +6,40 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-02
-- 运行时间：2026-07-02 21:43:03 UTC
+- 最新运行日期：2026-07-03
+- 运行时间：2026-07-03 20:58:57 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：6
-- 速读区：3
+- 本次总论文数：6
+- 精读区：4
+- 速读区：2
 
 ### 今日简报（AI）
-今日精读两篇满分论文，聚焦图像去模糊与视频超分辨率，同时速览了扩散模型去偏、色彩偏振联合去噪及低光增强质量评估等前沿工作。  
-相位信息赋能展开网络去模糊，扩散先验驱动任意尺度视频超分；值得关注的是，无训练去偏方法和多任务质量评估也正为生成模型可靠性铺路。  
-推荐抓紧复现《Leveraging Phase Information》的相位增强技巧，并关注 CLIP 引导的去偏优化如何零成本提升生成图像公平性。
-- 详情：[/202607/02/README](/202607/02/README)
+今日聚焦计算成像与生成优化：用状态空间模型重建稀疏扫描CT，让语言辅助真实世界超分辨率。
+最值得关注：RCL-Mamba 打通双域状态空间，应对旋转稀疏扫描测量难题；语言先验可将低分辨率补丁提升至逼真细节。
+下一步不妨把多模态大模型引入底层视觉，或试试扩散模型的后训练剪枝与分布奖励优化。
+- 详情：[/202607/03/README](/202607/03/README)
 
 ### 精读区论文标签
-1. [Leveraging Phase Information to Boost Unrolled Network Learning for Image Deblurring](/202607/02/2607.00251v1-leveraging-phase-information-to-boost-unrolled-network-learning-for-image-deblurring)  
+1. [RCL-Mamba: A Dual-domain State Space Model for Measurement-oriented Image Restoration in Rotational Sparse-View Scanning Computed Laminography](/202607/03/2606.31353v1-rcl-mamba-a-dual-domain-state-space-model-for-measurement-oriented-image-restoration-in-rotational-sparse-view-scanning-computed-laminography)  
    标签：评分：10.0/10、query:real-ir
-   evidence：通过幅度-相位分解和展开网络学习进行图像去模糊
-2. [AVSR-Diff: Scale-Agnostic Diffusion Priors for Temporally Consistent Arbitrary-Scale Video Super-Resolution](/202607/02/2607.00987v1-avsr-diff-scale-agnostic-diffusion-priors-for-temporally-consistent-arbitrary-scale-video-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：基于扩散先验的任意尺度视频超分辨率
-3. [Constrained Tabular Diffusion for Finance](/202607/02/2606.28674v1-constrained-tabular-diffusion-for-finance)  
+   evidence：面向测量的图像恢复网络
+2. [Language-Assisted Super-Resolution from Real-World Low-Resolution Patches](/202607/03/2606.31363v2-language-assisted-super-resolution-from-real-world-low-resolution-patches)  
    标签：评分：9.0/10、query:real-ir
-   evidence：提出面向金融的约束表格扩散模型
-4. [Generative Learning as a Tool to Improve Perception of Emotional Body Motion Expressions](/202607/02/2606.28769v1-generative-learning-as-a-tool-to-improve-perception-of-emotional-body-motion-expressions)  
+   evidence：利用单图深度变化提取真实低分辨率块，结合语言辅助的超分辨率
+3. [Wavelet-Guided Semantic Signal Compensation for Inversion-Free Image Editing](/202607/03/2607.02421v1-wavelet-guided-semantic-signal-compensation-for-inversion-free-image-editing)  
    标签：评分：9.0/10、query:real-ir
-   evidence：使用生成模型隐式学习情感肢体运动
-5. [MG-SpaIR: Multi-grade Sparse-guided Implicit Representation for Training-Data-Free Image Restoration](/202607/02/2607.00138v1-mg-spair-multi-grade-sparse-guided-implicit-representation-for-training-data-free-image-restoration)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于隐式神经表示和稀疏正则化的无训练数据图像复原
-6. [Accelerating Discrete Diffusion Models with Parallel-In-Time Sampling](/202607/02/2607.00773v1-accelerating-discrete-diffusion-models-with-parallel-in-time-sampling)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：离散扩散模型的并行时间采样加速
+   evidence：通过小波引导补偿改进无逆向扩散框架中的文本引导图像编辑
+4. [Multi-Resolution Flow Matching: Training-Free Diffusion Acceleration via Staged Sampling](/202607/03/2607.01642v1-multi-resolution-flow-matching-training-free-diffusion-acceleration-via-staged-sampling)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：通过多分辨率分阶段采样实现流匹配扩散模型的免训练加速。
 
 ### 速读区论文标签
-1. [Training-Free Debiasing of Diffusion Models via CLIP-Guided Denoising Optimization](/202607/02/2607.00817v1-training-free-debiasing-of-diffusion-models-via-clip-guided-denoising-optimization)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：通过CLIP引导优化文本嵌入实现扩散模型免训练去偏
-2. [CPDDNet: Color-Polarization Denoising and Demosaicking Network](/202607/02/2607.01100v1-cpddnet-color-polarization-denoising-and-demosaicking-network)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：联合去噪和去马赛克进行图像复原
-3. [LEIQ-Assessor: Multi-dimensional Quality Assessment of Low-light Enhanced Images via Multi-task Learning](/202607/02/2606.29752v1-leiq-assessor-multi-dimensional-quality-assessment-of-low-light-enhanced-images-via-multi-task-learning)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：低光增强图像的多维质量评价模型
+1. [Post-Training Pruning for Diffusion Transformers](/202607/03/2607.00927v1-post-training-pruning-for-diffusion-transformers)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：针对扩散Transformer的后训练剪枝方法，降低计算开销
+2. [Optimizing Visual Generative Models via Distribution-wise Rewards](/202607/03/2607.02291v1-optimizing-visual-generative-models-via-distribution-wise-rewards)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：使用分布级奖励微调视觉生成模型
 
 
 <div class="dpr-home-promo-card">
