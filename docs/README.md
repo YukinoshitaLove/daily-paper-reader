@@ -6,40 +6,28 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-03
-- 运行时间：2026-07-03 20:58:57 UTC
+- 最新运行日期：2026-07-04
+- 运行时间：2026-07-04 20:36:11 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：4
-- 速读区：2
+- 本次总论文数：2
+- 精读区：1
+- 速读区：1
 
 ### 今日简报（AI）
-今日聚焦计算成像与生成优化：用状态空间模型重建稀疏扫描CT，让语言辅助真实世界超分辨率。
-最值得关注：RCL-Mamba 打通双域状态空间，应对旋转稀疏扫描测量难题；语言先验可将低分辨率补丁提升至逼真细节。
-下一步不妨把多模态大模型引入底层视觉，或试试扩散模型的后训练剪枝与分布奖励优化。
-- 详情：[/202607/03/README](/202607/03/README)
+今日精读高分论文，探索如何用变化感知链同时完成图像变化描述与分割；速读则聚焦从图片集中推断视觉概念。
+值得关注：变化感知链让模型“看见并说出”两图差异，性能提升显著；示例驱动的视觉概念推理也展现出强大迁移能力。
+建议读者可先复现变化描述任务，再尝试将示例推理思路融入自己的多模态项目。
+- 详情：[/202607/04/README](/202607/04/README)
 
 ### 精读区论文标签
-1. [RCL-Mamba: A Dual-domain State Space Model for Measurement-oriented Image Restoration in Rotational Sparse-View Scanning Computed Laminography](/202607/03/2606.31353v1-rcl-mamba-a-dual-domain-state-space-model-for-measurement-oriented-image-restoration-in-rotational-sparse-view-scanning-computed-laminography)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：面向测量的图像恢复网络
-2. [Language-Assisted Super-Resolution from Real-World Low-Resolution Patches](/202607/03/2606.31363v2-language-assisted-super-resolution-from-real-world-low-resolution-patches)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：利用单图深度变化提取真实低分辨率块，结合语言辅助的超分辨率
-3. [Wavelet-Guided Semantic Signal Compensation for Inversion-Free Image Editing](/202607/03/2607.02421v1-wavelet-guided-semantic-signal-compensation-for-inversion-free-image-editing)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：通过小波引导补偿改进无逆向扩散框架中的文本引导图像编辑
-4. [Multi-Resolution Flow Matching: Training-Free Diffusion Acceleration via Staged Sampling](/202607/03/2607.01642v1-multi-resolution-flow-matching-training-free-diffusion-acceleration-via-staged-sampling)  
+1. [CCRC: A Change-Aware Captioning and Reasoning Chain for Image Change Captioning and Segmentation](/202607/04/2606.28724v1-ccrc-a-change-aware-captioning-and-reasoning-chain-for-image-change-captioning-and-segmentation)  
    标签：评分：8.0/10、query:real-ir
-   evidence：通过多分辨率分阶段采样实现流匹配扩散模型的免训练加速。
+   evidence：面向图像编辑任务的图像变化描述与分割
 
 ### 速读区论文标签
-1. [Post-Training Pruning for Diffusion Transformers](/202607/03/2607.00927v1-post-training-pruning-for-diffusion-transformers)  
+1. [Show Me Examples: Inferring Visual Concepts from Image Sets](/202607/04/2607.02402v1-show-me-examples-inferring-visual-concepts-from-image-sets)  
    标签：评分：7.0/10、query:real-ir
-   evidence：针对扩散Transformer的后训练剪枝方法，降低计算开销
-2. [Optimizing Visual Generative Models via Distribution-wise Rewards](/202607/03/2607.02291v1-optimizing-visual-generative-models-via-distribution-wise-rewards)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：使用分布级奖励微调视觉生成模型
+   evidence：从图像集推断视觉概念并生成新图像
 
 
 <div class="dpr-home-promo-card">
