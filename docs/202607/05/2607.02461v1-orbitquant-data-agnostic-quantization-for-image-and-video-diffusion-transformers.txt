@@ -1,0 +1,737 @@
+Title: OrbitQuant: Data-Agnostic Quantization for Image and Video Diffusion Transformers
+
+URL Source: https://arxiv.org/pdf/2607.02461v1
+
+Published Time: Fri, 03 Jul 2026 01:41:11 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# OrbitQuant: Data-Agnostic Quantization for Image and Video Diffusion Transformers 
+
+## Donghyun Lee 1,2,†*, Jitesh Chavan 1, Duy Nguyen 1,3, Sam Huang 1, Liming Jiang 1,Priyadarshini Panda 2, Timo Mertens 1, Saurabh Shukla 1,†
+
+1Cantina Labs, 2University of Southern California, 3University of Illinois Urbana-Champaign 
+
+> †
+
+Correspondence to: saurabh@cantina.ai, donghyun.lee.1@usc.edu 
+
+Project Page: https://saurabhcantina.github.io/orbitquant/ BF16 
+
+> W3A4
+
+OrbitQuant ViDiT -Q  
+
+> W3A3 W2A4
+> Prompt: ABengal tiger walking through tall grass, detailed fur strands, morning sunlight, wildlife
+> photography
+> Prompt: A cozy coffee shop storefront with a large sign reading "Morning Brew Cantina", realistic
+> street photography, highly detailed typography
+
+QuaRot 
+
+> Prompt: Extreme macro photograph of a dandelion seed head covered in morning dew droplets
+> Prompt: color drop in water, ink swirling in water, colorful ink in water,
+> abstraction fancy dream cloud of ink
+> BF16 OrbitQuant ViDiT -Q
+
+(a) Image generation on FLUX.1 -dev (b) W4A4 Video generation on Wan 14B  
+
+> Frame 18 of 81 Frame 76 of 81
+
+Figure 1. Qualitative comparison of OrbitQuant against QuaRot [2] and ViDiT-Q [53] under low-bit quantization, with the BF16 full-precision output. (a) Image generation on FLUX.1-dev at W3A4, W3A3, and W2A4. (b) Video generation on Wan 14B at W4A4. 
+
+## Abstract 
+
+Diffusion transformers (DiTs) achieve state-of-the-art im-age and video generation, but their multi-step sampling and growing parameter count make inference expensive. Post-training quantization (PTQ) is the natural remedy, yet DiT activations shift across timesteps, prompts, and guid-ance branches, forcing prior methods to re-fit calibration data for every new checkpoint or modality. We present Or-bitQuant, a data-agnostic weight-activation quantizer that bypasses range estimation by quantizing in a normalized, rotated basis. In this basis, a randomized permuted block-Hadamard (RPBH) rotation concentrates each coordinate 
+
+> *
+
+Work done during an internship at Cantina Labs. 
+
+around one fixed, known marginal regardless of the input, so a single Lloyd–Max codebook serves all timesteps, prompts, and layers of a given input dimension. We extend the same quantizer to weight rows offline, absorbing the rotation into the weights so that it cancels inside each linear layer and only a forward rotation on the activations remains at run-time. The same recipe transfers from image to video with no per-modality tuning. Across FLUX.1, Z-Image-Turbo, Wan 2.1, and CogVideoX, it sets the state of the art for PTQ at several low-bit settings. It also pushes PTQ of image diffu-sion transformers to W2A4 with usable generation quality. 
+
+## 1. Introduction 
+
+Diffusion models have become the dominant paradigm for high-fidelity image and video generation. Traditionally, 1
+
+> arXiv:2607.02461v1 [cs.CV] 2 Jul 2026
+
+these models employ a convolutional U-Net as the denois-ing backbone [17, 36, 37, 39]. More recently, however, the field has shifted to transformer-based denoisers. Diffusion Transformers (DiTs) [3, 35] replace the U-Net with a stack of attention blocks that scales favorably with model size and data, and now underpin state-of-the-art image [4, 6, 10, 23, 44, 47] and video generators [22, 33, 43, 50]. Despite their quality, DiTs are expensive to run at infer-ence for two reasons. First, the transformer trunk is evalu-ated repeatedly across many sequential denoising timesteps. Second, unlike LLM decoding, where latency is dominated by weight loading [12, 28], DiT inference is compute-bound even at a single batch, so weight-only quantization yields no measured speedup [24]. Low-bit post-training quantization (PTQ) of both weights and activations is therefore the nat-ural remedy, since it compresses both the memory footprint and the compute of every step without any retraining. PTQ is most mature for large language models (LLMs), where activation outliers are handled by scaling them into the weights [46] or rotating them away [2, 5, 29, 42]. Both assume activation statistics that a single calibration pass can capture, which holds for LLMs but breaks for diffusion transformers. DiT activations exhibit channel-wise out-liers [45] and shift across timesteps, prompts, and classifier-free-guidance branches [7, 53]. Existing DiT PTQ methods absorb this drift with calibration [24, 52, 53], so each new checkpoint, resolution, or modality requires a calibration set to be re-collected and re-fit. We propose OrbitQuant , a rotation-based PTQ frame-work for diffusion transformers. A DiT activation offers no stable range to calibrate against, since it moves with ev-ery input. Rather than chase that moving target with per-input scales, OrbitQuant rotates it away. A random rotation turns a normalized activation into coordinates that follow one fixed, known distribution regardless of the input [51], so a single Lloyd–Max codebook built offline quantizes every activation and is shared across all denoising steps. OrbitQuant realizes this as a randomized permuted block-Hadamard (RPBH) rotation, and we find that a uniform random permutation suffices to keep the rotated marginal well-behaved at low bit-width on DiT activations. The same rotation is folded into the weight rows offline, so it can-cels inside each linear layer, with weights and activations quantized in one shared basis, leaving only a single forward RPBH rotation at inference. The main contributions of our work are as follows: • We cast low-bit DiT activation quantization as a distri-butional codebook problem, replacing per-timestep range calibration with a single Lloyd–Max codebook fit to a fixed post-rotation marginal and shared across all denois-ing steps. • We extend the same quantizer to the weight rows with a shared-rotation design that quantizes weights and activa-tions in one common basis. • We propose the RPBH rotation, an efficient rotation whose uniform random permutation keeps activations well-quantizable at low bit-width without calibration. • We evaluate OrbitQuant on image and video DiTs, achieving state-of-the-art PTQ on GenEval and VBench without calibration data. At W2A4, where prior PTQ baselines collapse to noise, OrbitQuant is the only method that still produces usable images, shown in Figure 1. 
+
+## 2. Related Work 
+
+LLM Quantization. In LLMs, Weight-only methods quantize weights alone and suit the memory-bound decod-ing regime [9, 12, 21, 28], while quantizing activations re-quires handling outlier channels, either by scaling them into the weights [46] or by rotating them away. Rotation-based methods [2, 5, 18, 29, 40, 42] fold a Hadamard or learned rotation into the weights by computational invariance, leav-ing the output unchanged while making activations easy to quantize. Recent block rotations pair the rotation with a calibrated permutation. DuQuant [27] orders channels by outlier mag-nitude, and PeRQ [38] fits a permutation that balances per-block mass, which its analysis shows governs block-Hadamard outlier suppression. Random rotations also en-able calibration-free vector quantization. PolarQuant [15] quantizes KV embeddings in polar coordinates, building a codebook from the analytically known angle distribu-tion after random preconditioning. TurboQuant [51] brings this distributional codebook to Cartesian coordinates with a dense Haar rotation and a Beta-marginal Lloyd–Max code-book. Both are standalone KV-cache vector quantizers that rotate back to reconstruct. OrbitQuant instead applies the rotation-plus-codebook idea inside DiT projections, where the shared rotation cancels rather than being inverted, and replaces the dense Haar with an efficient RPBH rotation. Unlike prior permuted rotations, it draws the permutation uniformly at random, with a probabilistic guarantee that the rotated coordinates stay well-behaved. 
+
+Diffusion Quantization. Most existing DiT quantization methods are calibration-based. SVDQuant [24] absorbs activation outliers with a high-precision low-rank branch fit on a calibration set, PTQ4DiT [45] balances salient channels with block reconstruction, AdaTSQ [52] fits per-channel scales with timestep-sensitive precision allocation, and ViDiT-Q [53] pairs per-channel calibration with mixed precision on both image and video DiTs. LRQ-DiT [49] adds calibrated DuQuant-style [27] rotations on outlier-heavy layers, PermuQuant [8] calibrates channel reorder-ing for per-group quantization, and S 2Q-VDiT [11] selects calibration data by Hessian-aware saliency with token-level distillation on video DiTs. QVGen [20] and RobuQ [48] de-part from PTQ with quantization-aware training (QAT), the 21. The Challenge of DiT Quantization  
+
+> Activations drift across steps and guidance
+> Across timesteps
+> Across CFG
+
+2. OrbitQuant Principle  
+
+> 1. Randomized Permuted Block -Hadamard (RPBH)
+> Weights (offline) Activations (online)
+> Quantized linear layer
+
+3. Fixed Coordinate Law   
+
+> Rotation gives one fixed distribution
+> Same codebook used for
+> weight
+> rows
+> activation
+> tokens all layers
+> all timesteps all prompts /
+> CFG branches
+
+# . . . . . .   
+
+> Lloyd -Max Codebook 𝒞 !,#
+> 𝑡 !𝑡 "𝑡 #
+
+… 
+
+> Raw
+> activation Rotated
+> coordinates
+> RPBH ( Π!)
+
+# +          
+
+> Block -Hadamard Permutation
+> Rotate
+> Quantize 𝑊
+> 𝑊 #′
+> 𝑥
+> Rotate
+> Quantize
+> 𝑥 &′
+> 2. Weight & Activation Quantization
+> 𝑓 !≈𝒩 (0,1/𝑑 )
+> t= 0 t= 49
+> Unconditional Conditional
+> Works across
+> Image DiTs
+> Video DiTs
+> ...
+
+Figure 2. Overview of OrbitQuant. (1) DiT activations drift across timesteps and CFG branches, so calibrated scales do not transfer. (2) 
+
+The RPBH rotation Πd maps raw activations to well-behaved coordinates. Folded into the weights, it cancels inside each layer ( ˆW ′ ˆx′ ≈
+
+W x ). (3) Rotated coordinates concentrate around one fixed marginal fd ≈ N (0 , 1/d ), so a single Lloyd–Max codebook Cd,b per dimension serves all layers, timesteps, prompts, and both image and video DiTs, with no calibration. 
+
+latter reaching ternary weights on ImageNet DiTs. Closer to our setting, DVD-Quant [26] is data-free, pairing a rotated quantizer with grid refinement and adaptive bit allocation, but it is tailored to video DiTs with per-model machinery, and ConvRot [19] pairs calibration-free group-wise regular Hadamard rotations with a uniform grid on FLUX. In con-trast, OrbitQuant uses a fully analytic distribution-derived codebook that requires no model evaluation at quantizer construction, and transfers unchanged between image and video DiTs. 
+
+## 3. Preliminaries 
+
+This section fixes notation and reviews the two ingredients we inherit from TurboQuant [51], namely a Haar-random orthogonal rotation and a Lloyd–Max scalar codebook de-signed against the post-rotation coordinate distribution. 
+
+3.1. Notation 
+
+We write matrices in bold uppercase (e.g., W), vectors in bold lowercase (e.g., x), and scalars in plain type. A DiT block is built from linear projections 
+
+y = Wx , W ∈ Rm×d, x ∈ Rd, (1) applied token-wise to image- or text-token streams. We write w⊤ 
+
+> i
+
+∈ Rd for the i-th row of W and ri = ∥wi∥2
+
+for its ℓ2 norm. Given weight and activation bit-widths bw
+
+and ba, our goal is to replace W and x with quantized sur-rogates ˆW and ˆx at bw and ba bits per coordinate, so that 
+
+ˆWˆx ≈ Wx at every denoising step and for every prompt, without calibration data. We write L for the set of target linear layers and D for the distinct input dimensions in L.
+
+3.2. TurboQuant 
+
+TurboQuant [51] is a calibration-free vector quantizer, orig-inally for KV-cache compression, that quantizes a vector in two steps. First, it normalizes x to ˜x = x/∥x∥2, keeps the norm, and applies a Haar-random orthogonal rotation 
+
+Φd ∈ Rd×d [32]. Regardless of x, each coordinate of Φd ˜x
+
+then follows the fixed marginal 
+
+fd(t) = Γ( d/ 2) 
+
+√π Γ(( d − 1) /2) (1 − t2)(d−3) /2, t ∈ [−1, 1] ,
+
+(2) where Γ( ·) is the Gamma function. For d ≥ 64 , this marginal is tightly approximated by N (0 , 1/d ), and distinct coordinates are nearly independent. Second, since fd is known offline, we precompute an MSE-optimal Lloyd–Max codebook [30, 31] for each (d, b ) ∈ D × { bw, b a}, giving 
+
+2b centroids C(d,b ) = {c(d,b )1 , . . . , c (d,b )2b } and the nearest-centroid map 
+
+ˆq(d) 
+
+> b
+
+(t) = arg min  
+
+> c∈ C (d,b )
+
+|t − c|, (3) applied coordinate-wise via ˆQ(d) 
+
+> b
+
+(u)k = ˆ q(d) 
+
+> b
+
+(uk) for any 
+
+u ∈ Rd. The codebook uses no scales or zero-points and is shared by all layers and rows of the same input dimension 
+
+d. Dequantization looks up centroids, rotates back by Φ⊤ 
+
+> d
+
+,and rescales by the stored norm. 
+
+## 4. Methodology 
+
+4.1. Overview 
+
+OrbitQuant replaces per-input range calibration with a dis-tributional quantizer applied in one shared, rotated, normal-ized basis. Because weights and activations are quantized in the same basis, the rotation cancels in the matrix prod-uct and only a forward rotation on the activation remains at runtime. We quantize weights offline (Section 4.2) and activations online (Section 4.3), realizing Πd as a random-ized permuted block-Hadamard (RPBH) transform with a 3Algorithm 1 OrbitQuant offline weight patching and online activation quantization                                                                                
+
+> Require: Transformer T, target layers L, input dimensions D,bit-widths (bw, b a), clamp ε
+> 1: ▷Offline
+> 2: for d∈ D do
+> 3: Πd←RPBH( d)
+> 4: ˆQ(d)
+> bw,ˆQ(d)
+> ba←LLOYD MAX (d, b w),LLOYD MAX (d, b a)
+> 5: end for
+> 6: for each W∈ L with input dim ddo
+> 7: W′←WΠ ⊤
+> d
+> 8: r′
+> i← ∥ w′
+> i∥2,˜w′
+> i←w′
+> i/r ′
+> ifor i= 1 , . . . , m
+> 9: ˆW′←diag( r′) ˆQ(d)
+> bw( ˜W′)
+> 10: Replace Wby ˆW′in T
+> 11: end for
+> 12: ▷Online on tokens x∈RN×d
+> 13: x′←xΠ ⊤
+> d
+> 14: s← ∥ x′∥2,˜x′←x′/(s+ε)
+> 15: ˆx′←s·ˆQ(d)
+> ba(˜ x′)
+> 16: return ˆx′
+
+uniform random permutation (Section 4.4). Figure 2 gives an overview. 
+
+4.2. Offline Weight Quantization 
+
+For a linear layer with input dimension d, OrbitQuant uses the shared rotation Πd of that dimension. Before inference we rotate the weight matrix into this basis, 
+
+W′ = WΠ ⊤ 
+
+> d
+
+. (4) We split each row of W′ into a magnitude r′ 
+
+> i
+
+and a unit direction ˜w′
+
+> i
+
+,
+
+r′ 
+
+> i
+
+= ∥w′
+
+> i
+
+∥2, ˜w′ 
+
+> i
+
+= w′
+
+> i
+
+/r ′
+
+> i
+
+, i = 1 , . . . , m. (5) We then quantize the direction with the Lloyd–Max code-book of Section 3.2 and re-attach the magnitude, 
+
+ˆW′ = diag( r′) · ˆQ(d) 
+
+> bw
+
+( ˜W′). (6) Because Πd is sampled independently of wi, each unit direction ˜w′ 
+
+> i
+
+has coordinates following the density fd of Equation (2), so the Lloyd–Max codebook designed for 
+
+fd is MSE-optimal on it. The row-norm vector r′ ∈ Rm
+
+is stored in BF16, adding 16 m bits per layer, negligible against the bwmd bits of the quantized direction ( < 0.3% ). The original weight is replaced by ˆW′ in place, so the in-ference path operates entirely in the rotated basis. 
+
+4.3. Online Activation Quantization 
+
+At inference, each incoming activation x is rotated by Πd
+
+before it enters the layer and split into a magnitude s and a unit direction ˜x′,
+
+x′ = Πdx, s = ∥x′∥2, ˜x′ = x′/(s + ε), (7) where ε = 10 −10 guards against zero norms on padding tokens. For a batch of N tokens, this forward rotation Πdx
+
+is applied row-wise as xΠ ⊤ 
+
+> d
+
+. We quantize the direction with the Lloyd–Max quantizer ˆQ(d) 
+
+> ba
+
+and rescale by s,
+
+ˆx′ = s · ˆQ(d) 
+
+> ba
+
+(˜ x′). (8) As with the weights, ˜x′ has coordinates following fd, so this codebook family applies without re-fitting. The only input-dependent quantity at inference is the per-token scalar 
+
+s, while the codebook is fixed and calibration-free. Algo-rithm 1 collects the offline and online stages. The weight absorbs Π⊤ 
+
+> d
+
+and the activation applies Πd, so the two cancel in the product, W′x′ = WΠ ⊤ 
+
+> d
+
+Πdx = Wx . The quantized layer therefore computes ˆW′ ˆx′ ≈ Wx with no inverse ro-tation at runtime. 
+
+4.4. Randomized permuted block-Hadamard 
+
+Quantizing all layers of dimension d with one codebook built from fd works only if the rotated coordinates follow that marginal. A Haar rotation Φd from [51] makes them follow fd exactly. Since the rotation cancels in the ma-trix product for any orthogonal Πd, we are free to choose it for efficiency, as long as it keeps the marginal close to 
+
+fd. A dense Haar rotation costs O(d2) in both time per token and storage, which dominates the per-image activa-tion cost. We instead realize Πd as a randomized permuted block-Hadamard (RPBH) rotation [1, 41], 
+
+Πd = blkdiag( HhD1, . . . , HhDd/h ) · Pπ , (9) where blkdiag( ·) places its arguments as diagonal blocks, 
+
+Hh is a h × h Walsh–Hadamard matrix, each Di is a Rademacher sign diagonal, and Pπ is the matrix of a uni-form random permutation π drawn once per dimension. It admits an O(d log h) transform through a permutation gather and a per-block Fast Walsh–Hadamard Transform, and stores as a sign vector and a permutation array rather than a d × d matrix. Unlike a full Randomized Hadamard Transform (RHT) [2, 42], whose Walsh–Hadamard matrix exists only on power-of-two dimensions, the block form is constructible on any d. In practice, h is the largest power of two dividing d, giving h ∈ { 128 , 512 , 1024 , 2048 , 4096 }
+
+across all evaluated models. The leading permutation Pπ acts first and keeps the marginal close to fd at low bit-width. Without it, each block-Hadamard mixes only within its block, and an out-lier concentrated in one block never spreads across the oth-ers. Pπ spreads coordinates across blocks, so every block receives a balanced share of the input mass with high prob-ability over π. Crucially, this permutation need not be data-dependent. Prior quantizers calibrate it by outlier magni-tude [27], column importance [13], or per-block mass [38]. RPBH instead draws it uniformly at random, which suffices for any input as the following proposition shows. 4(a) FLUX.1 -schnell 𝑑 = 3072 (b) FLUX.1 -schnell 𝑑 = 12288 Figure 3. Rotated activation coordinates follow the dimension marginal fd. For (a) an attention projection ( d=3072 ) and (b) a feed-forward projection ( d=12288 ) of FLUX.1-schnell, each cell plots the distribution of activation tokens with no rotation (Raw), a dense Haar rotation, and the RPBH. The dashed curve is the target N (0 , 1/d ) and the inset reports the Kolmogorov–Smirnov distance to it. The light red vertical ticks mark the bin edges of the shared Lloyd–Max W 4 codebook, which is fit to fd and reused for both weights and activations. 
+
+Proposition 1 (Universal variance concentration) Let 
+
+Πd be the RPBH rotation of Equation (9) on d = kh 
+
+with k blocks of size h, and ˜x a fixed unit vector with 
+
+μ∞ = ∥˜x∥2
+
+> ∞
+
+. For every δ ∈ (0 , 1) , with probability at least 
+
+1 − δ over Πd, every coordinate zi of Πd ˜x is centered with 
+
+Var( zi | π) ∈
+
+h 1−ρd , 1+ ρd
+
+i
+
+, ρ = d μ ∞
+
+q 12h log 4kδ .
+
+(10) Since ρ stays small unless one coordinate carries an out-sized share of the norm, the variance bound of Equation (10) keeps the marginal of Πd ˜x close to N (0 , 1/d ) and the Lloyd–Max codebook near-optimal. We prove the proposi-tion in the supplementary material A. Section 6.1 confirms that removing the permutation degrades low-bit robustness. 
+
+4.5. Data-agnostic Codebook 
+
+Prior PTQ methods recalibrate because the activation range shifts with the timestep and prompt. OrbitQuant removes this dependence at the source. By Proposition 1, every coor-dinate of a normalized, RPBH-rotated activation stays close to the same marginal fd, fixed by the dimension d alone. We therefore run Lloyd–Max on fd offline to obtain a sin-gle codebook Cd per dimension, and quantizing reduces to normalizing, rotating, and mapping each coordinate to its nearest centroid, with no input statistics collected. One Cd
+
+serves every timestep, prompt, layer, and the weight rows of dimension d, which is what makes OrbitQuant calibration-free. This codebook follows TurboQuant [51], which quan-tizes randomly rotated vectors against a fixed Beta-marginal codebook computed once. TurboQuant is a standalone vec-tor quantizer for KV-cache and vector-database compres-sion. It uses a dense O(d2) Haar rotation and operates as a quantize-dequantize codec, reconstructing each vector be-fore use. OrbitQuant instead pairs the codebook with the structured RPBH rotation and absorbs it into the weights. The quantized operands then feed each linear layer di-rectly, with no reconstruction and only a forward rotation at inference. Figure 3 confirms the marginal matching at an attention projection ( d=3072 ) and a feed-forward layer (d=12288 ). Raw activations deviate sharply from fd, but after the RPBH rotation both weights and activations match 
+
+fd ≈ N (0 , 1/d ) as closely as a dense Haar rotation does, so a single codebook built from fd fits them all. 
+
+## 5. Experiments 
+
+5.1. Setup 
+
+Models and bit-widths. We evaluate OrbitQuant on three image DiTs and two video DiTs. For image generation we report FLUX.1-schnell (4-step, guidance 0.0), FLUX.1-dev (50-step, guidance 3.5), and Z-Image-Turbo (10-step, guidance 0.0) at W4A4 and W2A4. For video generation we report Wan 2.1-1.3B (81 frames, 480 ×832 , 50 steps, CFG 5.0) and CogVideoX-2B (49 frames, 480 ×720 , 50 steps, CFG 6.0) at W4A6 and W4A4. We quantize all transformer-block projections with OrbitQuant and keep the adaptive layer normalization (AdaLN) modulation pro-jections, where present, at INT4 weight round-to-nearest (RTN) [24]. This AdaLN treatment is identical across all methods we implement. Wan 2.1-1.3B has no AdaLN mod-ulation, so only its transformer-block projections are quan-tized. The full list of quantized and skipped layers is given in the supplementary material B. 
+
+Baselines. Image baselines are the calibration-based SVDQuant [24], AdaTSQ [52], and ViDiT-Q [53], to-gether with Q-DiT [7], QuaRot [2], and SmoothQuant [46]. Video baselines are ViDiT-Q, SVDQuant, QuaRot, and SmoothQuant. Baseline numbers are taken primarily from AdaTSQ [52] for image and QVGen [20] for video. 5Table 1. GenEval results on three image diffusion transformers at W4A4 and W2A4. Values are scores on six compositional sub-tasks and Overall. Bold and underlined entries indicate the best and second-best result within each (model, bit-width) group. ↑ means higher is better. † represents our implementation. Model Method Bit Single object ↑ Two object ↑ Counting ↑ Colors ↑ Position ↑ Color attribution ↑ Overall ↑                                                                                                                                                                                                                                                                                                 
+
+> FLUX.1-schnell FP16 16/16 0.997 0.884 0.600 0.742 0.275 0.488 0.664 Q-DiT [7] W4A4 0.741 0.424 0.378 0.418 0.073 0.208 0.373 SmoothQuant [46] W4A4 0.619 0.293 0.272 0.317 0.043 0.143 0.281 QuaRot [2] W4A4 0.819 0.543 0.472 0.519 0.118 0.275 0.458 ViDiT-Q [53] W4A4 0.888 0.586 0.516 0.585 0.130 0.268 0.495 SVDQuant [24] W4A4 0.994 0.910 0.450 0.708 0.260 0.420 0.624 AdaTSQ [52] W4A4 0.997 0.894 0.622 0.793 0.278 0.498 0.680 OrbitQuant W4A4 0.991 0.881 0.706 0.803 0.323 0.512 0.703
+> QuaRot †[2] W2A4 0.006 0.000 0.000 0.000 0.000 0.000 0.001 SmoothQuant †[46] W2A4 0.000 0.000 0.000 0.000 0.000 0.000 0.000 ViDiT-Q †[53] W2A4 0.006 0.000 0.000 0.000 0.000 0.000 0.001 OrbitQuant W2A4 0.972 0.697 0.575 0.766 0.198 0.420 0.604
+> FLUX.1-dev FP16 16/16 0.984 0.823 0.769 0.771 0.203 0.450 0.667 Q-DiT [7] W4A4 0.047 0.000 0.009 0.024 0.000 0.003 0.014 SmoothQuant [46] W4A4 0.003 0.000 0.003 0.011 0.000 0.000 0.007 QuaRot [2] W4A4 0.634 0.106 0.294 0.346 0.025 0.050 0.243 ViDiT-Q [53] W4A4 0.709 0.147 0.325 0.410 0.028 0.060 0.280 SVDQuant [24] W4A4 0.981 0.710 0.610 0.698 0.140 0.300 0.573 AdaTSQ [52] W4A4 0.981 0.770 0.640 0.708 0.260 0.350 0.618 OrbitQuant W4A4 0.988 0.768 0.691 0.755 0.178 0.420 0.633
+> QuaRot †[2] W2A4 0.006 0.000 0.000 0.000 0.000 0.000 0.001 SmoothQuant †[46] W2A4 0.000 0.000 0.000 0.000 0.000 0.000 0.000 ViDiT-Q †[53] W2A4 0.006 0.000 0.000 0.000 0.000 0.000 0.001 OrbitQuant W2A4 0.956 0.424 0.481 0.678 0.110 0.203 0.475
+> Z-Image-Turbo FP16 16/16 1.000 0.907 0.709 0.859 0.468 0.583 0.754 SmoothQuant [46] W4A4 0.003 0.000 0.000 0.000 0.000 0.000 0.000 QuaRot [2] W4A4 0.906 0.505 0.416 0.692 0.250 0.343 0.519 ViDiT-Q [53] W4A4 0.972 0.705 0.584 0.777 0.435 0.533 0.668 SVDQuant [24] W4A4 0.994 0.843 0.633 0.833 0.485 0.520 0.718 AdaTSQ [52] W4A4 0.994 0.891 0.681 0.872 0.520 0.613 0.762 OrbitQuant W4A4 0.997 0.889 0.781 0.888 0.450 0.598 0.767
+> QuaRot †[2] W2A4 0.006 0.000 0.000 0.000 0.000 0.000 0.001 SmoothQuant †[46] W2A4 0.006 0.000 0.000 0.000 0.000 0.000 0.001 ViDiT-Q †[53] W2A4 0.003 0.000 0.000 0.003 0.000 0.000 0.001 OrbitQuant W2A4 0.703 0.194 0.275 0.500 0.128 0.113 0.319
+
+5.2. Image generation: GenEval 
+
+Table 1 reports GenEval Overall and per-task scores. At W4A4, OrbitQuant is essentially lossless, exceeding FP16 on Overall on FLUX.1-schnell and Z-Image-Turbo and trailing it by 0.034 on FLUX.1-dev, while outperforming every PTQ baseline to set the state of the art on GenEval. The advantage widens at W2A4, where the rotation and smoothing baselines collapse to near-zero on all three back-bones while OrbitQuant stays functional, retaining most of its quality on the FLUX models and remaining the only method that produces meaningful scores on Z-Image-Turbo. Results at W3A3 and W2A3 are presented in the supplementary material C.1. 
+
+5.3. Video generation: VBench 
+
+OrbitQuant applies to Wan 2.1-1.3B [43] and CogVideoX-2B [50] with the identical recipe used for the image exper-iments, and Table 2 reports the full VBench comparison. At W4A6, OrbitQuant is the strongest PTQ method on both backbones, leading on Overall Consistency and most per-dimension scores over the calibration-based ViDiT-Q [53] and SVDQuant [24]. The advantage holds at W4A4, where the baselines lose ground on the harder dimensions while OrbitQuant stays closest on most dimensions, again ranking first on Overall Consistency on both backbones. Compar-isons against quantization-aware training (QAT) and results on the huge model, including Wan 14B [43] and Hunyuan-Video [22], are given in the supplementary material C. 
+
+5.4. Qualitative Comparison 
+
+Figure 4 shows generations from OrbitQuant, QuaRot [2], and ViDiT-Q [53] alongside the BF16 reference. For images at W3A3, OrbitQuant stays close to BF16 on FLUX.1-dev, FLUX.1-schnell, and Z-Image-Turbo, retaining fine struc-ture and color, while the other methods lose fidelity and collapse to noise on Z-Image-Turbo. For Wan 14B video at W4A4, OrbitQuant preserves scene layout and stays consis-tent across frames, whereas the other methods drift in color and structure. 
+
+5.5. Latency and Memory Analysis 
+
+We measure end-to-end latency and peak memory on FLUX.1-dev for image (NVIDIA H100, 1024 2, 50 steps, 6Table 2. VBench PTQ video-generation results on Wan 2.1-1.3B and CogVideoX-2B. Scores are percentages. Bold and underlined entries indicate the best and second-best result within each (model, bit-width) group. † represents our implementation. 
+
+Model Method Bit Imaging Quality ↑
+
+Aesthetic Quality ↑
+
+Motion Smoothness ↑
+
+Dynamic Degree ↑
+
+Background Consistency ↑
+
+Subject Consistency ↑ Scene ↑ Overall Consistency ↑
+
+Wan 2.1-1.3B Full Prec. 16/16 64.30 58.21 97.37 70.28 95.94 93.84 28.05 24.67 SmoothQuant † [46] W4A6 53.51 49.19 98.01 34.44 94.89 92.66 12.81 22.15 QuaRot † [2] W4A6 56.92 50.36 96.94 54.17 95.36 91.65 14.88 22.65 ViDiT-Q [53] W4A6 56.24 50.18 94.81 52.43 89.67 82.53 13.45 19.58 SVDQuant [24] W4A6 58.16 51.27 97.05 49.44 93.74 91.71 14.18 23.26 OrbitQuant W4A6 61.25 56.08 97.76 59.78 95.51 94.23 24.88 24.35 
+
+SmoothQuant † [46] W4A4 46.32 36.33 96.39 51.94 95.85 90.39 2.79 15.05 QuaRot † [2] W4A4 51.42 40.49 96.21 52.78 95.76 88.80 5.31 17.98 ViDiT-Q † [53] W4A4 44.51 36.43 96.16 58.06 95.92 89.59 1.85 13.11 SVDQuant [24] W4A4 57.57 46.30 94.21 72.22 93.16 77.96 12.73 21.91 OrbitQuant W4A4 58.58 53.41 97.42 53.89 95.30 92.98 18.81 23.86 
+
+CogVideoX-2B Full Prec. 16/16 59.15 54.49 97.43 67.78 94.79 92.82 36.24 25.06 SmoothQuant † [46] W4A6 51.50 49.70 97.20 30.00 94.70 91.10 21.90 23.20 QuaRot † [2] W4A6 54.11 52.25 96.92 49.72 94.60 91.82 30.73 24.03 ViDiT-Q [53] W4A6 54.72 43.01 92.18 43.22 90.76 81.02 26.25 20.41 SVDQuant [24] W4A6 58.27 47.06 95.28 40.83 92.41 87.45 27.69 21.34 OrbitQuant W4A6 55.59 54.42 97.02 57.50 94.78 92.56 32.51 24.55 
+
+SmoothQuant † [46] W4A4 39.90 35.50 97.80 1.90 95.90 92.90 3.60 12.80 QuaRot † [2] W4A4 49.60 47.10 96.90 9.20 94.80 90.20 19.70 21.70 ViDiT-Q † [53] W4A4 44.80 42.10 97.30 4.40 95.60 90.30 10.50 18.40 SVDQuant [24] W4A4 51.60 49.40 97.69 42.22 94.03 91.78 25.67 22.89 OrbitQuant W4A4 52.62 51.66 96.99 42.78 94.50 91.65 28.53 23.86 BF16 OrbitQuant ViDiT -QQuaRot 
+
+(a) Image generation on different models at W3A3 
+
+> Z-Image -Turbo  A red fox curled up asleep in fresh powder snow, individual fur strands and frost crystals visible,
+> soft pastel winter dawn light, wildlife macro photography
+> A high -speed macro shot of a single water drop splashing into a cup of coffee, a perfect crown -
+> shaped splash frozen mid -air, studio lighting
+> FLUX.1 -schnell  FLUX.1 -dev
+> An extreme macro shot of a hummingbird hovering beside a dew -covered red hibiscus flower,
+> iridescent emerald feathers, frozen wingbeat, crisp nature photography
+> Robot dancing in Times Square
+> BF16 OrbitQuant QuaRot ViDiT -Q
+
+(b) Video generation on Wan 14B at W4A4   
+
+> Frame 12 of 81 Frame 45 of 81 Frame 77 of 81
+
+Figure 4. Qualitative comparison of OrbitQuant against QuaRot [2] and ViDiT-Q [53], with the BF16 full-precision output shown for reference. (a) Image generation at W3A3 on FLUX.1-dev, FLUX.1-schnell, and Z-Image-Turbo, with one prompt per model. (b) Video generation at W4A4 on Wan 14B, showing three sampled frames per method. 
+
+guidance 3.5) and on Wan 2.1-1.3B for video ( 480 ×832 ,
+
+81 frames, 50 steps, CFG 5.0). All methods are evaluated under fake quantization, with weights and activations de-quantized to BF16 and the matmul computed in BF16. The comparison therefore measures quantization overhead, not realized low-bit speedup. As shown in Figure 5, OrbitQuant has the lowest overhead among the weight-and-activation quantization methods on both, with SmoothQuant [46], QuaRot [2], and ViDiT-Q [53] running 1.09 ×, 1.28 ×, and 
+
+1.40 × slower on image and in the same relative order on video. OrbitQuant keeps the lowest peak memory on im-age, matching the unquantized footprint. OrbitQuant has the lowest overhead because its acti-vation quantization is a fixed, shared-codebook nearest-centroid lookup, which empirically undercuts the dynamic per-token uniform quantization of QuaRot and the addi-7Figure 5. Latency and peak memory together, with lower-left be-ing better. The left panel is image generation on FLUX.1-dev, the right panel video on Wan 2.1-1.3B. Table 3. Rotation-class ablation on FLUX.1-schnell. GenEval Overall (mean over three seeds) at three bit-widths, and the per-image activation-rotation latency at 1024 2 on an H100 (rotation cost only, summed over all quantized layers and denoising steps).                     
+
+> Rotation W4A4 W3A3 W2A4 Latency(s) Haar 0.696 0.669 0.591 11.65 Full RHT 0.691 0.672 0.587 0.452 Block-RHT 0.678 0.642 0.558 0.381
+> RPBH (ours) 0.690 0.674 0.595 0.451
+
+tional channel-wise smoothing of SmoothQuant and ViDiT-Q. On video, where activations dominate, the lookup mate-rializes an index and gather tensor that lifts OrbitQuant’s peak memory above QuaRot and SmoothQuant (20.3 vs 19.3 GB), though still below ViDiT-Q (23.2 GB). 
+
+## 6. Ablations 
+
+6.1. Comparison between Rotation Matrix 
+
+The forward identity of Section 4.3 holds for any orthog-onal rotation, but codebook compatibility requires the ro-tated marginal to match fd. We compare four rotations in-side an otherwise identical OrbitQuant pipeline on FLUX.1-schnell. Table 3 reports GenEval Overall at three bit-widths and the per-image activation rotation latency on an H100. At W4A4 the four rotations are within noise. They separate at lower bit-widths, where RPBH is the strongest at W3A3 and W2A4, ahead of the dense Haar, the permutation-free Block-Randomized Hadamard Trans-form (Block-RHT), and the Full RHT of the kind used by rotation-based LLM quantizers [2, 42]. The random per-mutation drives the gap over Block-RHT, which is RPBH without the permutation. It spreads clustered outliers across blocks so the rotated marginal stays close to fd, which a fixed codebook can quantize at low bit-width. The struc-tured rotations admit a fast Hadamard transform kernel that the dense Haar cannot use, running an order of magnitude faster ( 26 ×). Among them RPBH adds 0.070 s over Block-RHT and is no slower than the Full RHT, while remain-BF16 W4 W3 W2   
+
+> AdaLN weight bit
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> GenEval Overall
+> FLUXschnell
+> FLUXdev
+> ZImageTurbo
+> BF16 INT4
+> AdaLN precision
+> 0
+> 2
+> 4
+> Compression ratio
+> 2.21 ×
+> 4×
+> Figure 6. AdaLN bit-width ablation with the main model fixed at W4A4 and AdaLN activations in BF16. The left panel reports GenEval Overall as the AdaLN modulation weight bit drops. The right panel reports model compression on the FLUX architecture with the AdaLN weights in BF16 ( 2.21 ×) and in INT4 ( 4×).
+
+ing constructible on every dimension in our study, including 
+
+d=1920 of CogVideoX-2B where no fast size-d Hadamard kernel exists. 
+
+6.2. AdaLN bit-width 
+
+OrbitQuant fixes AdaLN modulation projections at INT4 weight RTN regardless of the main bit-width, since their timestep-dependent scale-and-shift cannot be folded into neighboring weights. To isolate this choice, we hold the main model at W4A4 and vary only the AdaLN weight bit, keeping AdaLN activations in BF16. Figure 6 reports GenEval Overall on three models. Quantizing the AdaLN weights to INT4 nearly matches the BF16 result on all three models, and lowering them further degrades Overall in a model-dependent way. At W3 all three models hold, but at W2 FLUX.1-dev and -schnell collapse, while Z-Image-Turbo stays robust. A low-bit AdaLN weight corrupts the modulation that every downstream layer reads. We still quantize these projections to INT4 rather than keep them in BF16, since they are 27% of the weights and leaving them in BF16 would drop the FLUX model compression from 
+
+4× to 2.21 × (Figure 6, right). Pushing them to W2 saves further memory while triggering this collapse on the FLUX models, so OrbitQuant keeps AdaLN at INT4. 
+
+## 7. Conclusion 
+
+We present OrbitQuant, a calibration-free weight-activation quantizer for diffusion transformers that replaces per-timestep range calibration with a single distributional code-book applied in a shared, rotated, normalized basis. The rotation is absorbed into the weights offline and cancels in-side each linear layer, leaving only a forward RPBH ro-tation on the activations at runtime. Its random permuta-tion is what keeps the rotated marginal well-behaved at low bit-width. Across FLUX.1, Z-Image-Turbo, Wan 2.1, and CogVideoX, the same recipe transfers from image to video with no per-modality tuning, sets the state of the art for PTQ on GenEval and VBench at low-bit settings, and supports usable 2-bit weights where prior PTQ methods collapse. 8References 
+
+[1] Nir Ailon and Bernard Chazelle. The fast johnson– lindenstrauss transform and approximate nearest neighbors. 
+
+SIAM Journal on computing , 39(1):302–322, 2009. 4 [2] Saleh Ashkboos, Amirkeivan Mohtashami, Maximilian L Croci, Bo Li, Pashmina Cameron, Martin Jaggi, Dan Alis-tarh, Torsten Hoefler, and James Hensman. Quarot: Outlier-free 4-bit inference in rotated llms. Advances in Neural In-formation Processing Systems , 37:100213–100240, 2024. 1, 2, 4, 5, 6, 7, 8, 3 [3] Fan Bao, Shen Nie, Kaiwen Xue, Yue Cao, Chongxuan Li, Hang Su, and Jun Zhu. All are worth words: A vit backbone for diffusion models. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pages 22669–22679, 2023. 2 [4] Huanqia Cai, Sihan Cao, Ruoyi Du, Peng Gao, Steven Hoi, Zhaohui Hou, Shijie Huang, Dengyang Jiang, Xin Jin, Liangchen Li, et al. Z-image: An efficient image generation foundation model with single-stream diffusion transformer. 
+
+arXiv preprint arXiv:2511.22699 , 2025. 2 [5] Jerry Chee, Yaohui Cai, Volodymyr Kuleshov, and Christo-pher M De Sa. Quip: 2-bit quantization of large language models with guarantees. Advances in neural information processing systems , 36:4396–4429, 2023. 2 [6] Junsong Chen, Chongjian Ge, Enze Xie, Yue Wu, Lewei Yao, Xiaozhe Ren, Zhongdao Wang, Ping Luo, Huchuan Lu, and Zhenguo Li. Pixart-σ: Weak-to-strong training of diffusion transformer for 4k text-to-image generation. In 
+
+European Conference on Computer Vision , pages 74–91. Springer, 2024. 2 [7] Lei Chen, Yuan Meng, Chen Tang, Xinzhu Ma, Jingyan Jiang, Xin Wang, Zhi Wang, and Wenwu Zhu. Q-dit: Ac-curate post-training quantization for diffusion transformers. In Proceedings of the Computer Vision and Pattern Recogni-tion Conference , pages 28306–28315, 2025. 2, 5, 6 [8] Yongsen Cheng, Kai Liu, Kaiwen Tao, Junxian Li, Zhixin Wang, Zhikai Chen, Renjing Pei, and Yulun Zhang. Per-muquant: Lowering per-group quantization error by re-ordering channels for diffusion models. arXiv preprint arXiv:2605.09503 , 2026. 2 [9] Tim Dettmers, Ruslan Svirschevski, Vage Egiazarian, De-nis Kuznedelev, Elias Frantar, Saleh Ashkboos, Alexander Borzunov, Torsten Hoefler, and Dan Alistarh. Spqr: Asparse-quantized representation for near-lossless llm weight compression. arXiv preprint arXiv:2306.03078 , 2023. 2 [10] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas M¨ uller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. Scaling recti-fied flow transformers for high-resolution image synthesis. In Forty-first international conference on machine learning ,2024. 2 [11] Weilun Feng, Haotong Qin, Chuanguang Yang, Xiangqi Li, Han Yang, Yuqi Li, Zhulin An, Libo Huang, Michele Magno, and Yongjun Xu. S 2 q-vdit: Accurate quantized video diffu-sion transformer with salient data and sparse token distilla-tion. arXiv preprint arXiv:2508.04016 , 2025. 2 [12] Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and Dan Alistarh. Gptq: Accurate post-training quantization for generative pre-trained transformers. arXiv preprint arXiv:2210.17323 , 2022. 2 [13] Hongyaoxing Gu, Lijuan Hu, Liye Yu, Haowei Li, and Fangfang Liu. Lopro: Enhancing low-rank quantiza-tion via permuted block-wise rotation. arXiv preprint arXiv:2601.19675 , 2026. 4 [14] Han Guo, William Brandon, Radostin Cholakov, Jonathan Ragan-Kelley, Eric Xing, and Yoon Kim. Fast matrix multi-plications for lookup table-quantized llms. In Findings of the Association for Computational Linguistics: EMNLP 2024 ,pages 12419–12433, 2024. 4 [15] Insu Han, Praneeth Kacham, Amin Karbasi, Vahab Mirrokni, and Amir Zandieh. Polarquant: Vector quantization with po-lar transformation. In The 29th International Conference on Artificial Intelligence and Statistics , 2026. 2 [16] Yefei He, Jing Liu, Weijia Wu, Hong Zhou, and Bohan Zhuang. Efficientdm: Efficient quantization-aware fine-tuning of low-bit diffusion models. In International Con-ference on Learning Representations , pages 15731–15750, 2024. 3 [17] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-fusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. 2 [18] Xing Hu, Yuan Cheng, Dawei Yang, Zukang Xu, Zhihang Yuan, Jiangyong Yu, Chen Xu, Zhe Jiang, and Sifan Zhou. Ostquant: Refining large language model quantization with orthogonal and scaling transformations for better distribution fitting. arXiv preprint arXiv:2501.13987 , 2025. 2 [19] Feice Huang, Zuliang Han, Xing Zhou, Yihuang Chen, Lifei Zhu, and Haoqian Wang. Convrot: Rotation-based plug-and-play 4-bit quantization for diffusion transformers. arXiv preprint arXiv:2512.03673 , 2025. 3 [20] Yushi Huang, Ruihao Gong, Jing Liu, Yifu Ding, Cheng-tao Lv, Haotong Qin, and Jun Zhang. Qvgen: Pushing the limit of quantized video generative models. arXiv preprint arXiv:2505.11497 , 2025. 2, 5, 3 [21] Sehoon Kim, Coleman Hooper, Amir Gholami, Zhen Dong, Xiuyu Li, Sheng Shen, Michael W Mahoney, and Kurt Keutzer. Squeezellm: Dense-and-sparse quantization. arXiv preprint arXiv:2306.07629 , 2023. 2 [22] Weijie Kong, Qi Tian, Zijian Zhang, Rox Min, Zuozhuo Dai, Jin Zhou, Jiangfeng Xiong, Xin Li, Bo Wu, Jianwei Zhang, et al. Hunyuanvideo: A systematic framework for large video generative models. arXiv preprint arXiv:2412.03603 , 2024. 2, 6 [23] Black Forest Labs, Stephen Batifol, Andreas Blattmann, Frederic Boesel, Saksham Consul, Cyril Diagne, Tim Dock-horn, Jack English, Zion English, Patrick Esser, Sumith Ku-lal, Kyle Lacey, Yam Levi, Cheng Li, Dominik Lorenz, Jonas M¨ uller, Dustin Podell, Robin Rombach, Harry Saini, Axel Sauer, and Luke Smith. Flux.1 kontext: Flow matching for in-context image generation and editing in latent space, 2025. 2 [24] Muyang Li, Yujun Lin, Zhekai Zhang, Tianle Cai, Xiuyu Li, Junxian Guo, Enze Xie, Chenlin Meng, Jun-Yan Zhu, 
+
+9and Song Han. Svdquant: Absorbing outliers by low-rank components for 4-bit diffusion models. arXiv preprint arXiv:2411.05007 , 2024. 2, 5, 6, 7, 3 [25] Yanjing Li, Sheng Xu, Xianbin Cao, Xiao Sun, and Baochang Zhang. Q-dm: An efficient low-bit quantized dif-fusion model. Advances in neural information processing systems , 36:76680–76691, 2023. 3 [26] Zhiteng Li, Hanxuan Li, Junyi Wu, Kai Liu, Haotong Qin, Linghe Kong, Guihai Chen, Yulun Zhang, and Xiaokang Yang. Dvd-quant: Data-free video diffusion transformers quantization. arXiv preprint arXiv:2505.18663 , 2025. 3, 2 [27] Haokun Lin, Haobo Xu, Yichen Wu, Jingzhi Cui, Yingtao Zhang, Linzhan Mou, Linqi Song, Zhenan Sun, and Ying Wei. Duquant: Distributing outliers via dual transformation makes stronger quantized llms. Advances in Neural Infor-mation Processing Systems , 37:87766–87800, 2024. 2, 4 [28] Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang, Wei-Ming Chen, Wei-Chen Wang, Guangxuan Xiao, Xingyu Dang, Chuang Gan, and Song Han. Awq: Activation-aware weight quantization for on-device llm compression and accelera-tion. Proceedings of machine learning and systems , 6:87– 100, 2024. 2 [29] Zechun Liu, Changsheng Zhao, Igor Fedorov, Bilge So-ran, Dhruv Choudhary, Raghuraman Krishnamoorthi, Vikas Chandra, Yuandong Tian, and Tijmen Blankevoort. Spin-quant: Llm quantization with learned rotations. In In-ternational Conference on Learning Representations , pages 92009–92032, 2025. 2 [30] Stuart Lloyd. Least squares quantization in pcm. IEEE trans-actions on information theory , 28(2):129–137, 1982. 3 [31] Joel Max. Quantizing for minimum distortion. IRE Transac-tions on Information Theory , 6(1):7–12, 1960. 3 [32] Francesco Mezzadri. How to generate random matrices from the classical compact groups. arXiv preprint math-ph/0609050 , 2006. 3 [33] OpenAI. Sora: Creating video from text. https:// openai.com/sora , 2024. Accessed: 2024-02-15. 2 [34] Gunho Park, Minsub Kim, Sungjae Lee, Jeonghoon Kim, Beomseok Kwon, Se Jung Kwon, Byeongwook Kim, Youngjoo Lee, Dongsoo Lee, et al. Lut-gemm: Quan-tized matrix multiplication based on luts for efficient in-ference in large-scale generative language models. In In-ternational Conference on Learning Representations , pages 38069–38086, 2024. 4 [35] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF inter-national conference on computer vision , pages 4195–4205, 2023. 2 [36] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. 2 [37] Chitwan Saharia, William Chan, Saurabh Saxena, Lala Li, Jay Whang, Emily L Denton, Kamyar Ghasemipour, Raphael Gontijo Lopes, Burcu Karagol Ayan, Tim Salimans, et al. Photorealistic text-to-image diffusion models with deep language understanding. Advances in neural information processing systems , 35:36479–36494, 2022. 2 [38] Sai Sanjeet, Ian Colbert, Pablo Monteagudo-Lago, Giuseppe Franco, Yaman Umuroglu, and Nicholas J Fraser. Pushing the limits of block rotations in post-training quantization. 
+
+arXiv preprint arXiv:2601.22347 , 2026. 2, 4 [39] Uriel Singer, Adam Polyak, Thomas Hayes, Xi Yin, Jie An, Songyang Zhang, Qiyuan Hu, Harry Yang, Oron Ashual, Oran Gafni, et al. Make-a-video: Text-to-video generation without text-video data. arXiv preprint arXiv:2209.14792 ,2022. 2 [40] Yuxuan Sun, Ruikang Liu, Haoli Bai, Han Bao, Kang Zhao, Yuening Li, Jiaxin Hu, Xianzhi Yu, Lu Hou, Chun Yuan, et al. Flatquant: Flatness matters for llm quantization. arXiv preprint arXiv:2410.09426 , 2024. 2 [41] Joel A Tropp. Improved analysis of the subsampled random-ized hadamard transform. Advances in Adaptive Data Anal-ysis , 3(01n02):115–126, 2011. 4 [42] Albert Tseng, Jerry Chee, Qingyao Sun, Volodymyr Kuleshov, and Christopher De Sa. Quip#: Even better llm quantization with hadamard incoherence and lattice code-books. Proceedings of machine learning research , 235: 48630, 2024. 2, 4, 8 [43] Team Wan, Ang Wang, Baole Ai, Bin Wen, Chaojie Mao, Chen-Wei Xie, Di Chen, Feiwu Yu, Haiming Zhao, Jianxiao Yang, et al. Wan: Open and advanced large-scale video gen-erative models. arXiv preprint arXiv:2503.20314 , 2025. 2, 6[44] Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Sheng-ming Yin, Shuai Bai, Xiao Xu, Yilei Chen, et al. Qwen-image technical report. arXiv preprint arXiv:2508.02324 , 2025. 2 [45] Junyi Wu, Haoxuan Wang, Yuzhang Shang, Mubarak Shah, and Yan Yan. Ptq4dit: Post-training quantization for diffu-sion transformers. Advances in neural information process-ing systems , 37:62732–62755, 2024. 2 [46] Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu, Julien Demouth, and Song Han. Smoothquant: Accurate and effi-cient post-training quantization for large language models. In 
+
+International conference on machine learning , pages 38087– 38099. PMLR, 2023. 2, 5, 6, 7, 3 [47] Enze Xie, Junsong Chen, Junyu Chen, Han Cai, Haotian Tang, Yujun Lin, Zhekai Zhang, Muyang Li, Ligeng Zhu, Yao Lu, et al. Sana: Efficient high-resolution image syn-thesis with linear diffusion transformers. arXiv preprint arXiv:2410.10629 , 2024. 2 [48] Kaicheng Yang, Xun Zhang, Haotong Qin, Yucheng Lin, Kaisen Yang, Xianglong Yan, and Yulun Zhang. Robuq: Pushing dits to w1. 58a2 via robust activation quantization. 
+
+arXiv preprint arXiv:2509.23582 , 2025. 2 [49] Lianwei Yang, Haokun Lin, Tianchen Zhao, Yichen Wu, Hongyu Zhu, Ruiqi Xie, Zhenan Sun, Yu Wang, and Qingyi Gu. Lrq-dit: Log-rotation post-training quantization of dif-fusion transformers for image and video generation. arXiv preprint arXiv:2508.03485 , 2025. 2 [50] Zhuoyi Yang, Jiayan Teng, Wendi Zheng, Ming Ding, Shiyu Huang, Jiazheng Xu, Yuanming Yang, Wenyi Hong, Xi-
+
+10 aohan Zhang, Guanyu Feng, et al. Cogvideox: Text-to-video diffusion models with an expert transformer. In In-ternational Conference on Learning Representations , pages 83048–83077, 2025. 2, 6 [51] Amir Zandieh, Majid Daliri, Majid Hadian, and Vahab Mir-rokni. Turboquant: Online vector quantization with near-optimal distortion rate. arXiv preprint arXiv:2504.19874 ,2025. 2, 3, 4, 5 [52] Shaoqiu Zhang, Zizhong Ding, Kaicheng Yang, Junyi Wu, Xianglong Yan, Xi Li, Bingnan Duan, Jianping Fang, and Yulun Zhang. Adatsq: Pushing the pareto frontier of dif-fusion transformers via temporal-sensitivity quantization. 
+
+arXiv preprint arXiv:2602.09883 , 2026. 2, 5, 6 [53] Tianchen Zhao, Tongcheng Fang, Haofeng Huang, Enshu Liu, Rui Wan, Widyadewi Soedarmadji, Shiyao Li, Zinan Lin, Guohao Dai, Shengen Yan, et al. Vidit-q: Efficient and accurate quantization of diffusion transformers for im-age and video generation. arXiv preprint arXiv:2406.02540 ,2024. 1, 2, 5, 6, 7, 3 
+
+11 OrbitQuant: Data-Agnostic Quantization for Image and Video Diffusion Transformers 
+
+# Supplementary Material 
+
+## A. Proof Sketch for RPBH Incoherence 
+
+Setup. Fix a unit vector ˜x ∈ Rd and write d = kh . Let 
+
+y = Pπ ˜x have blocks y(j) ∈ Rh with masses Mj =
+
+∥y(j)∥22 summing to 1, outputs z(j) = HhDj y(j) with 
+
+(Hh)li = ±1/√h and Dj Rademacher, and μ∞ = ∥˜x∥2
+
+> ∞
+
+.Write z = ( z(1) , . . . , z(k)) for the full output Πd ˜x.
+
+Lemma 1 (Per-block incoherence) For any fixed partition (any π), with probability at least 1 − δ/ 2 over {Dj },
+
+∥z∥∞ ≤ p2 log(4 d/δ )/h. (11) 
+
+Proof 1 Each output coordinate z(j) 
+
+> l
+
+= P
+
+> i
+
+(Hh)li σ(j) 
+
+> i
+
+y(j)
+
+> i
+
+is a mean-zero Rademacher sum with variance P
+
+> i
+
+(Hh)2
+
+> li
+
+(y(j) 
+
+> i
+
+)2 = Mj /h ≤ 1/h . Hoeffding gives 
+
+Pr[ |z(j) 
+
+> l
+
+| > t ] ≤ 2e−t2h/ 2, and a union bound over the d
+
+coordinates yields Equation (11) .
+
+Lemma 2 (Mass balancing) With probability at least 1 −
+
+δ/ 2 over π, for all j,
+
+Mj − 1 
+
+> k
+
+≤ μ∞
+
+p(h/ 2) log(4 k/δ ). (12) 
+
+Proof 2 Each Mj is a sum of h values drawn without re-placement from {˜x2 
+
+> i
+
+} ⊆ [0 , μ ∞] with mean 1/k . By Hoeffd-ing’s bound for sampling without replacement, Pr[ |Mj −
+
+1/k | ≥ ϵ] ≤ 2e−2ϵ2/(hμ 2
+
+> ∞)
+
+, and a union bound over the k
+
+blocks gives Equation (12) .Proposition 1 (restated). 
+
+Let ρ = d μ ∞
+
+p(1 /2h) log(4 k/δ ). With probability at least 
+
+1 − δ over Πd, every coordinate of z = Πd ˜x is mean-zero with conditional variance Var( zi | π) ∈ 1 
+
+> d
+
+(1 ± ρ), and 
+
+∥Πd ˜x∥∞ ≤
+
+q 2 
+
+> d
+
+(1 + ρ) log(4 d/δ ). (13) 
+
+Proof 3 Each zi is a mean-zero Rademacher sum, so 
+
+E[zi] = 0 . On the event of Lemma 2, Mj ∈ 1 
+
+> k
+
+(1 ± ρ),so each coordinate has variance Mj /h ∈ 1 
+
+> d
+
+(1 ± ρ). Equa-tion (13) then follows by repeating the proof of Lemma 1 with Mj /h ≤ 1 
+
+> d
+
+(1 + ρ), after a union bound over the two events, each holding with probability at least 1 − δ/ 2.
+
+Remark 1 Lemma 1 uses only Mj ≤ 1, so it holds with or without the permutation. The permutation enters through Lemma 2 alone, equalizing every per-coordinate variance to 1/d regardless of how outlier channels fall into blocks, which is what the no-permutation variant loses at low bit-width (Section 6.1). 
+
+Remark 2 Variance concentration upgrades to a quantita-tive Gaussian approximation. Conditional on π, each co-ordinate zi in block j is a sum of h independent bounded terms with total variance Mj /h , so the Berry–Esseen in-equality bounds its Kolmogorov distance to N (0 , M j /h )
+
+by C P 
+
+> i
+
+|y(j) 
+
+> i
+
+|3/M 3/2 
+
+> j
+
+≤ Cpμ∞/M j for a universal constant C. On the event of Lemma 2 this is at most 
+
+Cpμ∞k/ (1 − ρ), so whenever no coordinate carries an outsized share of the norm, every rotated coordinate is close to N (0 , 1/d ) in distribution, not only in variance. Figure 3 confirms this empirically. 
+
+## B. Additional Experimental Details 
+
+B.1. Generation settings 
+
+Image models use the sampler and step count of their public checkpoints, FLUX.1-schnell at 4 steps and guidance 0.0, FLUX.1-dev at 50 steps and guidance 3.5, and Z-Image-Turbo at 10 steps and guidance 0.0. Video models use Wan 2.1-1.3B at 81 frames, 480 ×832 , 50 steps, CFG 5.0, and CogVideoX-2B at 49 frames, 480 ×720 , 50 steps, CFG 6.0. NVIDIA H100 GPUs are used for experiments. 
+
+B.2. Quantized and skipped layers 
+
+We quantize every linear projection in the transformer block through the OrbitQuant path, namely the image- and text-side Q, K, V and output projections and the feed-forward layers of every block, including the text-conditioning K and 
+
+V projections that consume text-encoder hidden states (the joint-attention text path in FLUX and Z-Image, the cross-attention projections in Wan and CogVideoX). AdaLN modulation projections are the one exception. Their output parameterizes a timestep-dependent elementwise scale-and-shift. A static norm affine can be folded into neighboring weights, as rotation-based LLM quantizers do [2], but this dynamic modulation cannot. The shared-rotation cancella-tion of Section 4 therefore has no counterpart here. Their input is also a single conditioning token per step, leaving no activation compute to save. We therefore quantize only their weights, with INT4 RTN at group size 64 and BF16 activa-tions. Embeddings, the timestep MLP, the final un-patchify head, and the text encoder stay in BF16. 1Table 4. GenEval results at the lowest bit-widths, W3A3 and W2A3, on three image diffusion transformers. Bold and underlined entries indicate the best and second-best PTQ result within each (model, bit-width) group. ↑ means higher is better. † represents our implementation. 
+
+Model Method Bit Single object ↑ Two object ↑ Counting ↑ Colors ↑ Position ↑ Color attribution ↑ Overall ↑
+
+FLUX.1-schnell FP16 16/16 0.997 0.884 0.600 0.742 0.275 0.488 0.664 SVDQuant [24] W3A3 0.820 0.647 0.466 0.560 0.160 0.373 0.504 AdaTSQ [52] W3A3 0.997 0.920 0.530 0.688 0.230 0.440 0.634 OrbitQuant W3A3 0.978 0.861 0.684 0.777 0.223 0.542 0.678 
+
+QuaRot † [2] W2A3 0.003 0.000 0.000 0.000 0.000 0.000 0.001 SmoothQuant † [46] W2A3 0.003 0.000 0.000 0.000 0.000 0.000 0.001 ViDiT-Q † [53] W2A3 0.009 0.000 0.000 0.003 0.000 0.000 0.002 OrbitQuant W2A3 0.947 0.573 0.431 0.691 0.140 0.318 0.517 
+
+FLUX.1-dev FP16 16/16 0.984 0.823 0.769 0.771 0.203 0.450 0.667 SVDQuant [24] W3A3 0.869 0.288 0.425 0.524 0.033 0.123 0.377 AdaTSQ [52] W3A3 0.956 0.548 0.628 0.656 0.083 0.290 0.527 OrbitQuant W3A3 0.981 0.684 0.606 0.734 0.128 0.372 0.584 
+
+QuaRot † [2] W2A3 0.003 0.000 0.000 0.000 0.000 0.000 0.001 SmoothQuant † [46] W2A3 0.003 0.000 0.000 0.000 0.000 0.000 0.001 ViDiT-Q † [53] W2A3 0.0013 0.000 0.000 0.003 0.000 0.000 0.002 OrbitQuant W2A3 0.906 0.235 0.338 0.582 0.050 0.120 0.372 
+
+Z-Image-Turbo FP16 16/16 1.000 0.907 0.709 0.859 0.468 0.583 0.754 SVDQuant [24] W3A3 0.005 0.000 0.000 0.000 0.000 0.000 0.000 AdaTSQ [52] W3A3 0.994 0.870 0.550 0.885 0.410 0.455 0.694 OrbitQuant W3A3 0.994 0.846 0.750 0.859 0.395 0.598 0.740 
+
+QuaRot † [2] W2A3 0.013 0.000 0.000 0.000 0.000 0.000 0.002 SmoothQuant † [46] W2A3 0.009 0.000 0.000 0.000 0.000 0.000 0.002 ViDiT-Q † [53] W2A3 0.000 0.000 0.000 0.003 0.000 0.000 0.000 OrbitQuant W2A3 0.272 0.023 0.028 0.269 0.018 0.023 0.105 
+
+Table 5. VBench results on Wan 14B at W4A4. Per-dimension scores over eight VBench dimensions. Bold and underlined entries indicate the best and second-best PTQ result. QVGen is a QAT method, shown for reference and excluded from the PTQ ranking. ↑ means higher is better. † represents our implementation. 
+
+Model Method Bit Imaging Quality ↑
+
+Aesthetic Quality ↑
+
+Motion Smoothness ↑
+
+Dynamic Degree ↑
+
+Background Consistency ↑
+
+Subject Consistency ↑ Scene ↑ Overall Consistency ↑
+
+Wan 14B BF16 16/16 0.6514 0.6136 0.9738 0.7389 0.9632 0.9365 0.3330 0.2629 SmoothQuant † [46] W4A4 0.5971 0.5263 0.9763 0.4472 0.9390 0.9171 0.1439 0.2327 QuaRot † [2] W4A4 0.6332 0.5686 0.9701 0.5500 0.9504 0.9185 0.2589 0.2541 ViDiT-Q † [53] W4A4 0.5948 0.5373 0.9672 0.5417 0.9533 0.9202 0.1849 0.2432 OrbitQuant W4A4 0.6405 0.6022 0.9754 0.6250 0.9559 0.9363 0.3285 0.2615 
+
+HunyuanVideo BF16 16/16 0.6478 0.6253 0.9930 0.5139 0.9701 0.9605 0.4281 0.2586 SmoothQuant [46] W4A4 0.5946 0.4841 0.9879 0.0139 0.9672 0.9497 0.0784 0.2109 QuaRot [2] W4A4 0.5430 0.4485 0.9222 0.8750 0.9769 0.9264 0.0094 0.1733 ViDiT-Q [53] W4A4 0.4010 0.4536 0.9943 0.0000 0.9719 0.9729 0.0785 0.1966 DVD-Quant [26] W4A4 0.6182 0.6196 0.9915 0.5694 0.9782 0.9661 0.2994 0.2568 
+
+OrbitQuant W4A4 0.6209 0.6072 0.9930 0.4417 0.9751 0.9622 0.3052 0.2283 
+
+## C. Additional Experiments 
+
+C.1. Lowest bit-widths: W3A3 and W2A3 
+
+We push to the lowest bit-widths, W3A3 and W2A3, on three image diffusion transformers. Table 4 reports GenEval. At W3A3 we compare against the low-bit im-age quantizers SVDQuant [24] and AdaTSQ [52], and at W2A3 against the rotation and smoothing baselines. At W3A3 OrbitQuant has the best Overall on all three mod-els and stays close to FP16. AdaTSQ is competitive and leads on a few individual dimensions, but OrbitQuant is the most consistent across them, while SVDQuant collapses en-tirely on Z-Image-Turbo. W2A3 is the harder test. The rotation and smoothing baselines collapse to near zero on every model, since a 3-bit uniform grid cannot place its lev-els where the rotated activations are dense. OrbitQuant is the only method that stays functional, remaining usable on the FLUX models. Z-Image-Turbo is the exception, where even OrbitQuant degrades sharply, marking the limit of a calibration-free codebook at this bit-width. 
+
+C.2. Video Generation on Huge Model 
+
+We evaluate the two largest video diffusion transformers in our study, Wan 14B [43] and HunyuanVideo [22], at 2Table 6. Seed robustness of OrbitQuant on GenEval. Mean and standard deviation over three random seeds on three image diffusion transformers at W4A4 and W2A4. ↑ means higher is better. 
+
+Model Bit Single object ↑ Two object ↑ Counting ↑ Colors ↑ Position ↑ Color attribution ↑ Overall ↑
+
+FLUX.1-schnell W4A4 0.991 ± 0.003 0.879 ± 0.019 0.685 ± 0.018 0.793 ± 0.011 0.280 ± 0.039 0.510 ± 0.014 0.690 ± 0.012 
+
+W2A4 0.963 ± 0.011 0.692 ± 0.013 0.577 ± 0.010 0.754 ± 0.025 0.164 ± 0.038 0.423 ± 0.031 0.595 ± 0.008 
+
+FLUX.1-dev W4A4 0.990 ± 0.002 0.763 ± 0.005 0.721 ± 0.027 0.761 ± 0.007 0.177 ± 0.010 0.421 ± 0.009 0.639 ± 0.004 
+
+W2A4 0.943 ± 0.014 0.395 ± 0.032 0.480 ± 0.011 0.668 ± 0.012 0.079 ± 0.027 0.198 ± 0.007 0.460 ± 0.014 
+
+Z-Image-Turbo W4A4 0.998 ± 0.002 0.880 ± 0.009 0.766 ± 0.022 0.875 ± 0.015 0.464 ± 0.017 0.618 ± 0.020 0.767 ± 0.001 
+
+W2A4 0.616 ± 0.149 0.165 ± 0.045 0.243 ± 0.090 0.433 ± 0.086 0.100 ± 0.037 0.103 ± 0.029 0.276 ± 0.072 
+
+Table 7. Video-generation results on Wan 2.1-1.3B and CogVideoX-2B at W4A4. Scores are percentages. P/Q marks each method as quantization-aware training (QAT) or post-training quantization (PTQ). Bold and underlined indicate the best and second-best result across all methods within each model; full-precision rows are references.                                                                                                                                                                                                                       
+
+> Model Method P/Q Bit Imaging Quality ↑
+> Aesthetic Quality ↑
+> Motion Smoothness ↑
+> Dynamic Degree ↑
+> Background Consistency ↑
+> Subject Consistency ↑Scene ↑Overall Consistency ↑
+> Wan 2.1-1.3B Full Prec. –16/16 64.30 58.21 97.37 70.28 95.94 93.84 28.05 24.67 LSQ [30] QAT W4A4 59.11 49.09 98.35 71.11 92.66 91.67 10.38 18.83 Q-DM [25] QAT W4A4 60.40 52.50 97.22 76.67 93.37 89.26 13.28 21.63 EfficientDM [16] QAT W4A4 60.70 53.57 96.18 56.39 93.74 91.70 11.77 21.19 QVGen [20] QAT W4A4 63.08 54.67 98.25 77.78 94.08 92.57 15.32 23.01 SmoothQuant [46] PTQ W4A4 46.32 36.33 96.39 51.94 95.85 90.39 2.79 15.05 QuaRot [2] PTQ W4A4 51.42 40.49 96.21 52.78 95.76 88.80 5.31 17.98 ViDiT-Q [53] PTQ W4A4 44.51 36.43 96.16 58.06 95.92 89.59 1.85 13.11 SVDQuant [24] PTQ W4A4 57.57 46.30 94.21 72.22 93.16 77.96 12.73 21.91 OrbitQuant PTQ W4A4 58.58 53.41 97.42 53.89 95.30 92.98 18.81 23.86
+> CogVideoX-2B Full Prec. –16/16 59.15 54.49 97.43 67.78 94.79 92.82 36.24 25.06 LSQ [30] QAT W4A4 58.73 54.20 97.57 45.00 92.97 92.41 24.06 23.17 Q-DM [25] QAT W4A4 54.96 52.71 98.00 48.61 93.82 91.86 28.02 23.87 EfficientDM [16] QAT W4A4 55.96 51.97 98.03 46.67 94.10 91.70 27.76 24.28 QVGen [20] QAT W4A4 60.16 54.61 98.06 67.22 94.38 93.01 31.42 24.61
+> SmoothQuant [46] PTQ W4A4 39.90 35.50 97.80 1.90 95.90 92.90 3.60 12.80 QuaRot [2] PTQ W4A4 49.60 47.10 96.90 9.20 94.80 90.20 19.70 21.70 ViDiT-Q [53] PTQ W4A4 44.80 42.10 97.30 4.40 95.60 90.30 10.50 18.40 SVDQuant [24] PTQ W4A4 51.60 49.40 97.69 42.22 94.03 91.78 25.67 22.89 OrbitQuant PTQ W4A4 52.62 51.66 96.99 42.78 94.50 91.65 28.53 23.86
+
+W4A4. Table 5 reports VBench per-dimension scores. On Wan 14B, OrbitQuant is the best PTQ on seven of the eight dimensions and stays within noise of BF16 on most. The rotation and smoothing baselines drop sharply on the motion and scene dimensions, where the activation out-liers are largest. On HunyuanVideo we compare against DVD-Quant [26], a quantizer designed specifically for the video model, with all baseline and DVD-Quant numbers taken from the DVD-Quant paper. Although OrbitQuant is calibration-free and uses one recipe across all backbones, it is competitive with DVD-Quant, ahead of it on imag-ing quality, motion smoothness, and scene. This suggests the distributional codebook still transfers to a model it was never tuned for, retaining usable quality without any per-model design. 
+
+C.3. Robustness 
+
+OrbitQuant is calibration-free, so the only stochastic parts of the pipeline are the RPBH rotation and the sampling noise. To confirm the results are not an artifact of a sin-gle random draw, we rerun the full pipeline with three ran-dom seeds and report the mean and standard deviation of GenEval. Table 6 covers the three image models at W4A4 and W2A4. At W4A4 the Overall standard deviation is at most 0.005 on every model, so a single seed is represen-tative. The FLUX models stay similarly stable at W2A4, within 0.013 on Overall, and only Z-Image-Turbo at W2A4 shows larger variance. The analytic codebook and the ran-dom rotation otherwise give consistent results across seeds. 
+
+C.4. Comparison with QAT 
+
+Table 7 places OrbitQuant alongside QAT methods that fine-tune the quantized model. As a calibration-free PTQ method, OrbitQuant is generally a step below the strongest QAT baseline QVGen [20], whose fine-tuned objective tar-gets video quality directly. Even so, it stays close across most VBench dimensions and surpasses every QAT method on several, leading on Subject Consistency, Scene, and Overall Consistency on Wan 2.1-1.3B. That a fine-tuning-free quantizer matches or beats QAT on part of the bench-3mark, without any gradient step or per-model design, shows how strong OrbitQuant’s rotated, calibration-free design is. 
+
+## D. Limitations and Future Work 
+
+OrbitQuant inherits the online rotation that comes with rotation-based quantization. Unlike weight-only or BF16 inference, it applies the RPBH to activations at every for-ward pass, so a runtime rotation cost accompanies the memory savings, though this cost is small. We com-pute the per-block Hadamard transform with the fused 
+
+fast hadamard transform kernel together with the random permutation, running at 0.451 s per image on a sin-gle H100 at 1024 2. This is an implementation limitation rather than a method one. Integer tensor cores compute on uniform grids, where the matmul runs directly on the quan-tized codes, while Lloyd–Max centroids are non-uniform, so no off-the-shelf kernel computes a codebook GEMM. Our current path therefore dequantizes codes and runs the matmul in BF16, as do all baselines under fake quantiza-tion. Lookup-table GEMM kernels for non-uniform weight quantization [14, 34] suggest the path forward, and we will build a fused kernel that gathers centroids in the GEMM prologue and computes in a native low-bit format. 4
