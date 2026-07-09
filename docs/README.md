@@ -6,70 +6,61 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-08
-- 运行时间：2026-07-08 21:53:51 UTC
+- 最新运行日期：2026-07-09
+- 运行时间：2026-07-09 22:04:15 UTC
 - 运行状态：成功
-- 本次总论文数：16
-- 精读区：6
-- 速读区：10
+- 本次总论文数：13
+- 精读区：7
+- 速读区：6
 
 ### 今日简报（AI）
-今日精读两篇满分论文，挖掘了无需调优即可驾驭超高分图像编辑的潜扩散模型，以及用频域感知和残差适配焕新视频人脸的修复技术。  
-最具启发的方向是：生成模型正从“精调”走向“开箱即用”的极简操控，同时频域信息的融合为视频修复带来质的飞跃。  
-下一步若想落地，不妨从扩散模型的剪枝与蒸馏加速入手，或利用生成后筛选策略来进一步净化合成图像质量。
-- 详情：[/202607/08/README](/202607/08/README)
+今日精读聚焦扩散模型前沿：视频增强用DiffCVE满分突破，模型压缩用DiT剪枝高效落地。  
+最值得看：扩散模型正从生成图像扩展到视频修复与模型轻量化，性能与效率双突破。  
+普通读者可关注：如何用扩散技术让老旧视频变高清，同时让大模型更省资源。
+- 详情：[/202607/09/README](/202607/09/README)
 
 ### 精读区论文标签
-1. [Tuning-Free Latent Diffusion Models for Ultrahigh-Resolution Image Editing](/202607/08/2607.06136v1-tuning-free-latent-diffusion-models-for-ultrahigh-resolution-image-editing)  
+1. [DiffCVE: Diffusion-based Compressed Video Enhancement](/202607/09/2607.07195v1-diffcve-diffusion-based-compressed-video-enhancement)  
    标签：评分：10.0/10、query:real-ir
-   evidence：利用免调优潜在扩散进行超高分辨率图像编辑
-2. [FADRA: Frequency-Aware Diffusion with Residual Adaptation for Video Face Restoration](/202607/08/2607.06389v1-fadra-frequency-aware-diffusion-with-residual-adaptation-for-video-face-restoration)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：提出频率感知扩散框架用于视频人脸修复
-3. [Robust Face Super-Resolution and Recognition Through Multi-Feature Aggregation in Diffusion Models](/202607/08/2607.05702v1-robust-face-super-resolution-and-recognition-through-multi-feature-aggregation-in-diffusion-models)  
+   evidence：利用编码先验的扩散压缩视频增强，保持结构一致
+2. [Post-Training Pruning for Diffusion Transformers](/202607/09/2607.00927v2-post-training-pruning-for-diffusion-transformers)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散模型的多特征聚合人脸超分辨率提升识别鲁棒性
-4. [Analysis-by-Proxy: Localization Signals in VLMs Operating as Condition Encoders](/202607/08/2607.06445v1-analysis-by-proxy-localization-signals-in-vlms-operating-as-condition-encoders)  
+   evidence：针对扩散变压器的后训练剪枝方法
+3. [GALOSH: Blind, Training-Free Denoising of Raw Bayer and sRGB Images by Parallel-Friendly Local Shrinkage](/202607/09/2607.03768v1-galosh-blind-training-free-denoising-of-raw-bayer-and-srgb-images-by-parallel-friendly-local-shrinkage)  
    标签：评分：9.0/10、query:real-ir
-   evidence：研究VLM在扩散图像编辑中的定位信号
-5. [Flash-BoN: Instant Drafts for Inference-Time Scaling in Diffusion Models](/202607/08/2607.04461v1-flash-bon-instant-drafts-for-inference-time-scaling-in-diffusion-models)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：通过生成即时草稿改进文本到图像扩散模型的推理时缩放，高效实现Best-of-N采样。
-6. [AMRM-Pure: Semantic-Preserving Adversarial Purification](/202607/08/2607.04474v1-amrm-pure-semantic-preserving-adversarial-purification)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：利用扩散模型进行对抗净化以实现图像修复
+   evidence：盲、无训练的去噪方法，适用于原始和sRGB图像
+4. [Numerical-aperture transfer in holotomography with a deterministic diffusion prior](/202607/09/2607.05824v1-numerical-aperture-transfer-in-holotomography-with-a-deterministic-diffusion-prior)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：使用确定性扩散先验将低数值孔径断层图转为高数值孔径，利用扩散模型实现图像复原/增强
+5. [Making Implicit Preservation Intent Explicit in Conversational Image Editing](/202607/09/2607.07051v1-making-implicit-preservation-intent-explicit-in-conversational-image-editing)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：对话式图像编辑中的遮挡感知恢复基准与免训练框架
+6. [ColorFM: An Optimization-to-Learning Framework for Color Transfer via Flow Matching](/202607/09/2607.07119v1-colorfm-an-optimization-to-learning-framework-for-color-transfer-via-flow-matching)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：通过流匹配进行颜色转移，用于图像编辑
+7. [Stage-Aware Adaptation and Distribution Calibration for Subject-Driven Personalized Text-to-Image Generation](/202607/09/2607.07173v1-stage-aware-adaptation-and-distribution-calibration-for-subject-driven-personalized-text-to-image-generation)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：利用扩散模型进行个性化文本到图像生成，采用阶段感知适配策略。
 
 ### 速读区论文标签
-1. [Bridging Diffusion Pruning and Step Distillation with Teacher-Aligned Repair](/202607/08/2607.06335v1-bridging-diffusion-pruning-and-step-distillation-with-teacher-aligned-repair)  
+1. [Decision-Aware Training for Sample-Based Generative Models](/202607/09/2607.01171v1-decision-aware-training-for-sample-based-generative-models)  
    标签：评分：8.0/10、query:real-ir
-   evidence：通过教师对齐修复结合剪枝和步长蒸馏，实现高效扩散模型。
-2. [Post-Generation Curation of Synthetic Images via Homogeneous-Heterogeneous Splitting](/202607/08/2607.02637v1-post-generation-curation-of-synthetic-images-via-homogeneous-heterogeneous-splitting)  
+   evidence：为生成模型增加决策损失以进行决策感知训练
+2. [Reward Lightning: Fast Video Generation via Homologous Preference Distillation](/202607/09/2607.03960v1-reward-lightning-fast-video-generation-via-homologous-preference-distillation)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：视频扩散模型中偏好对齐与蒸馏的统一框架
+3. [A Decomposable Probe for Few-Step Diffusion Models: Prompt, Latent, and Score Selectivity across Backbone Families and Distillation Paradigms](/202607/09/2607.03256v1-a-decomposable-probe-for-few-step-diffusion-models-prompt-latent-and-score-selectivity-across-backbone-families-and-distillation-paradigms)  
    标签：评分：7.0/10、query:real-ir
-   evidence：通过均质-异质拆分后精选合成图像对抗生成器偏差
-3. [Optimal Mixture-of-Experts Model Averaging for Conditional Generative Models](/202607/08/2607.04360v1-optimal-mixture-of-experts-model-averaging-for-conditional-generative-models)  
+   evidence：分析少步扩散模型提示、潜在变量和得分选择性的可分解探针
+4. [Learning to Generate Multiple Objects from Dense and Occluded Layouts](/202607/09/2607.03488v1-learning-to-generate-multiple-objects-from-dense-and-occluded-layouts)  
    标签：评分：7.0/10、query:real-ir
-   evidence：条件生成模型的最优混合专家模型平均
-4. [Transferability Between Understanding and Generation in Unified Multimodal Models](/202607/08/2607.04423v1-transferability-between-understanding-and-generation-in-unified-multimodal-models)  
+   evidence：文本到图像扩散模型处理密集遮挡场景；布局感知注意力与损失
+5. [Self-Improving Diffusion Classifiers with Minority Preference Optimization](/202607/09/2607.03770v1-self-improving-diffusion-classifiers-with-minority-preference-optimization)  
    标签：评分：7.0/10、query:real-ir
-   evidence：统一多模态模型中理解与生成任务间的可迁移性研究
-5. [Transferability Between Understanding and Generation in Unified Multimodal Models](/202607/08/2607.04423v2-transferability-between-understanding-and-generation-in-unified-multimodal-models)  
+   evidence：针对扩散分类器的少数类偏好优化
+6. [Transferability Between Understanding and Generation in Unified Multimodal Models](/202607/09/2607.04423v1-transferability-between-understanding-and-generation-in-unified-multimodal-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：利用跨任务迁移提升统一多模态模型生成能力的训练策略
-6. [Video Generation Models Are Inherent Lighting Estimators](/202607/08/2607.04674v1-video-generation-models-are-inherent-lighting-estimators)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：利用视频生成模型进行光照估计
-7. [Search Beyond What Can Be Taught: Evolving the Knowledge Boundary in Agentic Visual Generation](/202607/08/2607.05382v1-search-beyond-what-can-be-taught-evolving-the-knowledge-boundary-in-agentic-visual-generation)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：搜索增强的视觉生成扩展生成模型知识边界
-8. [PIPBench: A Profile-Inclusive Framework for Personalized Image Generation Evaluation](/202607/08/2607.06440v1-pipbench-a-profile-inclusive-framework-for-personalized-image-generation-evaluation)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：个性化图像生成评估基准
-9. [Tensor-Train Joint Modeling for Few-Step Discrete Diffusion](/202607/08/2607.03788v1-tensor-train-joint-modeling-for-few-step-discrete-diffusion)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：张量分解实现离散扩散中的显式联合分布建模
-10. [From RGB Generation to Dense Field Readout: Pixel-Space Dense Prediction with Text-to-Image Models](/202607/08/2607.06553v1-from-rgb-generation-to-dense-field-readout-pixel-space-dense-prediction-with-text-to-image-models)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：从预训练文本到图像扩散模型直接读取像素空间密集场，无需生成RGB图像
+   evidence：研究统一多模态模型中理解与生成能力间的迁移性
 
 
 <div class="dpr-home-promo-card">
