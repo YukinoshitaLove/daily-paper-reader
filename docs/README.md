@@ -6,61 +6,49 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-09
-- 运行时间：2026-07-09 22:04:15 UTC
+- 最新运行日期：2026-07-10
+- 运行时间：2026-07-10 20:48:21 UTC
 - 运行状态：成功
-- 本次总论文数：13
-- 精读区：7
-- 速读区：6
+- 本次总论文数：9
+- 精读区：5
+- 速读区：4
 
 ### 今日简报（AI）
-今日精读聚焦扩散模型前沿：视频增强用DiffCVE满分突破，模型压缩用DiT剪枝高效落地。  
-最值得看：扩散模型正从生成图像扩展到视频修复与模型轻量化，性能与效率双突破。  
-普通读者可关注：如何用扩散技术让老旧视频变高清，同时让大模型更省资源。
-- 详情：[/202607/09/README](/202607/09/README)
+今日精选9篇前沿AI研究，深度解读5篇，聚焦视频重光照与事件相机扩散模型。  
+最值得关注的是LightCrafter的物理光照可控视频编辑，以及LongE2V让事件相机完成长时序预测与插帧。  
+建议普通读者体验类似的轻量视频编辑应用，或了解事件相机如何把高速运动变成流畅影像。
+- 详情：[/202607/10/README](/202607/10/README)
 
 ### 精读区论文标签
-1. [DiffCVE: Diffusion-based Compressed Video Enhancement](/202607/09/2607.07195v1-diffcve-diffusion-based-compressed-video-enhancement)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：利用编码先验的扩散压缩视频增强，保持结构一致
-2. [Post-Training Pruning for Diffusion Transformers](/202607/09/2607.00927v2-post-training-pruning-for-diffusion-transformers)  
+1. [LightCrafter: PBR-Conditioned Video Diffusion Refinement for Controllable and Consistent Relighting](/202607/10/2607.08016v1-lightcrafter-pbr-conditioned-video-diffusion-refinement-for-controllable-and-consistent-relighting)  
    标签：评分：9.0/10、query:real-ir
-   evidence：针对扩散变压器的后训练剪枝方法
-3. [GALOSH: Blind, Training-Free Denoising of Raw Bayer and sRGB Images by Parallel-Friendly Local Shrinkage](/202607/09/2607.03768v1-galosh-blind-training-free-denoising-of-raw-bayer-and-srgb-images-by-parallel-friendly-local-shrinkage)  
+   evidence：使用基于物理渲染条件的扩散模型进行视频重光照
+2. [LongE2V: Long-Horizon Event-based Video Reconstruction, Prediction, and Frame Interpolation with Video Diffusion Models](/202607/10/2607.08770v1-longe2v-long-horizon-event-based-video-reconstruction-prediction-and-frame-interpolation-with-video-diffusion-models)  
    标签：评分：9.0/10、query:real-ir
-   evidence：盲、无训练的去噪方法，适用于原始和sRGB图像
-4. [Numerical-aperture transfer in holotomography with a deterministic diffusion prior](/202607/09/2607.05824v1-numerical-aperture-transfer-in-holotomography-with-a-deterministic-diffusion-prior)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：使用确定性扩散先验将低数值孔径断层图转为高数值孔径，利用扩散模型实现图像复原/增强
-5. [Making Implicit Preservation Intent Explicit in Conversational Image Editing](/202607/09/2607.07051v1-making-implicit-preservation-intent-explicit-in-conversational-image-editing)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：对话式图像编辑中的遮挡感知恢复基准与免训练框架
-6. [ColorFM: An Optimization-to-Learning Framework for Color Transfer via Flow Matching](/202607/09/2607.07119v1-colorfm-an-optimization-to-learning-framework-for-color-transfer-via-flow-matching)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：通过流匹配进行颜色转移，用于图像编辑
-7. [Stage-Aware Adaptation and Distribution Calibration for Subject-Driven Personalized Text-to-Image Generation](/202607/09/2607.07173v1-stage-aware-adaptation-and-distribution-calibration-for-subject-driven-personalized-text-to-image-generation)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：利用扩散模型进行个性化文本到图像生成，采用阶段感知适配策略。
+   evidence：视频扩散用于事件驱动视频重建与插帧
+3. [Handwriting Trajectory Recovery with Diffusion Models](/202607/10/2607.03422v1-handwriting-trajectory-recovery-with-diffusion-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：首个基于扩散模型的手写轨迹恢复框架
+4. [Reinforcing the Generation Order of Multimodal Masked Diffusion Models](/202607/10/2607.08056v1-reinforcing-the-generation-order-of-multimodal-masked-diffusion-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：优化文本到图像合成中标记生成顺序的掩蔽扩散模型
+5. [Multimodal 3D LUT Generation via StatLUT with Statistical Features for Photorealistic Style Transfer](/202607/10/2607.08227v1-multimodal-3d-lut-generation-via-statlut-with-statistical-features-for-photorealistic-style-transfer)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于多模态3D LUT生成的逼真风格迁移
 
 ### 速读区论文标签
-1. [Decision-Aware Training for Sample-Based Generative Models](/202607/09/2607.01171v1-decision-aware-training-for-sample-based-generative-models)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：为生成模型增加决策损失以进行决策感知训练
-2. [Reward Lightning: Fast Video Generation via Homologous Preference Distillation](/202607/09/2607.03960v1-reward-lightning-fast-video-generation-via-homologous-preference-distillation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：视频扩散模型中偏好对齐与蒸馏的统一框架
-3. [A Decomposable Probe for Few-Step Diffusion Models: Prompt, Latent, and Score Selectivity across Backbone Families and Distillation Paradigms](/202607/09/2607.03256v1-a-decomposable-probe-for-few-step-diffusion-models-prompt-latent-and-score-selectivity-across-backbone-families-and-distillation-paradigms)  
+1. [dOPSD: On-Policy Self-Distillation for Diffusion Language Models](/202607/10/2607.04428v1-dopsd-on-policy-self-distillation-for-diffusion-language-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：分析少步扩散模型提示、潜在变量和得分选择性的可分解探针
-4. [Learning to Generate Multiple Objects from Dense and Occluded Layouts](/202607/09/2607.03488v1-learning-to-generate-multiple-objects-from-dense-and-occluded-layouts)  
+   evidence：扩散语言模型的训练方法
+2. [Leveraging Color Naming for Image Enhancement](/202607/10/2607.08185v1-leveraging-color-naming-for-image-enhancement)  
    标签：评分：7.0/10、query:real-ir
-   evidence：文本到图像扩散模型处理密集遮挡场景；布局感知注意力与损失
-5. [Self-Improving Diffusion Classifiers with Minority Preference Optimization](/202607/09/2607.03770v1-self-improving-diffusion-classifiers-with-minority-preference-optimization)  
+   evidence：基于颜色命名的图像增强及直观编辑控制
+3. [Enhancing In-context Panoramic Generation via Geometric-aware Pretraining](/202607/10/2607.08765v1-enhancing-in-context-panoramic-generation-via-geometric-aware-pretraining)  
    标签：评分：7.0/10、query:real-ir
-   evidence：针对扩散分类器的少数类偏好优化
-6. [Transferability Between Understanding and Generation in Unified Multimodal Models](/202607/09/2607.04423v1-transferability-between-understanding-and-generation-in-unified-multimodal-models)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：研究统一多模态模型中理解与生成能力间的迁移性
+   evidence：上下文全景生成，支持编辑、修复、外延
+4. [An exact information theory of generalization phase transitions in Bayesian diffusion models](/202607/10/2607.08041v1-an-exact-information-theory-of-generalization-phase-transitions-in-bayesian-diffusion-models)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：贝叶斯扩散模型泛化相变的精确信息论
 
 
 <div class="dpr-home-promo-card">
