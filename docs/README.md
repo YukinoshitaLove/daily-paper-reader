@@ -6,34 +6,46 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-11
-- 运行时间：2026-07-11 21:19:36 UTC
+- 最新运行日期：2026-07-12
+- 运行时间：2026-07-12 20:28:19 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：2
-- 速读区：2
+- 本次总论文数：8
+- 精读区：3
+- 速读区：5
 
 ### 今日简报（AI）
-今日精读聚焦扩散模型的理论边界与安全机制，用信息论揭开贝叶斯扩散的泛化相变，并为 Stable Diffusion 找到轻量遗忘路径。  
-最值得关注的两大突破：精确刻画扩散模型在数据量-模型容量相变中的临界行为，以及用交叉注意力流形替代实现高效的“去学习”。  
-想追前沿又不被细节淹没，建议从这两篇精读入手，理解生成模型可靠性的理论底座与可控遗忘的实现逻辑。
-- 详情：[/202607/11/README](/202607/11/README)
+今日精读了两篇计算成像与AI安全的突破性方法，并速读了镜头模糊合成、分布建模等多项研究。  
+最值得关注的是：无镜头图像重建的集成式正逆向网络，以及通过倾斜分布消除实现概念遗忘的TILDE框架。  
+若你对隐私保护成像或大模型“遗忘”机制感兴趣，可以优先细读这两篇论文。
+- 详情：[/202607/12/README](/202607/12/README)
 
 ### 精读区论文标签
-1. [An exact information theory of generalization phase transitions in Bayesian diffusion models](/202607/11/2607.08041v1-an-exact-information-theory-of-generalization-phase-transitions-in-bayesian-diffusion-models)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：贝叶斯信息受限扩散模型提供泛化相变的精确信息论分析
-2. [AutoAnchor: Stable Diffusion Unlearning Using Cross-Attention as a Manifold Surrogate](/202607/11/2607.08337v1-autoanchor-stable-diffusion-unlearning-using-cross-attention-as-a-manifold-surrogate)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：通过交叉注意力流形代理进行稳定扩散反学习以消除有害内容
+1. [Integrated Forward-Inverse Network for Lensless Image Reconstruction](/202607/12/2607.04608v1-integrated-forward-inverse-network-for-lensless-image-reconstruction)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：无透镜图像重建属于图像复原
+2. [TILDE: TILt-based Distributional Erasure for Concept Unlearning](/202607/12/2607.06432v1-tilde-tilt-based-distributional-erasure-for-concept-unlearning)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：文本到图像扩散模型的概念消除
+3. [Cardiac MRI Through-Plane Super-Resolution Guided by Reference and Memory](/202607/12/2607.07581v1-cardiac-mri-through-plane-super-resolution-guided-by-reference-and-memory)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：提出心脏MRI超分辨率方法
 
 ### 速读区论文标签
-1. [Dynamic-in-Few-Step: Unifying Dynamic Computation and Few-Step Distillation for Efficient Video Generation](/202607/11/2607.06631v1-dynamic-in-few-step-unifying-dynamic-computation-and-few-step-distillation-for-efficient-video-generation)  
+1. [Realistic Compound-Lens Defocus Blur Synthesis](/202607/12/2607.05837v1-realistic-compound-lens-defocus-blur-synthesis)  
    标签：评分：7.0/10、query:real-ir
-   evidence：融合动态稀疏化与少步蒸馏实现高效视频扩散
-2. [TMI: Text-to-Image Meets Image-to-Image for Complementary Data Synthesis to Boost Long-Tailed Instance Segmentation](/202607/11/2607.08201v1-tmi-text-to-image-meets-image-to-image-for-complementary-data-synthesis-to-boost-long-tailed-instance-segmentation)  
+   evidence：面向图像复原的真实散焦去模糊数据集合成
+2. [Unpaired Joint Distribution Modeling via Multi-Scale Image Representations](/202607/12/2607.08198v1-unpaired-joint-distribution-modeling-via-multi-scale-image-representations)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：基于多尺度图像表示的非配对联合分布建模用于生成式任务
+3. [High-Fidelity One-Step Generative Visuomotor Policy via Recursive Correction, Frequency Consistency, and Contrastive Flow Matching](/202607/12/2607.03865v1-high-fidelity-one-step-generative-visuomotor-policy-via-recursive-correction-frequency-consistency-and-contrastive-flow-matching)  
    标签：评分：6.0/10、query:real-ir
-   evidence：结合文生图与上下文感知的图生图编辑，用于数据合成
+   evidence：基于递归校正与频率一致性的一步生成式视觉运动策略
+4. [Aura: Consistent Multi-Subject Video Generation via VLM-Grounded Semantic Alignment](/202607/12/2607.04311v1-aura-consistent-multi-subject-video-generation-via-vlm-grounded-semantic-alignment)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：基于VLM语义对齐的统一多主体一致视频生成
+5. [FourTune: Towards Fully 4-Bit Efficient Post-Training for Diffusion Models](/202607/12/2607.05711v1-fourtune-towards-fully-4-bit-efficient-post-training-for-diffusion-models)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：提出扩散模型的4比特量化后训练方法以提高效率
 
 
 <div class="dpr-home-promo-card">
