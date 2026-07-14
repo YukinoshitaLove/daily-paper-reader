@@ -6,63 +6,85 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-13
-- 运行时间：2026-07-13 20:53:54 UTC
+- 最新运行日期：2026-07-14
+- 运行时间：2026-07-14 20:42:16 UTC
 - 运行状态：成功
-- 本次总论文数：14
-- 精读区：6
-- 速读区：8
+- 本次总论文数：21
+- 精读区：12
+- 速读区：9
 
 ### 今日简报（AI）
-仅需两张噪声图就能模拟真实相机噪声，解耦光照即可操控室内多视角重光照；今日精读最高分10.0的《YeTI》与9.0的室内重光照方案值得细读。  
-若你要落地角色生成，速读中的DreamCharacter-1从3D大模型到产品级角色已给出工程闭环，建议结合IB-Flow的快速文生图蒸馏思路推进。
-- 详情：[/202607/13/README](/202607/13/README)
+今日精读两篇满分图像/人脸超分论文，速览场景级3D扩散、扩散去噪表征学习等多模态生成新作。
+最值得关注h-Flow用Doob h-变换实现灵活流模型图像编辑，以及基于空间变换器的参考人脸超分技术。
+建议跟进扩散模型在图像编辑与表征学习中的交叉应用，尤其关注将物理变换引入生成流程的范式。
+- 详情：[/202607/14/README](/202607/14/README)
 
 ### 精读区论文标签
-1. [YeTI: You Only Need Two Noisy Images for Real-World sRGB Noise Generation](/202607/13/2607.09193v1-yeti-you-only-need-two-noisy-images-for-real-world-srgb-noise-generation)  
+1. [h-Flow: Flexible Flow-based Image Editing via Doob's h-Transform](/202607/14/2607.10800v1-h-flow-flexible-flow-based-image-editing-via-doobs-h-transform)  
    标签：评分：10.0/10、query:real-ir
-   evidence：使用条件扩散模型生成真实世界sRGB噪声用于图像去噪
-2. [Decoupled Illumination Priors for Spatially Controllable Multi-View Indoor Scene Relighting](/202607/13/2607.08879v1-decoupled-illumination-priors-for-spatially-controllable-multi-view-indoor-scene-relighting)  
+   evidence：提出免训练的基于流模型的图像编辑框架
+2. [Reference-Based Face Super-Resolution Using the Spatial Transformer](/202607/14/2607.11025v1-reference-based-face-super-resolution-using-the-spatial-transformer)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：基于参考的人脸超分辨率
+3. [CUST: Clustered Unit-level Similarity Transformer for Lightweight Image Super-Resolution](/202607/14/2607.11088v1-cust-clustered-unit-level-similarity-transformer-for-lightweight-image-super-resolution)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：提出用于轻量级图像超分辨率的聚类Transformer
+4. [DynEval: Holistic Evaluations of T2I Generative Models in the Wild](/202607/14/2607.11199v1-dyneval-holistic-evaluations-of-t2i-generative-models-in-the-wild)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：评估文本到图像生成模型，与生成模型直接相关
+5. [Latent-Identity Tuning in Text-to-Image Personalization Models](/202607/14/2607.11885v1-latent-identity-tuning-in-text-to-image-personalization-models)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：用于特定人物图像编辑和生成的细粒度身份调节
+6. [Compression Asymmetry and Trajectory Binding in Noise-Anchored Diffusion Inversion](/202607/14/2607.09784v1-compression-asymmetry-and-trajectory-binding-in-noise-anchored-diffusion-inversion)  
    标签：评分：9.0/10、query:real-ir
-   evidence：解耦扩散图像编辑模型的照明先验，实现可控重光照。
-3. [Simon-SR: Spatially Adaptive Modulation and Visual Prompt Adaptation for Text-Reinforced Super-Resolution](/202607/13/2607.09351v1-simon-sr-spatially-adaptive-modulation-and-visual-prompt-adaptation-for-text-reinforced-super-resolution)  
+   evidence：研究真实图像扩散反演机制，直接推动扩散模型技术发展
+7. [PnP-IPA: A Provably Convergent Plug-and-Play Inexact Proximal Algorithm for Nonconvex Imaging Problems](/202607/14/2607.10223v1-pnp-ipa-a-provably-convergent-plug-and-play-inexact-proximal-algorithm-for-nonconvex-imaging-problems)  
    标签：评分：9.0/10、query:real-ir
-   evidence：Simon-SR：基于可学习提示和空间自适应的文本增强超分辨率
-4. [CtrlVTON: Controllable Virtual Try-On via Visual-Instance-Prompt Segmentation](/202607/13/2607.09362v1-ctrlvton-controllable-virtual-try-on-via-visual-instance-prompt-segmentation)  
+   evidence：用于图像恢复逆问题的即插即用方法，使用深度去噪器
+8. [ChartSync: A Benchmark for Visuo-Logical Cascading Chart Editing](/202607/14/2607.10301v1-chartsync-a-benchmark-for-visuo-logical-cascading-chart-editing)  
    标签：评分：9.0/10、query:real-ir
-   evidence：将虚拟试穿重新定义为图像编辑问题
-5. [FourTune: Towards Fully 4-Bit Efficient Post-Training for Diffusion Models](/202607/13/2607.05711v1-fourtune-towards-fully-4-bit-efficient-post-training-for-diffusion-models)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：扩散模型高效后训练
-6. [High-Resolution Artwork Outpainting with Global Blueprint Guidance and Layout Control](/202607/13/2607.06162v1-high-resolution-artwork-outpainting-with-global-blueprint-guidance-and-layout-control)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于扩散模型的图像外推编辑
+   evidence：用于评估级联编辑的图表编辑基准
+9. [Data-efficient continuous conditional denoising diffusion model for microstructure generation](/202607/14/2607.10429v1-data-efficient-continuous-conditional-denoising-diffusion-model-for-microstructure-generation)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：用于微观结构生成的连续条件去噪扩散模型
+10. [Improving Sample Diversity in Autoregressive Text-to-Image Generation via Cluster Truncation](/202607/14/2607.10535v1-improving-sample-diversity-in-autoregressive-text-to-image-generation-via-cluster-truncation)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：聚类截断解码提升自回归图像生成的样本多样性
+11. [Diversify Diffusion with Temperature Sampling and Variance-Corrective Time Shifting](/202607/14/2607.10853v1-diversify-diffusion-with-temperature-sampling-and-variance-corrective-time-shifting)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：免训练方法，通过温度采样和时间偏移实现扩散模型采样多样化
+12. [The Devil Is in the Leakage: A Disentangled Dual-Purification Framework for High-Fidelity Hairstyle Transfer](/202607/14/2607.11281v1-the-devil-is-in-the-leakage-a-disentangled-dual-purification-framework-for-high-fidelity-hairstyle-transfer)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于扩散的发型迁移，双重净化防止身份和姿态泄露
 
 ### 速读区论文标签
-1. [DreamCharacter-1: From 3D Generative Foundation Models to Product-Ready Character Generation](/202607/13/2607.07817v1-dreamcharacter-1-from-3d-generative-foundation-models-to-product-ready-character-generation)  
+1. [SynCity 3000: Bootstrapping Scene-Scale 3D Diffusion](/202607/14/2607.05392v1-syncity-3000-bootstrapping-scene-scale-3d-diffusion)  
    标签：评分：8.0/10、query:real-ir
-   evidence：提出基于3D生成基础模型的高保真角色生成方法。
-2. [IB-Flow: Information Bottleneck-Guided CFG Distillation for Few-Step Text-to-Image Generation](/202607/13/2607.09133v1-ib-flow-information-bottleneck-guided-cfg-distillation-for-few-step-text-to-image-generation)  
+   evidence：使用扩散模型进行3D场景生成
+2. [Probing Diffusion Denoising Dynamics for Contrastive Representation Learning](/202607/14/2607.09067v1-probing-diffusion-denoising-dynamics-for-contrastive-representation-learning)  
    标签：评分：8.0/10、query:real-ir
-   evidence：利用信息瓶颈指导扩散模型CFG轨迹蒸馏实现少步生成
-3. [Enhancing Video Physical Consistency via Role-aware Joint Training and Modality-decoupled Denoising](/202607/13/2607.04653v1-enhancing-video-physical-consistency-via-role-aware-joint-training-and-modality-decoupled-denoising)  
+   evidence：利用预训练扩散模型的去噪动力学进行判别式表示学习
+3. [Next-Dense-Stride Prediction for Multimodal Autoregressive Visual Modeling](/202607/14/2607.09892v1-next-dense-stride-prediction-for-multimodal-autoregressive-visual-modeling)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：提出一种新的自回归图像生成范式DenseAR
+4. [Conservation Laws for Diffusion Models](/202607/14/2607.10067v1-conservation-laws-for-diffusion-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：为扩散模型建立理论守恒定律，将交叉熵与信息论量关联
+5. [Imperceptible and Reversible Adversarial Examples against Vision-Language Models for Privacy Protection](/202607/14/2607.10329v1-imperceptible-and-reversible-adversarial-examples-against-vision-language-models-for-privacy-protection)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：利用基于扩散的对抗编辑进行图像修改，属于图像编辑
+6. [DiffUE: Enhancing Utility-Unlearnability Trade-off of Unlearnable Examples via Diffusion Autoencoders](/202607/14/2607.10580v1-diffue-enhancing-utility-unlearnability-trade-off-of-unlearnable-examples-via-diffusion-autoencoders)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：使用扩散自编码器生成不可学习样本，即用于隐私的图像编辑
+7. [Backbone-Agnostic Perturbation-Induced Uncertainty Learning for End-to-End Real-World Image Dehazing](/202607/14/2607.11623v1-backbone-agnostic-perturbation-induced-uncertainty-learning-for-end-to-end-real-world-image-dehazing)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：提出用于真实世界图像去雾的不确定性学习，属于图像恢复任务
+8. [Multilevel Preconditioning Strategies for Convex Optimization Methods in Image Deblurring](/202607/14/2607.10864v1-multilevel-preconditioning-strategies-for-convex-optimization-methods-in-image-deblurring)  
    标签：评分：7.0/10、query:real-ir
-   evidence：通过角色感知联合训练与模态解耦去噪提升视频扩散模型的物理一致性
-4. [CanvasAgent: Enabling Complex Image Creation and Editing via Visual Tool Orchestration](/202607/13/2607.05465v1-canvasagent-enabling-complex-image-creation-and-editing-via-visual-tool-orchestration)  
+   evidence：通过凸优化进行图像去模糊，直接处理图像恢复任务
+9. [DDR-Net: Haze-Aware Dual-Domain Refinement for Single-Image Dehazing](/202607/14/2607.11071v1-ddr-net-haze-aware-dual-domain-refinement-for-single-image-dehazing)  
    标签：评分：7.0/10、query:real-ir
-   evidence：编排图像创建和编辑工具
-5. [Breaking Spurious Correlations via Generative Randomization and Cross-Variant Self-Supervised Learning](/202607/13/2607.05850v1-breaking-spurious-correlations-via-generative-randomization-and-cross-variant-self-supervised-learning)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：使用结构保持扩散模型生成反事实图像
-6. [ReGen: Hierarchical Multi-Prompt Representation Generation for Efficient Waveform Diffusion Models](/202607/13/2607.09134v1-regen-hierarchical-multi-prompt-representation-generation-for-efficient-waveform-diffusion-models)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：分层多提示表示生成实现高效波形扩散模型
-7. [PixWorld: Unifying 3D Scene Generation and Reconstruction in Pixel Space](/202607/13/2607.05373v1-pixworld-unifying-3d-scene-generation-and-reconstruction-in-pixel-space)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：统一像素空间扩散用于3D场景生成与重建，避免潜在编码信息损失。
-8. [Variable-Length Generative Protein Design via Generalized Poisson Flow](/202607/13/2607.09039v1-variable-length-generative-protein-design-via-generalized-poisson-flow)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：用于变长蛋白质设计的泊松流生成模型
+   evidence：单图像去雾，属于图像恢复任务
 
 
 <div class="dpr-home-promo-card">
