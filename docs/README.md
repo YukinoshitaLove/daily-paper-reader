@@ -6,46 +6,52 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-15
-- 运行时间：2026-07-15 21:07:15 UTC
+- 最新运行日期：2026-07-16
+- 运行时间：2026-07-16 21:05:40 UTC
 - 运行状态：成功
-- 本次总论文数：8
+- 本次总论文数：10
 - 精读区：6
-- 速读区：2
+- 速读区：4
 
 ### 今日简报（AI）
-今日聚焦流匹配与视觉解耦前沿：精读超分、抠图新方案，速览风格迁移与RGB通用表征。
-最值得关注《RFMSR》的残差流匹配实现极致超分（满分），以及自监督自动抠图的无标注训练范式。
-普通读者可从流匹配在图像复原中的高效应用入手，跟踪风格-内容解耦的对比增强思路。
-- 详情：[/202607/15/README](/202607/15/README)
+今日聚焦生成模型前沿：工业级视频修复、离散扩散统一框架与医学影像/蛋白质生成  
+重点关注《LPM》10分工业级视频生成式修复与《Discrete Diffusion》从分词到生成的统一范式  
+建议留意生成模型在影视、医疗、生物等垂直场景的深度融合，可跟进代码与产业落地进展
+- 详情：[/202607/16/README](/202607/16/README)
 
 ### 精读区论文标签
-1. [RFMSR: Residual Flow Matching for Image Super-Resolution](/202607/15/2607.12753v1-rfmsr-residual-flow-matching-for-image-super-resolution)  
+1. [LPM: Industrial-Scale Generative Video Restoration](/202607/16/2607.13460v1-lpm-industrial-scale-generative-video-restoration)  
    标签：评分：10.0/10、query:real-ir
-   evidence：使用残差流匹配进行图像超分辨率
-2. [Self-supervised Automatic Matting](/202607/15/2607.10395v1-self-supervised-automatic-matting)  
+   evidence：工业级扩散生成视频修复
+2. [Discrete Diffusion Models: A Unified Framework from Tokenization to Generation](/202607/16/2607.13431v1-discrete-diffusion-models-a-unified-framework-from-tokenization-to-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：提出SSMatte，无需人工标注的自监督自动图像抠图框架，性能与全监督方法相当。
-3. [Why Low-Light Cameras Go Color Blind: Removing Color Bias in Raw Denoising](/202607/15/2607.11090v1-why-low-light-cameras-go-color-blind-removing-color-bias-in-raw-denoising)  
+   evidence：离散扩散模型的统一框架
+3. [FreeLit: Paired-Free Indoor Relighting via Physics-Guided Diffusion](/202607/16/2607.13656v1-freelit-paired-free-indoor-relighting-via-physics-guided-diffusion)  
    标签：评分：9.0/10、query:real-ir
-   evidence：处理原始图像去噪这一核心图像修复任务
-4. [Structure-Detail Decoupled Autoregressive Generation for Fast and High-Fidelity Virtual Try-On](/202607/15/2607.11233v1-structure-detail-decoupled-autoregressive-generation-for-fast-and-high-fidelity-virtual-try-on)  
+   evidence：无配对室内重光照的物理引导扩散模型
+4. [TCAM-Diff: Triplane-Aware Cross-Attention Medical Diffusion Model](/202607/16/2607.13812v1-tcam-diff-triplane-aware-cross-attention-medical-diffusion-model)  
    标签：评分：9.0/10、query:real-ir
-   evidence：自回归虚拟换装解决关键图像编辑任务，克服扩散模型局限
-5. [FlashDiff: Efficient Regional Execution and Scheduling for Diffusion Model Serving](/202607/15/2607.12121v1-flashdiff-efficient-regional-execution-and-scheduling-for-diffusion-model-serving)  
+   evidence：利用三平面感知交叉注意力扩散模型生成三维医学图像
+5. [Cyclone: Diffusion Model for Cycle-Consistent Weather Editing from Unpaired Driving Data](/202607/16/2607.13927v1-cyclone-diffusion-model-for-cycle-consistent-weather-editing-from-unpaired-driving-data)  
    标签：评分：9.0/10、query:real-ir
-   evidence：通过自适应区域执行与调度实现高效扩散模型服务
-6. [DiTailed: Ensuring Visual Object Consistency in Text-Image-to-Image Flow Matching Models](/202607/15/2607.12539v1-ditailed-ensuring-visual-object-consistency-in-text-image-to-image-flow-matching-models)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：解决流匹配模型在文本引导图像编辑中的对象一致性问题
+   evidence：基于潜扩散的统一天气编辑框架
+6. [ARDepth: Auto-regressive Monocular Depth Estimation with Progressive Visual Conditioning](/202607/16/2607.12433v1-ardepth-auto-regressive-monocular-depth-estimation-with-progressive-visual-conditioning)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：将单目深度估计构建为结构化自回归生成，逐步提高空间分辨率构建深度
 
 ### 速读区论文标签
-1. [Contrastive-Augmented Flow Matching for Style-Content Disentanglement](/202607/15/2607.12404v1-contrastive-augmented-flow-matching-for-style-content-disentanglement)  
+1. [Improving Medical Image Generative Models with Fréchet Distance Loss](/202607/16/2607.13300v1-improving-medical-image-generative-models-with-frchet-distance-loss)  
    标签：评分：8.0/10、query:real-ir
-   evidence：对比流匹配改善风格-内容解耦，提升生成模型，与扩散模型改进相关
-2. [Let RGB Be the Language of Vision](/202607/15/2607.12450v1-let-rgb-be-the-language-of-vision)  
+   evidence：提出用Fréchet距离损失微调扩散生成模型
+2. [Spectral Consistent Flow for One-step 3D Medical Image Translation](/202607/16/2607.10627v1-spectral-consistent-flow-for-one-step-3d-medical-image-translation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：将多种视觉任务统一为RGB到RGB图像编辑，使用通用编辑骨干
+   evidence：基于谱一致流的单步3D医学图像转换
+3. [Exploring the Alignment of Generation and Understanding in Protein Structure Modeling](/202607/16/2607.13503v1-exploring-the-alignment-of-generation-and-understanding-in-protein-structure-modeling)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：蛋白质生成模型，生成与理解的对齐
+4. [VideoRAE: Taming Video Foundation Models for Generative Modeling via Representation Autoencoders](/202607/16/2607.14088v1-videorae-taming-video-foundation-models-for-generative-modeling-via-representation-autoencoders)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：利用基础模型的视频生成表示自编码器
 
 
 <div class="dpr-home-promo-card">
