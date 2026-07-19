@@ -6,29 +6,23 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-18
-- 运行时间：2026-07-18 21:16:07 UTC
+- 最新运行日期：2026-07-19
+- 运行时间：2026-07-19 20:17:51 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：3
+- 本次总论文数：1
+- 精读区：1
 - 速读区：0
 
 ### 今日简报（AI）
-今日精读两篇前沿论文，聚焦生成式AI中反事实推理与开源模型生态。  
-高分研究揭示扩散模型通过反事实干预生成罕见概念的新路径，并实证分析了开源艺术模型社区创作者的协作模式。  
-建议创作者关注反事实生成技术，以解锁更可控的罕见视觉创作。
-- 详情：[/202607/18/README](/202607/18/README)
+今日精读了一篇满分论文，聚焦于用自适应缓存技术加速视频生成。
+最值得关注的方向是：通过智能调整缓存策略，显著提升视频扩散模型的推理效率。
+建议开发者或研究人员关注该方法在实时视频生成与资源受限场景中的落地潜力。
+- 详情：[/202607/19/README](/202607/19/README)
 
 ### 精读区论文标签
-1. [Rare Concept Generation via Counterfactual Inference in Diffusion Models](/202607/18/2607.14765v1-rare-concept-generation-via-counterfactual-inference-in-diffusion-models)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散模型的反事实推断稀有概念生成
-2. [Navigating the Open-Source Model Ecosystem: An Empirical Study of Creator Practices in Artistic Image Generation](/202607/18/2607.10538v1-navigating-the-open-source-model-ecosystem-an-empirical-study-of-creator-practices-in-artistic-image-generation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：开源图像生成生态中创作者实践研究
-3. [Uni-AdaVD: Universal Concept Erasure for Visual Generation via Orthogonal Value Decomposition](/202607/18/2607.14521v1-uni-adavd-universal-concept-erasure-for-visual-generation-via-orthogonal-value-decomposition)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：视觉生成模型的概念擦除框架
+1. [ACID: Adaptive Caching for vIDeo generation](/202607/19/2607.12358v1-acid-adaptive-caching-for-video-generation)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：自适应缓存加速视频扩散模型推理，直接提升扩散模型效率
 
 ### 速读区论文标签
 - 本次无速读推荐。
