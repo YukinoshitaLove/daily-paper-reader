@@ -6,52 +6,82 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-20
-- 运行时间：2026-07-20 21:25:50 UTC
+- 最新运行日期：2026-07-21
+- 运行时间：2026-07-21 21:53:20 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：6
-- 速读区：4
+- 本次总论文数：20
+- 精读区：11
+- 速读区：9
 
 ### 今日简报（AI）
-今日精选10篇论文，聚焦图像去模糊新框架与扩散模型前沿进展。  
-值得关注的是真实场景去模糊的灵活数据采集方法，以及扩散模型在混合权重估计上的鲁棒性。  
-下一步建议读者体验GS-RealBlur的开源工具，并关注扩散模型加速技术的最新突破。
-- 详情：[/202607/20/README](/202607/20/README)
+今日精读两篇满分论文，聚焦半监督条件扩散的标签增强策略与像素空间扩散Transformer的生成效率突破，并速览桥匹配对齐、布局推理可控生成及半导体超分缺陷检测。  
+最值得关注：用标签增强让扩散模型在极少标注下实现高质量条件生成，以及像素空间Transformer在加速扩散的同时保持保真度。  
+下一步不妨将标签增强思路迁移到你手头的生成任务上，或比对桥匹配对齐方法在图像翻译中的性能上限。
+- 详情：[/202607/21/README](/202607/21/README)
 
 ### 精读区论文标签
-1. [GS-RealBlur: A Flexible Data Acquisition Framework for Real-World Image Deblurring](/202607/20/2607.15401v1-gs-realblur-a-flexible-data-acquisition-framework-for-real-world-image-deblurring)  
+1. [Semi-Supervised Conditional Diffusion via Label Augmentation](/202607/21/2607.16685v1-semi-supervised-conditional-diffusion-via-label-augmentation)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：提出一种通过为无标签数据分配平凡标签的半监督条件扩散学习方法。
+2. [Pixel-Space Diffusion Transformers](/202607/21/2607.17585v1-pixel-space-diffusion-transformers)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：用于高分辨率图像合成的像素空间扩散变换器
+3. [Rarity-Aware Discrete Diffusion with Spatially Consistent Decoding for Photo-Realistic Image Super-Resolution](/202607/21/2607.17612v1-rarity-aware-discrete-diffusion-with-spatially-consistent-decoding-for-photo-realistic-image-super-resolution)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：使用离散扩散模型进行真实感图像超分辨率
+4. [CoBind: Stage-Aware Compositional Binding for Training-Free Text-to-Image Generation](/202607/21/2607.16307v1-cobind-stage-aware-compositional-binding-for-training-free-text-to-image-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：真实世界图像去模糊的数据采集框架
-2. [Diffusion models recover accurate mixture weights despite score function insensitivity](/202607/20/2607.15485v1-diffusion-models-recover-accurate-mixture-weights-despite-score-function-insensitivity)  
+   evidence：面向扩散文本到图像生成的无需训练的组合绑定方法
+5. [The Devil is in the Dark Pixels: Toward Brightness Bias-Robust Denoising](/202607/21/2607.16320v1-the-devil-is-in-the-dark-pixels-toward-brightness-bias-robust-denoising)  
    标签：评分：9.0/10、query:real-ir
-   evidence：理论分析扩散模型如何恢复混合权重，增进了对基于分数生成模型的理解。
-3. [SPEED: One-Step Pixel Diffusion for High-quality Video Frame Interpolation](/202607/20/2607.15585v1-speed-one-step-pixel-diffusion-for-high-quality-video-frame-interpolation)  
+   evidence：解决图像去噪中的亮度偏差问题，核心图像修复任务
+6. [Twisted Schrödinger Bridge Matching](/202607/21/2607.16987v1-twisted-schrdinger-bridge-matching)  
    标签：评分：9.0/10、query:real-ir
-   evidence：提出一步像素扩散框架用于视频帧插值，属于视频恢复任务。
-4. [WREN: Low Light Image Enhancement Using Retinex theory-based Double U-Net-like Structures](/202607/20/2607.15604v1-wren-low-light-image-enhancement-using-retinex-theory-based-double-u-net-like-structures)  
+   evidence：将基于扩散的薛定谔桥模型扩展至扭曲布朗运动，用于生成建模。
+7. [STBridge: Shared-Target Alignment for Bridging Understanding and Generation in UMMs](/202607/21/2607.17140v1-stbridge-shared-target-alignment-for-bridging-understanding-and-generation-in-umms)  
    标签：评分：9.0/10、query:real-ir
-   evidence：提出基于Retinex理论和双U-Net的低光图像增强网络，直接解决图像恢复问题。
-5. [Efficient Difficulty-Aware Dynamic Routing for Diffusion-Based Real-World Image Super-Resolution](/202607/20/2607.15711v1-efficient-difficulty-aware-dynamic-routing-for-diffusion-based-real-world-image-super-resolution)  
+   evidence：解决图像编辑中的理解-生成对齐差距
+8. [Coarse-to-fine Framework for Generative MEF via Implicit Neural Representation](/202607/21/2607.17611v1-coarse-to-fine-framework-for-generative-mef-via-implicit-neural-representation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散的真实图像超分辨率，结合难度感知动态路由
-6. [StructGen: Disambiguating Multi-Reference Image Generation via Structured Context Modeling](/202607/20/2607.15619v1-structgen-disambiguating-multi-reference-image-generation-via-structured-context-modeling)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：通过结构化上下文建模的多参考图像生成
+   evidence：利用隐式神经表示的生成式多曝光融合框架，用于图像复原。
+9. [MixDiffusion: Mixing Diffusion-based Uni-condition Text-to-Image Generation Models for Multi-condition Image Synthesis](/202607/21/2607.17634v1-mixdiffusion-mixing-diffusion-based-uni-condition-text-to-image-generation-models-for-multi-condition-image-synthesis)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：使用扩散模型的无需训练多条件文本到图像生成
+10. [Consistent Feature Transport for Image Relighting](/202607/21/2607.17833v1-consistent-feature-transport-for-image-relighting)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于扩散的图像重光照作为光照特征传输
+11. [DiFA: Inference-Time Forward-Process Alignment for Diffusion Models](/202607/21/2607.17972v1-difa-inference-time-forward-process-alignment-for-diffusion-models)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：扩散模型的无需训练推理时对齐方法
 
 ### 速读区论文标签
-1. [DiTango: Cost-Effective Parallel Diffusion Generation with Selective Attention State Reuse](/202607/20/2607.15650v1-ditango-cost-effective-parallel-diffusion-generation-with-selective-attention-state-reuse)  
+1. [A${}^2$BM: Alignment-Aware Bridge Matching for Image-to-Image Translation](/202607/21/2607.16294v1-a2bm-alignment-aware-bridge-matching-for-image-to-image-translation)  
    标签：评分：8.0/10、query:real-ir
-   evidence：通过选择性注意力状态重用来加速并行扩散生成
-2. [Seeing the End at Step Zero: Accelerating Diffusion MLLMs via MLP Sparsity-Aware Truncation](/202607/20/2607.14557v1-seeing-the-end-at-step-zero-accelerating-diffusion-mllms-via-mlp-sparsity-aware-truncation)  
+   evidence：用于图像翻译的桥匹配，扩展扩散模型
+2. [Think, Plan, Paint: Layout-Aware Reasoning for Controllable Image Generation in Unified Models](/202607/21/2607.16409v1-think-plan-paint-layout-aware-reasoning-for-controllable-image-generation-in-unified-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于布局推理的可控图像生成
+3. [Does Super-Resolution Preserve Defect Evidence? A Low-False-Call Benchmark for Semiconductor Inspection](/202607/21/2607.17401v1-does-super-resolution-preserve-defect-evidence-a-low-false-call-benchmark-for-semiconductor-inspection)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：面向半导体缺陷检测的超分辨率
+4. [Feature-Guided Diffusion for Non-Differentiable Inverse Rendering](/202607/21/2607.17411v1-feature-guided-diffusion-for-non-differentiable-inverse-rendering)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：使用特征引导扩散进行黑盒逆渲染，无需可微渲染器。
+5. [FlowMimic: Mask-free Visual Editing and Generation with Pixel-pair Warped Flow Field for Online Video Editing Data Generation and Modality Mimicry](/202607/21/2607.18227v1-flowmimic-mask-free-visual-editing-and-generation-with-pixel-pair-warped-flow-field-for-online-video-editing-data-generation-and-modality-mimicry)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：无掩码的视频与图像视觉编辑与生成
+6. [Semi-Supervised Conditional Generative Learning through Stochastic Interpolation and Sufficient Representations](/202607/21/2607.16725v1-semi-supervised-conditional-generative-learning-through-stochastic-interpolation-and-sufficient-representations)  
    标签：评分：7.0/10、query:real-ir
-   evidence：通过MLP稀疏性早期检测扩散多模态大语言模型的语义边界
-3. [DSTAR: Accelerating Diffusion Transformers via Spatial and Temporal Redundancy Reduction](/202607/20/2607.15846v1-dstar-accelerating-diffusion-transformers-via-spatial-and-temporal-redundancy-reduction)  
+   evidence：通过随机插值的半监督条件生成学习
+7. [Cross-Branch Conflict as a Shield: Safeguarding Facial Identities in Unified Multimodal Image Editing](/202607/21/2607.16898v1-cross-branch-conflict-as-a-shield-safeguarding-facial-identities-in-unified-multimodal-image-editing)  
    标签：评分：7.0/10、query:real-ir
-   evidence：加速扩散Transformer推理，用于生成与编辑
-4. [PE-Field 4D: Video Generation Models as Canvas](/202607/20/2607.15667v1-pe-field-4d-video-generation-models-as-canvas)  
+   evidence：保护人脸身份免遭统一多模态图像编辑的未授权篡改
+8. [Iterated graph Laplacian for image restoration problems](/202607/21/2607.17313v1-iterated-graph-laplacian-for-image-restoration-problems)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：使用迭代图拉普拉斯正则化的图像恢复方法，经典方法
+9. [Test-Time Registers as Global Priors for Tokenized Image Generation](/202607/21/2607.16824v1-test-time-registers-as-global-priors-for-tokenized-image-generation)  
    标签：评分：6.0/10、query:real-ir
-   evidence：使用扩散Transformer进行几何感知控制的视频生成
+   evidence：使用测试时寄存器作为分词图像生成的全局先验
 
 
 <div class="dpr-home-promo-card">
