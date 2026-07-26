@@ -6,34 +6,27 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-25
-- 运行时间：2026-07-25 20:03:38 UTC
+- 最新运行日期：2026-07-26
+- 运行时间：2026-07-26 20:13:09 UTC
 - 运行状态：成功
-- 本次总论文数：4
+- 本次总论文数：2
 - 精读区：2
-- 速读区：2
+- 速读区：0
 
 ### 今日简报（AI）
-今日精读两篇9分论文，聚焦自进化因果记忆的图像修复智能体与物理引导的偏振估计新方法。  
-最值得关注的是因果推理赋予AI修复模型的持续适应能力，以及扩散模型在偏振重建中的稳健突破。  
-建议先快速浏览两篇速读论文的图表，再深入精读高分工作的方法与实验逻辑。
-- 详情：[/202607/25/README](/202607/25/README)
+今日精读了两篇顶会预印本，聚焦图像去模糊与显微成像增强。最值得关注的是《The RealDefocus Benchmark》提出首个真实散焦去模糊基准，以及《Physics-Informed Deep Learning》用物理约束实现荧光显微跨模态超分辨。推荐读者进一步查阅前者开源的数据集与评测协议，或将物理先验引入自己的成像修复任务。
+- 详情：[/202607/26/README](/202607/26/README)
 
 ### 精读区论文标签
-1. [Causal-AgentIR: Self-Evolving Causal Memory for Adaptive Image Restoration Agents](/202607/25/2607.21125v1-causal-agentir-self-evolving-causal-memory-for-adaptive-image-restoration-agents)  
+1. [The RealDefocus Benchmark for Defocus Deblurring](/202607/26/2607.21078v1-the-realdefocus-benchmark-for-defocus-deblurring)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：为去焦去模糊任务提供基准，属于图像复原
+2. [Physics-Informed Deep Learning Model for Cross-Modality Super-Resolution in Fluorescence Microscopy](/202607/26/2607.21190v1-physics-informed-deep-learning-model-for-cross-modality-super-resolution-in-fluorescence-microscopy)  
    标签：评分：9.0/10、query:real-ir
-   evidence：自适应图像修复智体
-2. [Stokes-Informed Diffusion for Robust Linear Polarization Estimation](/202607/25/2607.21239v1-stokes-informed-diffusion-for-robust-linear-polarization-estimation)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于斯托克斯信息的扩散框架用于偏振估计
+   evidence：物理信息引导的生成对抗网络用于显微镜跨模态超分辨率
 
 ### 速读区论文标签
-1. [On the Failure of Boundary-Seeking Distillation in Bottlenecked Generative Architectures](/202607/25/2607.15919v1-on-the-failure-of-boundary-seeking-distillation-in-bottlenecked-generative-architectures)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：自编码器知识蒸馏，生成架构
-2. [ERank in Latent Space as an Image-Complexity and Richness Measure](/202607/25/2607.19315v1-erank-in-latent-space-as-an-image-complexity-and-richness-measure)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：提出一种能改进超分辨率训练的数据选择度量
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
