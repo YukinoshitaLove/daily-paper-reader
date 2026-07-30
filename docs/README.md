@@ -6,61 +6,52 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-29
-- 运行时间：2026-07-29 21:09:40 UTC
+- 最新运行日期：2026-07-30
+- 运行时间：2026-07-30 21:42:41 UTC
 - 运行状态：成功
-- 本次总论文数：13
+- 本次总论文数：10
 - 精读区：6
-- 速读区：7
+- 速读区：4
 
 ### 今日简报（AI）
-今日聚焦图像生成新突破：精读两篇满分论文分别提出ScaleResfusion的残差修正流与免噪一步LoRA扩散先验，大幅提升修复质量与效率。
-最值得关注的方向是残差向量场引导的流匹配与任务驱动的一步式扩散先验，它们将扩散模型推向更稳定、更可控的应用前沿。
-建议读者从这两篇满分论文入手，把握扩散模型在图像修复中从多步采样到一步生成的范式转变。
-- 详情：[/202607/29/README](/202607/29/README)
+今日精读聚焦视频影子去除的两项高分突破，速读则涵盖流图学习与生成模型的新思路。  
+WildShadowRemover 和 FreeShadow 分别用细节保留扩散模型与免训练光照迁移，实现了逼真的光影复原。  
+想亲手修复老照片或视频里的影子？去试试这些扩散模型驱动的免训练方案吧。
+- 详情：[/202607/30/README](/202607/30/README)
 
 ### 精读区论文标签
-1. [ScaleResfusion: Residual Rectified Flow based on Residual Vector Field](/202607/29/2607.25275v1-scaleresfusion-residual-rectified-flow-based-on-residual-vector-field)  
+1. [WildShadowRemover: In-the-Wild Video Shadow Removal via Detail-Preserving Video Diffusion Models](/202607/30/2607.26203v1-wildshadowremover-in-the-wild-video-shadow-removal-via-detail-preserving-video-diffusion-models)  
    标签：评分：10.0/10、query:real-ir
-   evidence：提出一种基于预训练整流流模型的可扩展扩散框架，用于真实图像复原
-2. [Noise-Free One-Step LoRA for Task-Driven Image Restoration with Diffusion Priors](/202607/29/2607.25390v1-noise-free-one-step-lora-for-task-driven-image-restoration-with-diffusion-priors)  
+   evidence：通过细节保留调制将视频扩散模型应用于视频阴影去除
+2. [FreeShadow: Training-Free Shadow Removal via Illumination Transfer and Selective Content Preservation in Diffusion Models](/202607/30/2607.26715v1-freeshadow-training-free-shadow-removal-via-illumination-transfer-and-selective-content-preservation-in-diffusion-models)  
    标签：评分：10.0/10、query:real-ir
-   evidence：用于任务驱动图像修复的无噪声一步扩散先验
-3. [Explicit Layer Modeling for Video Object Insertion and Layer Decomposition](/202607/29/2607.25802v1-explicit-layer-modeling-for-video-object-insertion-and-layer-decomposition)  
+   evidence：基于预训练扩散模型的无需训练阴影去除
+3. [Dual Inversion for Text-to-Image Diffusion Models: From Both Prompt and Noise Perspectives](/202607/30/2607.26735v1-dual-inversion-for-text-to-image-diffusion-models-from-both-prompt-and-noise-perspectives)  
    标签：评分：10.0/10、query:real-ir
-   evidence：显式视频图层建模用于物体插入与分解，推进视频编辑。
-4. [Small, Bias-Free, Blind and Convolutional Denoiser: A compact ConvNeXt U-Net for blind Gaussian color-image denoising](/202607/29/2607.22793v1-small-bias-free-blind-and-convolutional-denoiser-a-compact-convnext-u-net-for-blind-gaussian-color-image-denoising)  
+   evidence：提示反演…文本到图像扩散模型
+4. [A Relaxed Gradient Step Denoiser for Splitting Methods in Poisson Inverse Problems](/202607/30/2607.26864v1-a-relaxed-gradient-step-denoiser-for-splitting-methods-in-poisson-inverse-problems)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：即插即用方法…成像逆问题…盲去噪
+5. [Parallel Decoding Distillation for Fast Image and Video Generation](/202607/30/2607.26004v1-parallel-decoding-distillation-for-fast-image-and-video-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：构建紧凑的无偏置ConvNeXt U-Net用于盲高斯彩色图像去噪
-5. [LoTA-N2N: Local Trace Adaptation for Zero-Shot Self-Supervised Image Denoising](/202607/29/2607.24135v1-lota-n2n-local-trace-adaptation-for-zero-shot-self-supervised-image-denoising)  
+   evidence：针对图像和视频生成的扩散/流匹配模型的快速推理蒸馏方法
+6. [LumaGuide: Distribution Shaping for Training-Free HDR Generation in Diffusion Models](/202607/30/2607.26237v1-lumaguide-distribution-shaping-for-training-free-hdr-generation-in-diffusion-models)  
    标签：评分：9.0/10、query:real-ir
-   evidence：提出局部迹适应用于零样本自监督图像去噪
-6. [Instruction-based Image Editing: A Survey on Data, Models, Evaluation, and Applications](/202607/29/2607.25642v1-instruction-based-image-editing-a-survey-on-data-models-evaluation-and-applications)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：关于指令式图像编辑的全面综述，涵盖数据、模型、评估和应用
+   evidence：通过扩散模型分布塑形实现无需训练的HDR生成
 
 ### 速读区论文标签
-1. [AI-interpreted Optical Scattering for Robust and Focal Depth-Aware Imaging](/202607/29/2607.22867v1-ai-interpreted-optical-scattering-for-robust-and-focal-depth-aware-imaging)  
+1. [Flow Map Learning via Nongradient Vector Flow](/202607/30/2607.26398v1-flow-map-learning-via-nongradient-vector-flow)  
    标签：评分：8.0/10、query:real-ir
-   evidence：使用VAE进行散射图像重建，属于基于生成模型的图像复原。
-2. [OmniMate: Open-Ended Real-Time Streaming Audio-Visual Generation for Interactive Avatars](/202607/29/2607.23023v2-omnimate-open-ended-real-time-streaming-audio-visual-generation-for-interactive-avatars)  
+   evidence：学习流映射以加速扩散/流模型采样
+2. [Amortized Moment Matching for Visual Generation](/202607/30/2607.26860v1-amortized-moment-matching-for-visual-generation)  
    标签：评分：8.0/10、query:real-ir
-   evidence：基于扩散模型的实时流式音视频生成用于交互式虚拟形象。
-3. [UniGen-AR: Unifying Visual Generation with Auto-Regressive Modeling](/202607/29/2607.24157v1-unigen-ar-unifying-visual-generation-with-auto-regressive-modeling)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：UniGen-AR通过自回归建模统一视觉生成，包括编辑和修复任务
-4. [Can Deep Generative Models Reproduce Non-Stationary Gaussian Random Fields?](/202607/29/2607.25929v1-can-deep-generative-models-reproduce-non-stationary-gaussian-random-fields)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：评估包括DDPM在内的深度生成模型重现非平稳高斯随机场的能力。
-5. [Conjugate Gradient Unrolled Network with PSF Conditioning for Non-Diagonal Data Fidelity in CASSI Reconstruction](/202607/29/2607.20138v1-conjugate-gradient-unrolled-network-with-psf-conditioning-for-non-diagonal-data-fidelity-in-cassi-reconstruction)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：提出共轭梯度展开网络解决CASSI图像重建中的非对角数据保真度问题，用于图像复原。
-6. [Fashion-3DLR: A Controllable 3D Garment Generation Using Pairwise Fashion Elements for Intelligent Design](/202607/29/2607.23189v1-fashion-3dlr-a-controllable-3d-garment-generation-using-pairwise-fashion-elements-for-intelligent-design)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：使用成对时尚元素进行3D服装生成，属于生成模型应用。
-7. [Perturbation-Aware Diffusion-Guided Hybrid Segmentation for Robust and Annotation-Efficient Plant Stress Phenotyping](/202607/29/2607.23680v1-perturbation-aware-diffusion-guided-hybrid-segmentation-for-robust-and-annotation-efficient-plant-stress-phenotyping)  
+   evidence：摊销矩匹配损失用于训练扩散模型进行视觉生成
+3. [JarvisHub: An Open Harness for Canvas-Native Multimodal Creative Agents](/202607/30/2607.23588v1-jarvishub-an-open-harness-for-canvas-native-multimodal-creative-agents)  
    标签：评分：6.0/10、query:real-ir
-   evidence：扩散模型用于精化农业图像分割掩码。
+   evidence：支持长程多模态创意编辑和生成工作流
+4. [Anchoring and Steering Diffusion: Enhancing the Faithfulness of Text-to-Image Generation at Inference Time](/202607/30/2607.26647v1-anchoring-and-steering-diffusion-enhancing-the-faithfulness-of-text-to-image-generation-at-inference-time)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：推理时锚定与引导提升扩散文图对齐
 
 
 <div class="dpr-home-promo-card">
