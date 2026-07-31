@@ -6,52 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-30
-- 运行时间：2026-07-30 21:42:41 UTC
+- 最新运行日期：2026-07-31
+- 运行时间：2026-07-31 21:40:13 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：6
-- 速读区：4
+- 本次总论文数：4
+- 精读区：2
+- 速读区：2
 
 ### 今日简报（AI）
-今日精读聚焦视频影子去除的两项高分突破，速读则涵盖流图学习与生成模型的新思路。  
-WildShadowRemover 和 FreeShadow 分别用细节保留扩散模型与免训练光照迁移，实现了逼真的光影复原。  
-想亲手修复老照片或视频里的影子？去试试这些扩散模型驱动的免训练方案吧。
-- 详情：[/202607/30/README](/202607/30/README)
+今天精选了4篇前沿论文，精读两篇9.0高分的遥感图像复原方法，均致力于解决“全能修复”中的核心难题。  
+最值得关注的是，两篇精读文章不约而同地聚焦“如何高效融合多退化类型的复原能力”，分别用专家分工和歧义修正来化解传统冲突，结论扎实。  
+如果你对图像处理感兴趣，建议优先阅读这两篇高分复原论文，快速掌握当前“多任务统筹”的技术新思路。
+- 详情：[/202607/31/README](/202607/31/README)
 
 ### 精读区论文标签
-1. [WildShadowRemover: In-the-Wild Video Shadow Removal via Detail-Preserving Video Diffusion Models](/202607/30/2607.26203v1-wildshadowremover-in-the-wild-video-shadow-removal-via-detail-preserving-video-diffusion-models)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：通过细节保留调制将视频扩散模型应用于视频阴影去除
-2. [FreeShadow: Training-Free Shadow Removal via Illumination Transfer and Selective Content Preservation in Diffusion Models](/202607/30/2607.26715v1-freeshadow-training-free-shadow-removal-via-illumination-transfer-and-selective-content-preservation-in-diffusion-models)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：基于预训练扩散模型的无需训练阴影去除
-3. [Dual Inversion for Text-to-Image Diffusion Models: From Both Prompt and Noise Perspectives](/202607/30/2607.26735v1-dual-inversion-for-text-to-image-diffusion-models-from-both-prompt-and-noise-perspectives)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：提示反演…文本到图像扩散模型
-4. [A Relaxed Gradient Step Denoiser for Splitting Methods in Poisson Inverse Problems](/202607/30/2607.26864v1-a-relaxed-gradient-step-denoiser-for-splitting-methods-in-poisson-inverse-problems)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：即插即用方法…成像逆问题…盲去噪
-5. [Parallel Decoding Distillation for Fast Image and Video Generation](/202607/30/2607.26004v1-parallel-decoding-distillation-for-fast-image-and-video-generation)  
+1. [CoRE-UIR: Prior-guided common and residual experts for efficient all-in-one remote sensing image restoration](/202607/31/2607.27898v1-core-uir-prior-guided-common-and-residual-experts-for-efficient-all-in-one-remote-sensing-image-restoration)  
    标签：评分：9.0/10、query:real-ir
-   evidence：针对图像和视频生成的扩散/流匹配模型的快速推理蒸馏方法
-6. [LumaGuide: Distribution Shaping for Training-Free HDR Generation in Diffusion Models](/202607/30/2607.26237v1-lumaguide-distribution-shaping-for-training-free-hdr-generation-in-diffusion-models)  
+   evidence：基于通用与残差专家的全功能遥感图像复原
+2. [What to Remove, What to Preserve: Dual-Ambiguity Rectification for All-in-One Image Restoration](/202607/31/2607.28526v1-what-to-remove-what-to-preserve-dual-ambiguity-rectification-for-all-in-one-image-restoration)  
    标签：评分：9.0/10、query:real-ir
-   evidence：通过扩散模型分布塑形实现无需训练的HDR生成
+   evidence：双歧义校正网络实现统一图像修复
 
 ### 速读区论文标签
-1. [Flow Map Learning via Nongradient Vector Flow](/202607/30/2607.26398v1-flow-map-learning-via-nongradient-vector-flow)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：学习流映射以加速扩散/流模型采样
-2. [Amortized Moment Matching for Visual Generation](/202607/30/2607.26860v1-amortized-moment-matching-for-visual-generation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：摊销矩匹配损失用于训练扩散模型进行视觉生成
-3. [JarvisHub: An Open Harness for Canvas-Native Multimodal Creative Agents](/202607/30/2607.23588v1-jarvishub-an-open-harness-for-canvas-native-multimodal-creative-agents)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：支持长程多模态创意编辑和生成工作流
-4. [Anchoring and Steering Diffusion: Enhancing the Faithfulness of Text-to-Image Generation at Inference Time](/202607/30/2607.26647v1-anchoring-and-steering-diffusion-enhancing-the-faithfulness-of-text-to-image-generation-at-inference-time)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：推理时锚定与引导提升扩散文图对齐
+1. [GenSplatCodec: Feed-Forward Gaussian Splatting Compression via One-Step Diffusion](/202607/31/2607.24403v1-gensplatcodec-feed-forward-gaussian-splatting-compression-via-one-step-diffusion)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：一步扩散用于前馈高斯压缩
+2. [Decoder-Guided Lossy Contour Coding Via Anchor Refinement](/202607/31/2607.26426v1-decoder-guided-lossy-contour-coding-via-anchor-refinement)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：轮廓编码作为图像超分辨率的结构边信息
 
 
 <div class="dpr-home-promo-card">
