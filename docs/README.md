@@ -6,34 +6,40 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-31
-- 运行时间：2026-07-31 21:40:13 UTC
+- 最新运行日期：2026-08-01
+- 运行时间：2026-08-01 20:09:31 UTC
 - 运行状态：成功
-- 本次总论文数：4
+- 本次总论文数：6
 - 精读区：2
-- 速读区：2
+- 速读区：4
 
 ### 今日简报（AI）
-今天精选了4篇前沿论文，精读两篇9.0高分的遥感图像复原方法，均致力于解决“全能修复”中的核心难题。  
-最值得关注的是，两篇精读文章不约而同地聚焦“如何高效融合多退化类型的复原能力”，分别用专家分工和歧义修正来化解传统冲突，结论扎实。  
-如果你对图像处理感兴趣，建议优先阅读这两篇高分复原论文，快速掌握当前“多任务统筹”的技术新思路。
-- 详情：[/202607/31/README](/202607/31/README)
+1) 今日精读两篇高分论文，聚焦图像生成与增强的精细控制。
+2) 最值得看：PRISM用图像自奖励机制自动优化生成提示，显著提升文生图质量；另一项工作通过协同特征聚合，同时提升人脸超分辨率与重识别鲁棒性。
+3) 不妨从PRISM入手，它通过模型自迭代改进的思路可轻松迁移到代码或文案生成任务。
+- 详情：[/202608/01/README](/202608/01/README)
 
 ### 精读区论文标签
-1. [CoRE-UIR: Prior-guided common and residual experts for efficient all-in-one remote sensing image restoration](/202607/31/2607.27898v1-core-uir-prior-guided-common-and-residual-experts-for-efficient-all-in-one-remote-sensing-image-restoration)  
+1. [PRISM: Prompt Refinement via Image-grounded Self-rewarding Mechanism for Text-to-Image Generation](/202608/01/2607.24353v1-prism-prompt-refinement-via-image-grounded-self-rewarding-mechanism-for-text-to-image-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于通用与残差专家的全功能遥感图像复原
-2. [What to Remove, What to Preserve: Dual-Ambiguity Rectification for All-in-One Image Restoration](/202607/31/2607.28526v1-what-to-remove-what-to-preserve-dual-ambiguity-rectification-for-all-in-one-image-restoration)  
+   evidence：基于图像自奖励的文本到图像生成提示优化
+2. [Collaborative Feature Aggregation for Face Super-Resolution and Robust Re-Identification](/202608/01/2607.28130v1-collaborative-feature-aggregation-for-face-super-resolution-and-robust-re-identification)  
    标签：评分：9.0/10、query:real-ir
-   evidence：双歧义校正网络实现统一图像修复
+   evidence：基于协作特征聚合的人脸超分辨率
 
 ### 速读区论文标签
-1. [GenSplatCodec: Feed-Forward Gaussian Splatting Compression via One-Step Diffusion](/202607/31/2607.24403v1-gensplatcodec-feed-forward-gaussian-splatting-compression-via-one-step-diffusion)  
+1. [A Reference-Free Framework for Evaluating Single-Frame ISP Pipelines](/202608/01/2607.23321v1-a-reference-free-framework-for-evaluating-single-frame-isp-pipelines)  
    标签：评分：7.0/10、query:real-ir
-   evidence：一步扩散用于前馈高斯压缩
-2. [Decoder-Guided Lossy Contour Coding Via Anchor Refinement](/202607/31/2607.26426v1-decoder-guided-lossy-contour-coding-via-anchor-refinement)  
+   evidence：针对相机管道低层图像处理伪影的盲质量评估
+2. [Contrastive Parameter Disentanglement for Multi-modal Remote Sensing Image Generation](/202608/01/2607.23673v1-contrastive-parameter-disentanglement-for-multi-modal-remote-sensing-image-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：轮廓编码作为图像超分辨率的结构边信息
+   evidence：对比参数解耦用于多模态图像生成
+3. [Explorative Modeling: Unlocking a Third Pretraining Axis and End-to-End Generation](/202608/01/2607.27372v1-explorative-modeling-unlocking-a-third-pretraining-axis-and-end-to-end-generation)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：端到端生成建模范式
+4. [ConFusion: Continuous Fusion Space Learning for Fine-Grained Controllable Infrared and Visible Image Fusion](/202608/01/2607.23600v1-confusion-continuous-fusion-space-learning-for-fine-grained-controllable-infrared-and-visible-image-fusion)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：连续融合空间学习实现可控红外-可见光图像融合
 
 
 <div class="dpr-home-promo-card">
