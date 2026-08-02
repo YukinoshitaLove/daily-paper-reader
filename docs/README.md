@@ -6,40 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-01
-- 运行时间：2026-08-01 20:09:31 UTC
+- 最新运行日期：2026-08-02
+- 运行时间：2026-08-02 20:14:11 UTC
 - 运行状态：成功
-- 本次总论文数：6
+- 本次总论文数：5
 - 精读区：2
-- 速读区：4
+- 速读区：3
 
 ### 今日简报（AI）
-1) 今日精读两篇高分论文，聚焦图像生成与增强的精细控制。
-2) 最值得看：PRISM用图像自奖励机制自动优化生成提示，显著提升文生图质量；另一项工作通过协同特征聚合，同时提升人脸超分辨率与重识别鲁棒性。
-3) 不妨从PRISM入手，它通过模型自迭代改进的思路可轻松迁移到代码或文案生成任务。
-- 详情：[/202608/01/README](/202608/01/README)
+今日精读2篇、速读3篇，聚焦视觉扩散模型架构与推理加速。最值得关注Chimera混合视觉扩散Transformer与FeatFix缓存修正方案，分别刷新扩展效率与生成速度。建议普通读者优先跟踪高效扩散架构和缓存复用技术的后续进展。
+- 详情：[/202608/02/README](/202608/02/README)
 
 ### 精读区论文标签
-1. [PRISM: Prompt Refinement via Image-grounded Self-rewarding Mechanism for Text-to-Image Generation](/202608/01/2607.24353v1-prism-prompt-refinement-via-image-grounded-self-rewarding-mechanism-for-text-to-image-generation)  
+1. [Chimera: Designing and Chinchilla-Scaling Hybrid Visual Diffusion Transformers](/202608/02/2607.28611v1-chimera-designing-and-chinchilla-scaling-hybrid-visual-diffusion-transformers)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于图像自奖励的文本到图像生成提示优化
-2. [Collaborative Feature Aggregation for Face Super-Resolution and Robust Re-Identification](/202608/01/2607.28130v1-collaborative-feature-aggregation-for-face-super-resolution-and-robust-re-identification)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于协作特征聚合的人脸超分辨率
+   evidence：面向高分辨率图像与视频生成的混合视觉扩散Transformer
+2. [FeatFix: Reuse What You Verify through Local Exact-Feature Correction for Faster Cached Diffusion Inference](/202608/02/2607.27842v1-featfix-reuse-what-you-verify-through-local-exact-feature-correction-for-faster-cached-diffusion-inference)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：通过精确特征校正加速缓存扩散推理的无训练方法
 
 ### 速读区论文标签
-1. [A Reference-Free Framework for Evaluating Single-Frame ISP Pipelines](/202608/01/2607.23321v1-a-reference-free-framework-for-evaluating-single-frame-isp-pipelines)  
+1. [CameraAnything: Refilming Videos with Arbitrary Camera Control](/202608/02/2607.24591v1-cameraanything-refilming-videos-with-arbitrary-camera-control)  
    标签：评分：7.0/10、query:real-ir
-   evidence：针对相机管道低层图像处理伪影的盲质量评估
-2. [Contrastive Parameter Disentanglement for Multi-modal Remote Sensing Image Generation](/202608/01/2607.23673v1-contrastive-parameter-disentanglement-for-multi-modal-remote-sensing-image-generation)  
+   evidence：统一相机控制视频编辑，与图像/视频编辑模型密切相关
+2. [LaP-Forensics: Latent-Pixel Consistency Guided Multimodal Reasoning for Deepfake Detection](/202608/02/2607.25962v1-lap-forensics-latent-pixel-consistency-guided-multimodal-reasoning-for-deepfake-detection)  
    标签：评分：7.0/10、query:real-ir
-   evidence：对比参数解耦用于多模态图像生成
-3. [Explorative Modeling: Unlocking a Third Pretraining Axis and End-to-End Generation](/202608/01/2607.27372v1-explorative-modeling-unlocking-a-third-pretraining-axis-and-end-to-end-generation)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：端到端生成建模范式
-4. [ConFusion: Continuous Fusion Space Learning for Fine-Grained Controllable Infrared and Visible Image Fusion](/202608/01/2607.23600v1-confusion-continuous-fusion-space-learning-for-fine-grained-controllable-infrared-and-visible-image-fusion)  
+   evidence：利用冻结的Stable Diffusion DDIM反演重建作为取证参考，属于扩散模型应用。
+3. [Post-FWI Injection of Learned Priors Using a Flow Matching Model](/202608/02/2607.23719v1-post-fwi-injection-of-learned-priors-using-a-flow-matching-model)  
    标签：评分：6.0/10、query:real-ir
-   evidence：连续融合空间学习实现可控红外-可见光图像融合
+   evidence：通过流匹配向不适定反问题注入学习先验，与生成式图像修复同调
 
 
 <div class="dpr-home-promo-card">
