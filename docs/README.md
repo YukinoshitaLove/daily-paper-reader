@@ -6,43 +6,56 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-09
-- 运行时间：2026-08-09 20:35:37 UTC
+- 最新运行日期：2026-08-10
+- 运行时间：2026-08-10 20:46:38 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：4
-- 速读区：3
+- 本次总论文数：12
+- 精读区：6
+- 速读区：6
 
 ### 今日简报（AI）
-今日聚焦病理图像超分辨率与盲人脸修复两篇高分精读，另速读偏振去马赛克、曲线结构生成等三篇。  
-最值得关注形态感知隐式超分网络（9.0）与几何对齐掩码自回归人脸修复（9.0），分别针对病理影像细节重建和遮挡人脸恢复。  
-建议普通读者优先关注医学图像增强与人脸修复的落地应用，留意几何对齐和形态先验的改进效果。
-- 详情：[/202608/09/README](/202608/09/README)
+今日共评阅12篇论文，精读6篇，其中两篇获9分高分，聚焦免训练人脸恢复与全能图像修复。最值得关注方向：波形结构锚定与频率校正扩散模型实现免训练人脸恢复，以及退化感知可变形令牌化统一多任务图像恢复。建议优先阅读两篇9分精读文章，再浏览速读中的扩散模型优化与恶劣天气去除策略。
+- 详情：[/202608/10/README](/202608/10/README)
 
 ### 精读区论文标签
-1. [Morphology-Aware Implicit Super-Resolution Network for Pathological Images](/202608/09/2608.03664v1-morphology-aware-implicit-super-resolution-network-for-pathological-images)  
+1. [WaveFreqAnchor: Wave-Structural Anchoring and Frequency Correction Diffusion for Training-Free Face Restoration](/202608/10/2608.06717v1-wavefreqanchor-wave-structural-anchoring-and-frequency-correction-diffusion-for-training-free-face-restoration)  
    标签：评分：9.0/10、query:real-ir
-   evidence：病理图像超分辨率与隐式神经表示
-2. [GeoMAR: Unleashing Geometrically Aligned Features for Masked Autoregressive Blind Face Restoration](/202608/09/2608.03923v1-geomar-unleashing-geometrically-aligned-features-for-masked-autoregressive-blind-face-restoration)  
+   evidence：免训练扩散人脸复原
+2. [Bend the Basics: Degradation-Aware Deformable Tokenization for All-in-One Image Restoration](/202608/10/2608.06832v1-bend-the-basics-degradation-aware-deformable-tokenization-for-all-in-one-image-restoration)  
    标签：评分：9.0/10、query:real-ir
-   evidence：盲脸恢复是图像恢复任务，提出几何对齐特征与掩码自回归细化
-3. [TASQ: Temporal-Adaptive Bit Sparsification Quantization for Diffusion Models](/202608/09/2608.03057v1-tasq-temporal-adaptive-bit-sparsification-quantization-for-diffusion-models)  
+   evidence：退化感知可变形分词的全能图像恢复方法，覆盖整个恢复流程
+3. [MaskFlow: Precise, Consistent and Seamless Regional Image Editing](/202608/10/2608.06929v1-maskflow-precise-consistent-and-seamless-regional-image-editing)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于掩码条件流匹配的区域图像编辑训练框架，实现精准一致且无缝的编辑
+4. [Local Epistemic Uncertainty Guided Active Sampling for Plug-and-play Diffusive Image Restoration](/202608/10/2608.06981v1-local-epistemic-uncertainty-guided-active-sampling-for-plug-and-play-diffusive-image-restoration)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于扩散模型的图像复原与主动采样
+5. [Test-Time Scaling for Safe Text-Guided Image Generation via Intermediate Clean Estimates](/202608/10/2608.03284v1-test-time-scaling-for-safe-text-guided-image-generation-via-intermediate-clean-estimates)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向扩散模型的量化方法，在去噪过程中降低比特运算量
-4. [Overcoming Attention Drift: Homogeneity-Heterogeneity Guided Feature Aggregation for Low-Light Remote Sensing Image Enhancement](/202608/09/2608.05843v1-overcoming-attention-drift-homogeneity-heterogeneity-guided-feature-aggregation-for-low-light-remote-sensing-image-enhancement)  
+   evidence：基于中间干净估计的扩散模型安全方法
+6. [Implicit Neural Speckle Denoising](/202608/10/2608.06574v1-implicit-neural-speckle-denoising)  
    标签：评分：8.0/10、query:real-ir
-   evidence：低光照遥感图像增强，一种结合基础模型先验的图像恢复任务
+   evidence：隐式神经表示用于散斑去噪
 
 ### 速读区论文标签
-1. [Quaternion Tensor Modeling for Joint Color-Polarization Demosaicking](/202608/09/2608.02144v1-quaternion-tensor-modeling-for-joint-color-polarization-demosaicking)  
+1. [Explore or Converge? Stage-Guided Per-Step Optimization for Diffusion Models](/202608/10/2608.06768v1-explore-or-converge-stage-guided-per-step-optimization-for-diffusion-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：扩散模型逐步优化训练策略
+2. [PAST: Prompt-Adaptive Sampling Termination for Efficient Diffusion Model](/202608/10/2608.06794v1-past-prompt-adaptive-sampling-termination-for-efficient-diffusion-model)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：扩散模型优化与自适应终止
+3. [Degradation-Aware Prompt Learning with Cross-Modal Compensation for Adverse Weather Removal](/202608/10/2608.06939v1-degradation-aware-prompt-learning-with-cross-modal-compensation-for-adverse-weather-removal)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：恶劣天气图像去除，跨模态提示，图像复原
+4. [HRDiT: Training-Free High-Resolution Image Generation with Off-the-Shelf Diffusion Transformer Models](/202608/10/2608.07003v1-hrdit-training-free-high-resolution-image-generation-with-off-the-shelf-diffusion-transformer-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：针对预训练扩散Transformer的高分辨率生成适配
+5. [JoyAI-Video-Edit: Real-Time Open-Ended Video Editing with Autoregressive Diffusion](/202608/10/2608.03974v1-joyai-video-edit-real-time-open-ended-video-editing-with-autoregressive-diffusion)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于四元数张量建模的彩色-偏振联合去马赛克
-2. [CSGen: A Multi-Domain Curvilinear Structure Generation Model via Hierarchical Multimodal Diffusion](/202608/09/2608.04655v1-csgen-a-multi-domain-curvilinear-structure-generation-model-via-hierarchical-multimodal-diffusion)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：层级多模态扩散实现可控曲线结构图像生成
-3. [CopyCat: Improving Fine-Grained Subject Consistency in Subject-to-Image Models within Seconds](/202608/09/2608.00674v1-copycat-improving-fine-grained-subject-consistency-in-subject-to-image-models-within-seconds)  
+   evidence：实时视频编辑，自回归扩散，编辑与生成模型
+6. [UniCycleFlow: Bidirectional Unpaired Image Translation with a Shared Rectified Flow](/202608/10/2608.06784v1-unicycleflow-bidirectional-unpaired-image-translation-with-a-shared-rectified-flow)  
    标签：评分：6.0/10、query:real-ir
-   evidence：主题到图像生成与细粒度一致性
+   evidence：基于修正流框架实现双向无配对图像转换，用共享速度场统一两个方向。
 
 
 <div class="dpr-home-promo-card">
