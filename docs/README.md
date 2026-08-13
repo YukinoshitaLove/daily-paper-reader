@@ -6,44 +6,46 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-12
-- 运行时间：2026-08-12 21:26:01 UTC
+- 最新运行日期：2026-08-13
+- 运行时间：2026-08-13 21:19:03 UTC
 - 运行状态：成功
 - 本次总论文数：8
-- 精读区：5
-- 速读区：3
+- 精读区：4
+- 速读区：4
 
 ### 今日简报（AI）
-今日精读聚焦图像恢复，水下增强与流匹配高效修复均获9分高分。最值得关注的是任务导向的水下图像恢复及感知一致的流匹配方法。建议优先精读这两篇，速读部分可略过低分项。
-- 详情：[/202608/12/README](/202608/12/README)
+今日精读聚焦成像逆问题的时空信息分配与高光谱全色锐化的双模态扩散先验，均获9.0高分；速读覆盖生成模型评估及手部编辑基准。  
+最值得关注：扩散模型在低层视觉中的应用（逆问题求解与高光谱融合）是当前高效方法的核心，评估工具则向可解释、可提示方向演进。  
+建议优先精读两篇高分论文，快速浏览其余三篇以把握评估与编辑的最新基准。
+- 详情：[/202608/13/README](/202608/13/README)
 
 ### 精读区论文标签
-1. [Degradation-Guided Underwater Image Restoration with Task-Oriented Latent Control](/202608/12/2608.08661v1-degradation-guided-underwater-image-restoration-with-task-oriented-latent-control)  
+1. [Making Every Step Count: Spatio-Temporal Information Allocation for Imaging Inverse Problems](/202608/13/2608.11747v1-making-every-step-count-spatio-temporal-information-allocation-for-imaging-inverse-problems)  
    标签：评分：9.0/10、query:real-ir
-   evidence：水下图像恢复，利用退化引导特征适应与任务导向潜在控制
-2. [Flow Straight to Reality: Perceptually Consistent Flow Matching for Efficient Image Restoration](/202608/12/2608.10544v1-flow-straight-to-reality-perceptually-consistent-flow-matching-for-efficient-image-restoration)  
+   evidence：基于流的生成式先验用于无训练成像逆问题，提出时空NFE分配策略
+2. [Dual Modality Prompted Diffusion Priors for Zero Shot Hyperspectral Pansharpening](/202608/13/2608.11748v1-dual-modality-prompted-diffusion-priors-for-zero-shot-hyperspectral-pansharpening)  
    标签：评分：9.0/10、query:real-ir
-   evidence：面向高效图像恢复的感知一致性流匹配，直接匹配恢复与生成模型结合的需求。
-3. [Structural Guidance for Unified Joint Demosaicing and Denoising](/202608/12/2608.09995v1-structural-guidance-for-unified-joint-demosaicing-and-denoising)  
+   evidence：扩散模型用于高光谱超分辨率与复原
+3. [Hybrid-LUT: Channel-Aware Hybrid Lookup Table and Filtering for Efficient Image Denoising](/202608/13/2608.11646v1-hybrid-lut-channel-aware-hybrid-lookup-table-and-filtering-for-efficient-image-denoising)  
    标签：评分：8.0/10、query:real-ir
-   evidence：联合去马赛克与去噪，经典图像恢复任务
-4. [Beyond Fixed Luminance: Towards Panchromatic and Orthochromatic Image Colorization](/202608/12/2608.10798v1-beyond-fixed-luminance-towards-panchromatic-and-orthochromatic-image-colorization)  
+   evidence：基于YUV空间混合查找表与滤波的高效图像去噪
+4. [XYZFlow:Scaling Multi dimensional Shortcut Flows for Efficient Generative Modeling](/202608/13/2608.12276v1-xyzflowscaling-multi-dimensional-shortcut-flows-for-efficient-generative-modeling)  
    标签：评分：8.0/10、query:real-ir
-   evidence：将着色问题构建为使用基础编辑模型的全RGB图像编辑，强匹配图像编辑模型需求。
-5. [NullEdit: Stealthy Image Protection via VLM Condition Redirection](/202608/12/2608.10870v1-nulledit-stealthy-image-protection-via-vlm-condition-redirection)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：针对图像编辑模型与VLM，提出编辑抑制防御方法。
+   evidence：通过多维流匹配和捷径流实现高效生成建模
 
 ### 速读区论文标签
-1. [UniSpace: Unified Visual Representation and Scalable Multimodal Modeling](/202608/12/2608.08676v1-unispace-unified-visual-representation-and-scalable-multimodal-modeling)  
+1. [Open Evaluation Agent: Efficient and Promptable Evaluation of Visual Generative Models](/202608/13/2608.09666v1-open-evaluation-agent-efficient-and-promptable-evaluation-of-visual-generative-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向图像生成与编辑的统一视觉表示，涉及重建敏感任务。
-2. [Generator-Guided Inverse Sampling for Lévy-Driven Generative Models](/202608/12/2608.10384v1-generator-guided-inverse-sampling-for-lvy-driven-generative-models)  
+   evidence：面向视觉生成模型的可提示评测框架
+2. [RA-ClipScore: Making Generative Model Evaluation More Interpretable](/202608/13/2608.12088v1-ra-clipscore-making-generative-model-evaluation-more-interpretable)  
    标签：评分：7.0/10、query:real-ir
-   evidence：Lévy驱动生成模型的反向采样研究
-3. [Open Evaluation Agent: Efficient and Promptable Evaluation of Visual Generative Models](/202608/12/2608.09666v1-open-evaluation-agent-efficient-and-promptable-evaluation-of-visual-generative-models)  
+   evidence：提出生成模型评估指标，与生成模型研究直接相关
+3. [HandEdit: A Unified Benchmark for Egocentric Human-to-Robot Dexterous Hand Image Editing](/202608/13/2608.12122v1-handedit-a-unified-benchmark-for-egocentric-human-to-robot-dexterous-hand-image-editing)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：面向灵巧手图像编辑的大规模第一视角基准
+4. [NAE: Normalizing AutoEncoder](/202608/13/2608.12084v1-nae-normalizing-autoencoder)  
    标签：评分：6.0/10、query:real-ir
-   evidence：评估视觉生成模型，契合复合需求中的评测部分
+   evidence：归一化流自编码器生成模型，匹配生成模型需求
 
 
 <div class="dpr-home-promo-card">
