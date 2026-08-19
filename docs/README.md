@@ -6,62 +6,64 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-18
-- 运行时间：2026-08-18 20:26:47 UTC
+- 最新运行日期：2026-08-19
+- 运行时间：2026-08-19 20:34:52 UTC
 - 运行状态：成功
 - 本次总论文数：14
 - 精读区：6
 - 速读区：8
 
 ### 今日简报（AI）
-今日精读聚焦扩散模型逆问题与大图超分，速读覆盖去噪、拼接生成与流匹配。最值关注Scale-Consistent扩散逆问题与ENAF多出口自适应融合超分，均获9.0高分。建议优先精读这两篇方法，再结合速读中的JoLT对比高分辨率生成策略。
-- 详情：[/202608/18/README](/202608/18/README)
+今日共读14篇，6篇精读，其中《Qwen-Video-Edit》与基于小波的多级去模糊框架均获9.0高分，值得优先关注。  
+前者展示了利用图像编辑模型迁移至指令式视频编辑的潜力，后者为ℓ1正则化去模糊提供了高效多级求解思路。  
+建议先精读这两篇，尤其留意视频编辑中的时序一致性设计与小波域加速策略，再扩展至生成式摩尔纹去除与数据设计。
+- 详情：[/202608/19/README](/202608/19/README)
 
 ### 精读区论文标签
-1. [Scale-Consistent Posterior Dynamics for Diffusion Inverse Problems](/202608/18/2608.15144v1-scale-consistent-posterior-dynamics-for-diffusion-inverse-problems)  
+1. [Qwen-Video-Edit: Instruction-Based Video Editing by Repurposing an Image Editing Model](/202608/19/2608.14790v2-qwen-video-edit-instruction-based-video-editing-by-repurposing-an-image-editing-model)  
    标签：评分：9.0/10、query:real-ir
-   evidence：直接针对图像修复与超分辨率的扩散逆问题方法
-2. [ENAF: A Multi-Exit Network with an Adaptive Patch Fusion for Large Image Super Resolution](/202608/18/2608.15349v1-enaf-a-multi-exit-network-with-an-adaptive-patch-fusion-for-large-image-super-resolution)  
+   evidence：将指令式图像编辑模型改造为视频编辑模型
+2. [Wavelet-based multilevel framework for $\ell_1$-regularized image deblurring](/202608/19/2608.17123v1-wavelet-based-multilevel-framework-for-ell1-regularized-image-deblurring)  
    标签：评分：9.0/10、query:real-ir
-   evidence：大图像超分辨率与自适应分块融合
-3. [PixRestore: Unified Image Restoration via Pixel Diffusion Transformer](/202608/18/2608.16793v1-pixrestore-unified-image-restoration-via-pixel-diffusion-transformer)  
+   evidence：L1正则化图像去模糊，属于核心图像复原任务
+3. [SFMformer: A Spatial-Frequency Modulation Transformer for Lightweight Image Super-Resolution](/202608/19/2608.17966v1-sfmformer-a-spatial-frequency-modulation-transformer-for-lightweight-image-super-resolution)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于无VAE像素扩散Transformer的通用图像恢复，使用流匹配
-4. [Unlocking the Potential of Image Editing via Concept Scaling and Dense Supervision](/202608/18/2608.16812v1-unlocking-the-potential-of-image-editing-via-concept-scaling-and-dense-supervision)  
+   evidence：基于空间-频率调制轻量级超分Transformer
+4. [EDITBRIDGE: Towards Faithful and Efficient Ultra-High-Resolution Image Editing](/202608/19/2608.18063v1-editbridge-towards-faithful-and-efficient-ultra-high-resolution-image-editing)  
    标签：评分：9.0/10、query:real-ir
-   evidence：通过概念缩放和密集监督的图像编辑
-5. [Equilibrium Forcing: Adaptive Video Generation Without Noise Conditioning](/202608/18/2608.14706v1-equilibrium-forcing-adaptive-video-generation-without-noise-conditioning)  
+   evidence：面向超高分辨率图像编辑的扩散桥方法，结合超分处理
+5. [PixelControl: Fine-Grained Condition Fidelity in Text-to-Image Diffusion](/202608/19/2608.15705v1-pixelcontrol-fine-grained-condition-fidelity-in-text-to-image-diffusion)  
    标签：评分：8.0/10、query:real-ir
-   evidence：用于自适应视频生成的无噪声条件扩散/流匹配框架，改进去噪生成模型
-6. [Forward-Evolution Error Analysis and Adaptive Design for Matrix-Valued Diffusion Models](/202608/18/2608.15103v1-forward-evolution-error-analysis-and-adaptive-design-for-matrix-valued-diffusion-models)  
+   evidence：文本到图像扩散与细粒度条件控制
+6. [Binarized High-Efficiency RAW Video Restoration and Beyond](/202608/19/2608.16756v1-binarized-high-efficiency-raw-video-restoration-and-beyond)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向扩散模型的误差分析与自适应噪声调度设计
+   evidence：面向RAW视频复原的二值化高效框架，兼顾时空建模
 
 ### 速读区论文标签
-1. [Image Denoising via the Adaptive Rank-Cluster Filter](/202608/18/2608.15298v1-image-denoising-via-the-adaptive-rank-cluster-filter)  
+1. [Improving Complex Moiré Removal with Generative Supervision](/202608/19/2608.17883v1-improving-complex-moir-removal-with-generative-supervision)  
    标签：评分：8.0/10、query:real-ir
-   evidence：提出自适应秩聚类滤波用于图像去噪，属于核心图像修复任务
-2. [JoLT: Joint Latent Trajectories for Context-Guided High-Resolution Tiled Generation](/202608/18/2608.15395v1-jolt-joint-latent-trajectories-for-context-guided-high-resolution-tiled-generation)  
+   evidence：生成监督用于图像恢复（去摩尔纹）
+2. [From Corpora to Co-Evolving Capabilities: Capability-Centric Data Design for Generalist Image Generation](/202608/19/2608.18076v1-from-corpora-to-co-evolving-capabilities-capability-centric-data-design-for-generalist-image-generation)  
    标签：评分：8.0/10、query:real-ir
-   evidence：通过联合潜轨迹进行高分辨率分块生成，与超分辨率任务密切相关
-3. [Spatially-Grounded Flow Matching: Structured Source Distributions for Image Generation](/202608/18/2608.15452v1-spatially-grounded-flow-matching-structured-source-distributions-for-image-generation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于结构化源分布的流匹配图像生成
-4. [RRFC: Recursive Refinement via Feedback Conditioning for Iterative Image-to-Image Generation](/202608/18/2608.15694v1-rrfc-recursive-refinement-via-feedback-conditioning-for-iterative-image-to-image-generation)  
+   evidence：面向通用图像生成的能力中心化数据设计
+3. [Abra: Scaling Diffusion Image Training](/202608/19/2608.17286v1-abra-scaling-diffusion-image-training)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于反馈条件化的迭代图像到图像生成
-5. [Revisiting Classifier-Free Guidance Methods in Latent Diffusion Models](/202608/18/2608.16786v1-revisiting-classifier-free-guidance-methods-in-latent-diffusion-models)  
+   evidence：面向文生图扩散模型训练的缩放规律研究
+4. [Picard Proximal Monte Carlo for Parallel Bayesian Imaging with Score-Based Generative Priors](/202608/19/2608.17666v1-picard-proximal-monte-carlo-for-parallel-bayesian-imaging-with-score-based-generative-priors)  
    标签：评分：7.0/10、query:real-ir
-   evidence：扩散模型引导方法
-6. [TISC: A Text-Driven Image Semantic Communication System for Faithful Reconstruction](/202608/18/2608.16100v1-tisc-a-text-driven-image-semantic-communication-system-for-faithful-reconstruction)  
+   evidence：面向成像逆问题，提出基于分数生成先验的并行后验采样框架
+5. [TINA+: Probing Residual Visual Knowledge in Unlearned Diffusion Models via Diffusion-Consistent Text-Free Inversion](/202608/19/2608.17747v1-tina-probing-residual-visual-knowledge-in-unlearned-diffusion-models-via-diffusion-consistent-text-free-inversion)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：通过扩散反演探测残留视觉知识
+6. [Generative Semantic Segmentation via an Observable Semantic-Image Interface and Hierarchical Generator Evidence Alignment](/202608/19/2608.11537v1-generative-semantic-segmentation-via-an-observable-semantic-image-interface-and-hierarchical-generator-evidence-alignment)  
    标签：评分：6.0/10、query:real-ir
-   evidence：使用基于扩散的文本到图像重建，相关于生成式图像模型
-7. [Nexus: Structured Synergy for Efficient Text-to-Image Generation using Rectified Flow Model](/202608/18/2608.16104v1-nexus-structured-synergy-for-efficient-text-to-image-generation-using-rectified-flow-model)  
+   evidence：面向条件语义图像生成与细化的扩散蒸馏生成器
+7. [GenRouter: Unified Workflow Routing for Agentic Image Generation](/202608/19/2608.16721v1-genrouter-unified-workflow-routing-for-agentic-image-generation)  
    标签：评分：6.0/10、query:real-ir
-   evidence：高效的修正流文本到图像生成，与生成扩散/流模型相关
-8. [An Empirical Study of Training Pixel-Space Text-to-Image Diffusion Models](/202608/18/2608.16887v1-an-empirical-study-of-training-pixel-space-text-to-image-diffusion-models)  
+   evidence：面向智能体图像生成的统一工作流路由
+8. [LinCa: Accelerating Diffusion Models via Learnable Decomposed Feature Caching](/202608/19/2608.17973v1-linca-accelerating-diffusion-models-via-learnable-decomposed-feature-caching)  
    标签：评分：6.0/10、query:real-ir
-   evidence：像素空间扩散训练策略，对扩散模型训练有指导意义，可迁移至图像修复场景
+   evidence：用可学习分解特征缓存加速扩散采样，可迁移至扩散恢复任务以提升效率
 
 
 <div class="dpr-home-promo-card">
