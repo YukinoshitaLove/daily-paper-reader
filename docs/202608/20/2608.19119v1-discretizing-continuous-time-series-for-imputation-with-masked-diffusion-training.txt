@@ -1,0 +1,976 @@
+Title: Discretizing Continuous Time Series for Imputation with Masked Diffusion Training
+
+URL Source: https://arxiv.org/pdf/2608.19119v1
+
+Published Time: Thu, 20 Aug 2026 01:12:55 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# Discretizing Continuous Time Series for Imputation with Masked Diffusion Training 
+
+Dongbin Kim 1, Seungyun Lee 1, Geonwoo Shin 1, Jaewook Lee 1 * 
+
+> 1
+
+Seoul National University 
+
+{dongbin413,rats96,shin0621,jaewook }@snu.ac.kr 
+
+Abstract 
+
+Time series imputation is a crucial area for reliable time series analysis, yet it remains challenging due to the complex temporal dynamics and noise of real-world data. Existing approaches, however, exhibit two limitations: missing and observed values are embedded within the same representation space without explicit structural separation, and continuous diffusion-based methods are trained to predict added noise rather than the original signal. To address these, we propose the Masked Diffusion Time-series Imputation Model (MDTIM), which leverages the training paradigm of masked diffusion model for imputation tasks. The [MASK] token is structurally orthogonal to valid observations, and the model directly predicts the original values, naturally aligning both the representation and the learning objective with the imputation task. To bridge the gap between discrete masked diffusion and the continuous, ordinal nature of time series, we further introduce Stochastic Discretization, which maps continuous values to ordinal-aware tokens while preserving continuous dynamics. Our experiments on diverse benchmarks confirm that MDTIM achieves superior robustness and scalability, consistently outperforming state-of-the-art deterministic and generative baselines across various missing scenarios. 
+
+1 Introduction 
+
+Time series imputation is a fundamental task in time series analysis, as real-world data are often partially observed due to sensor failures or transmission errors [16]. At its core, imputation aims to recover the underlying clean signal from partial observations, which requires the representation and learning objective of the model to be well-aligned with the structure of partial observability. From this perspective, we observe that existing approaches leave room for improvement along two axes. First, at the representation level, both discriminative Transformer-based methods [6] and continuous diffusion models [33] embed missing and observed values within the same data manifold. Although attention masks can prevent the model from attending to missing positions, placeholder values (e.g., zeros) still occupy the same embedding space as valid observations, potentially introduc-ing spurious correlations in the input representation [8]. Second, at the objective level, continuous diffusion models such as CSDI [33] are typically trained to predict the Gaussian noise added to the data rather than the original values themselves, which is somewhat indirect for a task whose goal is to recover what was originally there. Masked Diffusion Models (MDM), recently developed in Natural Language Processing [28], offer a natural fit for both aspects. Unlike continuous diffusion that corrupts data with Gaussian noise, MDM replaces tokens with a special [MASK] symbol and learns to recover the original values. The [MASK]           
+
+> *Corresponding author. Preprint. arXiv:2608.19119v1 [cs.LG] 19 Aug 2026 010 20 30 40 20
+> 10
+> 010
+> HUFL (Channel 0)
+> 010 20 30 40
+> Time Step
+> 15
+> 10
+> 5
+> 0510
+> MUFL (Channel 2)
+> Uncertainty (1 , 2 )
+> Imputed Value Ground Truth
+
+Figure 1: Imputation results of MDTIM on the ETTh dataset. Red regions indicate intervals where both channels are missing, while yellow regions represent single-channel missingness. The uncertainty ( σ), derived from the output probability of MDTIM, is estimated to be higher in the red regions (information scarcity) compared to the yellow regions (richer information) .token is structurally orthogonal to any valid observation, which provides a clearer separation between missing and observed states in the representation. The model also directly predicts the original values rather than the noise, more closely matching the imputation goal. Despite this conceptual fit, directly applying MDM to time series imputation presents a fundamental challenge. Time series data are inherently continuous and ordinal, whereas language tokens are discrete and categorical. Naive quantization severs the ordinal relationships between adjacent values and loses information below the grid resolution, which is particularly problematic when fine-grained reconstruction is needed. This raises our central research question: How can we leverage the training paradigm of masked diffusion while preserving the continuous and ordinal nature of time series data? 
+
+To answer this, we propose the Masked Diffusion Time-series Imputation Model (MDTIM) ,a framework that bridges discrete masked diffusion and continuous time series modeling. We introduce Stochastic Discretization , which injects noise during tokenization to preserve information in expectation, and replace the standard one-hot objective with Ordinal-Aware Soft Labeling to capture the ordinal relationships between tokens. We further incorporate a spectral consistency objective and an expectation-based decoder for precise continuous reconstruction. Our main contributions are summarized as follows: • We propose a Masked Diffusion Framework that addresses the lack of structural separation between missing and observed representations in time series imputation. • We introduce a novel quantization pipeline by Stochastic Discretization and Ordinal-Aware Soft Labeling , which preserves ordinal relationships within a categorical token space without information loss. • We employ an Expectation-based Unmasking strategy and Spectral Consistency Regular-ization, allowing MDTIM to reconstruct continuous time series precisely. Our method consistently outperforms state-of-the-art deterministic and generative baselines across di-verse benchmarks. 
+
+2 Related Work 
+
+2.1 Time Series Imputation 
+
+Time series data are often partially observed due to sensor faults, irregular sampling, or data-collection constraints [35]. Naive deletion or mean/zero imputation can bias estimation and degrade downstream tasks [16], so time-series imputation aims to recover missing values by leveraging temporal dependencies, cross-variable correlations, and informative missingness patterns [4, 6]. Methodologically, deep learning approaches have progressed from RNN-based architectures with masking [4, 3] to Transformer-based models that leverage self-attention to capture long-range dependencies; SAITS [6], in particular, achieves strong performance via Diagonally-Masked Self-Attention. Beyond deterministic models, diffusion-based models such as CSDI [33] and SSSD [20] produce probabilistic imputations by conditioning on observed data and iterative denoising. SSSD further incorporates structured state space models to better capture long-range temporal dependencies. However, this conditional formulation is misaligned with the imputation task: the model learns 2Target Distribution           
+
+> 6910 11 10 9743335
+> 2. Stochastic Discretization
+> Discretized Token Sequence
+> 1. Masking Input Data 3. Ordinal-Aware Soft Labeling
+> Normalize &Add Noise Discretize &Generate Soft Labels
+
+Figure 2: Overview of the proposed Stochastic Discretization and Ordinal-Aware Soft Labeling framework. The process consists of three stages: (1) Masking Input Data , where missing values are identified; (2) Stochastic Discretization , which applies instance-adaptive normalization and injects stochastic noise ϵ ∼ U (−0.5, 0.5) to bridge the continuous-discrete gap; and (3) Ordinal-Aware Soft Labeling , which maps continuous values to discrete tokens while generating soft target distributions to preserve ordinal semantic relationships. 
+
+“what noise was added” rather than “what was originally there” . Moreover, its training objective is decoupled from the masking ratio, applying uniform weight regardless of reconstruction difficulty. 
+
+2.2 Masked Diffusion Model 
+
+Discrete diffusion models extend the diffusion paradigm to categorical state spaces [13]. Among them, D3PM [2] introduced an absorbing-state formulation, where tokens are progressively replaced by a special [MASK] symbol and recovered through iterative denoising. MDLM [28] adapted this framework to language modeling via a continuous-time weighted cross-entropy objective, demon-strating its effectiveness as a non-autoregressive alternative for conditional text generation. Building on MDLM, subsequent works have improved robustness through unmasking-order-aware training [15] and conditional fidelity by treating observed tokens as fixed anchors during sampling [17, 27]. Despite these advances, masked diffusion has been studied almost exclusively in discrete modalities such as NLP, and its extension to time series remains underexplored due to the fundamental gap between discrete tokens and continuous, ordinal temporal signals. 
+
+3 Discrete Representation for Time-Series Modeling 
+
+Although the Masked Diffusion Model (MDM) offers a promising framework for imputation, directly applying it to time series presents a structural challenge: MDMs are inherently designed for discrete state spaces (e.g., text tokens), whereas time series data consist of continuous numerical values. To bridge this gap, we introduce a unified discretization framework illustrated in Figure 2, which combines Stochastic Discretization to mitigate quantization error and Ordinal-Aware Soft Labeling to preserve the temporal order of the original signals within the discrete vocabulary. 
+
+3.1 Stochastic Discretization Instance-Adaptive Normalization. To stabilize local statistics against distribution shifts, we normalize each input window x ∈ RT ×C into ˜x. Specifically, the normalization statistics are computed solely using the observed values (excluding masked positions), ensuring that there is no data-leakage in the training and imputation process. 
+
+Stochastic Token Generation. We map the normalized values to a discrete vocabulary of size K.Specifically, we first project the continuous value ˜xt,c onto the grid coordinates and inject uniform noise ϵ ∼ U (−0.5, 0.5) before rounding: 
+
+ct,c = ˜xt,c − vmin 
+
+vmax − vmin 
+
+· (K − 1) + 1 , zt,c = ⌊ct,c + ϵ⌉, (1) where ⌊·⌉ denotes the nearest integer function. This stochastic mechanism preserves information in expectation. For instance, a coordinate ct,c = 3 .6 is assigned to token 4 with 60% probability and 3token 3 with 40% , ensuring E[zt,c ] ≈ ct,c . This allows the model to learn precise dynamics beyond the fixed grid resolution. Discretized Token Sequence                           
+
+> Temporal Encoder
+> Discretized Embedder
+> Variate Encoder
+> Masked Time Series Input Unmasked Output
+> (c) Continuous Reconstruction via Expectation (b) Ordinal-Spectral Consistent Training (a) Discretized Token Embedding
+> L
+> 910 M10 9M910 M10 9M42M31M
+> Embedding Vectors M1234Input Embeddings
+> Stochastic Discretization
+> Model Output Soft Label Imputed Time Series Ground Truth Model Output Probability
+> Cross Entropy Loss: FFT Loss:
+> 123456
+> Factorized Backbone
+
+Figure 3: Overview of the Masked Diffusion Time-series Imputation Model (MDTIM) frame-work. The architecture operates on the discretized input through three key phases: (a) Discretized Token Embedding: The discrete tokens generated by the stochastic tokenizer are mapped into dense vector representations. (b) Ordinal-Spectral Consistent Training: The backbone is trained with a dual objective combining Ordinal-Aware Soft Cross-Entropy and Spectral Consistency Loss. This ensures spectral consistency across global frequencies while maintaining local ordinal accuracy. (c) Continuous Reconstruction via Expectation: Finally, continuous values are recovered by comput-ing the probability-weighted expectation of the predicted token distribution, enabling precise dense reconstruction from discrete outputs. 
+
+3.2 Ordinal-Aware Soft Labeling 
+
+Treating discretized tokens as independent classes ignores their ordinal nature (e.g., token k is semantically closer to k + 1 than k + 10 ). To enforce continuity, we employ Ordinal-Aware Soft Labeling with a truncated Gaussian kernel. Given a ground-truth token index y ∈ { 1, . . . , K }, the target probability si for the i-th class is defined as: 
+
+si =
+
+( 1 
+
+> Z
+
+exp 
+
+
+
+− (i−y)2
+
+> σ2
+
+
+
+if |i − y| ≤ w, 
+
+0 otherwise , (2) where w is the truncation window size (e.g., w = 2 ), σ controls smoothness, and Z is the normal-ization constant. Crucially, we assign zero probability to the [MASK] token ( s0 = 0 ) and distant bins. This concentrates probability mass on valid ordinal neighbors while preserving the structural separation of the mask state. 
+
+4 Masked Diffusion Framework 
+
+Building upon the discrete representation of time series data described in Section 3, we introduce the 
+
+Masked Diffusion Time-series Imputation Model (MDTIM) , a framework designed to model the joint distribution of multivariate time series and incorporate training techniques of masked diffusion models. Figure 3 illustrates the overall pipeline. 
+
+4.1 Factorized Temporal-Variate Backbone 
+
+To effectively model the joint distribution of multivariate time series, we employ a Factorized Temporal-Variate Transformer based on the Diffusion Transformer (DiT) proposed by Peebles and Xie [25]. This architecture processes the input through alternating factorization of the time ( T ) and feature ( C) axes. 4Discretized Embedding. Given the masked input indices zt ∈ { 0, . . . , K }B×T ×C at diffusion step 
+
+t, we utilize a distinct embedding matrix Ec for each channel c to preserve semantic orthogonality. The input is projected to an initial hidden state H0 ∈ RB×T ×C×D , where D is the hidden dimension. 
+
+Interleaved DiT Blocks. The core network consists of L layers, each sequentially processing the temporal and feature axes via two DiT blocks conditioned on the diffusion timestep t, with Rotary Position Embeddings (RoPE) [32] encoding relative positions. The Temporal block reshapes H(l−1) 
+
+to R(B·C)×T ×D and captures time-dependencies along the temporal axis: 
+
+H′(l) = TemporalEncoder (H(l−1) , t ). (3) The Variate block then reshapes H′(l) to R(B·T )×C×D and symmetrically models cross-channel correlations: 
+
+H(l) = VariateEncoder (H′(l), t ). (4) The final output is projected to vocabulary size Kout = 1 .5K, covering the extended range [−1.5, 1.5] 
+
+to account for potential distribution shifts in unobserved regions. 
+
+4.2 Ordinal-Spectral Consistent Training Objective 
+
+To simultaneously ensure local reconstruction fidelity and global temporal coherence, we formulate a dual-domain objective. This combines a discrete diffusion loss adapted for ordinal continuity with an auxiliary spectral regularization term. 
+
+Ordinal-Aware Masked Diffusion. We adopt the continuous-time training paradigm of Masked Diffusion Language Models (MDLM) [2, 28], optimizing a weighted variational lower bound (NELBO). Standard MDLM employs a simple cross-entropy loss against one-hot targets, which treats all incorrect tokens equally, failing to capture the ordinal magnitude inherent in time-series data. To address this, we employ the Ordinal-Aware Soft Labels derived in Sec. 3.2 as the optimization targets. For a set of masked indices Mt at timestep t, the diffusion loss is formulated as: 
+
+Ldiff = Et
+
+"
+
+w(t) X
+
+> l∈M t
+
+− s(l), log pθ (z(l) 
+
+> t
+
+)
+
+#
+
+, (5) where log pθ (z(l) 
+
+> t
+
+) ∈ RK is the predicted log-probability vector, and s(l) ∈ RK denotes the soft target distribution. The detailed formulation of time-dependent weight w(t) and the corresponding noise schedule are detailed in Appendix C.2.2. Replacing the one-hot target ey with s(l) can be viewed as a smooth relaxation of the standard MDLM objective. Writing s(l) = (1 − ϵ)ey + ϵ u(l) with ϵ = 1 − s(l) 
+
+> y
+
+, the per-token loss decomposes as: 
+
+−⟨ s(l), log pθ ⟩ = (1 − ϵ)L(l)NELBO + ϵD KL (u(l)∥pθ ) + const , (6) so that the original NELBO is recovered when s(l) collapses to a one-hot ( ϵ → 0) and otherwise encourages the predicted distribution to align with the ordinal neighborhood of y. The detailed derivation is provided in Appendix B. 
+
+Spectral Consistency Regularization. While the token-wise objective ensures local accuracy, it may neglect global temporal correlations and frequency structures. To strictly enforce global coherence, we incorporate a Spectral Consistency Loss , adapting the frequency-domain regularization proposed in DiffusionTS [41]. During training, we compute a continuous estimate of the full sequence, 
+
+ˆxt, by applying expectation-based decoding (Sec. 4.3). We then minimize the L1 distance between the Fourier representations of the reconstructed and ground-truth signals: 
+
+LFFT = Et [∥F (ˆ xt) − F (x0)∥1] , (7) where F(·) denotes the Fast Fourier Transform (FFT). Therefore, the total training objective is a weighted combination: Ltotal = Ldiff + λLFFT .54.3 Continuous Reconstruction via Expectation 
+
+Since Stochastic Discretization injects random noise into the input, the model output depends on the specific noise realization. To obtain a robust estimate, we run inference M times (e.g., M = 10 ) with independent noise samples and average the predicted probability distributions, ¯pt,c = 1
+
+> M
+
+PMm=1 p(m) 
+
+> t,c
+
+.The continuous value is then recovered as the expectation over the averaged distribution: 
+
+ˆxt,c =
+
+> K
+
+X
+
+> k=1
+
+¯p(k) 
+
+> t,c
+
+· vk, (8) where vk is the center value of the k-th bin within [−1.5, 1.5] . The result is then denormalized using the instance-wise statistics to recover the original scale. Table 1: Quantitative comparison of multivariate time-series imputation performance ( L = 48 ). We report the MAE of MDTIM and baselines averaged over 3 random seeds at missing ratios of 30% and 70% (50% in Appendix D.1). The best results are highlighted in bold .                                                                                                                                                                                                                                                                                                                            
+
+> Dataset Energy ETTh Weather Sine Missing Type Uniform Geometric Uniform Geometric Uniform Geometric Uniform Geometric
+> Model 30% 70% 30% 70% 30% 70% 30% 70% 30% 70% 30% 70% 30% 70% 30% 70% RNN  BRITS 0.246 0.379 0.329 0.366 0.194 0.299 0.227 0.292 0.050 0.073 0.058 0.071 0.010 0.021 0.020 0.019 MRNN 1.086 1.143 1.087 1.143 0.743 0.782 0.751 0.781 0.651 0.661 0.654 0.659 0.169 0.170 0.169 0.170 GRUD 0.364 0.457 0.426 0.445 0.310 0.394 0.348 0.383 0.104 0.369 0.164 0.350 0.008 0.014 0.013 0.012 Transformer  Transformer 0.323 0.401 0.354 0.393 0.168 0.252 0.183 0.247 0.076 0.070 0.083 0.068 0.039 0.046 0.042 0.045 Informer 0.344 0.379 0.371 0.373 0.207 0.302 0.226 0.296 0.047 0.059 0.052 0.058 0.027 0.039 0.036 0.037 PatchTST 0.586 0.529 0.528 0.517 0.202 0.272 0.231 0.262 0.074 0.082 0.081 0.077 0.015 0.017 0.019 0.015 SAITS 0.177 0.212 0.204 0.208 0.140 0.210 0.152 0.206 0.045 0.049 0.050 0.048 0.026 0.026 0.030 0.025 ImputeFormer 0.066 0.219 0.113 0.194 0.146 0.245 0.165 0.235 0.049 0.171 0.090 0.149 0.006 0.041 0.012 0.037 CNN  TimesNet 0.617 0.818 0.689 0.808 0.593 0.719 0.628 0.717 0.211 0.351 0.225 0.348 0.167 0.220 0.189 0.217 SCINet 0.557 0.571 0.546 0.565 0.238 0.323 0.261 0.317 0.074 0.089 0.086 0.087 0.019 0.031 0.026 0.029 Linear  DLinear 0.795 0.527 0.684 0.517 0.379 0.445 0.373 0.435 0.372 0.223 0.345 0.220 0.070 0.053 0.062 0.051 FiLM 0.877 0.520 0.791 0.512 0.696 0.627 0.707 0.623 0.380 0.209 0.360 0.206 0.127 0.109 0.132 0.108 FreTS 0.157 0.219 0.225 0.206 0.222 0.299 0.262 0.286 0.071 0.080 0.080 0.074 0.068 0.068 0.075 0.065 Generative  GPVAE 0.476 0.730 0.501 0.727 0.333 0.449 0.369 0.440 0.158 0.255 0.172 0.252 0.152 0.162 0.153 0.162 USGAN 0.264 0.412 0.330 0.401 0.208 0.302 0.240 0.295 0.087 0.122 0.101 0.118 0.014 0.029 0.026 0.026 CSDI 0.094 0.139 0.110 0.136 0.160 0.244 0.177 0.240 0.039 0.049 0.044 0.048 0.003 0.004 0.004 0.004 FGTI 0.050 0.100 0.065 0.097 0.218 0.349 0.293 0.328 0.038 0.051 0.046 0.049 0.001 0.003 0.002 0.003
+> MDTIM (Ours) 0.044 0.085 0.053 0.082 0.127 0.211 0.146 0.205 0.032 0.044 0.036 0.043 0.002 0.004 0.003 0.003
+
+5 Experiments 
+
+We empirically present a comprehensive evaluation of the proposed Masked Diffusion Time-series Imputation Model (MDTIM), comparing it against state-of-the-art deterministic and generative baselines. Our experiments focus on imputation accuracy, robustness to complex missing patterns, and computational efficiency. 
+
+5.1 Experimental Setup 
+
+We evaluate our method on widely used benchmarks: Energy, ETTh, Weather, and the synthetic Sine dataset. To rigorously test the models, we simulate data corruption using two distinct mechanisms: 
+
+Uniform masking, where observations are dropped randomly to mimic independent failures, and 
+
+Geometric masking, which removes consecutive time steps to simulate prolonged sensor malfunctions or transmission errors. For both scenarios, we assess performance across varying missing rates of 30%, 50%, and 70%. We compare MDTIM against a comprehensive suite of 19 baselines spanning various architectural paradigms. These include RNN-based methods such as BRITS[3], MRNN[40], and GRU-D[4]; and Transformer-based models including the canonical Transformer[34], Informer[43], PatchTST[24], SAITS[6], and ImputeFormer[23]. Also, we include recent high-performance convolutional and linear architectures: TimesNet[37], SCINet[19], DLinear[42], FILM[44], and FreTS[39]. Finally, we evaluate against probabilistic frameworks including GP-VAE[9], US-GAN[22], and the diffusion-based CSDI[33] and FGTI[38]. To account for the stochastic nature of the missing data patterns, we 6evaluate each trained model across three independent inference trials using distinct random seeds for mask generation, and report the averaged Mean Absolute Error (MAE). 
+
+5.2 Imputation Performance Main Results. As shown in Table 1, MDTIM achieves the lowest MAE on Energy, ETTh, and Weather across both Uniform and Geometric missing patterns. FGTI [38], a frequency-aware diffusion model, attains the best results on the synthetic Sine dataset whose signal is dominated by a few well-defined frequencies, while MDTIM trails by only a marginal gap (e.g., 0.002 vs. 0.001 at 30% Uniform). On the more complex real-world ETTh dataset, however, FGTI degrades substantially (0.218 vs. 0.127 at 30% Uniform), suggesting that frequency-domain priors generalize less reliably to irregular and non-stationary signals. Compared to the diffusion-based CSDI [33], MDTIM consistently yields lower MAE across all datasets, owing to our Expectation-based Reconstruction 
+
+that recovers continuous values deterministically from the predicted token distribution and mitigates the sampling variance inherent in continuous diffusion. MDTIM also exhibits notable robustness under geometric masking, where most baselines suffer significant degradation; for instance, on Energy at 30%, MDTIM increases only from 0.044 to 0.053, indicating that the masked diffusion objective encourages inference of global temporal structure rather than reliance on local interpolation. 
+
+Scalability to Long-Term Dependencies. To verify that MDTIM captures long-range temporal dependencies, we extend the evaluation to longer sequence lengths L ∈ { 96 , 192 }. As shown in Table 2, the performance advantage of MDTIM grows with the sequence length: while MDTIM is comparable to SAITS at L = 48 , the gap widens substantially at longer horizons. At L = 192 
+
+with 30% Uniform missing, MDTIM achieves an MAE of 0.123, considerably lower than BRITS (0.192) and SAITS (0.145), indicating that MDTIM captures global context without suffering from the attention dilution often observed in baselines. Table 2: Robustness analysis on extended sequence lengths ( L ∈ { 96 , 192 }). We report the MAE averaged over 3 random seeds.                                                                   
+
+> Length 96 192 Missing Type Uniform Geometric Uniform Geometric
+> Model 30% 50% 70% 30% 50% 70% 30% 50% 70% 30% 50% 70% BRITS 0.191 0.229 0.287 0.220 0.250 0.280 0.192 0.230 0.287 0.222 0.250 0.280 SAITS 0.139 0.162 0.204 0.150 0.172 0.200 0.145 0.162 0.198 0.156 0.171 0.195 CSDI 0.149 0.177 0.222 0.162 0.187 0.218 0.170 0.199 0.245 0.183 0.209 0.241 MDTIM 0.124 0.152 0.199 0.138 0.163 0.194 0.123 0.148 0.190 0.135 0.157 0.186
+
+Probabilistic Imputation Performance Beyond point estimation accuracy, we evaluate the quality of the predictive distributions generated by the models using the Continuous Ranked Probability Score (CRPS). CRPS estimates the calibration (reliability) and sharpness (precision) of the probabilistic inference. Table 3: Quantitative comparison of probabilistic imputation performance (CRPS, L = 48 ). We compare MDTIM with the diffusion-based baseline CSDI. Lower is better.                                              
+
+> Energy ETTh Sine Missing Type Rate CSDI MDTIM CSDI MDTIM CSDI MDTIM Uniform 30% 0.0629 0.0429 0.1120 0.0863 0.0023 0.0020
+> 50% 0.0747 0.0541 0.1356 0.1078 0.0025 0.0020
+> 70% 0.0927 0.0771 0.1748 0.1520 0.0030 0.0020
+> Geometric 30% 0.0732 0.0547 0.1262 0.1017 0.0027 0.0020
+> 50% 0.0818 0.0626 0.1460 0.1197 0.0028 0.0020
+> 70% 0.0905 0.0733 0.1708 0.1462 0.0029 0.0020
+
+As shown in Table 3, MDTIM consistently outperforms CSDI, the diffusion-based baseline, across all datasets and missing scenarios. On the highly periodic Sine dataset, MDTIM achieves a near-constant CRPS regardless of the missing rate, indicating that it captures deterministic periodicity 7with high confidence. While continuous diffusion models often exhibit excessive variance due to sampling noise, MDTIM mitigates such ambiguity through its expectation-based decoding over discrete distributions. Furthermore, on the complex real-world ETTh dataset, MDTIM achieves significantly lower CRPS (e.g., 0.0863 vs. 0.1120 at 30% uniform missing), demonstrating that our 
+
+Ordinal-Aware Soft Labeling guides the model to produce well-calibrated uncertainty estimates. 
+
+Imputation under Naturally Missing Real-World Data. To assess MDTIM under realistic missingness patterns, we further evaluate on PhysioNet 2012 [29], a multivariate clinical time series benchmark with ∼80% natural missingness due to irregular ICU sampling, and apply additional uniform and geometric masking on top of the existing missingness. Since the highly sparse and irregular nature of PhysioNet yields no dominant spectral structure, we disable the spectral consistency loss for this dataset; all other settings remain identical. Table 4: Imputation performance on PhysioNet 2012.                     
+
+> PhysioNet2012 Uniform Geometric Model 30% 50% 70% 30% 50% 70% BRITS 0.333 0.364 0.408 0.356 0.379 0.405 SAITS 0.283 0.314 0.360 0.298 0.324 0.358 CSDI 0.303 0.332 0.376 0.320 0.342 0.374 ImputeFormer 0.289 0.329 0.389 0.311 0.343 0.388 FGTI 0.338 0.376 0.425 0.370 0.397 0.423 MDTIM (Ours) 0.236 0.279 0.339 0.257 0.291 0.337
+
+As shown in Table 4, MDTIM achieves the lowest MAE across all settings, outperform-ing SAITS by a clear margin. Notably, FGTI exhibits the largest degradation here, even underperforming BRITS. This indicates that frequency-domain priors become unreliable for highly irregular signals where dominant spectral components are weak or unstable, whereas our ordinal-aware discrete formulation generalizes effectively to real-world sparse and irregular ob-servations. 
+
+5.3 Computational Efficiency and Model Scalability 
+
+Diffusion-based methods often trade efficiency for accuracy. To examine this trade-off, we compare MDTIM against representative baselines at two model scales on the Energy dataset with uniform missing (Table 5). Table 5: Imputation performance and efficiency on Energy (uniform missing). Inference time is measured on the full test set (MDTIM: M =10 noise samples; CSDI: T =50 diffusion steps).                                                     
+
+> Scale Small Large Model 30% 50% 70% Params (M) Time (s) 30% 50% 70% Params (M) Time (s)
+> BRITS 0.246 0.296 0.379 2.18 4.88 0.245 0.293 0.371 8.55 4.96 SAITS 0.212 0.216 0.240 25.25 0.41 0.177 0.185 0.212 88.24 0.79 CSDI 0.094 0.112 0.139 1.19 401.69 0.074 0.093 0.128 4.49 894.76 MDTIM (Ours) 0.046 0.065 0.092 0.65 4.05 0.044 0.061 0.085 8.33 12.63
+
+MDTIM addresses the latency bottleneck of continuous diffusion: while CSDI requires up to 894s at the Large scale, the Small MDTIM completes inference in 4.05s while halving the MAE (0.074 →0.046). It is also notably parameter-efficient—the 0.65M Small variant surpasses the 88.24M Large SAITS, suggesting that the masked diffusion objective captures temporal dynamics more densely than scaling deterministic Transformers. 
+
+5.4 Downstream Forecasting Task 
+
+Table 6: Forecasting MAE on Energy (L=48 ) using a fixed PatchTST pre-dictor with imputed inputs from each model.            
+
+> Energy Forecast Horizon Imputer H=4 H=6 H=8 H=12
+> SAITS 0.187 0.207 0.224 0.254 CSDI 0.171 0.190 0.208 0.237 MDTIM (Ours) 0.138 0.153 0.170 0.200
+
+To assess whether the imputation accuracy of MDTIM translates to downstream tasks, we evaluate forecasting performance when the input window contains missing val-ues. Each imputation model reconstructs the partially ob-served input, after which a fixed PatchTST [24] forecaster, pre-trained on clean sequences, predicts the subsequent H
+
+steps. Since the forecaster is identical across all settings, differences in forecasting MAE directly reflect the quality of imputation. As shown in Table 6, MDTIM yields substantially lower forecasting error than both baselines across all horizons on Energy, reducing MAE by 19–26% over 8SAITS and 16–19% over CSDI. These results indicate that the imputation accuracy of MDTIM propagates to downstream forecasting, and that high-fidelity imputation is essential for tasks that rely on partially observed inputs. 
+
+5.5 Ablation Studies 
+
+To rigorously evaluate the proposed framework, we conduct ablation studies on the contribution of our expectation-based unmasking and soft labeling strategies, and the sensitivity to the vocabulary size. Table 7: Ablation study on unmasking and labeling strategies. All results are reported as MAE averaged over 3 random seeds under the uniform missing scenario.                                                      
+
+> Components ETTh Energy Sine
+> Exp. Unmasking Soft-Label 30% 50% 70% 30% 50% 70% 30% 50% 70%
+> ✗✗0.134 0.166 0.229 0.053 0.073 0.101 0.0071 0.0072 0.0075
+> ✗✓0.131 0.162 0.222 0.056 0.079 0.115 0.0069 0.0070 0.0074
+> ✓✗0.129 0.159 0.212 0.044 0.060 0.085 0.0026 0.0030 0.0036
+> ✓✓0.127 0.157 0.211 0.044 0.061 0.085 0.0022 0.0026 0.0035
+
+Impact of Unmasking and Labeling Strategies. Table 7 summarizes the effect of our two proposed components: Expectation-based Unmasking and Ordinal-Aware Soft Labeling . Expectation-based Unmasking consistently reduces error across all datasets, confirming that computing the expected value over discrete bins mitigates quantization error inherent in Argmax selection. The contribution of Soft Labeling, in contrast, scales with the structural regularity of the data. On the highly periodic Sine dataset, Soft Labeling yields a substantial additional gain on top of Expectation-based Unmasking, as ordinal-aware guidance aligns naturally with the smooth, predictable transitions of periodic signals. A similar but milder gain is observed on ETTh, whose complex temporal dynamics still benefit from ordinal regularization under higher uncertainty. On Energy, where the dynamics are less structured, Soft Labeling offers no further improvement beyond Expectation-based Unmasking. These results indicate that Soft Labeling is most effective when the underlying signal exhibits clear ordinal or periodic structure that ordinal-aware guidance can exploit. Table 8: MAE on ETTh with varying vocabu-lary size ( K).                           
+
+> ETTh Uniform Geometric
+> Bins 30% 50% 70% 30% 50% 70% 20 0.138 0.166 0.217 0.157 0.181 0.211 40 0.127 0.157 0.211 0.146 0.173 0.205
+> 60 0.129 0.160 0.214 0.148 0.175 0.208
+
+Sensitivity to Vocabulary Size ( K). We further investigate the impact of the vocabulary size K on imputation accuracy (Table 8), which exhibits a trade-off between discretization resolution and classifica-tion complexity. A small vocabulary ( K=20 ) suf-fers from high quantization error, failing to capture fine-grained fluctuations. Conversely, K=60 slightly degrades performance, as a larger vocabulary increases the difficulty of the discrete classification task. K=40 achieves the best balance, providing sufficient resolution to approximate the continuous signal while remaining tractable to optimize. 
+
+6 Conclusion and Limitations 
+
+We proposed MDTIM, a framework that adapts the masked diffusion training paradigm to continuous time series imputation. By introducing Stochastic Discretization and Ordinal-Aware Soft Label-ing, MDTIM bridges the gap between continuous dynamics and categorical tokenization, while the Expectation-based Unmasking strategy enables precise continuous reconstruction. Extensive experiments demonstrate that MDTIM consistently outperforms both deterministic and generative baselines in reconstruction accuracy and robustness across diverse missing scenarios, while requiring substantially less inference time than continuous diffusion baselines. 
+
+Limitations and Future Work. While MDTIM demonstrates strong performance across diverse missing scenarios, several aspects warrant further investigation. First, the optimal vocabulary size 
+
+K may vary across datasets depending on the range and granularity of the underlying signal; a data-adaptive discretization scheme that automatically selects the resolution would further improve generalization. Second, our spectral consistency regularization assumes the presence of stable 9frequency components and is therefore disabled on benchmarks dominated by irregular sampling such as PhysioNet. Designing an adaptive frequency objective that modulates its influence based on local signal regularity is a promising direction. Finally, our evaluation focuses on standard imputation benchmarks of moderate length; extending MDTIM to extremely long sequences and to multi-scale or non-stationary domains such as financial tick data remains for future work. 
+
+References 
+
+[1] Juan Miguel Lopez Alcaraz and Nils Strodthoff. Diffusion-based time series imputation and forecasting with structured state space models. arXiv preprint arXiv:2208.09399 , 2022. [2] Jacob Austin, Daniel D Johnson, Jonathan Ho, Daniel Tarlow, and Rianne Van Den Berg. Structured denoising diffusion models in discrete state-spaces. Advances in neural information processing systems , 34:17981–17993, 2021. [3] Wei Cao, Dong Wang, Jian Li, Hao Zhou, Lei Li, and Yitan Li. Brits: Bidirectional recurrent imputation for time series. Advances in neural information processing systems , 31, 2018. [4] Zhengping Che, Sanjay Purushotham, Kyunghyun Cho, David Sontag, and Yan Liu. Recurrent neural networks for multivariate time series with missing values. Scientific reports , 8(1):6085, 2018. [5] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. 
+
+Advances in neural information processing systems , 34:8780–8794, 2021. [6] Wenjie Du, David Cˆ ot´ e, and Yan Liu. Saits: Self-attention-based imputation for time series. 
+
+Expert Systems with Applications , 219:119619, 2023. [7] Wenjie Du, Jun Wang, Linglong Qian, Yiyuan Yang, Zina Ibrahim, Fanxing Liu, Zepu Wang, Haoxin Liu, Zhiyuan Zhao, Yingjie Zhou, et al. Tsi-bench: Benchmarking time series imputation. 
+
+arXiv preprint arXiv:2406.12747 , 2024. [8] Gal Fadlon, Idan Arbiv, Nimrod Berman, and Omri Azencot. A diffusion model for regular time series generation from irregular data with completion and masking. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https://openreview. net/forum?id=M9JmlA6Cgf .[9] Vincent Fortuin, Dmitry Baranchuk, Gunnar R¨ atsch, and Stephan Mandt. Gp-vae: Deep probabilistic time series imputation. In International conference on artificial intelligence and statistics , pages 1651–1661. PMLR, 2020. [10] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 , 2022. [11] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. [12] Jonathan Ho, Tim Salimans, Alexey Gritsenko, William Chan, Mohammad Norouzi, and David J Fleet. Video diffusion models. Advances in neural information processing systems , 35: 8633–8646, 2022. [13] Emiel Hoogeboom, Didrik Nielsen, Priyank Jaini, Patrick Forr, and Max Welling. Argmax flows and multinomial diffusion: Learning categorical distributions. Advances in neural information processing systems , 34:12454–12465, 2021. [14] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-based generative models. Advances in neural information processing systems , 35: 26565–26577, 2022. [15] Jaeyeon Kim, Kulin Shah, Vasilis Kontonis, Sham M Kakade, and Sitan Chen. Train for the worst, plan for the best: Understanding token ordering in masked diffusions. In Forty-second International Conference on Machine Learning , 2025. 10 [16] SeungHyun Kim, Hyunsu Kim, Eunggu Yun, Hwangrae Lee, Jaehun Lee, and Juho Lee. Probabilistic imputation for time-series classification with missing data. In International Conference on Machine Learning , pages 16654–16667. PMLR, 2023. [17] Hyukhun Koh, Minha Jhang, Dohyung Kim, Sangmook Lee, and Kyomin Jung. Conditional [mask] discrete diffusion language model. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing , pages 8910–8934, 2025. [18] Zhifeng Kong, Wei Ping, Jiaji Huang, Kexin Zhao, and Bryan Catanzaro. Diffwave: A versatile diffusion model for audio synthesis. arXiv preprint arXiv:2009.09761 , 2020. [19] Minhao Liu, Ailing Zeng, Muxi Chen, Zhijian Xu, Qiuxia Lai, Lingna Ma, and Qiang Xu. Scinet: Time series modeling and forecasting with sample convolution and interaction. Advances in Neural Information Processing Systems , 35:5816–5828, 2022. [20] Juan Miguel Lopez Alcaraz and Nils Strodthoff. Diffusion-based time series imputation and forecasting with structured atate apace models. Transactions on machine learning research ,pages 1–36, 2023. [21] James E Matheson and Robert L Winkler. Scoring rules for continuous probability distributions. 
+
+Management science , 22(10):1087–1096, 1976. [22] Xiaoye Miao, Yangyang Wu, Jun Wang, Yunjun Gao, Xudong Mao, and Jianwei Yin. Generative semi-supervised learning for multivariate time series imputation. In Proceedings of the AAAI conference on artificial intelligence , volume 35, pages 8983–8991, 2021. [23] Tong Nie, Guoyang Qin, Wei Ma, Yuewen Mei, and Jian Sun. Imputeformer: Low rankness-induced transformers for generalizable spatiotemporal imputation. In Proceedings of the 30th ACM SIGKDD conference on knowledge discovery and data mining , pages 2260–2271, 2024. [24] Yuqi Nie, Nam H Nguyen, Phanwadee Sinthong, and Jayant Kalagnanam. A time series is worth 64 words: Long-term forecasting with transformers. In The Eleventh International Conference on Learning Representations , 2023. URL https://openreview.net/forum? id=Jbdc0vTOcol .[25] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF international conference on computer vision , pages 4195–4205, 2023. [26] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. [27] Litu Rout, Constantine Caramanis, and Sanjay Shakkottai. Anchored diffusion language model. 
+
+Advances in Neural Information Processing Systems , 2025. [28] Subham Sahoo, Marianne Arriola, Yair Schiff, Aaron Gokaslan, Edgar Marroquin, Justin Chiu, Alexander Rush, and Volodymyr Kuleshov. Simple and effective masked diffusion language models. Advances in Neural Information Processing Systems , 37:130136–130184, 2024. [29] Ikaro Silva, George Moody, Daniel J Scott, Leo A Celi, and Roger G Mark. Predicting in-hospital mortality of icu patients: The physionet/computing in cardiology challenge 2012. In 
+
+2012 computing in cardiology , pages 245–248. IEEE, 2012. [30] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsuper-vised learning using nonequilibrium thermodynamics. In International conference on machine learning , pages 2256–2265. pmlr, 2015. [31] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 , 2020. [32] Jianlin Su, Murtadha Ahmed, Yu Lu, Shengfeng Pan, Wen Bo, and Yunfeng Liu. Roformer: Enhanced transformer with rotary position embedding. Neurocomputing , 568:127063, 2024. 11 [33] Yusuke Tashiro, Jiaming Song, Yang Song, and Stefano Ermon. Csdi: Conditional score-based diffusion models for probabilistic time series imputation. Advances in neural information processing systems , 34:24804–24816, 2021. [34] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. Advances in neural information processing systems , 30, 2017. [35] Jun Wang, Wenjie Du, Yiyuan Yang, Linglong Qian, Wei Cao, Keli Zhang, Wenjia Wang, Yuxuan Liang, and Qingsong Wen. Deep learning for multivariate time series imputation: a survey. In Proceedings of the Thirty-Fourth International Joint Conference on Artificial Intelligence , IJCAI ’25, 2025. ISBN 978-1-956792-06-5. doi: 10.24963/ijcai.2025/1187. URL 
+
+https://doi.org/10.24963/ijcai.2025/1187 .[36] Haixu Wu, Jiehui Xu, Jianmin Wang, and Mingsheng Long. Autoformer: Decomposition trans-formers with auto-correlation for long-term series forecasting. Advances in neural information processing systems , 34:22419–22430, 2021. [37] Haixu Wu, Tengge Hu, Yong Liu, Hang Zhou, Jianmin Wang, and Mingsheng Long. Timesnet: Temporal 2d-variation modeling for general time series analysis. In The Eleventh International Conference on Learning Representations , 2023. URL https://openreview.net/forum? id=ju_Uqw384Oq .[38] Xinyu Yang, Yu Sun, Xiaojie Yuan, and Xinyang Chen. Frequency-aware generative models for multivariate time series imputation. Advances in Neural Information Processing Systems , 37: 52595–52623, 2024. [39] Kun Yi, Qi Zhang, Wei Fan, Shoujin Wang, Pengyang Wang, Hui He, Ning An, Defu Lian, Longbing Cao, and Zhendong Niu. Frequency-domain mlps are more effective learners in time series forecasting. Advances in Neural Information Processing Systems , 36:76656–76679, 2023. [40] Jinsung Yoon, William R Zame, and Mihaela Van Der Schaar. Estimating missing data in temporal data streams using multi-directional recurrent neural networks. IEEE Transactions on Biomedical Engineering , 66(5):1477–1490, 2018. [41] Xinyu Yuan and Yan Qiao. Diffusion-TS: Interpretable diffusion for general time series generation. In The Twelfth International Conference on Learning Representations , 2024. URL 
+
+https://openreview.net/forum?id=4h1apFjO99 .[42] Ailing Zeng, Muxi Chen, Lei Zhang, and Qiang Xu. Are transformers effective for time series forecasting? In Proceedings of the AAAI conference on artificial intelligence , volume 37, pages 11121–11128, 2023. [43] Haoyi Zhou, Shanghang Zhang, Jieqi Peng, Shuai Zhang, Jianxin Li, Hui Xiong, and Wancai Zhang. Informer: Beyond efficient transformer for long sequence time-series forecasting. In 
+
+Proceedings of the AAAI conference on artificial intelligence , volume 35, pages 11106–11115, 2021. [44] Tian Zhou, Ziqing Ma, Qingsong Wen, Liang Sun, Tao Yao, Wotao Yin, Rong Jin, et al. Film: Frequency improved legendre memory model for long-term time series forecasting. Advances in neural information processing systems , 35:12677–12690, 2022. 12 A Preliminaries on Diffusion Models 
+
+A.1 Diffusion Models 
+
+Diffusion models [30, 11, 31] are a class of latent-variable generative models that learn to invert a fixed noise-injection process. Since their introduction, they have become the dominant paradigm in many continuous-data generative tasks, achieving state-of-the-art results in image [5, 26, 14], audio [18], and video [12] synthesis, and have also been adopted as strong probabilistic models for time series forecasting and imputation [33, 1]. 
+
+Notation. Let x0 ∈ Rd denote a clean data sample drawn from the data distribution q(x0), and let xt ∈ Rd for t ∈ { 1, . . . , T } denote its noisy latents along the forward chain. A noise schedule 
+
+{βt}Tt=1 ⊂ (0 , 1) controls the amount of corruption at each step, with the per-step retention factor 
+
+αt = 1 − βt and the cumulative retention factor ¯αt = Q 
+
+> s≤t
+
+αs; by construction ¯α0 = 1 and ¯αT ≈ 0.
+
+A.1.1 Diffusion Framework Forward (Gaussian corruption). The forward process gradually corrupts a data sample into pure Gaussian noise over T steps: 
+
+q(xt | xt−1) = N (xt; p1 − βtxt−1, β tI). (9) A useful property of this Markov chain is that its t-step marginal admits a closed form: 
+
+q(xt|x0) = N (xt; √¯αtx0, (1 − ¯αt)I), x t = √¯αtx0 + √1 − ¯αtϵ, ϵ ∼ N (0 , I ). (10) That is, xt at any timestep t can be sampled directly from x0 without simulating the full chain, which makes per-step training tractable. As t → T , the schedule is chosen so that ¯αT ≈ 0 and xT becomes approximately isotropic Gaussian, independent of x0.
+
+Reverse (learned denoising). The reverse process incrementally denoises noise back into the data manifold. While the marginal q(xt−1|xt) is intractable, the conditional posterior q(xt−1|xt, x 0) is Gaussian with closed-form mean and variance depending only on βt and ¯αt [11]. A neural network parameterizes the reverse kernel 
+
+pθ (xt−1|xt) = N (xt−1; μθ (xt, t ), Σθ (xt, t )) , (11) where the mean is typically expressed through a noise predictor ϵθ (xt, t ):
+
+μθ (xt, t ) = 1
+
+√αt
+
+
+
+xt − βt
+
+√1 − ¯αt
+
+ϵθ (xt, t )
+
+
+
+. (12) 
+
+A.1.2 Conditional Diffusion 
+
+The diffusion framework introduced in Appendix A.1 defines an unconditional generative model. Many practical applications, including the time series imputation setting of this paper, instead require sampling from a conditional distribution p(x0 | y).Let O ⊆ { 1, . . . , d } index observed coordinates and M = ¯O the missing ones. The goal is to sample 
+
+xM 
+
+> 0
+
+∼ p(xM 
+
+> 0
+
+| xO 
+
+> 0
+
+). (13) While external-conditioning paradigms such as classifier guidance [5] and classifier-free guidance [10] are effective when y is an external attribute such as a class label or text prompt, they do not apply directly to time series imputation, where the conditioning signal is a subset of the data itself. Diffusion-based imputation methods therefore commonly adopt the following setting [33, 1]. The forward process applies Gaussian corruption only to missing coordinates while preserving observed ones throughout all steps, 
+
+q(xM 
+
+> t
+
+|xM 
+
+> 0
+
+) = N (xM 
+
+> t
+
+; √¯αt xM 
+
+> 0
+
+, (1 − ¯αt)I), xO 
+
+> t
+
+= xO 
+
+> 0
+
+∀t. (14) The noise predictor receives the partially-noisy tensor ˜xt (noisy on M, clean on O) together with the missingness mask M and the timestep t, ϵθ (˜ xt, M, t ), giving the network direct access to which coordinates are observed and what their values are. 13 A.1.3 Training objective 
+
+Training maximizes a variational lower bound (ELBO) on log pθ (x0). The bound decomposes into a sum of KL divergences between the tractable forward posterior q(xt−1 | xt, x 0) and the learned reverse kernel pθ (xt−1 | xt) at each step [11]. Reparameterizing the network as a noise predictor ϵθ
+
+and substituting the closed-form expression for xt in Equation (10), the per-step KL reduces (up to a 
+
+t-dependent reweighting) to the simple denoising loss of Ho et al. [11]: 
+
+Lsimple (θ) = Et∼U{ 1,...,T },x 0,ϵ ∼N (0 ,I )[∥ϵ − ϵθ (√¯αtx0 + √1 − ¯αtϵ, t )∥22]. (15) For the conditional setting in Appendix A.1.2, the noise predictor ϵθ (˜ xt, M, t ) takes the partially noisy tensor and the missingness mask as input, and the loss is restricted to the missing coordinates [33, 1]: 
+
+Limp (θ) = Et∼U{ 1,...,T },x 0,ϵ ∼N (0 ,I ),M
+
+ ∥ϵM − ϵM 
+
+> θ
+
+(˜ xt, M, t )∥22
+
+ , (16) where the missingness mask M is sampled from a distribution of patterns during training, encouraging the model to generalize across missingness configurations. 
+
+A.2 Masked Diffusion Language Models 
+
+Masked Diffusion Language Models (MDLM) [28] adapt the diffusion framework of Appendix A.1 to discrete sequences by replacing Gaussian corruption with an absorbing-state Markov chain [2]. The role of pure noise N (0 , I ) in continuous diffusion is played here by a single distinguished symbol [MASK] : the forward process gradually replaces tokens with [MASK] , the prior at t = 1 is the all-[MASK] sequence, and the reverse process iteratively unmasks positions back to data tokens. 
+
+Notation. Let t(i) = iT and s(i) = i−1 
+
+> T
+
+for i ∈ { 1, . . . , T }. Tokens take values in {0, 1, . . . , K }
+
+where 0 denotes [MASK] . We represent tokens as one-hot vectors in V := {e0, . . . , e K } ⊂ { 0, 1}K+1 
+
+and denote the [MASK] one-hot by m := e0. For a length-L sequence x = ( xl)Ll=1 , let zt = ( zlt)Ll=1 
+
+be the latent at time t. We write Cat( ·; π) for a categorical distribution and ⟨· , ·⟩ for the dot product. 
+
+A.2.1 MDLM Framework Forward (absorbing mask corruption). The forward process factorizes across token positions and replaces each token by [MASK] with probability 1 − αt:
+
+q(zt | x) = 
+
+> L
+
+Y
+
+> l=1
+
+Cat( zlt; αtxl + (1 − αt)m), (17) with αt → 1 as t → 0 and αt → 0 as t → 1. We parameterize the noise schedule via αt = e−σ(t).Our experiments use the log-linear schedule defined by σ(t) = − log(1 − t), which yields a linear decay αt = 1 − t.The defining property of this process is that [MASK] is an absorbing state: once zlt = m, it remains masked for all later times. Consequently, q(zt|x) depends only on which positions have been masked and the reverse process is naturally structured around iterative unmasking .
+
+Reverse (learned denoising kernel). MDLM parameterizes the reverse kernel pθ (zs | zt) = 
+
+QLl=1 pθ (zls | zt) via a predicted mixture token xlθ (zt) over the K non-mask vocabulary entries. Two structural constraints mirror the absorbing forward process: (i) zero-masking , ⟨xlθ (zt), m ⟩ = 0 , so the predictor never re-introduces [MASK] and (ii) carry-over , zlt̸ = m ⇒ zls = zlt, so already-unmasked tokens are preserved. As a result, the reverse transition is 
+
+pθ (zls | zt) = 
+
+(
+
+Cat( zls; zlt), zlt̸ = m, 
+
+Cat( zls; αs−αt 
+
+> 1−αt
+
+xlθ (zt) + 1−αs 
+
+> 1−αt
+
+m), zlt = m. (18) For masked positions, the update is a mixture: with probability αs−αt 
+
+> 1−αt
+
+the token is unmasked according to xlθ , and otherwise it remains [MASK] .14 A.2.2 Conditional Masking 
+
+For text infilling, observed tokens can be treated as anchors and excluded from corruption. Let 
+
+A ⊆ { 1, . . . , L } be the anchored index set and ¯A its complement. Anchored positions are preserved exactly throughout the forward process while non-anchored positions undergo standard absorbing mask corruption: 
+
+q(zt | x) = Y
+
+> l∈A
+
+I[zlt = xl] Y 
+
+> l∈¯A
+
+Cat  zlt; αtxl + (1 − αt)m , (19) so that zlt = xl for all t and all l ∈ A (hard preservation). The reverse kernel mirrors this structure. Anchored positions are copied from zt unchanged, and only non-anchored masked positions are denoised via the standard reverse kernel in Equation (18). This guarantees that observed tokens remain unchanged throughout generation while the model fills in the unobserved ones. This anchored formulation directly matches the imputation setting in Appendix A.1.2. The anchored set A corresponds to the observed coordinates O, and the complement ¯A corresponds to the missing coordinates M.
+
+A.2.3 Training Objective 
+
+MDLM trains the denoising kernel by minimizing a negative ELBO (NELBO). Owing to the absorbing structure of the forward process, each per-step KL between the forward posterior and the learned reverse kernel reduces in closed form to a weighted cross-entropy over currently masked positions, 
+
+wt
+
+P 
+
+> l∈M t
+
+CE( xlθ (zt), x l) where wt = αt−αs 
+
+> 1−αt
+
+and Mt = {l | zlt = m} is the set of currently masked positions. The denoiser xlθ (zt) predicts the clean token at position l directly, paralleling the prediction of clean signal x0 in continuous diffusion. Taking T → ∞ , the discrete-time sum converges to a continuous-time objective that samples t ∼ U (0 , 1) and uses the weight w(t) = α′ 
+
+> t
+> 1−αt
+
+:
+
+LCT (x; θ) = Et
+
+"
+
+α′
+
+> t
+
+1 − αt
+
+X
+
+> l∈M t
+
+CE  xlθ (zt), x l#
+
+, (20) which integrates the per-step loss over a continuous time grid and is the form actually used in our experiments. With anchors (Section A.2.2), observed positions are excluded from the forward process and therefore never appear masked at any time t. The training loss is consequently computed only on non-anchor masked positions Manch  
+
+> t
+
+= {l ∈ ¯A | zlt = m}, i.e., Mt is replaced by Manch  
+
+> t
+
+in Equation (20). The denoiser is trained to reconstruct only the missing coordinates conditional on the observed ones, which is exactly the imputation objective pθ (xM 
+
+> 0
+
+| xO 
+
+> 0
+
+) targeted in Appendix A.1.2. 
+
+B Derivation of the Soft-Label Loss Decomposition 
+
+We provide the derivation of the decomposition stated in Eq. 6. For brevity, we suppress the position index l and the timestep weight w(t), and consider a single per-token loss 
+
+L = − s, log pθ = −
+
+> K
+
+X
+
+> i=1
+
+si log pθ (i), (21) where s is the ordinal-aware soft label centered at the ground-truth index y (Eq. 2) and pθ ∈ ∆K−1
+
+is the predicted distribution. 
+
+Step 1: Decomposition of the soft label. Let ϵ := 1 − sy ∈ [0 , 1) denote the total mass that s
+
+assigns outside the ground-truth index y. We define 
+
+u := s − sy ey
+
+1 − sy
+
+, (22) where ey denotes the one-hot vector at position y. By construction, uy = 0 and u is a valid probability distribution supported on the ordinal neighborhood {i : 0 < |i − y| ≤ w}. The soft label can then be written as a convex combination 
+
+s = (1 − ϵ) ey + ϵ u. (23) 15 Step 2: Splitting the cross-entropy. Substituting Eq. 23 into L and applying the linearity of the inner product gives 
+
+L = − (1 − ϵ) ey + ϵ u, log pθ (24) 
+
+= −(1 − ϵ) ⟨ey , log pθ ⟩ − ϵ ⟨u, log pθ ⟩. (25) The first term is the standard MDLM cross-entropy against the one-hot target, 
+
+−⟨ ey , log pθ ⟩ = − log pθ (y) = LNELBO , (26) recovering the per-token NELBO contribution of vanilla MDLM [28]. 
+
+Step 3: KL form of the second term. The second term is the cross-entropy H(u, pθ ), which by the standard identity decomposes as 
+
+H(u, pθ ) = −⟨ u, log pθ ⟩ = DKL (u ∥ pθ ) + H(u), (27) where H(u) = − P 
+
+> i
+
+ui log ui is the entropy of u and depends only on s (i.e., independent of pθ ). 
+
+Step 4: Combining. Substituting back into Eq. 25 yields 
+
+L = (1 − ϵ) LNELBO + ϵ D KL (u ∥ pθ ) + ϵ H (u)
+
+| {z } 
+
+> const
+
+, (28) which is exactly the decomposition in Eq. 6. Two limiting cases are worth noting: • As the soft label sharpens ( s → ey , equivalently ϵ → 0), the KL term vanishes and 
+
+L → L NELBO , recovering the vanilla MDLM objective. • For ϵ > 0, the additional non-negative term ϵ D KL (u ∥ pθ ) penalizes probability mass placed outside the ordinal neighborhood of y, since u is supported only on {i : 0 < |i − y| ≤ w}.The same decomposition holds inside the expectation Et[w(t)·] in Eq. 5 by linearity, giving the full-objective form 
+
+Ldiff = Et
+
+"
+
+w(t) X
+
+> l∈M t
+
+
+
+(1 − ϵ(l)) L(l)NELBO + ϵ(l) DKL 
+
+ u(l) ∥ pθ (z(l) 
+
+> t
+
+)#
+
++ const . (29) 
+
+C Experimental Settings 
+
+C.1 Datasets 
+
+Table 9: Statistics of benchmark datasets. 
+
+Datasets Features Frequency Samples Domain 
+
+Energy 28 10 min. 19,735 Weather ETTh 7 60 min. 17,420 Temperature Weather 21 10 min. 52,696 Weather Sine 5 - 10000 Simulation We evaluate the proposed MDTIM on four time-series datasets: three real-world benchmarks (Energy, ETTh, Weather) to assess practical validity, and one synthetic Sine dataset for controlled evaluation of periodic dynamics. These datasets cover a broad range of dynamics observed in long-horizon multivariate time-series. The Energy 1 dataset contains electricity-related measurements with strong seasonality and occasional irregular variations. The ETTh 2 dataset is a standard benchmark derived from Electricity Transformer Dataset [43] and is commonly used to evaluate long-range dependency modeling. The Weather 3 [36] dataset includes multivariate meteorological observations characterized 
+
+> 1https://archive.ics.uci.edu/dataset/374/appliances+energy+prediction
+> 2https://github.com/zhouhaoyi/ETDataset
+> 3https://www.bgc-jena.mpg.de/wetter/
+
+16 by nonlinear interactions, seasonal trends, and stochastic fluctuations. In addition, the synthetic Sine dataset offers a controlled environment with known periodic structure, which helps validate fundamental forecasting behavior under minimal uncontrolled factors. Overall, these datasets were selected to ensure domain diversity and to evaluate performance under both structured periodic signals and noisy, non-stationary real-world patterns. Dataset specifications are summarized in Table 9. For the implementation and training of the baseline models, we adopted the codebase curated by Du et al. [7] 4.
+
+C.2 Training Configurations 
+
+We provide the detailed hyperparameter settings used to train MDTIM. To ensure reproducibility, we list the common architectural parameters and training schemes applied across all datasets. All experiments are conducted with dual Intel Xeon Gold 6444Y CPUs and a single NVIDIA H100 PCIe GPU (80GB). 
+
+C.2.1 Hyperparameters 
+
+The architecture of MDTIM is based on the Factorized Temporal-Variate Backbone described in Section 4. Table 10 summarizes detailed hyperparameters. We utilized consistent hyperparameter settings across all datasets to ensure reproducibility. Table 10: Hyperparameters for MDTIM architecture and training.                                      
+
+> Category Parameter Value Description Model
+> Hidden Size ( D)256 Dimension of hidden states Attention Heads 16 Number of heads in MSA DiT Blocks ( L)5Number of factorized layers Dropout 0.2 Dropout probability Bins ( K)40 Vocabulary size for discretization Output Range 1.5 Value range [−1.5,1.5]
+> Cond. Dim 16 Time-step embedding dimension
+> Training
+> Batch Size 256 -Learning Rate 3×10 −4-Scheduler Const. w/ Warmup -Warmup Steps 2,500 -Max Steps 10,000 -Gradient Clip 1.0 Norm clipping value EMA Decay 0.995 Exponential moving average FFT Weight ( λ)1.0 Spectral loss weight
+
+C.2.2 Noise Schedule and Time-Dependent Weighting 
+
+We employ a Log-Linear Noise Schedule to compute the continuous-time diffusion process. For a time step t ∈ [0 , 1] and a small constant ϵ = 10 −3, the total noise σ(t) and its rate of change are defined as: 
+
+σ(t) = − log (1 − (1 − ϵ)t) , dσ dt = 1 − ϵ
+
+1 − (1 − ϵ)t (30) To ensure balanced training across varying noise levels, we apply importance sampling via a time-dependent loss weight w(t). This weight effectively normalizes the contribution of each time step to the objective function: 
+
+w(t) = dσ (t)/dt eσ(t) − 1 (31) 
+
+> 4https://github.com/WenjieDu/Awesome_Imputation
+
+17 This weighting scheme assigns higher importance to low-noise regions ( t ≈ 0), prioritizing the learning of fine-grained details from clean data, while down-weighting highly corrupted states ( t ≈ 1)where reconstruction is ambiguous. 
+
+C.3 Evaluation Metrics 
+
+We evaluate both point imputation accuracy and the quality of predictive distributions. Let yi,t,c and 
+
+ˆyi,t,c denote the ground truth and the imputed value for sample i, time step t, and channel c. All metrics are computed exclusively on the masked positions, denoted by the set of indices M.
+
+MAE and MSE. We report Mean Absolute Error (MAE) and Mean Squared Error (MSE), averaged over the masked entries M:
+
+MAE = 1
+
+|M| 
+
+X
+
+> (i,t,c )∈M
+
+|ˆyi,t,c − yi,t,c | , MSE = 1
+
+|M| 
+
+X
+
+> (i,t,c )∈M
+
+(ˆ yi,t,c − yi,t,c )2 . (32) In probabilistic settings, we set ˆyi,t,c to the sample mean of M generated trajectories, ˆyi,t,c =
+
+> 1
+> M
+
+PMm=1 ˜y(m)
+
+> i,t,c
+
+.
+
+CRPS. To assess the probabilistic imputation performance, we use the Continuous Ranked Prob-ability Score (CRPS) [21]. For a predictive CDF Fi,t,c at a masked position, CRPS is defined as 
+
+CRPS( Fi,t,c , y i,t,c ) = 
+
+Z ∞−∞ 
+
+
+
+Fi,t,c (z) − I[z ≥ yi,t,c ]
+
+2
+
+dz. (33) Lower CRPS indicates better probabilistic imputation, rewarding both calibration and sharpness. 
+
+Sample-based CRPS Estimation. Since the model produces M stochastic samples {˜y(m)
+
+> i,t,c
+
+}Mm=1 ∼
+
+Fi,t,c , we approximate CRPS by 
+
+CRPS i,t,c = 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+˜y(m) 
+
+> i,t,c
+
+− yi,t,c − 12M 2
+
+> M
+
+X
+
+> m=1
+> M
+
+X
+
+> n=1
+
+˜y(m) 
+
+> i,t,c
+
+− ˜y(n) 
+
+> i,t,c
+
+. (34) We report the average of CRPS i,t,c over all masked entries in M.
+
+D Additional Experimental Results 
+
+In this section, we provide supplementary experimental results that complement the main paper. Section D.1 reports the full quantitative comparison including the 50% missing ratio omitted from Table 1 for space. Section D.2 presents an ablation comparing our discrete formulation against a continuous-modeling counterpart, isolating the contribution of Stochastic Discretization .
+
+D.1 Full Imputation Performance Across All Missing Ratios 
+
+Table 11 reports the complete results of our main imputation experiment, including the 30%, 50%, and 70% missing ratios under both Uniform and Geometric scenarios. The 50% column extends the trend reported in the main paper: MDTIM consistently maintains the lowest MAE across the majority of settings, and the relative improvement over baselines remains stable across missing ratios. This confirms that the performance advantage of MDTIM is not specific to any particular corruption level, but holds robustly throughout the regime of partial observation. 
+
+D.2 Comparison with Continuous Modeling 
+
+To isolate the contribution of our discrete formulation, we compare MDTIM (Disc), the proposed model, against a continuous-modeling variant MDTIM (Cont). MDTIM (Cont) shares the same Factorized Temporal-Variate backbone and masked diffusion training paradigm, but operates directly on continuous input values and is optimized with a Mean Squared Error (MSE) loss. In contrast, 18 Table 11: Quantitative comparison of multivariate time-series imputation performance ( L = 48 ). We report the MAE of MDTIM and baselines averaged over 3 random seeds. The best results are highlighted in bold .
+
+Dataset Energy ETTh Weather Sine Missing Type Uniform Geometric Uniform Geometric Uniform Geometric Uniform Geometric 
+
+Model 30% 50% 70% 30% 50% 70% 30% 50% 70% 30% 50% 70% 30% 50% 70% 30% 50% 70% 30% 50% 70% 30% 50% 70% RNN  BRITS 0.246 0.296 0.379 0.329 0.344 0.366 0.194 0.235 0.299 0.227 0.258 0.292 0.050 0.057 0.073 0.058 0.063 0.071 0.010 0.013 0.021 0.020 0.019 0.019 MRNN 1.086 1.107 1.143 1.087 1.108 1.143 0.743 0.762 0.782 0.751 0.765 0.781 0.651 0.653 0.661 0.654 0.656 0.659 0.169 0.169 0.170 0.169 0.169 0.170 GRUD 0.364 0.387 0.457 0.426 0.425 0.445 0.310 0.336 0.394 0.348 0.362 0.383 0.104 0.176 0.369 0.164 0.231 0.350 0.008 0.008 0.014 0.013 0.012 0.012 Transformer  Transformer 0.323 0.335 0.401 0.354 0.356 0.393 0.168 0.201 0.252 0.183 0.212 0.247 0.076 0.067 0.070 0.083 0.072 0.068 0.039 0.041 0.046 0.042 0.044 0.045 Informer 0.344 0.338 0.379 0.371 0.357 0.373 0.207 0.240 0.302 0.226 0.256 0.296 0.047 0.046 0.059 0.052 0.050 0.058 0.027 0.025 0.039 0.036 0.032 0.037 PatchTST 0.586 0.336 0.529 0.528 0.378 0.517 0.202 0.218 0.272 0.231 0.243 0.262 0.074 0.061 0.082 0.081 0.069 0.077 0.015 0.011 0.017 0.019 0.014 0.015 SAITS 0.177 0.185 0.212 0.204 0.200 0.208 0.140 0.166 0.210 0.152 0.176 0.206 0.045 0.044 0.049 0.050 0.048 0.048 0.026 0.023 0.026 0.030 0.026 0.025 Imputeformer 0.066 0.100 0.219 0.113 0.143 0.194 0.146 0.178 0.245 0.165 0.196 0.235 0.049 0.068 0.171 0.090 0.111 0.149 0.006 0.012 0.041 0.012 0.019 0.037 CNN  TimesNet 0.617 0.683 0.818 0.689 0.726 0.808 0.593 0.653 0.719 0.628 0.666 0.717 0.211 0.202 0.351 0.225 0.223 0.348 0.167 0.188 0.220 0.189 0.200 0.217 SCINet 0.557 0.418 0.571 0.546 0.442 0.565 0.238 0.252 0.323 0.261 0.273 0.317 0.074 0.068 0.089 0.086 0.076 0.087 0.019 0.018 0.031 0.026 0.024 0.029 Linear  DLinear 0.795 0.351 0.527 0.684 0.388 0.517 0.379 0.319 0.445 0.373 0.357 0.435 0.372 0.149 0.223 0.345 0.161 0.220 0.070 0.032 0.053 0.062 0.041 0.051 FiLM 0.877 0.380 0.520 0.791 0.413 0.512 0.696 0.608 0.627 0.707 0.627 0.623 0.380 0.156 0.209 0.360 0.165 0.206 0.127 0.102 0.109 0.132 0.110 0.108 FreTS 0.157 0.147 0.219 0.225 0.184 0.206 0.222 0.238 0.299 0.262 0.266 0.286 0.071 0.059 0.080 0.080 0.067 0.074 0.068 0.037 0.068 0.075 0.049 0.065 Generative  GPVAE 0.476 0.509 0.730 0.501 0.532 0.727 0.333 0.349 0.449 0.369 0.385 0.440 0.158 0.153 0.255 0.172 0.170 0.252 0.152 0.150 0.162 0.153 0.151 0.162 USGAN 0.264 0.323 0.412 0.330 0.362 0.401 0.208 0.243 0.302 0.240 0.266 0.295 0.087 0.094 0.122 0.101 0.104 0.118 0.014 0.018 0.029 0.026 0.026 0.026 CSDI 0.094 0.112 0.139 0.110 0.122 0.136 0.160 0.192 0.244 0.177 0.206 0.240 0.039 0.043 0.049 0.044 0.046 0.048 0.003 0.004 0.004 0.004 0.004 0.004 FGTI 0.050 0.071 0.100 0.065 0.080 0.097 0.218 0.255 0.349 0.293 0.311 0.328 0.038 0.043 0.051 0.046 0.047 0.049 0.001 0.002 0.003 0.002 0.003 0.003 
+
+MDTIM (Ours) 0.044 0.061 0.085 0.053 0.067 0.082 0.127 0.157 0.211 0.146 0.173 0.205 0.032 0.036 0.044 0.036 0.039 0.043 0.002 0.003 0.004 0.003 0.003 0.003 30 50 70 
+
+Missing Rate (%) 
+
+0.04 0.08 0.12 0.16 0.20 0.24 
+
+> MAE
+
+SAITS CSDI MDTIM (Cont) MDTIM (Disc) 
+
+(a) Uniform Missing 30 50 70 
+
+Missing Rate (%) 
+
+0.04 0.08 0.12 0.16 0.20 0.24  
+
+> MAE
+
+(b) Geometric Missing 
+
+Figure 4: Comparison between MDTIM (Disc) and MDTIM (Cont) on the Energy dataset, alongside representative baselines (SAITS, CSDI). Results are reported under both uniform and geometric missing scenarios across varying missing rates. MDTIM (Disc) employs our Stochastic Discretization to map continuous signals into discrete tokens and optimizes the ordinal-aware discrete diffusion objective described in Section 4. As shown in Figure 4, MDTIM (Cont) already performs competitively with strong baselines, indi-cating that the masked diffusion paradigm of learning to reconstruct from varying corruption levels with timestep conditioning is itself effective even in continuous spaces. Nevertheless, MDTIM (Disc) consistently achieves lower MAE across all missing rates and missing types. This performance gap confirms that the explicit structural separation between valid observations and missing placeholders, achieved through our orthogonal tokenization, provides a benefit beyond the masked diffusion training scheme alone, and is crucial for time series imputation. 
+
+E Visualization of Imputation Results 
+
+We provide comprehensive visualizations of the imputation results across all benchmark datasets: ETTh, Energy, Weather, and Sine with MDTIM. Figures 5, 6, 7, and 8 illustrate the reconstructed time series for all channels (ETTh, Sine) or subset of channels (Energy, Weather). In each figure, the left column displays the results under 50% uniform masking, while the right column shows under 50% geometric masking. The blue lines represent the ground truth values, while the green lines denote the imputed values (ˆx) reconstructed by MDTIM. The green shaded areas indicate the estimated uncertainty intervals. As observed, MDTIM effectively captures the complex temporal dynamics and periodicity of the multivariate time series. 19 20 
+
+10 
+
+010 20 Imputed Ground Truth 
+
+2
+
+024 Imputed Ground Truth 
+
+20 
+
+10 
+
+010 Imputed Ground Truth 
+
+3
+
+2
+
+1
+
+012 Imputed Ground Truth 
+
+23456 Imputed Ground Truth 
+
+0.6 0.8 1.0 1.2 1.4 1.6 Imputed Ground Truth 
+
+0 10 20 30 40 
+
+Time Step 
+
+56789
+
+Imputed Ground Truth (a) Uniform Missing 20 
+
+10 
+
+010 20 Imputed Ground Truth 
+
+2
+
+1
+
+01234 Imputed Ground Truth 
+
+20 
+
+10 
+
+010 Imputed Ground Truth 
+
+3
+
+2
+
+1
+
+012 Imputed Ground Truth 
+
+23456 Imputed Ground Truth 
+
+0.6 0.8 1.0 1.2 1.4 1.6 Imputed Ground Truth 
+
+0 10 20 30 40 
+
+Time Step 
+
+56789 Imputed Ground Truth (b) Geometric Missing 
+
+Figure 5: Visualization of imputation results on the ETTh dataset. 20 0100 200 300 400 Imputed Ground Truth 
+
+21.8 22.0 22.2 22.4 22.6 22.8 23.0 Imputed Ground Truth 
+
+24.7 24.8 24.9 25.0 25.1 25.2 Imputed Ground Truth 
+
+8.5 9.0 9.5 10.0 10.5 11.0 Imputed Ground Truth 
+
+25.2 25.4 25.6 25.8 
+
+Imputed Ground Truth 
+
+8.6 8.8 9.0 9.2 9.4 
+
+Imputed Ground Truth 
+
+0 10 20 30 40 
+
+Time Step 
+
+25 30 35 40 Imputed Ground Truth (a) Uniform Missing 0100 200 300 400 Imputed Ground Truth 
+
+21.75 22.00 22.25 22.50 22.75 23.00 23.25 Imputed Ground Truth 
+
+24.8 24.9 25.0 25.1 25.2 Imputed Ground Truth 
+
+910 11 
+
+Imputed Ground Truth 
+
+25.0 25.2 25.4 25.6 25.8 26.0 Imputed Ground Truth 
+
+8.6 8.8 9.0 9.2 9.4 Imputed Ground Truth 
+
+0 10 20 30 40 
+
+Time Step 
+
+20 25 30 35 40 Imputed Ground Truth (b) Geometric Missing 
+
+Figure 6: Visualization of imputation results on the Energy dataset. 21 01234 Imputed Ground Truth 
+
+4.0 4.2 4.4 4.6 
+
+Imputed Ground Truth 
+
+6.4 6.6 6.8 7.0 7.2 7.4 7.6 Imputed Ground Truth 
+
+1230 1240 1250 1260 Imputed Ground Truth 
+
+2345 Imputed Ground Truth 
+
+234567 Imputed Ground Truth 
+
+0 10 20 30 40 
+
+Time Step 
+
+160 180 200 220 Imputed Ground Truth (a) Uniform Missing 01234 Imputed Ground Truth 
+
+4.0 4.2 4.4 4.6 
+
+Imputed Ground Truth 
+
+6.4 6.6 6.8 7.0 7.2 7.4 
+
+Imputed Ground Truth 
+
+1230 1240 1250 1260 Imputed Ground Truth 
+
+2345 Imputed Ground Truth 
+
+234567 Imputed Ground Truth 
+
+0 10 20 30 40 
+
+Time Step 
+
+160 180 200 
+
+Imputed Ground Truth (b) Geometric Missing 
+
+Figure 7: Visualization of imputation results on the Weather dataset. 22 0.4 0.6 0.8 1.0 Imputed Ground Truth 
+
+0.2 0.4 0.6 0.8 1.0 Imputed Ground Truth 
+
+0.5 0.6 0.7 0.8 0.9 1.0 Imputed Ground Truth 
+
+0.4 0.6 0.8 1.0 Imputed Ground Truth 
+
+0 10 20 30 40 
+
+Time Step 
+
+0.0 0.2 0.4 0.6 0.8 1.0 Imputed Ground Truth (a) Uniform Missing 0.4 0.6 0.8 1.0 Imputed Ground Truth 
+
+0.2 0.4 0.6 0.8 1.0 Imputed Ground Truth 
+
+0.5 0.6 0.7 0.8 0.9 1.0 
+
+Imputed Ground Truth 
+
+0.4 0.6 0.8 1.0 Imputed Ground Truth 
+
+0 10 20 30 40 
+
+Time Step 
+
+0.0 0.2 0.4 0.6 0.8 1.0 Imputed Ground Truth (b) Geometric Missing 
+
+Figure 8: Visualization of imputation results on the Sine dataset. 23
