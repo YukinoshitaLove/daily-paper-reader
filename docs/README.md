@@ -6,53 +6,71 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-20
-- 运行时间：2026-08-20 20:38:39 UTC
+- 最新运行日期：2026-08-21
+- 运行时间：2026-08-21 20:32:32 UTC
 - 运行状态：成功
-- 本次总论文数：11
-- 精读区：5
-- 速读区：6
+- 本次总论文数：17
+- 精读区：6
+- 速读区：11
 
 ### 今日简报（AI）
-今日精读5篇、速读6篇，聚焦图像增强与扩散模型理论。最值得看的是9.0分的《Dynamic SpectraFormer for Ultra-High-Definition Underwater Image Enhancement》及8.0分的扩散模型信息传播分析。建议优先精读水下图像增强方向，兼顾扩散模型新理论。
-- 详情：[/202608/20/README](/202608/20/README)
+今日精读扩散模型条件化与曝光校正两篇高分论文，另速读文本编辑、PET重建等三篇。最值得关注的是9.0分的AutoLumNet单次曝光校正与扩散模型条件化新解释，方向明确且方法落地。初学者可先看AutoLumNet，代码和效果更直观，便于理解图像生成任务。
+- 详情：[/202608/21/README](/202608/21/README)
 
 ### 精读区论文标签
-1. [Dynamic SpectraFormer for Ultra-High-Definition Underwater Image Enhancement](/202608/20/2608.18662v1-dynamic-spectraformer-for-ultra-high-definition-underwater-image-enhancement)  
+1. [A Plug-in Interpretation of Conditioning in Score-Based Diffusion Models](/202608/21/2608.19504v1-a-plug-in-interpretation-of-conditioning-in-score-based-diffusion-models)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于频域Transformer的水下图像增强，属于图像恢复任务。
-2. [Information Spreading in Diffusion Models from Effective Field Theory](/202608/20/2608.14308v1-information-spreading-in-diffusion-models-from-effective-field-theory)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：分数匹配扩散模型的去噪动力学分析
-3. [AViTS: Adaptive Spatiotemporal Token Selection for Efficient Dynamic-Resolution Generation](/202608/20/2608.17995v1-avits-adaptive-spatiotemporal-token-selection-for-efficient-dynamic-resolution-generation)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：面向动态分辨率扩散Transformer生成的自适应时空令牌选择方法
-4. [PALATE: Personalized Aesthetic Learning through Adaptive Taste Evolution for Multi-User Portrait Retouching](/202608/20/2608.18622v1-palate-personalized-aesthetic-learning-through-adaptive-taste-evolution-for-multi-user-portrait-retouching)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于自适应品味演进的个性化人像修图
-5. [Diffusion Models for High-Dimensional Clustered Data: Intrinsic-Dimension Adaptivity via Bayesian Classification](/202608/20/2608.19067v1-diffusion-models-for-high-dimensional-clustered-data-intrinsic-dimension-adaptivity-via-bayesian-classification)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：针对高维聚类数据的扩散模型理论分析
+   evidence：基于分数的扩散模型中的条件生成机制
+2. [AutoLumNet: Monotone Optimal Transport for Single-Shot Exposure Correction](/202608/21/2608.19860v1-autolumnet-monotone-optimal-transport-for-single-shot-exposure-correction)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：曝光校正属于图像恢复任务
+3. [DPC-Net: Dual-Prior Collaborative Network for All-in-One Image Restoration](/202608/21/2608.20141v1-dpc-net-dual-prior-collaborative-network-for-all-in-one-image-restoration)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：面向多种退化类型的统一图像恢复，提出双先验协作网络
+4. [DARS: Dual-Level Credit Assignment RL with Structured Reasoning for Instruction-Based Image Editing](/202608/21/2608.20161v1-dars-dual-level-credit-assignment-rl-with-structured-reasoning-for-instruction-based-image-editing)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于指令的图像编辑与扩散渲染器，强化学习训练
+5. [Ultra-High-Definition Restoration Transformers with Correlation Matching Transformation](/202608/21/2608.20263v1-ultra-high-definition-restoration-transformers-with-correlation-matching-transformation)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：超高清图像复原与超分辨率任务
+6. [Swift-Image: Exploring the Performance Frontier of Compact Unified Image Generation Models](/202608/21/2608.20334v1-swift-image-exploring-the-performance-frontier-of-compact-unified-image-generation-models)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：统一的文生图与图像编辑模型，采用紧凑DiT架构
 
 ### 速读区论文标签
-1. [PoseAdapter: Dual-Stream 2.5D Controllable Image Generation for Complex Multi-Object Scenes](/202608/20/2608.15583v1-poseadapter-dual-stream-25d-controllable-image-generation-for-complex-multi-object-scenes)  
+1. [TextRefine: Improving Textual Fidelity, Spatial Placement, and Glyph Rendering for Text Editing in Product Posters](/202608/21/2608.19637v1-textrefine-improving-textual-fidelity-spatial-placement-and-glyph-rendering-for-text-editing-in-product-posters)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：直接面向基于指令的图像编辑，提出后训练与奖励优化框架
+2. [Flow Matching-Based PET Image Reconstruction](/202608/21/2608.20112v1-flow-matching-based-pet-image-reconstruction)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：使用流匹配生成模型进行PET图像重建，契合修复与生成模型主题
+3. [Conditional Dynamical Systems for Image Generation](/202608/21/2608.14961v1-conditional-dynamical-systems-for-image-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：可控图像生成与空间姿态控制，接近图像编辑模型
-2. [Frozen DINO Localizes Image Edits Without a Localizer](/202608/20/2608.18968v1-frozen-dino-localizes-image-edits-without-a-localizer)  
+   evidence：基于新兴计算基底上的连续动力系统进行图像生成
+4. [Optimize Your Sampling: Tuned Diffusion Sampling with Bayesian Optimization](/202608/21/2608.18040v1-optimize-your-sampling-tuned-diffusion-sampling-with-bayesian-optimization)  
    标签：评分：7.0/10、query:real-ir
-   evidence：利用冻结DINO定位图像编辑区域，与图像编辑模型评测和取证相关
-3. [Counterfactual Contrastive Analysis](/202608/20/2608.19032v1-counterfactual-contrastive-analysis)  
+   evidence：针对扩散模型采样步长选择进行贝叶斯优化，提升生成效率和质量
+5. [Continuous Adversarial MeanFlow Transfer](/202608/21/2608.19540v1-continuous-adversarial-meanflow-transfer)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于对比分析的无分类器反事实图像生成，生成最小编辑的逼真图像
-4. [Evaluating the Diversity of AI-Generated Content with Diversity Profiles](/202608/20/2608.17731v1-evaluating-the-diversity-of-ai-generated-content-with-diversity-profiles)  
+   evidence：预训练扩散/流模型的快速迁移与少步生成加速
+6. [Stream4D: 4D-Consistency for Streaming Autoregressive Diffusion Video Models](/202608/21/2608.19556v1-stream4d-4d-consistency-for-streaming-autoregressive-diffusion-video-models)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：基于自回归扩散的视频模型，加入4D一致性约束
+7. [Scale-Separated Conditioning for Style-Encoder-Free Diffusion Stylization](/202608/21/2608.19719v1-scale-separated-conditioning-for-style-encoder-free-diffusion-stylization)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：无需风格编码器的参考图像扩散风格化条件框架
+8. [Unwarping the Lens: A Physics-Grounded Approach to Video Glasses Removal](/202608/21/2608.20212v1-unwarping-the-lens-a-physics-grounded-approach-to-video-glasses-removal)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：面部属性编辑；利用生成式修复进行眼镜移除
+9. [TEA: Text Encoder Alignment for Robust Concept Erasure in Text-to-Image Models](/202608/21/2608.15341v1-tea-text-encoder-alignment-for-robust-concept-erasure-in-text-to-image-models)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向AI生成内容的多样性评估，可推广至生成模型评测
-5. [ReX-Shot: Single-Image Rephotography via Geometry- and Camera-Grounded Generation](/202608/20/2608.18593v1-rex-shot-single-image-rephotography-via-geometry--and-camera-grounded-generation)  
+   evidence：面向文本到图像扩散模型的鲁棒概念擦除文本编码器对齐框架
+10. [Learning-State-Aware Dynamic Generative Data Augmentation on Small-Scale Datasets](/202608/21/2608.18907v1-learning-state-aware-dynamic-generative-data-augmentation-on-small-scale-datasets)  
    标签：评分：6.0/10、query:real-ir
-   evidence：基于几何与相机约束的单图像重拍摄生成，涉及细节恢复与超分辨率
-6. [Discretizing Continuous Time Series for Imputation with Masked Diffusion Training](/202608/20/2608.19119v1-discretizing-continuous-time-series-for-imputation-with-masked-diffusion-training)  
+   evidence：基于预训练生成模型的动态生成式数据增强用于图像分类
+11. [BeyondMasks: Evaluating Causal and Physical Consistency in Video Object Removal](/202608/21/2608.20107v1-beyondmasks-evaluating-causal-and-physical-consistency-in-video-object-removal)  
    标签：评分：6.0/10、query:real-ir
-   evidence：掩码扩散训练用于时间序列插补
+   evidence：面向生成式视频模型的因果一致视频对象移除配对基准
 
 
 <div class="dpr-home-promo-card">
