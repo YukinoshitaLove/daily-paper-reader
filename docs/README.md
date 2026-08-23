@@ -6,19 +6,21 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-22
-- 运行时间：2026-08-22 19:58:08 UTC
+- 最新运行日期：2026-08-23
+- 运行时间：2026-08-23 19:58:20 UTC
 - 运行状态：成功
-- 本次总论文数：0
-- 精读区：0
+- 本次总论文数：1
+- 精读区：1
 - 速读区：0
 
 ### 今日简报（AI）
-> 今日无新推荐，系统未产出可展示论文。
-- 详情：[/202608/22/README](/202608/22/README)
+今日精读1篇高分论文，聚焦恶劣天气下修复与分割协作的无监督跨任务优化。最值得关注的是其8.0分所体现的可靠恢复分割协同思路，无需监督即可提升鲁棒性。建议进一步探索该方法在真实雾雨场景中的迁移效果。
+- 详情：[/202608/23/README](/202608/23/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Ultra: Unsupervised Cross-Task Optimization for Reliable Restoration Segmentation Collaboration under Adverse Weather](/202608/23/2608.16589v1-ultra-unsupervised-cross-task-optimization-for-reliable-restoration-segmentation-collaboration-under-adverse-weather)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：恶劣天气下图像恢复与分割的无监督跨任务协同优化
 
 ### 速读区论文标签
 - 本次无速读推荐。
