@@ -6,60 +6,62 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-24
-- 运行时间：2026-08-24 20:38:23 UTC
+- 最新运行日期：2026-08-25
+- 运行时间：2026-08-25 19:55:05 UTC
 - 运行状态：成功
-- 本次总论文数：12
-- 精读区：2
-- 速读区：10
+- 本次总论文数：14
+- 精读区：6
+- 速读区：8
 
 ### 今日简报（AI）
-今日精读2篇、速读10篇，共12篇，聚焦MRI重建与扩散模型效率优化。
-
-最值得关注：基于去噪正则的快速MRI重建一致性模型（9.0/10），以及扩散Transformer的锚定指令缓存加速方法（8.0/10）。
-
-若想快速跟进，可从这两个高分解方向切入，先看摘要与实验对比，再决定是否深入复现。
-- 详情：[/202608/24/README](/202608/24/README)
+今日精读6篇、速读8篇，共览14篇论文，聚焦图像修复与生成前沿。最值关注：法医尸检影像恢复（9.0）与GAN-Diff融合WGAN-GP+扩散U-Net（9.0）。建议普通读者优先探索医学图像修复与条件扩散生成方向。
+- 详情：[/202608/25/README](/202608/25/README)
 
 ### 精读区论文标签
-1. [Consistency Models for Fast MRI Reconstruction Using Regularization by Denoising](/202608/24/2608.20561v1-consistency-models-for-fast-mri-reconstruction-using-regularization-by-denoising)  
+1. [Through the Schrödinger Bridge: Benchmarking Antemortem Image Restoration from Postmortem Autolysis to Enhance Forensic Diagnostics](/202608/25/2608.21813v1-through-the-schrdinger-bridge-benchmarking-antemortem-image-restoration-from-postmortem-autolysis-to-enhance-forensic-diagnostics)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于一致性模型与去噪正则化的MRI重建
-2. [Anchoring Instruction Outside Mask: Exact Reference Caching for Efficient In-Context Diffusion Transformers](/202608/24/2608.21229v1-anchoring-instruction-outside-mask-exact-reference-caching-for-efficient-in-context-diffusion-transformers)  
+   evidence：基于Schrödinger桥生成模型的图像恢复
+2. [GAN-Diff : Coupling Pretrained WGAN-GP Features with Conditional Diffusion U-Nets](/202608/25/2608.22272v1-gan-diff--coupling-pretrained-wgan-gp-features-with-conditional-diffusion-u-nets)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：结合GAN先验与扩散U-Net的图像去噪和二倍超分框架
+3. [Mover360: Controllable Object Manipulation in 360° Panoramic Images](/202608/25/2608.23238v1-mover360-controllable-object-manipulation-in-360-panoramic-images)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：360°全景图像的可控对象操作编辑框架
+4. [Controllable blind deblurring with diffusion models](/202608/25/2608.23343v1-controllable-blind-deblurring-with-diffusion-models)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于扩散模型的盲去模糊与可控修复
+5. [Posterior Information Dynamics of Diffusion Models for Linear Inverse Problems](/202608/25/2608.21709v1-posterior-information-dynamics-of-diffusion-models-for-linear-inverse-problems)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向上下文编辑的扩散Transformer加速
+   evidence：扩散模型用于线性逆问题的理论分析
+6. [BC-IHV: Conditioning the Color Space for Stable Rectified-Flow Low-Light Enhancement](/202608/25/2608.21847v1-bc-ihv-conditioning-the-color-space-for-stable-rectified-flow-low-light-enhancement)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于整流流生成模型的低光增强，属于图像修复
 
 ### 速读区论文标签
-1. [GenRec: Knowing Where to Reconstruct and Where to Generate](/202608/24/2608.17832v1-genrec-knowing-where-to-reconstruct-and-where-to-generate)  
+1. [Improved denoising diffusion probabilistic models with efficient non-diagonal covariance modeling](/202608/25/2608.21972v1-improved-denoising-diffusion-probabilistic-models-with-efficient-non-diagonal-covariance-modeling)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：通过协方差建模加速DDPM采样，扩散模型改进
+2. [Neighbor-Aware View Synthesis for Restoring Missing Views in Light-Field Camera Arrays](/202608/25/2608.23175v1-neighbor-aware-view-synthesis-for-restoring-missing-views-in-light-field-camera-arrays)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：利用生成框架修复光场相机阵列中的缺失视图
+3. [SpatialDiff: 3D-Aware Object Movement via Implicit Spatial Modeling](/202608/25/2608.21776v1-spatialdiff-3d-aware-object-movement-via-implicit-spatial-modeling)  
    标签：评分：7.0/10、query:real-ir
-   evidence：重建-生成分离的生成式新视角合成
-2. [Frozen CLIP Priors for Robust Self-Supervised Poisson Inverse Problems](/202608/24/2608.20524v1-frozen-clip-priors-for-robust-self-supervised-poisson-inverse-problems)  
+   evidence：三维感知物体移动图像编辑
+4. [HP-UniIF: Hierarchical Prompt Learning for Unified Image Fusion](/202608/25/2608.21786v1-hp-uniif-hierarchical-prompt-learning-for-unified-image-fusion)  
    标签：评分：7.0/10、query:real-ir
-   evidence：利用冻结CLIP先验的自监督泊松逆问题图像重建
-3. [Minimax Optimality of Score-Entropy Discrete Diffusion](/202608/24/2608.20635v1-minimax-optimality-of-score-entropy-discrete-diffusion)  
+   evidence：基于扩散先验的统一图像融合框架，涵盖视觉修复
+5. [Pixel-Space Diffusion via Observation Operators](/202608/25/2608.21885v1-pixel-space-diffusion-via-observation-operators)  
    标签：评分：7.0/10、query:real-ir
-   evidence：离散扩散分数估计理论
-4. [DiGS-Avatar: Single-Image Animatable 3D Human Reconstruction via UV-Space Diffusion](/202608/24/2608.20759v1-digs-avatar-single-image-animatable-3d-human-reconstruction-via-uv-space-diffusion)  
+   evidence：基于观测算子的扩散训练新框架
+6. [Targeted Iterative Filtering](/202608/25/2608.22299v1-targeted-iterative-filtering)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于扩散模型的UV隐空间补全实现单图3D人体重建
-5. [Efficient Audio-Visual Generation via Synchrony-Aware Cross-Modal Sparse Attention](/202608/24/2608.15522v1-efficient-audio-visual-generation-via-synchrony-aware-cross-modal-sparse-attention)  
+   evidence：用于图像去噪的非线性扩散
+7. [Grounding Free-Form Instructions for Fashion Complementary Image Generation](/202608/25/2608.23302v1-grounding-free-form-instructions-for-fashion-complementary-image-generation)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：基于指令接地生成互补服饰图像，生成模型
+8. [DefaultShift: Auditing Semantic Default Shift in Accelerated Text-to-Image Models](/202608/25/2608.21784v1-defaultshift-auditing-semantic-default-shift-in-accelerated-text-to-image-models)  
    标签：评分：6.0/10、query:real-ir
-   evidence：基于扩散的高效音视频生成与稀疏注意力
-6. [DiSCO: Defending text-to-image generation through distribution-guided contrastive prompt optimization](/202608/24/2608.17067v1-disco-defending-text-to-image-generation-through-distribution-guided-contrastive-prompt-optimization)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：文生图黑盒防御
-7. [Image Generation Techniques for Urban Planning](/202608/24/2608.18908v1-image-generation-techniques-for-urban-planning)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：开发面向建筑表现图的条件流匹配生成模型
-8. [DiffVC-ONE: Diffusion-based Generative Video Compression with One-Step Video Diffusion Transformer](/202608/24/2608.20515v1-diffvc-one-diffusion-based-generative-video-compression-with-one-step-video-diffusion-transformer)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：基于扩散的一步视频扩散Transformer生成式视频压缩
-9. [InfinityEdit: Infinite Video Editing with a Lightweight Edit-Ignition Adapter](/202608/24/2608.20910v1-infinityedit-infinite-video-editing-with-a-lightweight-edit-ignition-adapter)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：视频编辑，与图像编辑模型相关
-10. [SlimDiffuSE: Towards Efficient Diffusion-Based Speech Enhancement using Slimmable Networks](/202608/24/2608.21188v1-slimdiffuse-towards-efficient-diffusion-based-speech-enhancement-using-slimmable-networks)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：可精简扩散模型效率方法
+   evidence：审计加速文本到图像模型中的语义默认偏移
 
 
 <div class="dpr-home-promo-card">
