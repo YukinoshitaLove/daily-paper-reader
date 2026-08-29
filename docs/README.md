@@ -7,37 +7,39 @@
 
 ## 每次日报
 - 最新运行日期：2026-08-29
-- 运行时间：2026-08-29 02:55:59 UTC
+- 运行时间：2026-08-29 21:56:54 UTC
 - 运行状态：成功
 - 本次总论文数：6
-- 精读区：2
-- 速读区：4
+- 精读区：1
+- 速读区：5
 
 ### 今日简报（AI）
-今日精读6篇，聚焦自回归图像生成与多模态推理，其中多Token辅助训练和免奖励在线RL编辑为高分亮点。最值得关注的是《Efficient Training with Foresight》提出多Token前瞻监督提升生成效率，以及《Can We Perform Online RL》探索无编辑奖励的强化学习新路径。建议优先精读这两篇，速读其余四篇以补全3D重建与视觉Tokenizer的细节。
+今日共读6篇论文，精读1篇、速读3篇，聚焦图像编辑与视觉生成前沿。
+最值得关注：无需编辑奖励的在线RL图像编辑方法（8.0分），以及物理感知的图像编辑与立体匹配技术。
+建议优先精读那一篇RL图像编辑论文，再速读TransPhy以对照物理一致性的编辑效果。
 - 详情：[/202608/29/README](/202608/29/README)
 
 ### 精读区论文标签
-1. [Efficient Training with Foresight: Multi-Token Auxiliary Supervision for Autoregressive Image Generation](/202608/29/2608.25386v1-efficient-training-with-foresight-multi-token-auxiliary-supervision-for-autoregressive-image-generation)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：面向自回归图像生成的统一训练框架
-2. [Can We Perform Online RL for Image Editing without Editing Rewards?](/202608/29/2608.22780v1-can-we-perform-online-rl-for-image-editing-without-editing-rewards)  
+1. [Can We Perform Online RL for Image Editing without Editing Rewards?](/202608/29/2608.22780v1-can-we-perform-online-rl-for-image-editing-without-editing-rewards)  
    标签：评分：8.0/10、query:real-ir
-   evidence：将图像编辑维度映射到文生图奖励空间，实现无需编辑奖励的在线RL优化
+   evidence：探索无需编辑奖励的图像编辑在线强化学习
 
 ### 速读区论文标签
-1. [Aphanta: Diagnosing Task-Aligned Image-Edited Intermediates for Multimodal Reasoning](/202608/29/2608.26993v1-aphanta-diagnosing-task-aligned-image-edited-intermediates-for-multimodal-reasoning)  
+1. [StereoDiffuer: Diffusion-based Progressive Geometry Modeling with Saliency Attention Perception for Stereo Matching](/202608/29/2608.21710v1-stereodiffuer-diffusion-based-progressive-geometry-modeling-with-saliency-attention-perception-for-stereo-matching)  
    标签：评分：7.0/10、query:real-ir
-   evidence：评估多模态大语言模型中图像编辑中间体的效用，与图像编辑模型直接相关。
-2. [Learning Spherical Occupancy Profiles for Multi-View 3D Reconstruction and Generation](/202608/29/2608.23206v2-learning-spherical-occupancy-profiles-for-multi-view-3d-reconstruction-and-generation)  
+   evidence：基于扩散模型的立体匹配视差精化框架
+2. [AffineTok: Semantic Affine Consistency for Diffusion-Friendly Visual Tokenizer](/202608/29/2608.23864v1-affinetok-semantic-affine-consistency-for-diffusion-friendly-visual-tokenizer)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：面向扩散友好的视觉分词器的语义恢复目标
+3. [TransPhy: Visual In-Context Learning for Physically Grounded Image Editing](/202608/29/2608.24119v1-transphy-visual-in-context-learning-for-physically-grounded-image-editing)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：基于视觉上下文学习的图像编辑方法
+4. [X-MULTI: VLM-based Imaging Factor Disentanglement for Factor-Aware Image Synthesis](/202608/29/2608.24563v1-x-multi-vlm-based-imaging-factor-disentanglement-for-factor-aware-image-synthesis)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：文本到图像生成中的成像因子解耦与组合合成
+5. [Learning spatially varying regularisation parameters of low regularity for image reconstruction](/202608/29/2608.25127v1-learning-spatially-varying-regularisation-parameters-of-low-regularity-for-image-reconstruction)  
    标签：评分：6.0/10、query:real-ir
-   evidence：以潜变量扩散模型构建生成式三维重建管线
-3. [AffineTok: Semantic Affine Consistency for Diffusion-Friendly Visual Tokenizer](/202608/29/2608.23864v1-affinetok-semantic-affine-consistency-for-diffusion-friendly-visual-tokenizer)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：面向扩散友好的视觉分词器与语义恢复目标
-4. [Learning spatially varying regularisation parameters of low regularity for image reconstruction](/202608/29/2608.25127v1-learning-spatially-varying-regularisation-parameters-of-low-regularity-for-image-reconstruction)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：通过空间自适应正则化参数改进图像重建，属于恢复方法研究。
+   evidence：用于变分图像重建的空间变化正则化参数，改进边缘和细节保持
 
 
 <div class="dpr-home-promo-card">
