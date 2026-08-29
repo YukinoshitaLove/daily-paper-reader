@@ -6,56 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-28
-- 运行时间：2026-08-28 04:06:16 UTC
+- 最新运行日期：2026-08-29
+- 运行时间：2026-08-29 02:55:59 UTC
 - 运行状态：成功
-- 本次总论文数：12
-- 精读区：6
-- 速读区：6
+- 本次总论文数：6
+- 精读区：2
+- 速读区：4
 
 ### 今日简报（AI）
-今日12篇推荐中，超分辨率研究领跑，精读高分聚焦于不确定性引导的扩散模型与真实纹理迁移；速读亮点涉及脑MRI部分容积重建、3D视频渲染优化及扩散模型记忆机制。最值得关注的是扩散模型在图像超分中的忠实性提升，以及细节真实性的新思路；建议优先翻阅这两篇精读论文，理解其核心方法。下一步可结合速读中的扩散理论分析，评估这些方法在常见低分辨率场景中的适用边界。
-- 详情：[/202608/28/README](/202608/28/README)
+今日精读6篇，聚焦自回归图像生成与多模态推理，其中多Token辅助训练和免奖励在线RL编辑为高分亮点。最值得关注的是《Efficient Training with Foresight》提出多Token前瞻监督提升生成效率，以及《Can We Perform Online RL》探索无编辑奖励的强化学习新路径。建议优先精读这两篇，速读其余四篇以补全3D重建与视觉Tokenizer的细节。
+- 详情：[/202608/29/README](/202608/29/README)
 
 ### 精读区论文标签
-1. [Uncertainty-Guided Latent Diffusion Models for Faithful Super Resolution](/202608/28/2608.25998v1-uncertainty-guided-latent-diffusion-models-for-faithful-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：不确定性引导的扩散超分辨率保真增强
-2. [GraftSR: Grafting Authentic Textures for Real-World Image Super-Resolution via Identical-Instance Guidance](/202608/28/2608.25334v1-graftsr-grafting-authentic-textures-for-real-world-image-super-resolution-via-identical-instance-guidance)  
+1. [Efficient Training with Foresight: Multi-Token Auxiliary Supervision for Autoregressive Image Generation](/202608/29/2608.25386v1-efficient-training-with-foresight-multi-token-auxiliary-supervision-for-autoregressive-image-generation)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散的真实世界图像超分辨率与参考引导。
-3. [Zero-Shot Video Restoration and Enhancement with Text-to-Image Latent Diffusion Models and Multi-Modal References](/202608/28/2608.26476v1-zero-shot-video-restoration-and-enhancement-with-text-to-image-latent-diffusion-models-and-multi-modal-references)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：利用文本到图像潜扩散模型实现零样本视频恢复
-4. [Hyperspectral Diffusion Equivariant Imaging (HyDiff-EI): A Self-supervised Framework for Hyperspectral Image Inpainting](/202608/28/2608.26812v1-hyperspectral-diffusion-equivariant-imaging-hydiff-ei-a-self-supervised-framework-for-hyperspectral-image-inpainting)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散的自监督高光谱图像修复方法
-5. [GuardPaint:SpeculativeSafetyDecodingforText-to-ImageGeneration](/202608/28/2608.21869v1-guardpaintspeculativesafetydecodingfortext-to-imagegeneration)  
+   evidence：面向自回归图像生成的统一训练框架
+2. [Can We Perform Online RL for Image Editing without Editing Rewards?](/202608/29/2608.22780v1-can-we-perform-online-rl-for-image-editing-without-editing-rewards)  
    标签：评分：8.0/10、query:real-ir
-   evidence：在文本到图像扩散轨迹内部进行干预，通过修复实现安全生成
-6. [WAVE: Reversing the Guidance Hierarchy for Coarse-to-Fine Guided Depth Super-Resolution](/202608/28/2608.25302v1-wave-reversing-the-guidance-hierarchy-for-coarse-to-fine-guided-depth-super-resolution)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于多级小波变换的引导深度超分辨率方法
+   evidence：将图像编辑维度映射到文生图奖励空间，实现无需编辑奖励的在线RL优化
 
 ### 速读区论文标签
-1. [Tissue-Mixture Entropy-Weighted Reconstruction for Partial-Volume-Aware Brain MRI Super-Resolution](/202608/28/2608.26647v1-tissue-mixture-entropy-weighted-reconstruction-for-partial-volume-aware-brain-mri-super-resolution)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：脑MRI超分辨率，体素混合感知重建
-2. [FixAnything: 3D-Consistent Rendering Refinement via Video Generative Priors](/202608/28/2608.23549v1-fixanything-3d-consistent-rendering-refinement-via-video-generative-priors)  
+1. [Aphanta: Diagnosing Task-Aligned Image-Edited Intermediates for Multimodal Reasoning](/202608/29/2608.26993v1-aphanta-diagnosing-task-aligned-image-edited-intermediates-for-multimodal-reasoning)  
    标签：评分：7.0/10、query:real-ir
-   evidence：利用基于扩散的视频生成先验修复渲染伪影
-3. [Generalization, memorization, and overfitting for diffusion models trained in the lazy high-dimensional regime](/202608/28/2608.23938v1-generalization-memorization-and-overfitting-for-diffusion-models-trained-in-the-lazy-high-dimensional-regime)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：扩散模型训练机制与泛化理论分析
-4. [Keep-or-Drop? Adaptive Tokenizer for Compact Video Representation](/202608/28/2608.24293v2-keep-or-drop-adaptive-tokenizer-for-compact-video-representation)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：面向潜扩散模型的自适应分词器提高视频表示效率
-5. [RubricRM: Generative Reward Modeling via Dynamic Rubrics for Image Generation and Editing](/202608/28/2608.26956v1-rubricrm-generative-reward-modeling-via-dynamic-rubrics-for-image-generation-and-editing)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：为文生图与指令式图像编辑提供动态评分标准的生成式奖励建模
-6. [EditaLive! Unified Character Video Editing for Live Streaming](/202608/28/2608.27123v1-editalive-unified-character-video-editing-for-live-streaming)  
+   evidence：评估多模态大语言模型中图像编辑中间体的效用，与图像编辑模型直接相关。
+2. [Learning Spherical Occupancy Profiles for Multi-View 3D Reconstruction and Generation](/202608/29/2608.23206v2-learning-spherical-occupancy-profiles-for-multi-view-3d-reconstruction-and-generation)  
    标签：评分：6.0/10、query:real-ir
-   evidence：基于图像动画的实时角色视频编辑模型
+   evidence：以潜变量扩散模型构建生成式三维重建管线
+3. [AffineTok: Semantic Affine Consistency for Diffusion-Friendly Visual Tokenizer](/202608/29/2608.23864v1-affinetok-semantic-affine-consistency-for-diffusion-friendly-visual-tokenizer)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：面向扩散友好的视觉分词器与语义恢复目标
+4. [Learning spatially varying regularisation parameters of low regularity for image reconstruction](/202608/29/2608.25127v1-learning-spatially-varying-regularisation-parameters-of-low-regularity-for-image-reconstruction)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：通过空间自适应正则化参数改进图像重建，属于恢复方法研究。
 
 
 <div class="dpr-home-promo-card">
