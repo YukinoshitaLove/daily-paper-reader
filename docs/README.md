@@ -6,35 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-30
-- 运行时间：2026-08-30 22:11:25 UTC
+- 最新运行日期：2026-08-31
+- 运行时间：2026-08-31 23:37:31 UTC
 - 运行状态：成功
-- 本次总论文数：5
+- 本次总论文数：3
 - 精读区：1
-- 速读区：4
+- 速读区：2
 
 ### 今日简报（AI）
-今日聚焦生成模型与多视图3D，5篇论文中精读扩散/流模型的表示学习（8.0分），并速读多视图鱼眼图像生成、自回归图像高效训练等方向。最值得关注的是表示学习在扩散/流模型中的应用价值，以及MIVIFI跨视角域桥接方法（7.0分）。下一步建议从精读论文入手，梳理表示学习如何提升生成质量与可控性。
-- 详情：[/202608/30/README](/202608/30/README)
+今日精读1篇、速读2篇，聚焦流匹配在CT重建与生成模型中的应用。最值得关注9.0分的《Physics-Guided Flow Matching for CT Image Reconstruction》，其物理先验融合思路显著优于常规方法；扩散桥多模态翻译亦可作为交叉参考。下一步可优先复现该精读论文的物理约束模块，并对比扩散桥实现效果。
+- 详情：[/202608/31/README](/202608/31/README)
 
 ### 精读区论文标签
-1. [Representation Learning in Diffusion and Flow-based Model: An Application Aspect](/202608/30/2608.24068v1-representation-learning-in-diffusion-and-flow-based-model-an-application-aspect)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：扩散与流模型表示学习综述
+1. [Physics-Guided Flow Matching for CT Image Reconstruction](/202608/31/2608.28256v1-physics-guided-flow-matching-for-ct-image-reconstruction)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：物理引导流匹配作为CT重建生成先验
 
 ### 速读区论文标签
-1. [MIVIFI: Bridging Perspective and Fisheye Domains for Training Multi-View Fisheye Image Generation Models](/202608/30/2608.23140v1-mivifi-bridging-perspective-and-fisheye-domains-for-training-multi-view-fisheye-image-generation-models)  
+1. [There and Back Again: Bidirectional Diffusion Bridges for Multimodality Translation](/202608/31/2608.27885v1-there-and-back-again-bidirectional-diffusion-bridges-for-multimodality-translation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：提出多视角鱼眼图像生成模型
-2. [Efficient Training with Foresight: Multi-Token Auxiliary Supervision for Autoregressive Image Generation](/202608/30/2608.25386v1-efficient-training-with-foresight-multi-token-auxiliary-supervision-for-autoregressive-image-generation)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：自回归图像生成的多token辅助监督
-3. [Learning Spherical Occupancy Profiles for Multi-View 3D Reconstruction and Generation](/202608/30/2608.23206v1-learning-spherical-occupancy-profiles-for-multi-view-3d-reconstruction-and-generation)  
+   evidence：用于文本-图像互译的双向扩散桥
+2. [Drift Variation Autoencoder: Unifying Generation and Representation Learning through Conditional Posterior Flow Matching](/202608/31/2608.25138v1-drift-variation-autoencoder-unifying-generation-and-representation-learning-through-conditional-posterior-flow-matching)  
    标签：评分：6.0/10、query:real-ir
-   evidence：使用潜在扩散模型进行生成式三维重建
-4. [ProxyFormer: A Dual-Stream Proxy Architecture for Ultra-Long Context and High-Resolution Generation](/202608/30/2608.23463v1-proxyformer-a-dual-stream-proxy-architecture-for-ultra-long-context-and-high-resolution-generation)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：面向高分辨率生成模型的高效架构
+   evidence：通过条件后验流匹配统一生成与表征学习
 
 
 <div class="dpr-home-promo-card">
