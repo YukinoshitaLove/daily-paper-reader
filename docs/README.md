@@ -6,75 +6,71 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-01
-- 运行时间：2026-09-01 22:27:45 UTC
+- 最新运行日期：2026-09-02
+- 运行时间：2026-09-02 22:53:24 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精读17篇，重点聚焦图像超分与JPEG恢复，其中《PixelIR》以满分10分领跑。
-
-最值得关注的方向是像素级流匹配实现单步超分，以及小波域均值流加速JPEG修复，二者均达9分以上高分。
-
-建议优先精读《PixelIR》验证其高效性，再按兴趣浏览扩散桥与3D风格化等速读选题。
-- 详情：[/202609/01/README](/202609/01/README)
+今日精读6篇、速读11篇，焦点集中在图像恢复与扩散模型应用。最值得关注：ReBridge-Flow 以流匹配重耦合后验桥实现图像恢复，以及免训练跨域修复方法均获9.0高分。建议普通读者优先复现这两项工作，并尝试将其思路迁移到视频修复任务。
+- 详情：[/202609/02/README](/202609/02/README)
 
 ### 精读区论文标签
-1. [PixelIR: Fidelity-Perception Decoupling via Pixel-Space Image-Residual Flow Matching for Efficient One-Step Real-World Super-Resolution](/202609/01/2608.30782v1-pixelir-fidelity-perception-decoupling-via-pixel-space-image-residual-flow-matching-for-efficient-one-step-real-world-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：直接面向真实世界超分辨率，采用生成式流匹配
-2. [Efficient JPEG Restoration in the Wavelet Domain via Mean Flows](/202609/01/2608.28730v1-efficient-jpeg-restoration-in-the-wavelet-domain-via-mean-flows)  
+1. [ReBridge-Flow: Re-Coupling Posterior Bridges in Flow Matching for Image Restoration](/202609/02/2609.00811v1-rebridge-flow-re-coupling-posterior-bridges-in-flow-matching-for-image-restoration)  
    标签：评分：9.0/10、query:real-ir
-   evidence：用小波域均值流生成式恢复器进行JPEG去压缩伪影，高效且高质量
-3. [DARD: Zero-Shot Degradation-Aware Retinex-Guided Diffusion for Low-Light Image Enhancement](/202609/01/2608.29243v1-dard-zero-shot-degradation-aware-retinex-guided-diffusion-for-low-light-image-enhancement)  
+   evidence：基于流匹配生成先验的图像恢复方法，通过后验桥重建耦来保持端点耦合
+2. [Training-Free Inpainting Across Domains with a Frozen Text-to-Image Diffusion Model](/202609/02/2609.00862v1-training-free-inpainting-across-domains-with-a-frozen-text-to-image-diffusion-model)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于扩散模型和Retinex引导的低光图像增强，直接匹配扩散/生成式图像修复需求
-4. [Learning to Restore More: Continual Capability Expansion for Pretrained Image Restoration Models](/202609/01/2608.30305v1-learning-to-restore-more-continual-capability-expansion-for-pretrained-image-restoration-models)  
+   evidence：利用冻结文生图扩散模型进行跨域免训练图像修复，直接对应图像修复与扩散生成需求
+3. [P-PatchDiff: Progressive Patch Diffusion Models for Low-light Image Enhancement](/202609/02/2609.01123v1-p-patchdiff-progressive-patch-diffusion-models-for-low-light-image-enhancement)  
    标签：评分：9.0/10、query:real-ir
-   evidence：预训练图像恢复模型的持续能力扩展
-5. [sRGB Real Noise Modeling via Noise-Aware Sampling with Normalizing Flows](/202609/01/2608.29038v1-srgb-real-noise-modeling-via-noise-aware-sampling-with-normalizing-flows)  
+   evidence：渐进分块扩散实现任意尺寸低光图像复原
+4. [Diffusion Based Unpaired Data Learning for Inverse Problems](/202609/02/2609.01370v1-diffusion-based-unpaired-data-learning-for-inverse-problems)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：面向逆问题的非配对扩散学习方法，涵盖图像复原、超分辨等任务
+5. [DocIntent: Answerability-Guided Agentic Restoration for Real-World Document Visual Question Answering](/202609/02/2608.29037v1-docintent-answerability-guided-agentic-restoration-for-real-world-document-visual-question-answering)  
    标签：评分：8.0/10、query:real-ir
-   evidence：用归一化流生成真实噪声，支撑图像去噪
-6. [RegionCache: Semantic-Aware Region Reuse for Efficient Multi-Turn Image Generation](/202609/01/2608.29809v1-regioncache-semantic-aware-region-reuse-for-efficient-multi-turn-image-generation)  
+   evidence：面向文档问答的真实退化图像恢复
+6. [Training-Free Hidden-State Refinement for Flow-Matching Image Generators](/202609/02/2608.29160v1-training-free-hidden-state-refinement-for-flow-matching-image-generators)  
    标签：评分：8.0/10、query:real-ir
-   evidence：基于扩散Transformer的多轮图像编辑，语义感知区域复用
+   evidence：针对冻结流匹配/扩散去噪器的免训练推理期细化
 
 ### 速读区论文标签
-1. [Discrete Diffusion Bridges for Spatiotemporally Aligned Image Translation and Generation](/202609/01/2608.29997v1-discrete-diffusion-bridges-for-spatiotemporally-aligned-image-translation-and-generation)  
+1. [Elastic Token Compression for Pixel-Space Diffusion Transformers](/202609/02/2608.29281v1-elastic-token-compression-for-pixel-space-diffusion-transformers)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向图像翻译与生成的时空对齐离散扩散框架
-2. [DReSG: Diffusion Residuals for Stylized Gaussian Splatting](/202609/01/2608.29048v1-dresg-diffusion-residuals-for-stylized-gaussian-splatting)  
+   evidence：面向像素空间扩散Transformer的令牌压缩以降低计算冗余
+2. [GenFirst: Generation Before Reconstruction for Stable End-to-End Latent Generative Modeling](/202609/02/2608.29335v1-genfirst-generation-before-reconstruction-for-stable-end-to-end-latent-generative-modeling)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：先生成后重建的稳定端到端潜变量生成建模训练方法
+3. [Advanced Pixel Diffusion Model with Guided Sparse Global Refinement](/202609/02/2609.00798v1-advanced-pixel-diffusion-model-with-guided-sparse-global-refinement)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：改进像素空间扩散模型并提出引导稀疏全局精修，属扩散生成模型算法改进方向
+4. [PredErase: Training-Free Object-and-Effect Removal with Predictive Latent Guidance](/202609/02/2609.00956v1-prederase-training-free-object-and-effect-removal-with-predictive-latent-guidance)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于冻结扩散模型的无训练图像编辑，去除对象及其阴影等光影效果
+5. [CameraEditor: Camera-Controlled Image Editing via Video-Prior Sequential Modeling](/202609/02/2609.01479v1-cameraeditor-camera-controlled-image-editing-via-video-prior-sequential-modeling)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于视频扩散先验的相机参数控制图像编辑模型
+6. [Denoising as Projection: Constrained Optimization with Gradient-Guided Diffusion](/202609/02/2608.29507v1-denoising-as-projection-constrained-optimization-with-gradient-guided-diffusion)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于扩散的三维场景风格化与外观编辑
-3. [Manifold-Constrained PET Reconstruction with Learned Flow-Matching Priors](/202609/01/2608.29158v1-manifold-constrained-pet-reconstruction-with-learned-flow-matching-priors)  
+   evidence：以去噪算子为投影的梯度引导扩散，保持数据流形约束
+7. [ASSERT: Adaptive Stochastic Sampling for Robust Diffusion Models on Analog Compute-in-Memory Hardware](/202609/02/2609.00955v1-assert-adaptive-stochastic-sampling-for-robust-diffusion-models-on-analog-compute-in-memory-hardware)  
    标签：评分：7.0/10、query:real-ir
-   evidence：用流匹配生成模型先验求解PET图像重建的逆问题，与生成模型驱动的图像恢复高度相关
-4. [Mapping-Based Image Diffusion](/202609/01/2608.29164v1-mapping-based-image-diffusion)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：基于张量的变分模型用于图像去噪与定向增强
-5. [Generalization over Memorization: Generalization-Aware Diffusion Adaptation for Single-Image Multi-View Synthesis](/202609/01/2608.29233v1-generalization-over-memorization-generalization-aware-diffusion-adaptation-for-single-image-multi-view-synthesis)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：基于扩散适配的单图多视角合成，强调泛化与记忆的区分
-6. [Elastic Token Compression for Pixel-Space Diffusion Transformers](/202609/01/2608.29281v1-elastic-token-compression-for-pixel-space-diffusion-transformers)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：面向像素空间扩散Transformer的令牌压缩方法，是扩散模型效率改进，可广泛应用于生成与恢复
-7. [OrnaStyler: Ornament-Aware Latent Editing for Content-Preserving 3D Stylization](/202609/01/2608.29905v1-ornastyler-ornament-aware-latent-editing-for-content-preserving-3d-stylization)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：基于修正流生成模型和反演引导编辑的文本驱动的3D纹样风格化，属于生成式编辑模型
-8. [Dior: Drawing the Light of Image via Material-Decoupled Illumination Representation](/202609/01/2608.29925v1-dior-drawing-the-light-of-image-via-material-decoupled-illumination-representation)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：可控图像重打光，直接属于图像编辑模型
-9. [Attribute Token Arithmetic: Disentangled and Continuous Semantic Control for Visual Autoregressive Models](/202609/01/2608.28082v1-attribute-token-arithmetic-disentangled-and-continuous-semantic-control-for-visual-autoregressive-models)  
+   evidence：面向模拟存算硬件的扩散模型噪声鲁棒采样方法，核心是扩散模型推理
+8. [Learning the Target Priors Before Image Translation: A Decoupled Training Paradigm for Cross-Modal Image Translation in Remote Sensing](/202609/02/2608.28517v1-learning-the-target-priors-before-image-translation-a-decoupled-training-paradigm-for-cross-modal-image-translation-in-remote-sensing)  
    标签：评分：6.0/10、query:real-ir
-   evidence：通过属性令牌算术在视觉自回归模型中实现语义属性控制，支持类似图像编辑的操作
-10. [FLM: Frequency-Aware Language Models for Generative Image Compression](/202609/01/2608.28687v1-flm-frequency-aware-language-models-for-generative-image-compression)  
+   evidence：面向跨模态翻译的目标域生成先验学习，符合生成模型主题
+9. [Coarse to Fine: Iterative Adversarial Neural Cellular Automata for Medical Image Synthesis](/202609/02/2608.28909v1-coarse-to-fine-iterative-adversarial-neural-cellular-automata-for-medical-image-synthesis)  
    标签：评分：6.0/10、query:real-ir
-   evidence：基于频率域语言模型的生成式图像压缩
-11. [PathGuide: Dynamic Classifier-Free Guidance via On-Policy Transport Alignment](/202609/01/2608.29107v1-pathguide-dynamic-classifier-free-guidance-via-on-policy-transport-alignment)  
+   evidence：医学图像合成使用的轻量NCA生成对抗网络，属生成模型范畴但与扩散修复无直接联系
+10. [EpaCache: Error-Propagation-Aware Caching for Accelerating Diffusion-Based Visual Generation](/202609/02/2608.29264v1-epacache-error-propagation-aware-caching-for-accelerating-diffusion-based-visual-generation)  
    标签：评分：6.0/10、query:real-ir
-   evidence：在基于流的生成模型中动态选择无分类器引导尺度，提升条件生成的推理控制
+   evidence：面向扩散图像/视频生成的无训练缓存加速方法
+11. [Reward-guided Fine-Tuning of One-Step Generative Models via Wasserstein Gradient Flow](/202609/02/2608.29647v1-reward-guided-fine-tuning-of-one-step-generative-models-via-wasserstein-gradient-flow)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：一步生成模型的奖励引导微调
 
 
 <div class="dpr-home-promo-card">
