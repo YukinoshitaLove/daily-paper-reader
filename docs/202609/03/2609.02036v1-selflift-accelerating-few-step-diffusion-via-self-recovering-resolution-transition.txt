@@ -1,0 +1,1040 @@
+Title: SelfLift: Accelerating Few-Step Diffusion via Self-Recovering Resolution Transition
+
+URL Source: https://arxiv.org/pdf/2609.02036v1
+
+Published Time: Thu, 03 Sep 2026 00:33:57 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# SelfLift: Accelerating Few-Step Diffusion via Self-Recovering Resolution Transition 
+
+Tingyan Wen 1,∗, Chenqian Yan 2,∗, Xurui Peng 2, Xiazhang Fang 2, Shuai Wang 2,
+
+Xueqian Wang 1,†, Songwei Liu 2,†
+
+> 1
+
+Tsinghua University , 2ByteDance 
+
+> ∗
+
+Equal contribution , †Corresponding authors 
+
+Abstract 
+
+Few-step diffusion models substantially compress temporal computation, making the spatial cost of each model evaluation an increasingly dominant source of inference latency. Progressive-resolution inference reduces this cost by performing early denoising at low resolution and reserving high-resolution computation for refinement. However, existing methods typically lift intermediate latents directly and rely on subsequent steps to absorb the induced distribution mismatch. In the few-step regime, the limited recovery budget leaves these errors as visible artifacts, constraining how late the transition can occur and, consequently, how efficiently it can be performed. We introduce SelfLift ,a self-recovering progressive-resolution framework that derives both transition-repair signals and trajectory-aligned supervision from the generative model itself. SelfLift-zero proposes a training-free Artifact-Aware Consistency Lift, using disagreement between direct latent lifting and pixel-VAE re-encoding as both a localized artifact-risk signal and a model-native correction direction. It enables reliable late transitions without external super-resolution, extra denoiser evaluations, or sampling-schedule modifications. Building on this robust transition, SelfLift-rich performs On-Policy Self Recovery on student-visited states, transferring dense high-resolution guidance from an internal self-teacher while remaining aligned with the altered progressive-resolution dynamics. Across FLUX.2-Klein and Z-Image-Turbo, SelfLift reduces end-to-end latency by 41.5% and 44.1% ,respectively. Combined with timestep distillation, it delivers overall speedups of 29.61 × and 19.21 ×
+
+over the corresponding 50-step models while preserving competitive generation quality, establishing a stronger speed–quality frontier for few-step diffusion.  
+
+> Project Page:
+
+https://happygirlty.github.io/SelfLift_res/  
+
+> Correspondence:
+
+Songwei Liu at liusongwei.zju@bytedance.com  
+
+> Date:
+
+August 2026 
+
+1 Introduction 
+
+Modern latent diffusion architectures achieve strong visual synthesis through iterative refinement [25, 28], but repeated full-resolution evaluations remain expen-sive. Step distillation compresses this process to one to eight evaluations using trajectory- or consistency-based objectives [21, 30, 32], distribution match-ing [41], or variational score distillation [24]. With temporal redundancy largely exhausted, further ac-1arXiv:2609.02036v1 [cs.CV] 2 Sep 2026 High-resolution rollout Low-resolution rollout              
+
+> 𝒙𝑻
+> noise
+> 𝒙𝟎
+> image
+> transition at step 𝑡𝑟
+> LR prefix: 𝑡𝑟 steps HR suffix: T-𝑡𝑟 steps
+> !𝒛 𝟎 ,𝒊 𝑯 𝒔𝒍↑
+> applied 𝝎𝒊𝜹𝑖
+> low artifact risk
+> Target-resolution VAE latent manifold
+> Direct Latent Lift
+> off-manifold drift
+> Target VAE Support
+> target-resolution latent region
+> Pixel-VAE Anchor
+> VAE-consistent paired reference
+> SelfLift Correction
+> residual-corrected latent state
+> !𝒛 𝟎 ,𝒊 𝑯𝒍𝒂𝒕↑
+> !𝒛 𝟎 ,𝒊 𝑯𝒑𝒊𝒙↑
+> large artifact risk 𝝎𝒊
+> applied 𝝎𝒋𝜹𝒋 𝝎𝒌 =𝟎 !𝒛 𝟎 ,𝒋 𝑯𝒍𝒂𝒕↑
+> !𝒛 𝟎 ,𝒋 𝑯 𝒔𝒍↑
+> !𝒛 𝟎 ,𝒌 𝑯𝒍𝒂𝒕↑
+> !𝒛 𝟎 ,𝒌 𝑯 𝒑𝒊𝒙↑
+> !𝒛 𝟎 ,𝒋 𝑯𝒑𝒊𝒙↑
+> (A) Latent Branch Sharp-looking with severe artifacts ↑ (B) Pixel Branch Artifact-free but blurry ↑ (C) Ours
+> ：SelfLift Clear and artifact-suppressed →
+
+Final Outputs   
+
+> ResolutionTransition Timestep 26354Speedup ↑ But Strict Transition ↑
+
+Figure 1 SelfLift unlocks fast and reliable progressive-resolution inference for few-step diffusion. Prior methods either leave latent-lifting artifacts to the few remaining denoising steps or rely on an external super-resolution model. SelfLift instead leverages two model-native branches, enabling later transitions with greater speedups. 
+
+celeration hinges on reducing per-step spatial cost without disrupting the distilled sparse trajectory. Progressive-resolution inference offers a natural so-lution. It performs early low-resolution evaluations to establish global structure, while reserving high-resolution computation for detail refinement, follow-ing diffusion’s coarse-to-fine evolution [4, 27]. As the simplest and lowest-overhead bridge between res-olutions, direct latent lifting is widely adopted in training-free methods [9, 34, 37]. Yet this efficiency comes at a cost, as the lifted states may exhibit visi-ble artifacts and spatial drift, leaving the remaining high-resolution steps to recover from the resulting transition errors. Fully exploiting progressive-resolution inference in the few-step regime poses two coupled challenges. 
+
+Challenge 1: Reliable resolution transition under a limited recovery budget. An earlier transition leaves more steps for recovery but sacrifices accel-eration, whereas a later transition yields greater speedups while making these errors harder to cor-rect. Pixel-space alternatives [43] avoid direct latent lifting through a separate super-resolution model, introducing an external generative prior and non-negligible inference overhead. Few-step acceleration therefore requires immediate, model-native transi-tion repair without external models or extra denoiser evaluations, shifting the focus from when or where to transition to how to cross the boundary reliably. 
+
+Challenge 2: Dense high-resolution guidance on the progressive-resolution trajectory. A reliable training-free transition already enables stable and efficient generation. When lightweight adaptation is allowed, the model’s native high-resolution ca-pability can be further used to recover details be-yond what the low-resolution prefix can represent. Standard fine-tuning and full-resolution distillation are poorly matched to this setting: they supervise target-derived or full-resolution states rather than the student-visited states produced by the acceler-ated rollout, creating a train–inference mismatch and potentially disrupting the few-step dynamics [10, 23]. Effective adaptation must therefore transfer dense high-resolution knowledge directly along the actual progressive-resolution trajectory used at inference. To address these challenges, we propose SelfLift , a self-recovering resolution-transition framework for ac-celerating few-step models, in which the model itself provides both self-derived transition-repair signals and trajectory-aligned supervision. SelfLift includes a complete training-free solution, SelfLift-zero, and an optional lightweight enhancement, SelfLift-rich. SelfLift-zero introduces Artifact-Aware Consistency Lift. Specifically, it constructs a self-derived consis-tency residual from the discrepancy between direct latent lifting and pixel VAE re-encoding. This resid-ual both localizes regions at risk of transition artifacts and provides a principled correction direction for the directly lifted latent. It can be integrated without an external super-resolution model or additional de-2noiser evaluations. SelfLift-rich further extends this principle through On-Policy Self Recovery. It distills our Zero transition into a lightweight latent lifter and transfers dense high-resolution guidance directly along the progressive-resolution trajectory. The su-pervision is provided by an internal self-teacher on the same student-visited states, without a separately trained teacher or reward model. Our contributions are summarized as follows: • We propose SelfLift , a self-recovering progressive-resolution framework that reframes few-step ac-celeration around reliable resolution transition. • SelfLift introduces two core designs : Artifact-Aware Consistency Lift for immediate and reli-able transition without external super-resolution or extra denoising, and On-Policy Self Recov-ery for trajectory-aligned adaptation with dense high-resolution supervision. • On FLUX.2-Klein and Z-Image-Turbo, SelfLift reduces end-to-end latency by 41.5% and 44.1% .With timestep distillation, it achieves 29.61 × and 
+
+> 19.21
+
+× overall speedups with strong generation quality. 
+
+2 Related Work 
+
+2.1 Efficient Diffusion Inference 
+
+Temporal acceleration employs fast ODE solvers [22, 42], error-rectified [26], multi-level [36], or motion-aware caching [39], and applies feature forecast-ing [19]. Trajectory distillation further compresses sampling through progressive compression [30], cross-noise consistency [32], or distribution matching [13, 40]. With temporal redundancy compressed in few-step models, per-evaluation spatial cost dominates. Spatial methods reduce this cost by varying res-olution along the sampling trajectory. Training-dependent designs use linked pyramids [11], noise-dependent patchification [14], or cascaded pixel-space flows [3], but require retraining. Training-free meth-ods include high–low–high sampling [34], region-adaptive lifting [9], and spectrally scheduled res-olution growth [37]. MrFlow instead uses pixel-space super-resolution, VAE re-encoding, and high-resolution refinement, avoiding direct latent lifting but requiring an external super-resolution model [43]. These approaches complement temporal acceleration, yet few-step models leave little denoising budget to absorb transition errors, making a reliable and self-contained resolution transition essential. 
+
+2.2 Post-Training of Step-distilled Mod-els 
+
+Step-distilled models acquire specialized dynamics over sparse timesteps, which standard post-training objectives may disrupt and thereby degrade genera-tion quality [23]. Effective adaptation must therefore improve the output distribution without deviating from the pretrained trajectory. PSO enlarges the likelihood margin between real images and distilled-model samples [23], whereas on-policy distillation supervises student-visited states to reduce the train– inference mismatch of off-policy teacher data [1]. Recent works extend this paradigm to visual gen-eration [5, 10, 15]. These methods primarily con-sider post-training along native-resolution trajecto-ries. Resolution-transition adaptation instead oper-ates on states jointly induced by the low-resolution prefix and cross-resolution transition. It must cor-rect the resulting distribution shift and recover high-resolution content on the actual progressive-resolution rollout, while preserving the pretrained few-step dynamics. 
+
+3 Method 
+
+3.1 Preliminaries  
+
+> Latent Flow Matching.
+
+Given an image x0, the VAE encoder E maps it to the clean latent z0 = E(x0).For flow time t ∈ [0 , 1] and text condition c, rectified flow [17] connects the clean latent to Gaussian noise and learns the corresponding conditional velocity field: 
+
+zt = (1 − t)z0 + tϵ, ϵ ∼ N (0, I),vθ (zt, t, c ) ≈ E[ϵ − z0 | zt, c ] . (1) Sampling follows the learned flow from t = 1 to t = 0 
+
+in the VAE latent space.  
+
+> Progressive-Resolution Inference.
+
+Let ΦRa→b denote the numerical flow from time a to b at resolution 
+
+R. Given a transition time tr , progressive-resolution inference first follows the low-resolution flow, lifts the intermediate state to the high-resolution latent space, and then completes the remaining trajectory at high resolution: 
+
+zPR 0 = Φ Htr →0
+
+ TL→H
+
+ ΦL 
+
+> 1→tr
+
+(ϵL; c) ; c . (2) where TL→H denotes the cross-resolution transition operator to convert the low-resolution state into a high-resolution state. 33.2 Analysis of Resolution Transition 
+
+At transition time tr , we analyze the predicted clean endpoint to expose decoder-visible differences without the noise retained in the intermediate state: 
+
+bzL0,t r = zL 
+
+> tr
+
+− tr vθ
+
+ zL 
+
+> tr
+
+, t r , c  . (3) Starting from the same estimate, direct latent lifting and pixel-VAE re-encoding produce 
+
+zlat = Ulat  bzL0,t r
+
+ , (4) 
+
+Y = Upix  DL
+
+ bzL0,t r
+
+ , zpix = EH(Y ), (5) where Ulat and Upix denote latent-space and pixel-space resizing. EH and DL represent the high-resolution encoder and the low-resolution decoder, respectively. 
+
+Observation 1. Decoder-visible inconsistencies under direct latent interpolation. Let Ulat : RdL → RdH be a fixed linear interpola-tion operator, where dL < d H. Its reachable sub-space is Zlat := Ulat  zL | zL ∈ RdL . By linearity, 
+
+dim (Zlat ) = rank (Ulat ) ≤ dL < d H. Let P lat  
+
+> tr
+
+denote the distribution of zlat , and let P HVAE denote the na-tive high-resolution VAE latent distribution. Since every directly lifted latent lies in Zlat , P lat  
+
+> tr
+
+(Zlat ) = 1 .If native target-resolution VAE latents are not con-centrated on this subspace, i.e., P HVAE (Zlat ) < 1,then P lat 
+
+> tr
+
+̸ = P HVAE . This support mismatch pro-vides a structural indication of the distributional discrepancy introduced by direct interpolation. Ap-pendix B further shows that directly lifted and pixel latents exhibit 18 .93 × and 1.43 × the native target-VAE round-trip energy, respectively. Together with Fig. 2(a), this empirically associates round-trip insta-bility with ghosting, structural distortion, and spatial drift. Meanwhile, direct lifting preserves determinis-tic correspondence with the preceding low-resolution state, motivating its use as the trajectory-preserving candidate. 
+
+Observation 2. Pixel re-encoding yields an encoder-reachable representation with limited high-frequency detail. Let XH denote the high-resolution image space and define the encoder-reachable latent set as ZHpix := 
+
+{E H(x) | x ∈ X H}. Although zpix ∈ ZHpix guaran-tees encoder reachability, it does not imply that Y
+
+uniquely identifies the corresponding sample-specific Latent Branch 
+
+> Low-resolution state at transition step
+> (c) Artifact-Corrected (b) VAE-Consistent Anchor
+> Decoder-visible Artifacts
+> High-resolution state
+> Pixel Branch
+> (a) Trajectory-Preserving Candidate
+> Ours
+> Over-smooth
+
+Figure 2 Direct lifting introduces decoder-visible incon-sistency (a), whereas pixel-VAE re-encoding provides a stable yet smoother VAE-reachable anchor (b). Correc-tion toward this anchor yields an artifact-reduced target-resolution state (c). 
+
+high-resolution detail. Let rHF denote the sample-specific high-frequency component. The minimum MSE attainable by any deterministic predictor from 
+
+Y is 
+
+inf  
+
+> f
+
+E
+
+h
+
+∥rHF − f (Y )∥22
+
+i
+
+= E [tr Cov ( rHF | Y )] . (6) When the conditional distribution p(rHF | Y ) is non-degenerate, Eq. 6 implies a strictly positive irre-ducible error. Hence, the pixel–VAE re-encoding branch cannot uniquely recover the sample-specific high-resolution detail from Y . Figure 2(b) fur-ther shows that the reconstruction of pixel-VAE re-encoding retains coarse spatial information after res-olution transitions but produces a smoother result, indicating that it is more suitable for selective cor-rection than as a global alternative to zlat .
+
+3.3 SelfLift 
+
+To address the two transition failure modes identified above, we introduce SelfLift, which has two vari-ants. SelfLift-zero uses Artifact-Aware Consistency Lift, which can selectively combine the dual lifting branches without training. SelfLift-rich enables On-Policy Self Recovery to learn a lightweight lifter on the student’s progressive-resolution rollout. Figure 3 illustrates an overview of our SelfLift framework. 
+
+Artifact-Aware Consistency Lift SelfLift-zero turns the complementary transition behaviors identified in Sec. 3.2 into an asymmetric, training-free correc-tion operator. Treating the two routes symmetri-cally is suboptimal: replacing the direct-lift state would inherit the smoothing of the pixel route, while global mixing would modify reliable and corrupted regions indiscriminately. We therefore retain zlat as 4Low-resolution Rollout High-resolution Rollout Clean Outputs reliable transition at timestep �
+
+(a) Training-free SelfLift-zer 
+
+> �
+
+o (b) Lightweight SelfLift-rich 
+
+SelfLift Framework: Reliable and High-Fidelity Progressive-Resolution Inference 
+
+A. zero: Artifact-Aware Consistency Lift B. 
+
+rich: On-Policy Self Recovery            
+
+> Latent height → ← Latent width Artifact Risk ↑
+> ��,� �풍� ↑
+> applied correction
+> ����
+> ��,� �풑� ↑
+> ��,� �↑
+> ��,� �풍� ↑
+> applied ����
+> ��,� �↑
+> ��,� �풑� ↑
+> (1) Low-res Endpoint �0,� �
+> �
+> Latent State �0,� �
+> ����↑ Pixel Anchor �0,� �
+> ����↑
+> low
+> high
+> 01
+> Artifact-Risk Map ��Adaptive Weights ��
+> (2) Consistency Residual �i
+> (3) Artifact-Aware Consistency Lift
+> Continue High-Res Rollout ...
+> Self-Teacher
+
++prompt only   
+
+> Student
+> Lite Latent Lifter �∅
+> ���
+> ����−1
+> �
+
+.. 
+
+> Student LoRA Adapter Teacher EMA LoRA Adapter
+
+. ...   
+
+> ���
+> ��/�
+> At Timestep ��
+> : � ��
+> ��/�
+> : � ��
+> ��/�
+> �0,� �
+> ��/�
+> �0,� �
+> ��/�
+> High-risk region
+> OPSR objective
+> �0,� �
+> �
+> SelfLift-zero corrected latent
+> � (� 0,� �
+> �)
+> Conv 3x3 SwinIR blocks Conv 3x3 Pixel ShuffleX x2
+> ... ...  �0,� �
+> �
+> (1) (2)
+> �
+
+Figure 3 Overview of SelfLift. Given the predicted low-resolution clean endpoint, SelfLift-zero constructs a trajectory-preserving latent candidate and a VAE-reachable pixel anchor. Their consistency residual yields an artifact-risk map and adaptive weights for selectively correcting high-risk regions before re-noising. SelfLift-rich distills this correction into a lightweight latent lifter and performs on-policy recovery on student-visited states, using an EMA self-teacher for privileged high-resolution guidance and a dynamics objective to preserve the pretrained few-step trajectory. 
+
+the trajectory state and use zpix only as a paired correction anchor. Both routes originate from the same predicted clean endpoint bzL
+
+0,t r , allowing their disagreement to isolate the effect of the resolution transition. We define the consistency residual as ∆ = zpix − zlat .
+
+∆i points from the direct-lift state toward its paired VAE-reachable anchor, while its magnitude reflects their local discrepancy. We convert this discrepancy into a spatial artifact-risk map and select the top-ρ
+
+locations within each sample: 
+
+si = 1
+
+C ∥∆i∥1, Mi = 1[si ≥ Q1−ρ({sj }j )] , (7) where Q1−ρ denotes the (1 − ρ)-quantile. Here, si
+
+serves as a local inconsistency proxy, while the sample-wise quantile adapts the selected region to different prompts and transition steps. We further convert the selected scores into spatially adaptive correction weights: 
+
+Wi = Mi
+
+
+
+wmin + ( wmax − wmin ) si − smin 
+
+smax − smin + ε
+
+
+
+,
+
+(8) where smin and smax are computed over the selected region. The corrected target-resolution clean latent is obtained through Artifact-Aware Consistency Lift: 
+
+bzH
+
+0,t r = zlat +W ⊙∆ = (1 −W )⊙zlat +W ⊙zpix . (9) Reliable locations remain on the direct-lift trajectory, whereas locations with larger inconsistency receive stronger correction toward the pixel-VAE anchor. This selective correction reduces artifacts such as ghosting and spatial drift without globally inheriting the over-smoothing of pixel-VAE re-encoding. The corrected result is shown in Figure 2(c). Finally, we re-noise the corrected clean estimate at 
+
+tr under the original flow marginal: 
+
+zHtr = (1 − eσtr ) bzH
+
+0,t r + eσtr ξ, ξ ∼ N (0 , I ). (10) Sampling then resumes at the target resolution un-der the unchanged few-step schedule. SelfLift-zero is training-free and plug-and-play, requiring neither external super-resolution nor additional denoiser eval-uations beyond the original sampling schedule. 
+
+On-Policy Self Recovery SelfLift-zero provides sta-ble resolution transition and substantial training-free acceleration. SelfLift-rich further advances the efficiency–quality frontier. Although one VAE round trip is inexpensive, its fixed cost becomes more notice-able when sampling requires only a few denoiser eval-uations. We therefore distill the complete Artifact-Aware Consistency Lift into a compact latent lifter 
+
+Gϕ. For a randomly sampled valid transition step tr ,we parameterize the lifter as a residual update over 5An astronaut lying in a field of white roses, holding a small white sign clearly reading "Romantic Rose".               
+
+> A retro diner sign at dusk, crescent moon icon, clearly reading "Moonlight Cafe", warm sunset sky.
+> ~ 2.5 NFE = 3 NFE x 512 2+ 1 NFE x 1024 2> 3 NFE 4NFE x 1024 2Ours: ~ 2.5 NFE
+
+Vanilla RaLu Speed MrFlow SelfLift-zero Original SelfLift-rich Figure 4 Superior visual fidelity of SelfLift under aggressive acceleration on FLUX.2-Klein-9b (4 NFEs). Vanilla, RALU, and Speed show severe artifacts, while MrFlow improves fidelity using a costlier external super-resolution model. SelfLift-zero suppresses artifacts through model-native correction, and SelfLift-rich further restores richer details. 
+
+direct latent lifting: 
+
+Gϕ
+
+ ˆzL
+
+> 0,t r
+
+ = zlat + Rϕ
+
+ ˆzL
+
+> 0,t r
+
+ , (11) 
+
+Llift = Ec,t r
+
+h
+
+Gϕ
+
+ ˆzL
+
+> 0,t r
+
+ − sg  ˆzH
+
+> 0,t r
+
+ 22
+
+i
+
+, (12) where sg( ·) denotes stop-gradient. The residual pa-rameterization preserves the state established by the low-resolution prefix and learns only the required transition correction. We instantiate Rϕ with a com-pact SwinIR-style network. The resulting 10.8M-parameter lifter replaces the explicit decode–resize– encode path with a single latent-space forward pass, yielding further end-to-end acceleration. We then freeze Gϕ and train directly on the progressive-resolution trajectory generated by the student. At each student-visited state zS 
+
+> tk
+
+, the stu-dent with parameters θ predicts bzS0,t k from the text condition c, while an EMA self-teacher with parame-ters ¯θ predicts bzT0,t k using additional high-resolution privileged context. Both predictions are evaluated on the same state, avoiding supervision from an in-dependent full-resolution trajectory. Let Φθ,t k (z; c)
+
+denote the one-step sampling update from tk to tk+1 .We optimize the student using 
+
+Lrich = LOPSR + λdyn Ldyn ,
+
+LOPSR = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+bzS0,t k − sg  bzT0,t k
+
+ 22 ,
+
+Ldyn = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+Φθ,t k
+
+ zS 
+
+> tk
+
+; c
+
+− sg  Φθ0,t k
+
+ zS 
+
+> tk
+
+; c 
+
+> 22
+
+.
+
+(13) where K is the number of supervised denoising steps and θ0 denotes the frozen pretrained backbone. 
+
+LOPSR transfers dense high-resolution guidance on the student-visited states, while Ldyn preserves the pretrained few-step dynamics. The rollout is ad-vanced only by the student, with gradients stopped across denoising steps. At inference, the privileged high-resolution context and EMA self-teacher are removed. SelfLift-rich re-tains only the adapted prompt-conditioned model and the lightweight latent lifter. Complete inference and training procedures are provided in Appendix A. 
+
+4 Experiments 
+
+4.1 Settings 
+
+Backbones and Inference Protocol. We evaluate SelfLift on FLUX.2-Klein-9b with 4 NFEs and Z-Image-Turbo with 8 NFEs. All images are generated at 1024 ×1024 , with the low-resolution prefix executed at 512 × 512 before a single transition to the target resolution. We set tr = 3 and tr = 6 , respectively, and use tr = 35 for the complementary 50-NFE experiments unless otherwise specified. 
+
+SelfLift Configurations. For SelfLift-zero, we use 
+
+(ρ, w min , w max ) = (0 .4, 0.5, 1.0) on FLUX.2-Klein-9b and (0 .3, 0.5, 1.0) on Z-Image-Turbo. SelfLift-rich employs a 10.8M-parameter SwinIR-style latent lifter [16] trained for 5K iterations with a learn-ing rate of 1 × 10 −4. For On-Policy Self Recov-ery, we follow D-OPSD’s training configuration [10], set λdyn = 80 , and adopt Flow-GRPO’s data proto-6Table 1 End-to-end efficiency and generation quality on FLUX.2-Klein-9b and Z-Image-Turbo. Speedups (×) are relative to Base (50), while parenthesized percentages denote latency reductions from Base (4)/(8). Other parenthesized values are changes from SelfLift-zero. Green marks SelfLift improvements, and red marks the two lowest latency reductions or two largest quality drops among competing methods. Bold and underline denote the best and second-best non-Base quality results. ↑/↓ indicate higher/lower is better. 
+
+Method Acceleration Overall Image Quality Text Alignment Latency (s) ↓ Speedup ↑ ImageReward ↑ PickScore ↑ AestheticScore ↑ CLIP ↑ GenEval ↑
+
+(a) FLUX.2-Klein-9b [2] Base (50) 46.053 1.000 × 1.129 22.330 5.465 32.039 0.784 Base (4) 2.665 17.280 × (+0.0%) 1.312 22.729 5.647 32.342 0.879 Vanilla Cache (2) [18] 1.520 30.310 × (+43.0%) 1.176 (-0.125) 22.254 (-0.379) 5.586 (-0.062) 32.164 (-0.153) 0.805 (-0.048) 
+
+Vanilla Dyres 1.512 30.470 × (+43.3%) 1.278 (-0.023) 22.504 (-0.129) 5.601 (-0.047) 31.799 (-0.518) 0.782 (-0.071) 
+
+LSRNA-RNA [8] 1.660 27.740 × (+37.7%) 1.254 (-0.047) 22.494 (-0.139) 5.606 (-0.042) 31.749 (-0.568) 0.868 (+0.015) 
+
+Bottleneck [34] 1.857 24.800 × (+30.3%) 1.277 (-0.024) 22.629 (-0.004) 5.655 (+0.007) 32.165 (-0.152) 0.901 (+0.048) 
+
+RaLu [9] 1.662 27.700 × (+37.6%) 1.289 (-0.012) 22.609 (-0.024) 5.621 (-0.027) 32.176 (-0.141) 0.847 (-0.006) 
+
+Speed [37] 1.601 28.770 × (+39.9%) 1.292 (-0.009) 22.583 (-0.050) 5.638 (-0.010) 32.243 (-0.074) 0.850 (-0.003) 
+
+MrFlow [43] 2.165 21.270 × (+18.8%) 1.283 (-0.018) 22.513 (-0.120) 5.601 (-0.047) 32.301 (-0.016) 0.852 (-0.001) 
+
+SelfLift-zero 1.643 28.040 × (+38.3%) 1.301 22.633 5.648 32.317 0.853 
+
+SelfLift-rich 1.556 29.610 × (+41.5%) 1.317 (+0.016) 22.704 (+0.071) 5.688 (+0.040) 32.345 (+0.029) 0.886 (+0.033) 
+
+(b) Z-Image-Turbo [33] Base (50) 38.562 1.000 × 1.029 22.158 5.533 32.037 0.713 Base (8) 3.591 10.740 × (+0.0%) 1.090 22.510 5.536 32.091 0.754 TaylorSeer [19] 2.432 15.850 × (+32.3%) 1.081 (+0.046) 22.430 (-0.004) 5.463 (-0.012) 31.880 (-0.096) 0.728 (-0.021) 
+
+Vanilla Dyres 2.585 14.920 × (+28.0%) 1.011 (-0.024) 22.336 (-0.098) 5.373 (-0.102) 31.302 (-0.674) 0.716 (-0.033) 
+
+LSRNA-RNA [8] 2.382 16.190 × (+33.7%) 0.993 (-0.042) 22.050 (-0.384) 5.389 (-0.086) 31.015 (-0.962) 0.682 (-0.067) 
+
+Bottleneck [34] 2.485 15.520 × (+30.8%) 0.941 (-0.094) 22.196 (-0.238) 5.439 (-0.036) 31.714 (-0.263) 0.763 (+0.014) 
+
+Speed [37] 1.987 19.410 × (+44.7%) 1.004 (-0.031) 22.282 (-0.152) 5.405 (-0.070) 31.971 (-0.005) 0.743 (-0.006) 
+
+MrFlow [43] 2.315 16.660 × (+35.5%) 1.032 (-0.003) 22.380 (-0.054) 5.501 (+0.026) 31.945 (-0.032) 0.740 (-0.009) 
+
+SelfLift-zero 2.376 16.230 × (+33.8%) 1.035 22.434 5.475 31.976 0.749 
+
+SelfLift-rich 2.007 19.210 × (+44.1%) 1.093 (+0.058) 22.499 (+0.065) 5.570 (+0.095) 32.084 (+0.107) 0.770 (+0.021) 
+
+Table 2 Complementarity with temporal acceleration on 50-step backbones. S and T denote spatial and temporal acceleration, respectively. SelfLift compounds acceleration to 5.60 ×/4.58 × while keeping every quality drop below 5% versus Base (50). 
+
+Model Method Accel. Acceleration Overall Image Quality Text Alignment Latency (s) ↓ Speedup ↑ ImageReward ↑ PickScore ↑ AestheticScore ↑ CLIP ↑ GenEval ↑
+
+SelfLift-zero S 23.966 1.920 × 1.110 22.344 5.456 32.297 0.817 
+
+> FLUX.2
+
+Klein-9b + TeaCache S + T 11.093 4.150 × 1.119 22.356 5.474 31.994 0.774 + TaylorSeer ( N = 3 ) S + T 11.130 4.140 × 1.120 22.329 5.452 32.120 0.812 + TaylorSeer ( N = 5 ) S + T 8.225 5.600 × 1.102 (−2.39% ) 22.249 (−0.36% ) 5.421 (−0.81% ) 31.805 (−0.73% ) 0.782 (−0.26% )
+
+SelfLift-zero S 17.689 2.180 × 1.013 22.044 5.540 32.083 0.717 
+
+> Z-Image
+
++ TeaCache S + T 10.107 3.820 × 1.022 22.136 5.564 31.960 0.695 + TaylorSeer ( N = 3 ) S + T 10.752 3.590 × 1.032 22.166 5.536 32.020 0.701 + TaylorSeer ( N = 5 ) S + T 8.424 4.580 × 1.018 (−1.07% ) 22.078 (−0.36% ) 5.493 (−0.72% ) 31.810 (−0.71% ) 0.682 (−4.35% )
+
+col [20]. Specifically, we sample 40K prompts from the Pick-a-Pic training split [12], a GenEval pool deduplicated against the official test set [6], and a visual text-rendering training set, with probabilities 
+
+0.7/0.2/0.1. All training is conducted on 8 high-performance GPUs with a per-device batch size of 1. Additional details, including complete hyperparame-ter configurations and training costs, are provided in Appendix C. 
+
+Evaluation Metrics. End-to-end latency is measured on a single GPU under the same hardware setting, using 10 warm-up runs followed by the mean of 50 generations. Speedup is computed relative to the corresponding 50-NFE backbone. ImageReward [38] measures overall generation quality, PickScore [12] and AestheticScore [31] assess preference and aes-thetics, while CLIPScore [7] and GenEval evaluate text–image alignment and compositional instruction following. Evaluation uses the corresponding test sets. GenEval uses fixed 300 random official test prompts. All other metrics use an equally sized, predefined balanced set drawn uniformly from DrawBench [29], Pick-a-Pic, and corresponding visual text rendering test split. All scores are averaged over three shared seeds, yielding 900 paired generations per method. 7FLUX.2-klein-4 NFEs Z-image-Turbo-8 NFEs       
+
+> Resolution Transition timestep Resolution Transition timestep Resolution Transition timestep Resolution Transition timestep
+> CLIP-IQA Score Image Reward Score CLIP-IQA Score Image Reward Score
+
+Figure 5 Transition-strategy ablation across resolution-transition steps. CLIP-IQA [35] measures visual sharpness, while ImageReward evaluates prompt-aligned quality. Stars mark the SelfLift-zero operating points with the best sharpness–alignment trade-off. 
+
+Table 3 Ablation of On-Policy Self Recovery on FLUX.2-Klein-9b. All learned variants use the same transition step tr = 3 .                              
+
+> Variant Acceleration Quality Latency (s) ↓Speedup ↑ImageReward ↑CLIP ↑
+> SelfLift-zero 1.642 28.04 ×1.3013 32.317 - Learned Latent Lifter 1.556 29.61 ×1.3031 32.305 - Off-Policy Distillation 1.556 29.61 ×1.1741 31.315 - OPSR w/o Ldyn 1.556 29.61 ×1.1813 31.813
+> SelfLift-rich 1.556 29.61 ×1.3171 32.345 Latent Branch Lifting Ours : Artifact-Aware Risk Localization SelfLift-zero
+> Artifacts are reduced ,yet persist.
+> Localized correction Simple Mix
+> Consistency Lifting Uniform Dual-Branch Mixing
+> Localized artifact-prone regions
+> Text Ghosting Spatial Drift
+
+Figure 6 Artifact localization and selective correc-tion. Uniform mixing only attenuates ghosting and drift, whereas SelfLift-zero corrects localized high-risk regions while preserving reliable details. 
+
+4.2 Main Results 
+
+Few-Step Results. We compare SelfLift with repre-sentative temporal acceleration methods, including TeaCache and TaylorSeer, and spatial acceleration methods, including Bottleneck, RaLu, Speed, and MrFlow. Table 1 and Figure 4 summarize the few-step results. Existing progressive-resolution meth-ods often suffer from transition artifacts and spatial drift, while MrFlow improves fidelity using an ex-ternal super-resolution model at lower efficiency. In contrast, training-free SelfLift-zero achieves 28 .04 ×
+
+and 16 .23 × speedups on FLUX.2-Klein-9b and Z-Image-Turbo while maintaining strong overall qual-ity. SelfLift-rich further reduces the native few-step latency by 41 .5% and 44 .1% , reaching 29 .61 × and 
+
+19 .21 × overall speedups. It consistently improves all reported metrics over SelfLift-zero and achieves the best ImageReward, PickScore, AestheticScore, and CLIPScore among accelerated methods on both backbones. These results show that SelfLift provides a favorable speed-quality trade-off for aggressive few-step inference. 
+
+Generality and Orthogonality. Although our main focus is accelerating few-step models, SelfLift-zero is a plug-and-play spatial acceleration method orthog-onal to temporal acceleration. As a complementary evaluation, Table 2 applies it directly to 50-step back-bones and combines it with TeaCache and TaylorSeer. SelfLift-zero alone achieves 1.92 ×/2.18 × speedups, in-creasing to 5.60 ×/4.58 × with temporal acceleration, while keeping the degradation across all evaluation metrics below 5% relative to the corresponding base models. This strong multiplicative gain shows that SelfLift provides complementary spatial efficiency, en-abling additional acceleration across both distilled and standard diffusion models. Further experiments are provided in the Appendix D. 
+
+4.3 Ablation Study 
+
+We conduct controlled ablations of SelfLift’s two key principles: spatially adaptive transition correction in SelfLift-zero and trajectory-aligned self-recovery in SelfLift-rich. Together, they suppress transition artifacts, recover high-resolution details, and preserve few-step dynamics. 
+
+Ablation of Artifact-Aware Consistency Lift. We examine whether reliable resolution transition can be achieved by either transition route alone or by fixed global fusion. Figure 5 compares direct latent lifting, pixel-VAE re-encoding, uniform 0.5 mixing, 8and SelfLift-zero across transition steps on FLUX.2-Klein-9b and Z-Image-Turbo. Later transitions pro-vide greater acceleration but leave less high-resolution recovery. The pixel branch remains stable but con-sistently over-smooths the output, resulting in low CLIP-IQA. The latent branch preserves sharpness, yet ghosting and spatial drift increasingly degrade ImageReward at late transitions, particularly on Z-Image-Turbo. Uniform mixing only interpolates between these failures because branch reliability varies spatially. In contrast, SelfLift-zero consistently maintains the strongest joint sharpness and prompt-aligned quality across both backbones. Figure 6 fur-ther shows that the consistency residual localizes artifact-prone regions, enabling selective correction while preserving reliable latent details.  
+
+> Ablation of On-Policy Self Recovery.
+
+Table 3 iso-lates the latent lifter, trajectory-aligned supervision, and dynamics preservation. Replacing the pixel-VAE round trip with the learned lifter reduces latency from 1.642 s to 1.556 s while preserving quality. Off-policy distillation substantially degrades ImageRe-ward and CLIPScore, confirming the mismatch be-tween off-policy teacher states and student-visited states. On-policy supervision alleviates this mismatch but remains insufficient without Ldyn . The full model improves ImageReward from 1.1813 to 1.3171 and CLIPScore from 31 .813 to 32 .345 at the same in-ference cost, demonstrating that trajectory-aligned supervision and dynamics preservation are jointly necessary. 
+
+5 Limitations and Discussion 
+
+While SelfLift demonstrates competitive empirical performance, its self-recovering design builds on capa-bilities increasingly available in modern multimodal generative models, including native multi-resolution support and image-conditioned editing. SelfLift-zero is training-free and plug-and-play across compatible model families. Its applicability and practical adap-tation are discussed further in Appendix E. The effec-tiveness of SelfLift-rich also depends on the quality of its internal self-teacher. We mitigate this dependence through high-quality prompt–reference curation be-fore training, enabling the internal teacher to pro-vide reliable high-resolution guidance along student-visited trajectories. Importantly, this reliance on the model itself is also what enables SelfLift’s self-contained design, without introducing a separately trained teacher or an external reward model. De-veloping stronger self-teachers and more effective trajectory-aligned supervision remains an important direction for future work. 
+
+6 Conclusion 
+
+We introduced SelfLift for reliable progressive-resolution inference in few-step diffusion models. SelfLift-zero selectively corrects transition artifacts without training or external super-resolution, while SelfLift-rich learns high-resolution recovery directly on student-visited trajectories. SelfLift reduces the native few-step latency by 41.5%/44.1% on FLUX.2-Klein-9b and Z-Image-Turbo and, together with timestep distillation, achieves overall speedups of 29.61 ×/19.21 × over the corresponding 50-step mod-els. 
+
+References                
+
+> [1] Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations, 2024. [2] Black Forest Labs. FLUX.2 [klein]: Towards interac-tive visual intelligence. https://bfl.ai/blog/flux 2-klein-towards-interactive-visual-intelli gence , 2026. [3] Shoufa Chen, Chongjian Ge, Shilong Zhang, Peize Sun, and Ping Luo. PixelFlow: Pixel-space genera-tive models with flow, 2025. [4] Zhenbang Du, Yonggan Fu, Lifu Wang, Jiayi Qian, Xiao Luo, and Yingyan Celine Lin. Fewer de-noising steps or cheaper per-step inference: To-wards compute-optimal diffusion model deployment. In Proceedings of the IEEE/CVF International Conference on Computer Vision, pages 3001–3010, 2025. [5] Zhen Fang, Wenxuan Huang, Yu Zeng, Yiming Zhao, Shuang Chen, Kaituo Feng, Yunlong Lin, Lin Chen, Zehui Chen, Shaosheng Cao, and Feng Zhao. Flow-opd: On-policy distillation for flow matching models, 2026. URL https://arxiv.org/abs/2605.08063 .[6] Dhruba Ghosh, Hannaneh Hajishirzi, and Ludwig Schmidt. GenEval: An object-focused framework for evaluating text-to-image alignment. In Advances in Neural Information Processing Systems, volume 36, 2023. [7] Jack Hessel, Ari Holtzman, Maxwell Forbes, Ronan Le Bras, and Yejin Choi. CLIPScore: A reference-free evaluation metric for image captioning. In Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing, pages
+
+97514–7528. Association for Computational Linguis-tics, 2021. doi: 10.18653/v1/2021.emnlp-main.595. [8] Jinho Jeong, Sangmin Han, Jinwoo Kim, and Seon Joo Kim. Latent space super-resolution for higher-resolution image generation with diffu-sion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 2355–2365, 2025. [9] Wongi Jeong, Kyungryeol Lee, Hoigi Seo, and Se Young Chun. Training-free mixed-resolution la-tent upsampling for spatially accelerated diffusion transformers, 2025. [10] Dengyang Jiang, Xin Jin, Dongyang Liu, Zanyi Wang, Mingzhe Zheng, Ruoyi Du, Xiangpeng Yang, Qilong Wu, Zhen Li, Peng Gao, Harry Yang, and Steven Hoi. D-opsd: On-policy self-distillation for continuously tuning step-distilled diffusion models, 2026. URL https://arxiv.org/abs/2605.05204 .[11] Yang Jin, Zhicheng Sun, Ningyuan Li, Kun Xu, Kun Xu, Hao Jiang, Nan Zhuang, Quzhe Huang, Yang Song, Yadong Mu, and Zhouchen Lin. Pyramidal flow matching for efficient video generative modeling, 2025. URL https://arxiv.org/abs/2410.05954 .[12] Yuval Kirstain, Adam Polyak, Uriel Singer, Shahbu-land Matiana, Joe Penna, and Omer Levy. Pick-a-pic: An open dataset of user preferences for text-to-image generation. In Advances in Neural Information Processing Systems, volume 36, 2023. [13] Haoyu Li, Tingyan Wen, Lin Qi, Zhe Wu, Yihuang Chen, Xing Zhou, Lifei Zhu, Xueqian Wang, and Kai Zhang. 1.x-distill: Breaking the diversity, qual-ity, and efficiency barrier in distribution matching distillation, 2026. URL https://arxiv.org/abs/26 04.04018 .[14] Hui Li, Baoyou Chen, Jiaye Li, Jingdong Wang, and Siyu Zhu. Pyramid patchification flow for visual generation. In International Conference on Learning Representations, 2026. [15] Quanhao Li, Junqiu Yu, Kaixun Jiang, Yujie Wei, Zhen Xing, Pandeng Li, Ruihang Chu, Shiwei Zhang, Yu Liu, and Zuxuan Wu. Diffusionopd: A unified per-spective of on-policy distillation in diffusion models, 2026. URL https://arxiv.org/abs/2605.15055 .[16] Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, and Radu Timofte. SwinIR: Image restoration using swin transformer. In Proceedings of the IEEE/CVF International Conference on Computer Vision Workshops, pages 1833–1844, 2021. [17] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. In International Conference on Learning Representations, 2023. [18] Feng Liu, Shiwei Zhang, Xiaofeng Wang, Yujie Wei, Haonan Qiu, Yuzhong Zhao, Yingya Zhang, Qixiang Ye, and Fang Wan. Timestep embedding tells: It’s time to cache for video diffusion model. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 7353–7363, 2025. [19] Jiacheng Liu, Chang Zou, Yuanhuiyi Lyu, Junjie Chen, and Linfeng Zhang. From reusing to forecast-ing: Accelerating diffusion models with TaylorSeers. In Proceedings of the IEEE/CVF International Conference on Computer Vision, pages 15853–15863, 2025. [20] Jie Liu, Gongye Liu, Jiajun Liang, Yangguang Li, Jia-heng Liu, Xintao Wang, Pengfei Wan, Di Zhang, and Wanli Ouyang. Flow-GRPO: Training flow match-ing models via online RL. In Advances in Neural Information Processing Systems, volume 38, 2025. [21] Xingchao Liu, Xiwen Zhang, Jianzhu Ma, Jian Peng, and Qiang Liu. InstaFlow: One step is enough for high-quality diffusion-based text-to-image gen-eration. In International Conference on Learning Representations, 2024. [22] Cheng Lu, Yuhao Zhou, Fan Bao, Jianfei Chen, Chongxuan Li, and Jun Zhu. DPM-Solver: A fast ODE solver for diffusion probabilistic model sam-pling in around 10 steps. In Advances in Neural Information Processing Systems, volume 35, pages 5775–5787. Curran Associates, Inc., 2022. [23] Zichen Miao, Zhengyuan Yang, Kevin Lin, Ze Wang, Zicheng Liu, Lijuan Wang, and Qiang Qiu. Tun-ing timestep-distilled diffusion model using pairwise sample optimization. In International Conference on Learning Representations, 2025. [24] Thuan Hoang Nguyen and Anh Tran. SwiftBrush: One-step text-to-image diffusion model with vari-ational score distillation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 7807–7816, 2024. [25] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF International Conference on Computer Vision, pages 4195–4205, 2023. [26] Xurui Peng, Chenqian Yan, Hong Liu, Rui Ma, Fang-min Chen, Xing Wang, Zhihua Wu, Songwei Liu, and Mingbao Lin. Ertacache: Error rectification and timesteps adjustment for efficient diffusion, 2026. URL https://arxiv.org/abs/2508.21091 .[27] Yurui Qian, Qi Cai, Yingwei Pan, Yehao Li, Ting Yao, Qibin Sun, and Tao Mei. Boost-ing diffusion models with moving average sam-pling in frequency domain. In Proceedings of the 
+
+10 IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 8911–8920, 2024. [28] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion mod-els. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 10684–10695, 2022. [29] Chitwan Saharia, William Chan, Saurabh Sax-ena, Lala Li, Jay Whang, Emily Denton, Seyed Kamyar Seyed Ghasemipour, Burcu Karagol Ayan, S. Sara Mahdavi, Rapha Gontijo Lopes, Tim Sali-mans, Jonathan Ho, David J Fleet, and Mohammad Norouzi. Photorealistic text-to-image diffusion mod-els with deep language understanding, 2022. URL 
+
+https://arxiv.org/abs/2205.11487 .[30] Tim Salimans and Jonathan Ho. Progressive distillation for fast sampling of diffusion mod-els. In International Conference on Learning Representations, 2022. [31] Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon, Ross Wightman, Mehdi Cherti, Theo Coombes, Aarush Katta, Clayton Mullis, Mitchell Wortsman, Patrick Schramowski, Srivatsa Kundurthy, Katherine Crowson, Ludwig Schmidt, Robert Kaczmarczyk, and Jenia Jitsev. LAION-5B: An open large-scale dataset for training next gen-eration image-text models. In Advances in Neural Information Processing Systems, volume 35, 2022. [32] Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. In Proceedings of the 40th International Conference on Machine Learning, volume 202 of Proceedings of Machine Learning Research, pages 32211–32252. PMLR, 2023. [33] Image Team, Huanqia Cai, Sihan Cao, Ruoyi Du, Peng Gao, Aiming Hao, Steven Hoi, Zhaohui Hou, Shijie Huang, Dengyang Jiang, Yuming Jiang, Xin Jin, Liangchen Li, Zhen Li, Zhong-Yu Li, David Liu, Dongyang Liu, Qilong Wu, Feng Yu, Zechao Zhan, Chi Zhang, Shifeng Zhang, Ruikai Zhou, and Shilin Zhou. Z-image: An efficient image generation founda-tion model with single-stream diffusion transformer, 2026. URL https://arxiv.org/abs/2511.22699 .[34] Ye Tian, Xin Xia, Yuxi Ren, Shanchuan Lin, Xing Wang, Xuefeng Xiao, Yunhai Tong, Ling Yang, and Bin Cui. Training-free diffusion acceleration with bottleneck sampling, 2025. [35] Jianyi Wang, Kelvin C. K. Chan, and Chen Change Loy. Exploring clip for assessing the look and feel of images, 2022. URL https://arxiv.org/abs/2207 .12396 .[36] Tingyan Wen, Haoyu Li, Yihuang Chen, Xing Zhou, Lifei Zhu, and Xueqian Wang. No cache left idle: Accelerating diffusion model via extreme-slimming caching, 2025. [37] Howard Xiao, Brian Chao, Lior Yariv, and Gordon Wetzstein. Spectral progressive diffusion for efficient image and video generation, 2026. [38] Jiazheng Xu, Xiao Liu, Yuchen Wu, Yuxuan Tong, Qinkai Li, Ming Ding, Jie Tang, and Yuxiao Dong. ImageReward: Learning and evaluating human pref-erences for text-to-image generation. In Advances in Neural Information Processing Systems, volume 36, 2023. [39] Jing Xu, Yuexiao Ma, Xuzhe Zheng, Xing Wang, Shiwei Liu, Chenqian Yan, Xiawu Zheng, Rongrong Ji, Fei Chao, and Songwei Liu. Motion-aware caching for efficient autoregressive video generation, 2026. URL https://arxiv.org/abs/2605.01725 .[40] Tianwei Yin, Michaël Gharbi, Taesung Park, Richard Zhang, Eli Shechtman, Frédo Durand, and William T. Freeman. Improved distribution matching distillation for fast image synthesis. In Advances in Neural Information Processing Systems, volume 37, pages 47455–47487. Curran Associates, Inc., 2024. [41] Tianwei Yin, Michaël Gharbi, Richard Zhang, Eli Shechtman, Frédo Durand, William T. Freeman, and Taesung Park. One-step diffusion with dis-tribution matching distillation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 6613–6623, 2024. [42] Wenliang Zhao, Lujia Bai, Yongming Rao, Jie Zhou, and Jiwen Lu. UniPC: A unified predictor-corrector framework for fast sampling of diffusion models. In Advances in Neural Information Processing Systems, volume 36, 2023. [43] Xingyu Zheng, Xianglong Liu, Yifu Ding, Weilun Feng, Junqing Lin, Jinyang Guo, and Haotong Qin. Multi-resolution flow matching: Training-free diffu-sion acceleration via staged sampling, 2026. 
+
+11 A SelfLift Algorithm 
+
+SelfLift adopts a unified progressive-resolution sampling procedure with two transition variants. SelfLift-zero performs Artifact-Aware Consistency Lift, whereas SelfLift-rich replaces the transition with the distilled latent lifter Gϕ and uses the LoRA-adapted student model. The detailed procedures for SelfLift inference and SelfLift-rich training are provided in Algorithm 1 and Algorithm 2, respec-tively. 
+
+SelfLift Inference (Algorithm 1) follows the low-resolution trajectory to the transition timestep tr,constructs a reliable target-resolution state using ei-ther artifact-aware correction or the learned latent lifter Gϕ, re-noises the clean estimate, and completes the remaining trajectory at high resolution. 
+
+SelfLift-rich Training (Algorithm 2) distills the com-plete zero transition into Gϕ, replacing the explicit pixel–VAE path with a compact latent-space oper-ator. It then performs On-Policy Self Recovery on student-visited states with a dynamics objective that preserves the pretrained few-step trajectory. 
+
+Algorithm 1 SelfLift Inference 
+
+Require: Prompt c, sampling schedule T =
+
+{(tk , eσtk )}Tk=1 , transition time tr , mode 
+
+m ∈ { zero , rich }
+
+Require: Pretrained model vθ0 , VAE (DL, EH, DH)
+
+Require: zero parameters η = ( ρ, w min , w max ), trained lifter Gϕ and LoRA-adapted model vθ
+
+Output: Generated image x0
+
+1: ev ← vθ0 if m = zero , otherwise ev ← vθ
+
+// Low-Resolution Rollout 
+
+2: Sample initial noise zL1 ∼ N (0 , I )
+
+3: Roll out to tr : zL 
+
+> tr
+
+← ΦL1→tr (zL1 , c, ev)
+
+// Resolution Transition 
+
+4: Predict the clean endpoint: bzL0,t r ← zL 
+
+> tr
+
+−tr ev(zL 
+
+> tr
+
+, t r , c )
+
+5: if m = zero then 
+
+6: Construct paired lifts: (zlat , z pix ) ▷ Eqs. (4)–(5) 
+
+7: Compute consistency residual: ∆ ← zpix − zlat 
+
+8: Compute artifact-risk map s, top-ρ mask M , and adaptive weights W from ∆ ▷ Eqs. (7)–(8) 
+
+9: Apply bzH0,t r ← zlat + W ⊙ ∆ ▷ Eqs. (9) 
+
+10: else 
+
+11: Apply the distilled lifter: bzH0,t r ← G ϕ(bzL0,t r )
+
+▷ Eq. (11) 
+
+12: end if 
+
+13: Sample transition noise ξ ∼ N (0 , I )
+
+14: Re-noise at tr : zH 
+
+> tr
+
+← (1 − eσtr )bzH0,t r + eσtr ξ ▷ Eq. (10) 
+
+// High-Resolution Rollout 
+
+15: Resume sampling: zH0 ← ΦH 
+
+> tr→0
+
+(zH 
+
+> tr
+
+, c, ev)
+
+16: return x0 ← D H(zH0 )
+
+Algorithm 2 SelfLift-rich Training 
+
+Require: Frozen model vθ0 , VAE, prompt set C
+
+Require: Training set D = {(c, gt H)}
+
+Require: Schedule T , transition set R, zero parameters 
+
+η
+
+Require: Dynamics weight λdyn , EMA decay β
+
+Output: Lifter Gϕ and LoRA-adapted student vθ
+
+// Stage I, Latent Lifter Distillation 
+
+1: Residual lifter: Gϕ(bzL0,t r ) ← zlat + Rϕ(bzL0,t r )
+
+2: for each lifter-training iteration do 
+
+3: Sample c ∼ C and tr ∼ R 
+
+4: Obtain bzL0,t r from the frozen low-resolution rollout 
+
+5: Construct target bzH,zero 0,t r with SelfLift-zero 
+
+▷ Eqs. (4)–(9) 
+
+6: Llift ← Gϕ(bzL0,t r ) − sg( bzH,zero 0,t r ) 22
+
+▷ Eq. (12) 
+
+7: Update ϕ using ∇ϕLlift 
+
+8: end for 
+
+9: Freeze Gϕ
+
+// Stage II, On-Policy Self Recovery 
+
+10: Initialize vθ ← vθ0 and v¯θ ← vθ
+
+11: for each recovery-training iteration do 
+
+12: Sample (c, gt H) ∼ D , tr ∼ R and zS 
+
+> t1
+
+∼ N (0 , I )
+
+13: for k = 1 , . . . , K do 
+
+14: if tk = tr then 
+
+15: Apply frozen Gϕ and re-noise the state 
+
+16: end if 
+
+17: Student endpoint: bzS0,t k ← zS 
+
+> tk
+
+− tk vθ (zS 
+
+> tk
+
+, t k , c )
+
+18: Teacher endpoint: 
+
+19: bzT0,t k ← zS 
+
+> tk
+
+− tk v¯θ (zS 
+
+> tk
+
+, t k , c, gt H)
+
+20: ℓ(k)OPSR ← bzS0,t k − sg( bzT0,t k ) 22 ▷ Eq. (13) 
+
+21: Student one-step transition: 
+
+22: zS 
+
+> tk+1
+
+← Φθ,t k (zS 
+
+> tk
+
+, c )
+
+23: Frozen-backbone reference: 
+
+24: z0 
+
+> tk+1
+
+← Φθ0,t k (zS 
+
+> tk
+
+, c )
+
+25: ℓ(k)dyn ← zS 
+
+> tk+1
+
+− sg( z0 
+
+> tk+1
+
+) 22
+
+▷ Eq. (13) 
+
+26: Detach before the next timestep: 
+
+27: zS 
+
+> tk+1
+
+← sg( zS 
+
+> tk+1
+
+)
+
+▷ stop gradients across steps 
+
+28: end for 
+
+29: LOPSR ← K−1 PKk=1 ℓ(k)OPSR 
+
+30: Ldyn ← K−1 PKk=1 ℓ(k)dyn 
+
+31: Lrich ← L OPSR + λdyn Ldyn ▷ Eq. (13) 
+
+32: Update the student LoRA using ∇θ Lrich 
+
+33: ¯θ ← β ¯θ + (1 − β)θ
+
+34: end for 
+
+35: Discard v¯θ and gt H
+
+36: return Gϕ and vθ
+
+B Consistency Analysis 
+
+Observation 1 in Sec. 3.2 shows that direct latent lifting preserves continuity with the preceding low-resolution trajectory, but may introduce decoder-visible inconsistencies due to its structural mismatch with the native high-resolution VAE latent distri-12 bution. The key intuition is that a latent lying in a stable, VAE-consistent region should be approxi-mately preserved after a target-VAE decode–encode round trip, whereas an unsupported latent may un-dergo an abnormally large change. We examine this phenomenon through the following calibration exper-iment.  
+
+> Calibration setup.
+
+We construct a small calibra-tion set of N = 1 ,000 native 1024 × 1024 images on FLUX.2-Klein. For each image xH, we obtain 
+
+xL = S↓(xH) and zL = EL(xL), where S↓ down-samples the image to 512 × 512 . We compare the native HR latent znat = EH(xH), the directly lifted latent zlat = Ulat (zL), and the pixel-VAE la-tent zpix = EH(Upix (DL(zL))) . Here, znat serves as the normal round-trip reference, zlat uses nearest-neighbor latent lifting, and zpix is obtained through low-resolution decoding, pixel-space resizing, and target-resolution re-encoding.  
+
+> Round-trip metric.
+
+For a target-resolution latent 
+
+z ∈ RC×H×W , we define 
+
+PH(z) = EH(DH(z)) ,eVAE (z) = 1
+
+CHW ∥P H(z) − z∥22 . (14) Here, PH performs one target-VAE decode–encode round trip, and eVAE (z) measures the resulting latent change. A small value indicates a stable, VAE-consistent representation, whereas an abnor-mally large value indicates a shift toward a VAE-inconsistent region.                
+
+> Table 4 Target-VAE round-trip consistency on 1,000 calibration samples.
+> Representation Mean eVAE / Native Behavior
+> Native HR latent 0.01894 1.00 ×Stable Pixel-VAE re-encoding 0.02717 1.43 ×Stable Direct latent lifting 0.35859 18 .93 ×Abnormal
+> Results.
+
+As shown in Table 4 and Fig. 7, native HR and pixel-VAE latents remain stable after the round trip, with small mean energies. In contrast, direct latent lifting yields an abnormally large energy of 0.35859 , which is 18 .93 × the native baseline and 
+
+13 .20 × the pixel-VAE energy. This separation holds for all 1,000 samples, while pixel-VAE re-encoding closes 97 .4% of the direct-lift–native energy gap on average. These results verify that direct latent lifting shifts the representation toward a VAE-inconsistent and Pixel Anchor   
+
+> Figure 7 Target-VAE round-trip consistency. Na-tive HR and pixel-VAE latents remain stable, whereas directly lifted latents exhibit substantially larger round-trip changes.
+
+unstable latent region, rather than merely changing its spatial resolution. Because the shifted latent is directly processed by the target-resolution decoder, its unsupported components become decoder-visible and can manifest as the ghosting, structural distor-tion, and spatial drift shown in Fig. 2(a). Pixel-VAE re-encoding instead remains close to the stable native HR latent regime and provides a practical paired anchor when the corresponding native HR latent is unavailable during inference. 
+
+C Experimental Details 
+
+We report the implementation details required to reproduce the main experiments. All evaluations generate 1024 × 1024 images using FLUX.2-Klein-9b with 4 NFEs and Z-Image-Turbo with 8 NFEs. We first report the additional architecture and optimiza-tion settings of SelfLift-rich, followed by the exact configurations of the compared acceleration methods. 
+
+C.1 SelfLift Hyperparameters 
+
+SelfLift-zero is training-free and uses the correction parameters reported in the main paper. SelfLift-rich additionally employs a compact SwinIR-style latent lifter and lightweight LoRA adaptation through On-Policy Self Recovery. Table 6 lists the architecture and optimization details omitted from the main text. 
+
+C.2 Baseline Implementation Details 
+
+We use the official implementations or released con-figurations of all compared methods without altering their core acceleration mechanisms. Unless defined otherwise by the original method, spatial baselines use a 512 × 512 low-resolution stage and transition 13 Table 5 Baseline settings used in the main few-step comparison. Within the spatial-acceleration block, ✓ denotes direct latent lifting, while ✗ is followed by the alternative transition mechanism.        
+
+> Method Accel. Core Config. FLUX.2-Klein-9b Z-Image-Turbo NFEs Parameters NFEs Parameters
+
+Reference Models 
+
+Base (full) – Native full-resolution inference. 50 Full 1024 2 resolution. 50 Full 1024 2 resolution. Base (distilled) – Native few-step inference. 4 Original 4-NFE schedule. 8 Original 8-NFE schedule. 
+
+Temporal Acceleration 
+
+Vanilla Cache T TeaCache-style feature reuse. 4 Cache steps 1 and 3. – –TaylorSeer T Taylor-based feature forecasting. – – 8 Official main-table setting. 
+
+Spatial Acceleration 
+
+Vanilla DyRes ✓ LR prefix with direct latent lifting. 4 512 2 → 1024 2, tr = 3 , shift 0.97 . 8 512 2 → 1024 2, tr = 6 .LSRNA-RNA ✓ Canny-guided RNA after latent lifting. 4 tr = 3 , emin = 0 .97 , emax = 1 .30 . 8 tr = 6 , same Canny-RNA rule. Bottleneck ✓ High–low–high bottleneck sampling. 4 1024 2 → 512 2 → 1024 2, transition steps (1 , 3) . 8 1024 2 → 512 2 → 1024 2,transition steps (1 , 6) .RaLu ✓ Region-adaptive lifting with timestep matching. 4 N = (2 , 1, 1) , e = (0 .092 , 0.233 , 1) ,transition ratio = 0 .30 . – –Speed ✗: DCT Spectral progressive-resolution sampling. 4 DCT expansion, tr = 3 , shift 
+
+0.97 . 8 DCT expansion, tr = 6 .MrFlow ✗: Pixel SR Pixel-space SR, VAE re-encoding, and one-step HR denoising. 
+
+4 + 1 (NLR , N ref ) = (4 , 1) ,Real-ESRGAN ×2. 8 + 1 (NLR , N ref ) = (8 , 1) ,Real-ESRGAN ×2.
+
+Table 6 Additional architecture, optimization, and training-cost details of SelfLift-rich. 
+
+Category Parameter Value Latent Lifter                 
+
+> Input channels / scale 128 /×2
+> Embedding dimension 192
+> Transformer depths (6 ,6,6,6)
+> Attention heads (8 ,8,8,8)
+> Window size / MLP ratio 8/2.5
+> Drop-path rate 0.15
+
+On-Policy Self Recovery             
+
+> LoRA rank / alpha 64 /128
+> Student learning rate 2×10 −5
+> EMA decay 0.9999
+> Optimizer / betas AdamW /
+> (0 .9,0.999)
+> Weight decay 0
+> Gradient clipping 1.0
+> Max iterations 3000
+
+Training Batch size 1 per device Gradient accumulation 1 
+
+> Mixed precision bf16
+
+Training Cost Hardware 8× GPU 80GB Latent lifter 5.56 GPU-h LoRA adapter 56 .8 GPU-h 
+
+to 1024 × 1024 at tr = 3 on FLUX.2-Klein-9b and 
+
+tr = 6 on Z-Image-Turbo. MrFlow retains its origi-nal pixel-space super-resolution pipeline. The shared mechanism and model-specific settings of each base-line are summarized in Table 5. 
+
+C.3 Evaluation Protocol and Metrics 
+
+All methods follow a unified protocol. GenEval uses its 300 official prompts, while other metrics use a predefined balanced set of 300 prompts sampled uni-formly from DrawBench, the Pick-a-Pic test set, and the visual text-rendering test split. Using shared seeds {0, 42 , 128 }, each main-table score averages 900 paired generations per method and backbone. • Inference efficiency: End-to-end latency is mea-sured on a single high-performance GPU using 10 warm-up runs followed by the average of 50 generations. Speedup is computed relative to Base (50), while latency reduction is measured against Base (4)/(8). • Overall generation quality: We use ImageRe-ward to assess the overall quality of generated images while accounting for their consistency with the input prompts. • Image quality and human preference: PickScore evaluates preference-aligned visual quality, while AestheticScore measures the aesthetic appeal of the generated images. • Text alignment and instruction following: CLIP-Score measures global text–image semantic align-ment. GenEval further evaluates compositional instruction following, including object counting, attribute binding, spatial relations, and color attribution. • Transition-quality ablation: In the resolution-transition ablations, we additionally report CLIP-IQA as a sharpness-sensitive perceptual quality metric. It serves as a proxy for blur and visual-quality degradation introduced by differ-ent transition strategies. 14 C.4 Runtime Breakdown 
+
+We further decompose the inference latency of FLUX.2-Klein-9b to identify the sources of SelfLift’s efficiency gains. All directly profiled results follow the main evaluation protocol, using 10 warm-up gen-erations followed by 50 timed samples on a single GPU. Calculations use the unrounded measurements, ensuring that the accumulated stage costs exactly recover the corresponding end-to-end latency. 41.5% lower end2end latency 
+
+Figure 8 Stage-wise runtime breakdown on FLUX.2-Klein-9b. SelfLift-rich reduces end-to-end latency by 
+
+41 .5% relative to Base (4), while its 3-LR+ 1-HR schedule reduces denoising latency by 56 .0% .
+
+Table 7 Stage-wise runtime breakdown on FLUX.2-Klein-9b. Times are reported in seconds per image. Totals are computed from full-precision measurements, while displayed values are rounded to three decimals. 
+
+Component Base (50) Base (4) SelfLift zero SelfLift rich                  
+
+> Sampling allocation 50 ×2 HR 4 HR 3 L+1 H 3 L+1 H LR sampling ––0.427 0.427 HR sampling 45.362 1.973 0.441 0.441 Resolution transition ––0.123 0.033 Other pipeline 0.691 0.692 0.652 0.655
+
+Total latency 46.053 2.665 1.643 1.556     
+
+> Speedup 1.00 ×17.28 ×28.04 ×29.61 ×
+
+D Extended Experiments 
+
+D.1 Ablations of SelfLift-zero 
+
+We further examine the two key factors govern-ing SelfLift-zero: the spatial extent and strength of artifact-aware correction, controlled by ρ and 
+
+[wmin , w max ], and the resolution-transition timestep 
+
+tr . The former determines how the pixel-VAE anchor corrects the directly lifted latent, while the latter controls the trade-off between low-resolution com-putation and the remaining high-resolution recovery budget. 
+
+D.1.1 Correction Parameters 
+
+SelfLift-zero uses ρ to select artifact-prone locations and [wmin , w max ] to control the correction magnitude. Table 10 isolates their effects through one-factor-at-a-time ablations: three neighboring ρ values on each backbone and two alternative weight ranges on FLUX.2-Klein-9b. All settings follow the main protocol with tr = 3 and tr = 6 , respectively. Since these parameters do not change the sampling schedule or the number of model evaluations, latency remains unchanged. 
+
+Table 10 Parameter ablation of SelfLift-zero. Main-paper settings are bold. Panel (a) reports ImageReward and CLIP-IQA on both backbones. Panel (b) reports the remaining FLUX.2-Klein-9b evaluation metrics.           
+
+> (a) Correction parameters and primary metrics ID ρwmin wmax ImageReward ↑CLIP-IQA ↑
+> FLUX.2-Klein-9b: selected-region ratio F1 0.3 0.5 1.0 1.2948
+
+0.8510 F2 0.4 0.5 1.0 1.3013 0.8470 F3 0.5 0.5 1.0 1.2967 0.8390 Z-Image-Turbo: selected-region ratio Z1 0.2 0.5 1.0 1.0278 0.8020 Z2 0.3 0.5 1.0 1.0354 0.7994 Z3 0.4 0.5 1.0 1.0306 0.7870 FLUX.2-Klein-9b: correction weights (default: F2) W1 0.4 0.5 0.5 1.2899 0.8500            
+
+> W2 0.4 0.8 1.0 1.2938 0.8360 (b) Remaining FLUX.2-Klein-9b metrics ID PickScore ↑Aesthetic ↑CLIP ↑GenEval ↑
+> F1 22.612
+
+5.654 32.300 0.848 
+
+F2 22.633 5.648 32.317 0.853             
+
+> F3 22.621 5.639 32.306 0.850 W1 22.602 5.651 32.291 0.846 W2 22.615 5.635 32.300 0.849
+
+Across both backbones, smaller ρ confines correc-tion to high-risk regions, preserving sharpness but leaving more artifacts, whereas larger ρ improves stability at the cost of smoothing. We therefore use ρ = 0 .4 for FLUX.2-Klein-9b and ρ = 0 .3 for Z-Image-Turbo. The range [wmin , w max ] controls cor-rection strength: wmin sets the correction floor, while 
+
+wmax caps correction in the most inconsistent regions. Increasing wmin suppresses transition artifacts and produces more stable outputs, but may reduce CLIP-IQA through over-smoothing. The default [0 .5, 1.0] 
+
+balances stability and sharpness and can be adjusted with negligible overhead across model families. For aggressive transitions or transition-sensitive tasks such as text rendering, a larger wmin is recommended to obtain stronger pixel-VAE correction and more 15 Table 8 Complete transition-strategy ablation corresponding to Fig. 5 of the main paper. Bold values denote the SelfLift-zero operating points adopted in the main experiments: tr = 3 for FLUX.2-Klein-9b and tr = 6 for Z-Image-Turbo. 
+
+Metric Transition strategy FLUX.2-Klein-9b (4 NFEs) Z-Image-Turbo (8 NFEs) 
+
+tr = 1 tr = 2 tr = 3 tr = 1 tr = 2 tr = 3 tr = 4 tr = 5 tr = 6 tr = 7 
+
+ImageReward ↑
+
+Latent branch 1.2852 1.3059 1.2778 1.0419 1.0538 1.0624 1.0445 1.0110 0.9594 0.8641 
+
+Pixel branch 1.2004 1.2934 1.2878 1.0398 1.0287 1.0246 1.0334 1.0366 1.0382 1.0386 
+
+Simple mix 1.2414 1.3124 1.2803 1.0236 1.0404 1.0431 1.0355 1.0413 1.0114 0.9864 
+
+SelfLift-zero 1.2674 1.3166 1.3013 1.0281 1.0420 1.0544 1.0529 1.0582 1.0354 1.0204 
+
+CLIP-IQA ↑
+
+Latent branch 0.8588 0.8721 0.8650 0.8197 0.8458 0.8534 0.8645 0.8600 0.8220 0.6606 
+
+Pixel branch 0.7911 0.7815 0.7686 0.8021 0.7590 0.7683 0.7612 0.7525 0.7383 0.7162 
+
+Simple mix 0.8393 0.8394 0.8220 0.7682 0.7945 0.8021 0.8016 0.7992 0.7732 0.5933 
+
+SelfLift-zero 0.8577 0.8636 0.8470 0.8102 0.8336 0.8374 0.8379 0.8280 0.7994 0.7130 
+
+Table 9 Complete ablation of On-Policy Self Recovery on FLUX.2-Klein-9b. All learned variants use the same transition step tr = 3 . Bold denotes the full SelfLift-rich model with λdyn = 80 , while underline marks the strongest non-default variant for each quality metric. 
+
+Variant λdyn 
+
+Acceleration Overall Image Quality Text Alignment Latency (s) ↓ Speedup ↑ ImageReward ↑ PickScore ↑ AestheticScore ↑ CLIP ↑ GenEval ↑
+
+SelfLift-zero – 1.643 28.04 × 1.3013 22.6326 5.6481 32.317 0.8528 
+
++ Learned latent lifter Gϕ – 1.556 29.61 × 1.3031 22.6737 5.6447 32.305 0.8554 
+
++ Off-policy distillation – 1.556 29.61 × 1.1741 22.4648 5.5380 31.315 0.8084 
+
++ OPSR w/o Ldyn 0 1.556 29.61 × 1.1813 22.6381 5.6380 31.813 0.8292 
+
++ OPSR 40 1.556 29.61 × 1.3048 22.6819 5.6706 32.247 0.8701 
+
+SelfLift-rich 80 1.556 29.61 × 1.3171 22.7036 5.6875 32.345 0.8858 
+
++ OPSR 120 1.556 29.61 × 1.3038 22.6467 5.6532 32.319 0.8571 
+
+reliable generation. 
+
+D.1.2 Resolution-Transition Timestep 
+
+Table 8 reports the complete numerical results corre-sponding to Fig. 5 of the main paper. We evaluate the latent branch, pixel branch, simple mix, and SelfLift-zero at every valid resolution-transition timestep on both backbones. 
+
+D.2 Ablation of On-Policy Self Recovery 
+
+Increasing tr preserves more computation at low reso-lution and therefore provides greater acceleration, but leaves fewer high-resolution steps for recovering tran-sition errors. Direct latent lifting retains relatively high sharpness at moderate transition timesteps, yet its prompt-aligned quality degrades sharply under aggressive late transitions, particularly on Z-Image-Turbo. Pixel-VAE re-encoding remains more sta-ble at late timesteps but consistently exhibits lower CLIP-IQA because of over-smoothing. Simple mix-ing merely interpolates between these two failure modes. SelfLift-zero instead maintains a favorable sharpness–alignment trade-off at the selected operat-Latent Branch Lifting Selflift-zero + ours: Latent Lifter only + Off-Policy Distillation + OPSR w/o ���� 
+
+> Selflift-rich Text G hosting
+> Artifacts Corrected & Comparable Correction
+> Mismatch Causes Severe Blur
+> Sharp and High-Fidelity Blurred Recovery
+
+Figure 9 Qualitative ablation of On-Policy Self Re-covery. Top: SelfLift-zero and the learned lifter correct direct-lifting ghosting, with the latter bypassing the pixel– VAE path. Bottom: off-policy distillation produces blur, removing Ldyn weakens recovery, and SelfLift-rich remains sharp. 
+
+ing points, tr = 3 for FLUX.2-Klein-9b and tr = 6 
+
+for Z-Image-Turbo. To complement the main-paper OPSR ablation, we provide qualitative evidence and a controlled study on FLUX.2-Klein-9b. We isolate three additions to 16 Latent Branch Lifting Text G hosting Spatial Drift       
+
+> Ours : Artifact-Aware Risk Localization
+> Localized artifact-prone regions
+> SelfLift-zero
+> Artifacts are reduced, but
+> residual distortions persist. Localized correction
+> Simple Mix
+> Consistency Lifting
+> Uniform Dual-Branch Mixing
+> Latent Branch Lifting
+> Ours : Artifact-Aware Risk Localization
+> SelfLift-zero
+> Artifacts are reduced, but
+> residual distortions persist. Localized correction
+> Simple Mix
+> Consistency Lifting
+> Uniform Dual-Branch Mixing
+> Localized artifact-prone regions
+> Text Ghosting Spatial Drift
+
+Figure 10 Additional validation of artifact localization. Predicted high-risk regions align with visible ghosting and spatial drift. Selective correction removes these localized artifacts, whereas uniform mixing leaves residual distortions. This extends Fig. 6 of the main paper. 
+
+SelfLift-zero: a learned lifter replacing the pixel–VAE round trip, trajectory-aligned on-policy supervision, and dynamics preservation. All learned variants use 
+
+tr = 3 .Figure 9 links these components to their failure modes. The learned lifter removes text ghosting and matches SelfLift-zero without requiring pixel–VAE inference. Off-policy supervision causes severe blur, removing dynamics preservation yields incomplete recovery, and the full model produces sharp results. Table 9 reports all metrics and a dynamics-weight sweep. The lifter reduces transition latency from 
+
+1.642 to 1.556 seconds without degrading quality. Off-policy distillation degrades all metrics, while on-policy supervision remains insufficient without Ldyn .With other settings fixed, λdyn = 80 performs best; 40 
+
+under-regularizes dynamics, whereas 120 limits adap-tation and approaches SelfLift-zero. These results confirm the complementarity of on-policy recovery and dynamics preservation. 
+
+D.3 Additional Validation of Artifact Lo-calization 
+
+Figure 10 further validates Fig. 6 on two examples. Localized correction removes these artifacts while preserving reliable content, whereas uniform mixing leaves residual distortions, confirming that the con-sistency residual captures artifact-sensitive transition errors. 
+
+D.4 Additional Qualitative Results 
+
+Figures ?? and ?? extend the main-paper compar-ison with additional prompts on FLUX.2-Klein-9b and Z-Image-Turbo, further demonstrating that Self-Lift consistently suppresses transition artifacts while preserving text accuracy, local structure, and fine-grained visual details across model families. 
+
+E Applicability and practical adapta-tion. 
+
+SelfLift-zero is a training-free, plug-and-play transi-tion operator applicable across model families without modifying the denoiser or sampling schedule. Its ef-fectiveness depends on the predicted clean sample used to construct both the direct latent and pixel-VAE branches. At early timesteps, the clean estimate is still immature, making the pixel branch and the resulting correction signal less reliable. Transitioning too early may preserve residual noise or incomplete structure, producing an under-denoised appearance while requiring more high-resolution steps and re-ducing acceleration. SelfLift-zero is therefore better suited to aggressive late-transition configurations, where the clean estimate is sufficiently developed, pixel-VAE guidance becomes reliable, and the errors accumulated by direct latent lifting are more pro-nounced. As transition correction is decoupled from timing, SelfLift-zero complements schedulers such as Speed, especially for flexible multi-step models. The same plug-and-play principle can extend to video generation when the backbone reliably supports the chosen resolutions. In our preliminary exploration with Wan2.1-T2V, 2× spatial downsampling of 480p inputs altered the token-sequence distribution and destabilized scene structure, indicating poor gener-alization to unseen sequence lengths. Progressive-resolution video inference should therefore remain within the model’s native multi-resolution regime, where SelfLift can reliably bridge resolution stages without additional training or external restoration models. 17

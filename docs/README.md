@@ -6,71 +6,65 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-02
-- 运行时间：2026-09-02 22:53:24 UTC
+- 最新运行日期：2026-09-03
+- 运行时间：2026-09-03 22:25:47 UTC
 - 运行状态：成功
-- 本次总论文数：17
+- 本次总论文数：15
 - 精读区：6
-- 速读区：11
+- 速读区：9
 
 ### 今日简报（AI）
-今日精读6篇、速读11篇，焦点集中在图像恢复与扩散模型应用。最值得关注：ReBridge-Flow 以流匹配重耦合后验桥实现图像恢复，以及免训练跨域修复方法均获9.0高分。建议普通读者优先复现这两项工作，并尝试将其思路迁移到视频修复任务。
-- 详情：[/202609/02/README](/202609/02/README)
+今日推荐15篇论文，其中6篇精读、9篇速读；最值得关注的是感知正则化扩散模型用于图像超分（10/10）和以一致性正则实现无监督阴影去除（9/10）。速读中，基于光谱谐波的全能天气恢复（8/10）也值得一看。建议普通读者优先追踪图像复原与生成模型结合的方向，后续可关注其效率提升与真实场景泛化。
+- 详情：[/202609/03/README](/202609/03/README)
 
 ### 精读区论文标签
-1. [ReBridge-Flow: Re-Coupling Posterior Bridges in Flow Matching for Image Restoration](/202609/02/2609.00811v1-rebridge-flow-re-coupling-posterior-bridges-in-flow-matching-for-image-restoration)  
+1. [Perceptually Regularized Diffusion Model for Image Super-Resolution](/202609/03/2609.02016v1-perceptually-regularized-diffusion-model-for-image-super-resolution)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：将感知正则化引入图像超分辨率扩散模型
+2. [Consistency as Regularization for Unsupervised Shadow Removal](/202609/03/2609.01806v1-consistency-as-regularization-for-unsupervised-shadow-removal)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于流匹配生成先验的图像恢复方法，通过后验桥重建耦来保持端点耦合
-2. [Training-Free Inpainting Across Domains with a Frozen Text-to-Image Diffusion Model](/202609/02/2609.00862v1-training-free-inpainting-across-domains-with-a-frozen-text-to-image-diffusion-model)  
+   evidence：提出基于跨观测一致性的无监督阴影去除，直接属于图像恢复任务。
+3. [LaST-SR: Laplace-Inspired Steady-Transient Complex-Frequency Decomposition for Single Image Super-Resolution](/202609/03/2609.02063v1-last-sr-laplace-inspired-steady-transient-complex-frequency-decomposition-for-single-image-super-resolution)  
    标签：评分：9.0/10、query:real-ir
-   evidence：利用冻结文生图扩散模型进行跨域免训练图像修复，直接对应图像修复与扩散生成需求
-3. [P-PatchDiff: Progressive Patch Diffusion Models for Low-light Image Enhancement](/202609/02/2609.01123v1-p-patchdiff-progressive-patch-diffusion-models-for-low-light-image-enhancement)  
+   evidence：论文聚焦单图像超分辨率，提出复频域稳态-瞬态分解，直接匹配图像恢复与超分辨率需求。
+4. [SR-Edit: Region-Aware Image Editing via Self-Refinement](/202609/03/2609.02504v1-sr-edit-region-aware-image-editing-via-self-refinement)  
    标签：评分：9.0/10、query:real-ir
-   evidence：渐进分块扩散实现任意尺寸低光图像复原
-4. [Diffusion Based Unpaired Data Learning for Inverse Problems](/202609/02/2609.01370v1-diffusion-based-unpaired-data-learning-for-inverse-problems)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：面向逆问题的非配对扩散学习方法，涵盖图像复原、超分辨等任务
-5. [DocIntent: Answerability-Guided Agentic Restoration for Real-World Document Visual Question Answering](/202609/02/2608.29037v1-docintent-answerability-guided-agentic-restoration-for-real-world-document-visual-question-answering)  
+   evidence：提出基于自细化的区域感知图像编辑框架，精确修改目标区域并保持其余区域
+5. [Uncertainty-Guided Adverse Weather Restoration via Gated Transformer Network](/202609/03/2609.02434v1-uncertainty-guided-adverse-weather-restoration-via-gated-transformer-network)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向文档问答的真实退化图像恢复
-6. [Training-Free Hidden-State Refinement for Flow-Matching Image Generators](/202609/02/2608.29160v1-training-free-hidden-state-refinement-for-flow-matching-image-generators)  
+   evidence：用门控Transformer做一体化恶劣天气图像恢复
+6. [Benchmarking RAW and RGB Restoration in Image Signal Processors](/202609/03/2609.02831v1-benchmarking-raw-and-rgb-restoration-in-image-signal-processors)  
    标签：评分：8.0/10、query:real-ir
-   evidence：针对冻结流匹配/扩散去噪器的免训练推理期细化
+   evidence：围绕ISP系统化评测RAW与RGB盲图像恢复
 
 ### 速读区论文标签
-1. [Elastic Token Compression for Pixel-Space Diffusion Transformers](/202609/02/2608.29281v1-elastic-token-compression-for-pixel-space-diffusion-transformers)  
+1. [Efficient All-in-One Weather Restoration using Spectral Harmonization](/202609/03/2609.02839v1-efficient-all-in-one-weather-restoration-using-spectral-harmonization)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向像素空间扩散Transformer的令牌压缩以降低计算冗余
-2. [GenFirst: Generation Before Reconstruction for Stable End-to-End Latent Generative Modeling](/202609/02/2608.29335v1-genfirst-generation-before-reconstruction-for-stable-end-to-end-latent-generative-modeling)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：先生成后重建的稳定端到端潜变量生成建模训练方法
-3. [Advanced Pixel Diffusion Model with Guided Sparse Global Refinement](/202609/02/2609.00798v1-advanced-pixel-diffusion-model-with-guided-sparse-global-refinement)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：改进像素空间扩散模型并提出引导稀疏全局精修，属扩散生成模型算法改进方向
-4. [PredErase: Training-Free Object-and-Effect Removal with Predictive Latent Guidance](/202609/02/2609.00956v1-prederase-training-free-object-and-effect-removal-with-predictive-latent-guidance)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于冻结扩散模型的无训练图像编辑，去除对象及其阴影等光影效果
-5. [CameraEditor: Camera-Controlled Image Editing via Video-Prior Sequential Modeling](/202609/02/2609.01479v1-cameraeditor-camera-controlled-image-editing-via-video-prior-sequential-modeling)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于视频扩散先验的相机参数控制图像编辑模型
-6. [Denoising as Projection: Constrained Optimization with Gradient-Guided Diffusion](/202609/02/2608.29507v1-denoising-as-projection-constrained-optimization-with-gradient-guided-diffusion)  
+   evidence：面向雨雾雪等天气退化的轻量全能图像恢复
+2. [A Cone-Constrained Bilinear Decomposition for Total Scaled-Gradient Variation Models](/202609/03/2609.00036v1-a-cone-constrained-bilinear-decomposition-for-total-scaled-gradient-variation-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：以去噪算子为投影的梯度引导扩散，保持数据流形约束
-7. [ASSERT: Adaptive Stochastic Sampling for Robust Diffusion Models on Analog Compute-in-Memory Hardware](/202609/02/2609.00955v1-assert-adaptive-stochastic-sampling-for-robust-diffusion-models-on-analog-compute-in-memory-hardware)  
+   evidence：面向边缘保持图像恢复正则化的锥约束优化方法
+3. [SelfLift: Accelerating Few-Step Diffusion via Self-Recovering Resolution Transition](/202609/03/2609.02036v1-selflift-accelerating-few-step-diffusion-via-self-recovering-resolution-transition)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向模拟存算硬件的扩散模型噪声鲁棒采样方法，核心是扩散模型推理
-8. [Learning the Target Priors Before Image Translation: A Decoupled Training Paradigm for Cross-Modal Image Translation in Remote Sensing](/202609/02/2608.28517v1-learning-the-target-priors-before-image-translation-a-decoupled-training-paradigm-for-cross-modal-image-translation-in-remote-sensing)  
+   evidence：通过渐进分辨率推理加速少步扩散，与扩散模型效率高度相关
+4. [Using Channel Representations in Regularization Terms: A Case Study on Image Diffusion](/202609/03/2608.29227v1-using-channel-representations-in-regularization-terms-a-case-study-on-image-diffusion)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向跨模态翻译的目标域生成先验学习，符合生成模型主题
-9. [Coarse to Fine: Iterative Adversarial Neural Cellular Automata for Medical Image Synthesis](/202609/02/2608.28909v1-coarse-to-fine-iterative-adversarial-neural-cellular-automata-for-medical-image-synthesis)  
+   evidence：面向图像重建与去噪的非线性扩散滤波新方法
+5. [Test-Time Scaling for Video Diffusion Models via Diagnosis-Guided Candidate Recycling](/202609/03/2608.29322v1-test-time-scaling-for-video-diffusion-models-via-diagnosis-guided-candidate-recycling)  
    标签：评分：6.0/10、query:real-ir
-   evidence：医学图像合成使用的轻量NCA生成对抗网络，属生成模型范畴但与扩散修复无直接联系
-10. [EpaCache: Error-Propagation-Aware Caching for Accelerating Diffusion-Based Visual Generation](/202609/02/2608.29264v1-epacache-error-propagation-aware-caching-for-accelerating-diffusion-based-visual-generation)  
+   evidence：视频扩散模型的测试时扩展与候选回收方法，属于扩散生成模型方向而非恢复方向
+6. [Efficient and High-Quality Depth Estimation via Pixel-Space Diffusion with Linear Attention](/202609/03/2608.30129v1-efficient-and-high-quality-depth-estimation-via-pixel-space-diffusion-with-linear-attention)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向扩散图像/视频生成的无训练缓存加速方法
-11. [Reward-guided Fine-Tuning of One-Step Generative Models via Wasserstein Gradient Flow](/202609/02/2608.29647v1-reward-guided-fine-tuning-of-one-step-generative-models-via-wasserstein-gradient-flow)  
+   evidence：线性注意力像素空间扩散用于高分辨率深度估计，方法可迁移但任务非图像恢复
+7. [GenScale: A Benchmark for Relative Object Scale in Image Generation and Editing](/202609/03/2609.00525v1-genscale-a-benchmark-for-relative-object-scale-in-image-generation-and-editing)  
    标签：评分：6.0/10、query:real-ir
-   evidence：一步生成模型的奖励引导微调
+   evidence：面向图像生成与编辑相对物体规模的评测基准和修正代理，属于编辑/生成模型评测方向
+8. [Linear Fusion MultiDiffusion for Fast Training-Free Spherical Panorama Generation](/202609/03/2609.01997v1-linear-fusion-multidiffusion-for-fast-training-free-spherical-panorama-generation)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：基于扩散模型的全景图生成方法，免训练线性融合属于扩散模型方法范畴
+9. [InstEditSeg: Instruction-Driven Image Editing for Polyp and Skin Lesion Segmentation](/202609/03/2609.02004v1-insteditseg-instruction-driven-image-editing-for-polyp-and-skin-lesion-segmentation)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：将医学分割重构为指令驱动图像编辑问题，属于图像编辑模型的应用型方法
 
 
 <div class="dpr-home-promo-card">
