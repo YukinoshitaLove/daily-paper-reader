@@ -6,54 +6,65 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-10
-- 运行时间：2026-09-10 21:42:52 UTC
+- 最新运行日期：2026-09-11
+- 运行时间：2026-09-11 21:57:16 UTC
 - 运行状态：成功
-- 本次总论文数：11
-- 精读区：0
-- 速读区：11
+- 本次总论文数：15
+- 精读区：6
+- 速读区：9
 
 ### 今日简报（AI）
-今日速读 11 篇，聚焦视觉设计与智能体生成等前沿方向。最值得关注的是《Editable Visual Design》与《Agentic Visual Generation》，两篇均获 7.0 分，前者重可编辑性，后者探讨从生成模型到智能体控制的路径。普通读者可先浏览这两篇摘要，了解 AI 视觉从"生成"走向"可控编辑"的趋势。
-- 详情：[/202609/10/README](/202609/10/README)
+今日筛选15篇医学与视觉AI论文，精读6篇、速读9篇。最值得关注的是医疗图像统一修复方向：UniH³（9.0分）整合层级同质与异质性实现全能修复，CEM-TUDASR（9.0分）则用多模态Transformer高效做无监督域自适应超分。普通读者可优先了解这两项医疗影像技术，其余速读篇目按兴趣浏览即可。
+- 详情：[/202609/11/README](/202609/11/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [UniH$^3$: Unifying Hierarchical Homogeneity and Heterogeneity for All-in-One Medical Image Restoration](/202609/11/2609.11156v1-unih3-unifying-hierarchical-homogeneity-and-heterogeneity-for-all-in-one-medical-image-restoration)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：统一同质与异质性的全能医学图像修复
+2. [CEM-TUDASR: Computationally efficient multi-modality transformer based unsupervised domain adaptive super-resolution approach](/202609/11/2609.11201v1-cem-tudasr-computationally-efficient-multi-modality-transformer-based-unsupervised-domain-adaptive-super-resolution-approach)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：面向胶囊内镜图像的无监督Transformer超分辨率
+3. [Guided Super-Resolution of Digital Elevation Models with Diffusion-Based Image Generators](/202609/11/2609.11886v1-guided-super-resolution-of-digital-elevation-models-with-diffusion-based-image-generators)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于扩散的引导式数字高程模型超分辨率
+4. [Overpainting: Localized Context-aware Diffusion Image Editing](/202609/11/2609.10811v1-overpainting-localized-context-aware-diffusion-image-editing)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：局部上下文感知的扩散图像编辑
+5. [Mi-Ripple: Restoring Images Degraded by Iterative AI Editing](/202609/11/2609.11317v1-mi-ripple-restoring-images-degraded-by-iterative-ai-editing)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：修复迭代AI编辑所致图像退化的复原流程
+6. [SenseNova-U1.5: Towards Native Unified Visual Intelligence](/202609/11/2609.11929v1-sensenova-u15-towards-native-unified-visual-intelligence)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：统一多模态模型，支持视觉生成与图像编辑
 
 ### 速读区论文标签
-1. [Editable Visual Design](/202609/10/2609.04034v2-editable-visual-design)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：基于扩散与编码智能体的可编辑视觉设计
-2. [Agentic Visual Generation: From Generative Models to Agentic Control](/202609/10/2609.06758v1-agentic-visual-generation-from-generative-models-to-agentic-control)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：视觉生成从生成模型演进到智能体控制
-3. [AXS-Net: Interpretable Deep Unfolding for Hyperspectral Image Denoising via Spectral Basis Unmixing and Structured Noise Refinement](/202609/10/2609.08777v1-axs-net-interpretable-deep-unfolding-for-hyperspectral-image-denoising-via-spectral-basis-unmixing-and-structured-noise-refinement)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：面向高光谱图像去噪复原的深度展开方法
-4. [Transformers as In-Context Samplers: From Closed-Form Diffusion to Estimation-Free Sampling](/202609/10/2609.08981v1-transformers-as-in-context-samplers-from-closed-form-diffusion-to-estimation-free-sampling)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：冻结Transformer可在上下文中实现闭式扩散采样生成
-5. [LightBridge: Feed-Forward Generative Relighting for 3D Gaussian Splatting](/202609/10/2609.02543v1-lightbridge-feed-forward-generative-relighting-for-3d-gaussian-splatting)  
+1. [AdaptVPR: Route-Aware Hard Positive Generation for Robust Visual Place Recognition](/202609/11/2609.04369v1-adaptvpr-route-aware-hard-positive-generation-for-robust-visual-place-recognition)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向3D高斯泼溅的前馈生成式重光照框架
-6. [Generating Medical Image Counterfactuals using Causal Explanations](/202609/10/2609.02697v1-generating-medical-image-counterfactuals-using-causal-explanations)  
+   evidence：生成式增强为位置识别构造同地点难正样本
+2. [GenPuzzle: Benchmarking Visual Reasoning in Image Generation Models](/202609/11/2609.05902v1-genpuzzle-benchmarking-visual-reasoning-in-image-generation-models)  
    标签：评分：6.0/10、query:real-ir
-   evidence：结合因果解释与生成对抗网络、扩散模型生成医学反事实图像
-7. [Thinking in Pictures: A Systematic Benchmark for Reasoning-driven Image Generation](/202609/10/2609.02864v1-thinking-in-pictures-a-systematic-benchmark-for-reasoning-driven-image-generation)  
+   evidence：图像生成模型评测基准
+3. [IM-ENGINE: Image Editing for Embodied Data Generation](/202609/11/2609.06279v1-im-engine-image-editing-for-embodied-data-generation)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向统一生成模型的推理驱动图像生成基准
-8. [Newton Matching for Generative Modeling: A Unified Framework for Fine-Tuning and Sampling](/202609/10/2609.05727v1-newton-matching-for-generative-modeling-a-unified-framework-for-fine-tuning-and-sampling)  
+   evidence：面向具身数据生成的图像编辑
+4. [Diffuse2Seg: Diffusion Models Can Segment Anything Without Supervision](/202609/11/2609.06491v1-diffuse2seg-diffusion-models-can-segment-anything-without-supervision)  
    标签：评分：6.0/10、query:real-ir
-   evidence：统一生成建模框架
-9. [Single Image to Textured 3D Object Generation in Frequency Domain: From Theory to Pipeline](/202609/10/2609.07085v1-single-image-to-textured-3d-object-generation-in-frequency-domain-from-theory-to-pipeline)  
+   evidence：利用文生图扩散特征实现无监督分割
+5. [TaskGuard: Task-Conditioned Restoration Utility for Risk-Aware Object Detection](/202609/11/2609.08011v1-taskguard-task-conditioned-restoration-utility-for-risk-aware-object-detection)  
    标签：评分：6.0/10、query:real-ir
-   evidence：频域中基于扩散先验的单图纹理化3D生成
-10. [Are Image Generators Zero-Shot Perceivers? A Rigorous Evaluation](/202609/10/2609.07884v1-are-image-generators-zero-shot-perceivers-a-rigorous-evaluation)  
+   evidence：面向目标检测的任务条件修复效用预测
+6. [Albedo Estimation via Latent Bridge Matching](/202609/11/2609.09884v1-albedo-estimation-via-latent-bridge-matching)  
    标签：评分：6.0/10、query:real-ir
-   evidence：评测图像生成器零样本感知能力的基准
-11. [Efficient Fairness Auditing Across Guidance Scales in Text-to-Image Diffusion Models via Causal Abstraction](/202609/10/2609.09486v1-efficient-fairness-auditing-across-guidance-scales-in-text-to-image-diffusion-models-via-causal-abstraction)  
+   evidence：基于潜桥匹配生成模型的本征图像反照率估计
+7. [Shedding Light: A Benchmark for Evaluating Lighting Understanding in Generative Image Models](/202609/11/2609.10787v1-shedding-light-a-benchmark-for-evaluating-lighting-understanding-in-generative-image-models)  
    标签：评分：6.0/10、query:real-ir
-   evidence：文本到图像扩散模型的公平性审计
+   evidence：生成式图像模型光照理解评测基准
+8. [ReconPlusGen: Injecting Reconstruction Prior into Multi-view 3D Generation through Noise Inversion and Modulation](/202609/11/2609.11129v1-reconplusgen-injecting-reconstruction-prior-into-multi-view-3d-generation-through-noise-inversion-and-modulation)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：噪声反演的多视角三维扩散生成
+9. [Logit Refiner: Improving Visual Autoregressive Models via Intra-Scale Dependency Modeling](/202609/11/2609.11804v1-logit-refiner-improving-visual-autoregressive-models-via-intra-scale-dependency-modeling)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：通过尺度内依赖建模改进视觉自回归图像生成
 
 
 <div class="dpr-home-promo-card">
