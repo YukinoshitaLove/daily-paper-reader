@@ -6,52 +6,47 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-13
-- 运行时间：2026-09-13 21:30:19 UTC
+- 最新运行日期：2026-09-14
+- 运行时间：2026-09-14 22:28:50 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：0
-- 速读区：10
+- 本次总论文数：9
+- 精读区：3
+- 速读区：6
 
 ### 今日简报（AI）
-2026-09-13日报：10篇全速读、0精读，三篇7.0分论文构成今日焦点。  
-最值得
-- 详情：[/202609/13/README](/202609/13/README)
+今日筛出 9 篇图像生成与恢复相关论文，精读 3 篇、速读 6 篇。最值得看的是语义对齐的梯度驱动图像编辑（9.0/10）与预训练低秩张量分解用于多维图像恢复（8.0/10）。普通读者可优先读这两篇精读，再按需浏览扩散模型概念擦除与街景生成等速读方向。
+- 详情：[/202609/14/README](/202609/14/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Semantically Aligned Gradient-Driven Context-Preserving Image Editing](/202609/14/2609.12691v1-semantically-aligned-gradient-driven-context-preserving-image-editing)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：语义对齐的指令引导图像编辑
+2. [Pre-Trained Low-Rank Tensor Decomposition for Multi-Dimensional Image Recovery](/202609/14/2609.12843v1-pre-trained-low-rank-tensor-decomposition-for-multi-dimensional-image-recovery)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：预训练张量分解用于图像恢复
+3. [Fast and Faithful: Principled Conditional Flow Matching for Inverse Problems](/202609/14/2609.12953v1-fast-and-faithful-principled-conditional-flow-matching-for-inverse-problems)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：面向成像逆问题的条件流匹配
 
 ### 速读区论文标签
-1. [Lightweight Generative Image Semantic Communication over Packet Erasure Channels](/202609/13/2609.06989v1-lightweight-generative-image-semantic-communication-over-packet-erasure-channels)  
+1. [GRACE: Adaptive Concept Erasure with Geometry-Guided Retention in Diffusion Models](/202609/14/2609.12731v1-grace-adaptive-concept-erasure-with-geometry-guided-retention-in-diffusion-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：用对抗学习将丢包图像恢复重述为条件生成任务
-2. [VoT: Vision-of-Thought for Unified Multimodal Representation Alignment](/202609/13/2609.07815v1-vot-vision-of-thought-for-unified-multimodal-representation-alignment)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：面向文生图扩散生成的离散视觉思维层
-3. [Why we should condition denoising diffusion generative models on windows of past observations](/202609/13/2609.10924v1-why-we-should-condition-denoising-diffusion-generative-models-on-windows-of-past-observations)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：以过去观测窗口为条件训练去噪扩散生成模型
-4. [Scaling 3D Generative Priors to Large-Scale Scene Meshes from Multi-View Images](/202609/13/2609.06385v1-scaling-3d-generative-priors-to-large-scale-scene-meshes-from-multi-view-images)  
+   evidence：文本到图像扩散模型的后处理概念擦除
+2. [StreetDiff: Multi-view Street Scenes Generation via Cross-view Consistent Multi-view Stable Diffusion with Structure Prompts](/202609/14/2609.09890v1-streetdiff-multi-view-street-scenes-generation-via-cross-view-consistent-multi-view-stable-diffusion-with-structure-prompts)  
    标签：评分：6.0/10、query:real-ir
-   evidence：将三维生成先验扩展到大规模场景网格
-5. [TransNormal-2: Geometry-Grounded Rectified Flow with Edge-Aware Decoding for Precise Normal Estimation](/202609/13/2609.06665v1-transnormal-2-geometry-grounded-rectified-flow-with-edge-aware-decoding-for-precise-normal-estimation)  
+   evidence：多视图稳定扩散街景生成
+3. [From Evaluation to Enhancement: Benchmarking and Improving Think-with-Video Reasoning for Video Generative Models](/202609/14/2609.11242v1-from-evaluation-to-enhancement-benchmarking-and-improving-think-with-video-reasoning-for-video-generative-models)  
    标签：评分：6.0/10、query:real-ir
-   evidence：整流流扩散框架修正VAE重建退化以提升几何精度
-6. [Discovering Natural Transformation Vulnerabilities in Black-Box Vision Models](/202609/13/2609.07110v1-discovering-natural-transformation-vulnerabilities-in-black-box-vision-models)  
+   evidence：视频生成模型推理评测基准
+4. [LoopVAE: Recurrent Depth Across Scales for Visual Tokenization](/202609/14/2609.11516v1-loopvae-recurrent-depth-across-scales-for-visual-tokenization)  
    标签：评分：6.0/10、query:real-ir
-   evidence：借助文本引导生成编辑器搜索编辑场景
-7. [Dreaming in Flow: Generative Grounding Feedback for Self-Evolving Unified Multimodal Models](/202609/13/2609.08282v1-dreaming-in-flow-generative-grounding-feedback-for-self-evolving-unified-multimodal-models)  
+   evidence：基于VAE的视觉分词器用于图像生成与重建
+5. [UFO: Chain-of-Evaluation for Omni-Condition Alignment in Multi-Modal Image Generation](/202609/14/2609.12397v1-ufo-chain-of-evaluation-for-omni-condition-alignment-in-multi-modal-image-generation)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向统一多模态模型的生成式自演化反馈
-8. [Advanced Brain Tissue Imaging with Data-Consistent Diffusion Priors in Laminographic X-Ray Nanoimaging](/202609/13/2609.10456v1-advanced-brain-tissue-imaging-with-data-consistent-diffusion-priors-in-laminographic-x-ray-nanoimaging)  
+   evidence：面向多模态图像生成对齐的统一评测框架
+6. [Recurrent Dynamic Range Extension](/202609/14/2609.13135v1-recurrent-dynamic-range-extension)  
    标签：评分：6.0/10、query:real-ir
-   evidence：结合数据一致性扩散先验做X射线层析重建
-9. [Guiding Image-to-3D Generation with Test-Time Partial Observations](/202609/13/2609.10531v1-guiding-image-to-3d-generation-with-test-time-partial-observations)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：图像到3D生成模型的测试时引导
-10. [Learning Interaction between Image and Layout Priors for Joint Image-Layout Generation in Design Templates](/202609/13/2609.11519v1-learning-interaction-between-image-and-layout-priors-for-joint-image-layout-generation-in-design-templates)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：生成模型联合生成图像与布局
+   evidence：结合对抗损失的循环网络用于HDR动态范围重建
 
 
 <div class="dpr-home-promo-card">
