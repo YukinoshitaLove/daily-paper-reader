@@ -6,47 +6,50 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-14
-- 运行时间：2026-09-14 22:28:50 UTC
+- 最新运行日期：2026-09-15
+- 运行时间：2026-09-15 22:23:50 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：3
+- 本次总论文数：10
+- 精读区：4
 - 速读区：6
 
 ### 今日简报（AI）
-今日筛出 9 篇图像生成与恢复相关论文，精读 3 篇、速读 6 篇。最值得看的是语义对齐的梯度驱动图像编辑（9.0/10）与预训练低秩张量分解用于多维图像恢复（8.0/10）。普通读者可优先读这两篇精读，再按需浏览扩散模型概念擦除与街景生成等速读方向。
-- 详情：[/202609/14/README](/202609/14/README)
+今日扫完 10 篇论文，精读 4 篇、速读 6 篇，图像复原与超分是绝对主线。最值得看的是拿下满分的《DNF-SR》——用双输入加负样本感知的微调做真实场景超分，其次是 8.0 分的《Restore What Matters》对联合复原与识别的经验总结。普通读者若只想挑一篇入门，建议先读 DNF-SR 摘要与方法图，再顺带看盲修复互学习那篇速读了解同类思路。
+- 详情：[/202609/15/README](/202609/15/README)
 
 ### 精读区论文标签
-1. [Semantically Aligned Gradient-Driven Context-Preserving Image Editing](/202609/14/2609.12691v1-semantically-aligned-gradient-driven-context-preserving-image-editing)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：语义对齐的指令引导图像编辑
-2. [Pre-Trained Low-Rank Tensor Decomposition for Multi-Dimensional Image Recovery](/202609/14/2609.12843v1-pre-trained-low-rank-tensor-decomposition-for-multi-dimensional-image-recovery)  
+1. [DNF-SR: Dual-Input and Negative-Aware Feature Fine-Tuning for Real-World Image Super-Resolution](/202609/15/2609.15120v1-dnf-sr-dual-input-and-negative-aware-feature-fine-tuning-for-real-world-image-super-resolution)  
+   标签：评分：10.0/10、query:real-ir
+   evidence：基于扩散模型的真实世界图像超分辨率特征微调
+2. [Restore What Matters: Lessons from Joint Restoration and Recognition](/202609/15/2609.13791v1-restore-what-matters-lessons-from-joint-restoration-and-recognition)  
    标签：评分：8.0/10、query:real-ir
-   evidence：预训练张量分解用于图像恢复
-3. [Fast and Faithful: Principled Conditional Flow Matching for Inverse Problems](/202609/14/2609.12953v1-fast-and-faithful-principled-conditional-flow-matching-for-inverse-problems)  
+   evidence：面向识别的联合修复范式
+3. [Direct Conditional Transition Sampling for Diffusion Inverse Problems](/202609/15/2609.14596v1-direct-conditional-transition-sampling-for-diffusion-inverse-problems)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向成像逆问题的条件流匹配
+   evidence：免训练扩散逆问题求解器
+4. [MedDiME: Efficient Latent Diffusion with Adaptive Masking for Medical Counterfactual Generation](/202609/15/2609.15647v1-meddime-efficient-latent-diffusion-with-adaptive-masking-for-medical-counterfactual-generation)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：潜在扩散与自适应掩码用于医学反事实图像编辑
 
 ### 速读区论文标签
-1. [GRACE: Adaptive Concept Erasure with Geometry-Guided Retention in Diffusion Models](/202609/14/2609.12731v1-grace-adaptive-concept-erasure-with-geometry-guided-retention-in-diffusion-models)  
+1. [Context-Aware Mutual Learning for Blind Image Inpainting and Beyond](/202609/15/2609.14439v1-context-aware-mutual-learning-for-blind-image-inpainting-and-beyond)  
    标签：评分：7.0/10、query:real-ir
-   evidence：文本到图像扩散模型的后处理概念擦除
-2. [StreetDiff: Multi-view Street Scenes Generation via Cross-view Consistent Multi-view Stable Diffusion with Structure Prompts](/202609/14/2609.09890v1-streetdiff-multi-view-street-scenes-generation-via-cross-view-consistent-multi-view-stable-diffusion-with-structure-prompts)  
+   evidence：两阶段互学习的盲图像修复
+2. [Convergence rates for generative drifting flows: fixed-scale obstructions and multihead acceleration](/202609/15/2609.15193v1-convergence-rates-for-generative-drifting-flows-fixed-scale-obstructions-and-multihead-acceleration)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：生成式漂移流的收敛理论，属于快速生成模型
+3. [VectorHarness: Recovering Editable, Relation-Preserving Structure from Scientific Graphics](/202609/15/2609.13294v1-vectorharness-recovering-editable-relation-preserving-structure-from-scientific-graphics)  
    标签：评分：6.0/10、query:real-ir
-   evidence：多视图稳定扩散街景生成
-3. [From Evaluation to Enhancement: Benchmarking and Improving Think-with-Video Reasoning for Video Generative Models](/202609/14/2609.11242v1-from-evaluation-to-enhancement-benchmarking-and-improving-think-with-video-reasoning-for-video-generative-models)  
+   evidence：面向可编辑科学图形编辑的栅格到创作重建
+4. [Branched Optimal Transport Amortization](/202609/15/2609.15072v1-branched-optimal-transport-amortization)  
    标签：评分：6.0/10、query:real-ir
-   evidence：视频生成模型推理评测基准
-4. [LoopVAE: Recurrent Depth Across Scales for Visual Tokenization](/202609/14/2609.11516v1-loopvae-recurrent-depth-across-scales-for-visual-tokenization)  
+   evidence：基于分支最优传输的深度生成模型
+5. [Diffusion Trajectory Modeling for Semantic Correspondence](/202609/15/2609.15357v1-diffusion-trajectory-modeling-for-semantic-correspondence)  
    标签：评分：6.0/10、query:real-ir
-   evidence：基于VAE的视觉分词器用于图像生成与重建
-5. [UFO: Chain-of-Evaluation for Omni-Condition Alignment in Multi-Modal Image Generation](/202609/14/2609.12397v1-ufo-chain-of-evaluation-for-omni-condition-alignment-in-multi-modal-image-generation)  
+   evidence：对扩散过程特征轨迹建模用于下游语义对应
+6. [RAPID: A Real-Time Defense Against Unauthorized Model Distillation for Text-to-Image Services](/202609/15/2609.15799v1-rapid-a-real-time-defense-against-unauthorized-model-distillation-for-text-to-image-services)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向多模态图像生成对齐的统一评测框架
-6. [Recurrent Dynamic Range Extension](/202609/14/2609.13135v1-recurrent-dynamic-range-extension)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：结合对抗损失的循环网络用于HDR动态范围重建
+   evidence：面向文生图扩散模型服务的实时防护
 
 
 <div class="dpr-home-promo-card">
