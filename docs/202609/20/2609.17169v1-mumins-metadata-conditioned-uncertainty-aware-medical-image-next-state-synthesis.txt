@@ -1,0 +1,502 @@
+Title: MUMINS: Metadata-conditioned Uncertainty-aware Medical Image Next-state Synthesis
+
+URL Source: https://arxiv.org/pdf/2609.17169v1
+
+Published Time: Wed, 16 Sep 2026 01:16:04 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# MUMINS: Metadata-conditioned Uncertainty-aware Medical Image Next-state Synthesis 
+
+## Anna Oliveras 1,2, Roger Mar´ ı1, Rafael Redondo 1, Oriol Guardi` a-Olivella 1, Cynthia Ifeyinwa Ugwu 1,Ana Tost 1, Bhalaji Nagarajan 3, Carolina Migliorelli 1, Vicent Ribas 1, Petia Radeva 2,41Eurecat, Centre Tecnol` ogic de Catalunya, Barcelona, Spain 
+
+2Dept. de Matem` atiques i Inform` atica, Universitat de Barcelona, Barcelona, Spain 
+
+3Barcelona Supercomputing Center (BSC), Barcelona, Spain 
+
+4Institut de Neuroci` encies, Universitat de Barcelona, Barcelona, Spain 
+
+anna.oliveras@eurecat.org, roger.mari@eurecat.org, rafael.redondo@eurecat.org, oriol.guardia@eurecat.org, cynthia.ugwu@eurecat.org, ana.tost@eurecat.org, bhalaji.nagarajan@bsc.es, carolina.migliorelli@eurecat.org, vicent.ribas@eurecat.org, petia.radeva@ub.edu 
+
+## Abstract 
+
+Forecasting anatomical changes such as tumor growth and neurodegeneration is a challenging generative vision task. Morphological evolution is subtle relative to static anatomy, highly patient-specific, and inherently stochastic. Exist-ing methods struggle with several issues: deterministic net-works ignore biological stochasticity, while standard diffu-sion models require computationally prohibitive multi-pass sampling to quantify uncertainty. We propose MUMINS 
+
+(Metadata-conditioned Uncertainty-aware Medical Image Next-state Synthesis), an efficient diffusion framework that jointly diffuses a baseline scan and its follow-up residual, summed to synthesize the follow-up scan, while concur-rently predicting a spatial uncertainty map, in a single re-verse diffusion process. Conditioned on the time interval and relevant metadata, it preserves fine-grained anatomy by dynamically re-injecting the baseline as a soft anchor at every denoising step, and a negative-log-likelihood head learns the uncertainty map to explicitly flag error-prone regions. Designed without organ-specific heuristics, the same architecture is reused across anatomies via separate, dataset-specific retraining. Extensive evaluations demon-strate that dataset-specific retraining of MUMINS matches or outperforms dedicated, domain-specific state-of-the-art methods on lung CT (PNG) and brain MRI (OASIS-3). Project page: https://github.com/aolivtous/MUMINS. Add noise 
+
+> 𝒚 𝒙
+> 3D U-Net
+> 𝑓 𝜃 (𝑧 𝑡 , 𝑡, 𝑐)
+
+𝒛 𝒕 
+
+𝐜 
+
+> 𝒙 (𝒇𝒖𝒕𝒖𝒓𝒆)
+
+↑ TRAINING ↑   
+
+> ↓INFERENCE ↓
+> 𝒙 𝒕−𝟏 𝒚 𝒕−𝟏 𝒚 𝒕 𝒙 𝒕 𝒙 𝒙 𝒚
+> Recon Guide
+> 𝑳 𝒓𝒆𝒄𝒐𝒏
+> 𝑳 𝑵𝑳𝑳
+
++ 
+
+> +
+> MUMINS Noise Head
+
+𝐜   
+
+> Variance Head
+> 𝒖𝒏𝒄𝒆𝒓𝒕𝒂𝒊𝒏𝒕𝒚
+> 𝒄
+> 𝒚 = (𝒙 (𝒇𝒖𝒕𝒖𝒓𝒆) − 𝒙) Baseline to Follow-up residual Predicted Baseline to Follow-up residual Predicted Follow-up 𝒙 (𝒇𝒖𝒕𝒖𝒓𝒆)
+> 𝒚
+> Two-channel volumetric tensor Conditional embedding Diffusion timestep
+> 𝒛 = (𝒙,𝒚)
+> 𝒕
+> 𝑩𝒂𝒔𝒆𝒍𝒊𝒏𝒆 𝑭𝒐𝒍𝒍𝒐𝒘 − 𝒖𝒑 𝒓𝒆𝒔𝒊𝒅𝒖𝒂𝒍
+
+Figure 1. MUMINS overview. Training: the model learns to jointly generate the baseline image, the baseline-to-follow-up residual, and a voxel-wise uncertainty map via denoising diffusion. Infer-ence: the real baseline is re-injected at every denoising step to guide residual generation. Joint state (baseline-residual) represen-tation enhances consistency between scans, while predicted uncer-tainty highlights error-prone regions of the synthetic follow-up. 
+
+## 1. Introduction 
+
+Predicting how anatomy evolves over time is a clinical necessity. In lung cancer, Computed Tomography (CT) screening identifies millions of indeterminate pulmonary arXiv:2609.17169v1 [cs.CV] 15 Sep 2026 nodules yearly, and survival hinges on resolving the “wait-and-watch” dilemma between benign, indolent lesions and early-stage malignancies [31]. In neurodegeneration, lon-gitudinal brain Magnetic Resonance Imaging (MRI) under-pins the tracking of Alzheimer’s disease progression, where patient-specific forecasts could accelerate trial stratification and treatment decisions [1]. In both modalities, forecasting a future scan (follow-up) from a starting scan (baseline) at an arbitrary interval is a prognostic necessity. From a computer-vision standpoint, this is a hard con-ditional generation problem: the morphological change be-tween scans is small relative to the static anatomy, highly patient-specific, and inherently stochastic [2, 11]. A genera-tive model must therefore preserve fine baseline scan details while generating plausible changes, and, since a single de-terministic output cannot capture the range of biologically plausible futures, should at least flag where its own predic-tion is most likely to diverge from the true outcome. Progression modeling has evolved from classical analyt-ical models [12, 22] to discriminative deep-learning predic-tors [8, 18, 36] and, recently, generative models [19, 29, 39, 42]. However, three limitations persist. First, determin-ism : the dominant deterministic and kinetic-model meth-ods yield a single future for each input. Second, organ specificity : existing methods embed anatomy- or modality-specific components (e.g., brain-age regularizers, growth-kinetic priors), so each new setting demands a custom ar-chitecture [7, 9]. Third, uncertainty : recent diffusion mod-els offer probabilistic synthesis [19, 29, 42], but extracting a per-voxel uncertainty map requires costly Monte Carlo ag-gregation over many reverse-diffusion passes [20, 41, 43]. We propose MUMINS (Metadata-conditioned 
+
+Uncertainty-aware Medical Image Next-state Synthesis), a diffusion framework that forecasts a patient’s follow-up scan (next state) at an arbitrary future interval ∆τ from their current one (baseline), along with a spatial uncertainty map, addressing all three limitations above. Fig. 1 gives an overview of the method. Our contributions are: • Joint baseline-residual representation. MUMINS jointly denoises the baseline and baseline-to-follow-up residual, with baseline re-injection at each inference step to preserve patient-specific anatomy while synthesizing plausible morphological change. • Single-pass per-voxel uncertainty prediction. We embed likelihood-based uncertainty learning to predict voxel-wise uncertainty from a single reverse-diffusion process. This bypasses the prohibitive cost of Monte Carlo sampling, which requires multiple inferences per sample, yielding uncertainty maps that correlate with re-construction error. • Domain-agnostic design. MUMINS uses a universal architecture with generic metadata conditioning, free of organ- or modality-specific components. After dataset-specific retraining, it matches or outperforms domain-specific state-of-the-art methods on PNG lung CT [35] and OASIS-3 brain MRI [17]. 
+
+## 2. Related Work 
+
+Longitudinal medical image progression aims to forecast patient-specific anatomical change from baseline scans, with growing attention to the uncertainty associated with such forecasts [46]. In line with the experimental bench-marks considered in this work, we first discuss existing methods for pulmonary nodule evolution and neurodegener-ative brain progression, then review recent diffusion-based approaches to uncertainty quantification. 
+
+2.1. Longitudinal Medical Image Progression 
+
+Deterministic and registration-based methods. Early progression models are deterministic regressors that learn a fixed mapping from baseline to follow-up. For lung nod-ules, NoFoNet [18] learns voxel-wise displacement fields to warp the baseline scan, refining intensities via a dedicated TextureNet branch, while Tao et al. [36] similarly warp a prior scan conditioned on the follow-up interval. LCT-former [21] instead couples a longitudinal Transformer with a ConvLSTM to capture spatiotemporal growth dynam-ics. A parallel line of work couples clinical kinetic growth models (e.g., Gompertz functions) with deep generative networks: GM-AE [8], LNGNet [38], and STGNet [10] all follow a two-stage paradigm, first predicting future nodule mass or volume via kinetic equations, then con-ditioning a downstream decoder to synthesize the final shape and texture. Recently, NGP-Net [35] introduced a lightweight growth architecture and released the longitudi-nal Pulmonary Nodule Growth (PNG) dataset, which, un-like fixed-interval datasets such as NLST [24], features ir-regular scan intervals handled via a dedicated spatiotem-poral encoding module. Despite their differing mecha-nisms, deterministic approaches yield only a single pre-dicted future without progression uncertainty, and kinetic-model variants are additionally vulnerable to error propa-gation, as downstream shape and texture generation depend on the accuracy of upstream growth predictions. 
+
+Adversarial and Flow Matching methods. GP-WGAN [39] proposed adversarial training for nodule progression by generating one-year follow-up scans, demonstrating that synthesized images could improve malignancy classifica-tion. To model continuous dynamics, CorrFlowNet [42] maps baseline CT embeddings to follow-up embeddings via a latent Neural ODE trained with flow matching, us-ing a correlational autoencoder to isolate nodule progres-sion from static lung anatomy. Similarly, IMMFM [14] em-ploys piecewise-quadratic interpolation paths as smooth tar-gets for flow matching in longitudinal neuroimaging. While these methods can model progression over continuous time, they mainly learn transitions from one state to another rather than capturing dense distributions of plausible follow-up scans, motivating diffusion-based approaches. 
+
+Diffusion-based progression. Denoising diffusion prob-abilistic models (DDPMs) have become a dominant paradigm for high-fidelity image generation [6, 23, 26, 27]. Recent methods leverage DDPMs for follow-up synthesis, but remain deeply anatomy-, disease-, or modality-specific. In pulmonary imaging, CIResDiff [15] predicts idiopathic pulmonary fibrosis progression by learning residual differ-ences between scans, conditioned on Contrastive Language-Image Pretraining (CLIP) [30] embeddings. For brain MRI, TADM-3D [19] models volumetric progression as residual diffusion over intensity differences, enforcing temporal co-herence via Brain-Age Estimator conditioning and Back-In-Time Regularization, while TaDiff [20] integrates treat-ment awareness into the diffusion process for diffuse glioma growth prediction, guided by sequential multi-parametric MRI and treatment plans. BrLP [29] operates in a com-pact latent space using a latent diffusion model, a Control-Net [45], an auxiliary volumetric network, and a patch dis-criminator for adversarial training, averaging multiple gen-eration paths to improve spatiotemporal consistency and volumetric accuracy in Alzheimer’s disease. 
+
+2.2. Uncertainty Quantification in Diffusion Models 
+
+Quantifying uncertainty in diffusion-based synthesis is an active, clinically relevant area. The most direct approach is Monte Carlo (MC) sampling: running the reverse process 
+
+N times and taking the per-voxel variance [20, 29, 41, 43]. This scales as N × T network evaluations per volume and is sensitive to N [32]. BayesDiff [16] reduces this cost via a post-hoc Last-Layer Laplace Approximation but still resamples weights every step, leaving the multi-pass bot-tleneck intact. A complementary line, from sports trajec-tory forecasting, instead learns uncertainty in a single for-ward pass: U2Diff [3] and its heteroscedastic extension U2Diffine [4] add a bivariate NLL term to the DDPM ob-jective, jointly predicting the noise’s mean and variance. U2Diffine propagates this variance to the output via a first-order Taylor expansion of the reverse update, linearizing the denoiser via its Jacobian; U2Diff forgoes this for speed. 
+
+## 3. Methodology 
+
+In this section, we describe MUMINS in four stages. First, follow-up synthesis is formulated as conditional generation of a joint baseline-residual state, separating static anatomy from longitudinal change. Second, a 3D temporally con-ditioned diffusion model learns this joint state and its as-sociated uncertainty. Third, during sampling, the baseline scan is re-injected at every reverse step to anchor the gen-erated residual to patient-specific anatomy. Finally, uncer-tainty estimates from the reverse steps are accumulated into a voxel-wise map of where the synthesized follow-up is less reliable. Fig. 1 gives an overview of the method. 
+
+3.1. Joint Baseline-Residual Representation 
+
+Let a patient’s baseline anatomical state be an observation 
+
+x ∈ X ⊂ RD×H×W acquired at time τ0, and the follow-up state be x(future) acquired at τf uture , with temporal interval 
+
+∆τ = τf uture − τ0. Directly modeling p(x(future) | x, ∆τ )
+
+often leads to shortcut learning, where the network ignores the temporal condition or fails to preserve patient-specific anatomy [19, 20]. We instead target the longitudinal resid-ual y = x(future) − x, isolating disease progression and anatomical evolution from the static anatomy, and synthe-size it jointly with the baseline as z = ( x, y). This formu-lation is inspired by DiffAtlas [44], a segmentation method that jointly diffuses an image and its mask and, at infer-ence, substitutes the known image at each reverse step to guide mask generation. We adapt this idea to progression along two axes. First, rather than an image-mask pair, our joint state pairs the static baseline x with the dynamic resid-ual y, so that substituting the known baseline at inference (Sec. 3.5) guides the generated residual. Second, we con-dition on clinical and acquisition variables c (Sec. 3.3) to further encourage patient- and time-specific synthesis. We therefore learn the conditional joint distribution pθ (z | c);modeling baseline and residual jointly keeps the generated progression structurally consistent with the baseline. 
+
+3.2. Forward Process and Noise Prediction 
+
+We construct a discrete-time Markovian diffusion process that progressively adds Gaussian noise to the joint data dis-tribution z0 ∼ pdata (z) [13]. Following [25], the noise is scheduled with a cosine variance profile β1, . . . , β T over T
+
+steps, defining the forward transitions as q(zt | zt−1) = 
+
+N (zt; √1 − βt zt−1, β tI). Using the reparameterization 
+
+¯αt = Qts=1 (1 − βs), the marginal distribution at any diffu-sion timestep t is given in closed form: 
+
+q(zt | z0) = N (zt; √¯αt z0, (1 − ¯αt)I). (1) The reverse process is parameterized by a 3D U-Net [5] 
+
+fθ (zt, t, c) outputting four channels, split into a noise-prediction tensor ˆϵθ (zt, t, c) (the noise-mean head) and a second tensor ˆsθ (zt, t, c) passed through a sigmoid to pro-duce a per-voxel standard deviation (the variance head): 
+
+ˆσθ (zt, t, c) = sigmoid(ˆ sθ (zt, t, c)) + ε, (2) with ε = 10 −6 for numerical stability. Because zt is a joint variable, both outputs factorize into baseline and resid-ual components, ˆϵθ = (ˆ ϵxθ , ˆϵyθ ) and ˆσθ = ( ˆ σxθ , ˆσyθ ). For brevity, we henceforth write ˆϵθ ≡ ˆϵθ (zt, t, c) and ˆσθ ≡
+
+ˆσθ (zt, t, c), with the same convention applied to their per-channel components ˆϵkθ and ˆσkθ for k ∈ { x, y }, suppressing dependence on (zt, t, c) unless required for clarity. 3.3. Temporal and Metadata Conditioning 
+
+The conditioning vector c = (∆ τ, a, ∆bx, ∆by , ∆bz ) ag-gregates clinical and acquisition signals relevant to longi-tudinal modeling: the inter-scan interval ∆τ , the patient’s age at τ0 (a), and a triplet of acquisition-quality descrip-tors (∆ bx, ∆by , ∆bz ) encoding the per-axis change in im-age blur between scans, computed during training as the dif-ference in gradient magnitude along axis i between paired scans. At inference, we report two settings: ∆b = 0,which preserves the baseline’s own sharpness and requires no knowledge of the unseen follow-up, and ∆b = GT, an oracle upper bound computed directly from the true follow-up. The former is the only information-respecting choice in a genuine forecasting deployment; the latter is reported purely as a diagnostic ceiling (Table 1). Follow-up scans can otherwise exhibit global sharpness differences from ac-quisition variability rather than anatomical progression, as in the PNG benchmark [35]; blur conditioning disentan-gles these acquisition-related appearance changes from true anatomical change (See Supp. Sec. G). Each scalar is in-dependently mapped through a sinusoidal positional em-bedding [37] and a two-layer MLP, then concatenated with the diffusion timestep embedding. This combined embed-ding modulates the network’s intermediate representations via the time-conditioned residual blocks, letting the noise estimator adapt its transition dynamics to the current noise scale, target longitudinal horizon, and acquisition context. 
+
+3.4. Hybrid Training Objective with Voxel-wise Un-certainty 
+
+We adapt the NLL-based uncertainty learning of U2Diff [3], originally developed for trajectory forecasting, to volumet-ric follow-up synthesis. The model predicts a per-voxel variance alongside each diffusion noise estimate, enabling uncertainty maps to be obtained from a single reverse-diffusion process. Training uses a hybrid objective that combines standard noise prediction with the NLL term. 
+
+Joint Noise Prediction. The primary objective trains the network to denoise the joint state. For each sample, we draw 
+
+ϵ ∼ N (0, I) and t ∼ U (1 , T ), and minimize a channel-wise reconstruction loss on the predicted noise mean: 
+
+Lrecon = Ez0,ϵ,t, c
+
+∥ϵx − ˆϵxθ ∥1 + ∥ϵy − ˆϵyθ ∥1
+
+ , (3) 
+
+x and y channels are weighted equally so uncertainty in ei-ther branch is not absorbed by the other. 
+
+Uncertainty Loss. To learn predictive variances without destabilizing noise prediction, we add an NLL term where the predicted mean acts only as a target for the variance head (Sec. 3.2), whose per-voxel standard deviation ˆσkθ (Eq. 2) is the predicted noise scale in the Gaussian NLL of Eq. (4). Following [3], we apply a stop-gradient sg[ ·] to the noise mean so gradients from the NLL flow only through the un-certainty head: 
+
+LN LL = Ez0,ϵ,t, c
+
+X
+
+> k∈{ x,y }
+
+
+
+log 
+
+√2π ˆσkθ
+
+
+
++
+
+ϵk − sg 
+
+h
+
+ˆϵkθ
+
+i 22
+
+2 ( ˆ σkθ )2
+
+
+
+,
+
+(4) This decomposition decouples optimizing the deterministic noise estimate (Eq. 3) from calibrating its uncertainty, pre-venting the network from trivially reducing LN LL by inflat-ing ˆσθ at the cost of Lrecon . The total objective is: 
+
+Ltotal = Lrecon + λN LL LN LL , (5) with λN LL = 0 .01 set empirically so the uncertainty term does not dominate denoising. 
+
+3.5. Baseline-Guided Conditional Synthesis 
+
+During inference, the objective is to sample from the condi-tional distribution pθ (x, y | c) given an observed baseline x
+
+and the conditioning vector c. Because our model is trained on this joint distribution, we perform conditional sampling via baseline injection. Starting from pure Gaussian noise 
+
+zT ∼ N (0, I), at each reverse step t the network predicts the joint posterior parameters. To ground the generative process in the patient’s actual anatomy, prior to each net-work evaluation we overwrite the x-component of zt with an exact sample from the forward marginal of the known baseline: 
+
+xt ∼ N  √¯αt x, (1 − ¯αt)I . (6) We realize this by drawing a single noise realization ϵ ∼N (0 , I ) once per sample and reusing it, unchanged, at ev-ery reverse step, i.e. xt = √¯αt x + √1 − ¯αt ϵ for all t: this satisfies the marginal of Eq. (6) at every step while trac-ing one coherent forward-diffusion trajectory of the known baseline, rather than resampling ϵ independently at each step. By iteratively projecting the baseline channel onto this fixed trajectory, the residual yt is continually guided by ac-curate, temporally consistent anatomical context. We ablate this choice against per-step noise resampling in Supp. Sec. F Table F.5, finding the single-trajectory injection preferable. At the end of the reverse process, we get the denoised joint state ˆz0 = (ˆ x0, ˆy0). We retain its residual channel and add it to the baseline to obtain the synthesized follow-up 
+
+ˆx(future) = x + ˆ y0.
+
+3.6. Uncertainty Propagation at Inference 
+
+Beyond a single volume, our framework yields a per-voxel uncertainty map by propagating the network’s predicted variance through the reverse process. Two approximations make this tractable at volumetric resolution. First, we adopt a diagonal predictive covariance, so the network outputs a per-voxel variance ˆσ2 
+
+> θ
+
+. Second, as in U2Diff [3], we set the Jacobian Jt = ∇zˆϵθ to zero, since retaining it requires a backward pass through the 3D denoiser at every reverse step, infeasible at our scale even under the diagonal approx-imation [4]. Our sampling uses the stochastic DDIM [33] update with skip interval ζ and stochasticity η, with per-step noise scale σt. Let Vt = Var( zt) be the accumulated per-voxel variance ( VT = 0). Assuming zt, ˆϵθ , and the injected noise are mutually independent (diagonal assump-tion), a first-order variance decomposition yields: 
+
+Vt−ζ = r2 
+
+> t
+
+Vt + c2 
+
+> t
+
+ˆσ2 
+
+> θ
+
+(zt, t, c) + σ2 
+
+> t
+
+, (7) with rt = p¯αt−ζ /¯αt and ct = p1 − ¯αt−ζ − σ2 
+
+> t
+
+−
+
+rt
+
+√1 − ¯αt. The three terms propagate accumulated uncer-tainty along the trajectory, add the network’s predicted un-certainty at step t, and inject the sampler’s stochastic noise, respectively; the full derivation is in Supp. Sec. A. Set-ting Jt = 0 removes the stabilizing cross-term of the full formulation [4], leaving an unopposed homogeneous map with per-step amplification r2 
+
+> t
+
+> 1. Propagating from the start of the chain thus accumulates variance monotonically, yielding over-dispersed, poorly calibrated maps by t = 0 
+
+(shown to be structural, not numerical, in Supp. Sec. B). We therefore adopt the delayed variance propagation of U2Diff [3], activating the recursion only for t ≤ ˆs and hold-ing Vt = 0 earlier, selecting ˆs by minimizing the NLL. Unlike U2Diff and U2Diffine, which sample deterministi-cally, our baseline-anchored synthesis requires stochastic 
+
+sampling: the injected term σ2 
+
+> t
+
+enters the recursion only for η > 0, and is needed both to calibrate uncertainty and, as our ablation shows, to maintain reconstruction quality (Supp. Sec. F, Table F.4). 
+
+From residual variance to follow-up uncertainty. The recursion above propagates variance over the two-channel joint state, so the final map V0 contains a baseline com-ponent Vx 
+
+> 0
+
+and a residual component Vy 
+
+> 0
+
+. Since the syn-thesized follow-up is ˆx(future) = x + ˆ y0 with the baseline 
+
+x injected as a known measurement, its predictive variance reduces exactly to the residual component: 
+
+Var  ˆx(future)  = Var( x + ˆ y0) = Var( x)
+
+| {z } 
+
+> = 0
+
++ Var(ˆ y0) + 2 Cov( x, ˆy0)
+
+| {z }
+
+> = 0
+
+= Vy 
+
+> 0
+
+, (8) where Var( x) = 0 because x is deterministic and fully observed, and Cov( x, ˆy0) = 0 follows from the diagonal predictive covariance of Sec. 3.6. This holds regardless of which guide-noise scheme injects the baseline (Sec. 3.5): 
+
+x itself is the same deterministic, fully-observed measure-ment under either injection variant, so the variance decom-position of Eq. (7) is unaffected by the single-trajectory-vs-resampling choice. Vy 
+
+> 0
+
+is thus the per-voxel predictive vari-ance of the synthesized follow-up, discarding the baseline component. We report its element-wise square root as the final uncertainty map, σ ≜ pVy 
+
+> 0
+
+, distinguishing it from the two quantities it is built from: the per-step network output 
+
+ˆσθ (Eq. 2), and the accumulated variance Vt it propagates into via the recursion of Eq. (7). The reverse chain con-cludes with a standard DDPM [13] step from t1 to t = 0 ;following U2Diff [3], the accumulated variance is carried through unchanged, V0 = Vt1 .
+
+## 4. Experiments and Results 
+
+4.1. Datasets and Preprocessing 
+
+Lung Nodule Progression. We use the Pulmonary Nodule Growth (PNG) dataset [35]: 378 chest CT scans from 103 patients, 226 longitudinal nodules with at least three time points (2–64 month intervals), radiologist-verified. We fol-low NGP’s [35] preprocessing and splits, converting longi-tudinal trios into pairs while keeping patients within a single split (full pipeline in Supp. Sec. C). 
+
+Alzheimer’s Disease Progression. We use OASIS-3 [17]: 1352 T1-weighted scans from 492 subjects (ages 42–97; CN/MCI/AD), spanning ∼10 years with a mean baseline-to-follow-up interval of 3.7 years. We follow the Turbo-prep [28] preprocessing of [29] and use 128 3 volumes as in [19], split 70 /15 /15% with intra-patient pairs kept within a single split (full pipeline in Supp. Sec. C). 
+
+4.2. Implementation Details 
+
+MUMINS uses a 3D U-Net [5] with per-resolution atten-tion factorized into in-plane and rotary-embedding depth-axis terms [34], adapted from the spatial/temporal split used in video diffusion models. We train with Adam ( 10 −4) and EMA (decay 0.995) for 150k iterations, batch 2 (300k for brain at batch 1; Supp. D) on 2 NVIDIA H100 (64 GB) GPUs, using T = 300 diffusion steps with a cosine sched-ule [25] and λNLL = 0 .01 . At inference we use stochastic DDIM [33] with skip interval ζ = 5 (60 steps), η = 1 , and variance start-step ˆs = 15 (selected on held-out validation; ablated in Supp. F). All baselines are retrained and evalu-ated on identical splits; extended details in Supp. D. 
+
+4.3. Evaluation metrics 
+
+As described in Sec. 4.1, samples are organized as longitu-dinal pairs; all metrics are averaged over pairs rather than subjects or nodules. 
+
+Synthesis quality. We compare each generated follow-up 
+
+ˆx(future) against the ground truth x(future) using three com-plementary metrics: mean absolute error (MAE ↓), the av-erage voxel-wise intensity error; peak signal-to-noise ratio (PSNR ↑), the reconstruction quality to the maximum sig-age: 53 dt: 6m               
+
+> age: 51 dt: 43m
+> age: 52 dt: 6m
+> age: 68 dt: 2.86y
+> age: 52 dt: 3.42y
+> age: 66 dt: 2.87y
+> 0.0 0.1 0.2 0.3 0.4
+> Absolute Error (CT)
+> 0.000 0.025 0.050 0.075 0.100 0.125 0.150 0.175
+> Absolute Error (MRI) Baseline GT Follow-up GT MUMINS NGPNet TADM-3D GM-AE Baseline GT Follow-up GT MUMINS BrLP TADM-3D
+
+Figure 2. Qualitative next-state synthesis on lung CT (top) and brain MRI (bottom): baseline (age, green), ground-truth follow-up ( ∆τ ,blue; in years y or months m), and per-method predictions with absolute error maps. MUMINS inference with ∆b = 0 .
+
+nal; and structural similarity (SSIM ↑) [40], the perceptual and structural agreement beyond intensity. 
+
+Uncertainty evaluation. MUMINS outputs a per-voxel uncertainty map σ in a single reverse-diffusion pass. We assess σ against the absolute error map e, with ei =
+
+|xi − ˆxi|, along two axes: localization , whether σ is high where error is large, and calibration , whether the pre-dicted uncertainty magnitude matches the observed error scale. For localization , we report Spearman ( ρ) correla-tion between σ and e, and the Area Under the Sparsifica-tion Error curve (AUSE); lower is better. For calibration ,we report the 95% prediction-interval coverage probabil-ity ( PICP 95 , ideal 0.95 ) and the mean prediction-interval width (MPIW), computed in normalized image-intensity units (Supp. Sec. D). Coverage at additional nominal lev-els is given in Supp. Sec. E. As a widely used uncertainty estimate in diffusion models [20, 29, 41, 43], we compute a Monte Carlo (MC) reference: for each input we draw K =20 stochastic generations from the same trained model and take their voxel-wise standard deviation. Since MC and our single-pass σ capture different uncertainty sources, we do not treat MC as ground truth; both are scored independently against the true error, and we report their cross-agreement (ρ). We discuss the compromise of this K=20 choice, in-cluding MC’s own convergence behavior, in Supp. Sec. E. 
+
+4.4. Results 
+
+We evaluate MUMINS against GM-AE [8], NGP-Net [35], and TADM-3D [19] on PNG [35] lung CT, and BrLP [29] and TADM-3D on OASIS-3 [17] brain MRI, plus a no-change copy baseline ( ˆx(future) = x, i.e. ˆy0 = 0). Table 1 reports both blur-conditioning settings from Sec. 3.3. MUMINS faithfully follows whatever ∆b it is given ( r = 0.974 –0.980 in Supp. Fig. G.4), including 
+
+∆b = 0 , which preserves the baseline’s own blur. These retrospective benchmarks, however, contain real inter-visit blur drift that ∆b = 0 does not chase, which is why it trails 
+
+∆b = GT below (See Supp. Sec. G). Unless stated other-wise, MUMINS refers to the deployable ∆b = 0 setting, for parity with baselines that lack access to the true follow-up. On PNG lung CT, MUMINS ( ∆b = 0 ) attains the best aggregate whole-image MAE, PSNR, and SSIM among lung baselines, narrowly edging out NGP-Net ( 23 .53 vs. 
+
+22 .85 dB PSNR) despite NGP-Net’s extra scan, and the best aggregate nodule-ROI PSNR ( 24 .89 dB), with ROI MAE essentially tied with GM-AE. The copy baseline trails all methods but TADM-3D on MAE/PSNR, confirming change is rewarded over copying. Whole-image gains mostly hold across subgroups at ∆b = 0 : SSIM trails NGP-Net in Sta-ble/Shrink, MAE trails GM-AE in Stable. ROI-level accu-racy is more sensitive: MUMINS clearly leads NGP-Net in Grow ( 26 .12 vs. 23 .38 dB PSNR ROI ) but trails it in Sta-ble and, more narrowly, Shrink, where GM-AE’s kinetic-growth model tops both. In Shrink, this reflects acquisition-blur mismatch, fully resolved by ∆b = GT (25 .45 vs. 
+
+24 .56 dB PSNR ROI ); in Stable, the gap persists even with the true blur, plausibly reflecting that NGP-Net’s extra scan helps on near-static nodules. Aggregated over all nodules, supplying the true drift ( ∆b = GT , an oracle diagnostic) recovers a uniform margin over NGP-Net (aggregate PSNR 
+
++2 .65 dB; nodule-ROI PSNR +2 .45 dB). Table 1. Synthesis results on the PNG lung CT benchmark and OASIS-3 brain MRI; subgroups indicate nodule growth trend (lung) and cognitive status (brain). Metrics reported over the whole image and the ROI (nodule/brain). Copy is a no-change reference. 
+
+Subgroup Method MAE ( ×10 −2) ↓ PSNR (dB) ↑ SSIM (%) ↑ MAE ROI (×10 −2) ↓ PSNR ROI (dB) ↑
+
+> PNG Lung CT [35]
+
+Grow 
+
+GM-AE [8] 4.03 ± 1.32 22.83 ± 2.61 65.29 ± 11.39 4.47 ± 2.51 25.18 ± 4.11 TADM-3D [19] 4.93 ± 1.57 21.49 ± 2.41 68.33 ± 10.10 5.92 ± 4.37 23.87 ± 5.28 NGP-Net [35] 4.74 ± 1.70 21.87 ± 2.75 68.48 ± 13.64 6.05 ± 3.80 23.38 ± 5.11 
+
+MUMINS ∆b = 0 3.87 ± 1.60 23.65 ± 3.87 71.66 ± 12.36 4.23 ± 2.71 26.12 ± 4.81 
+
+MUMINS ∆b = GT 2.95 ± 1.29 26.22 ± 4.41 80.82 ± 11.21 3.42 ± 2.16 28.39 ± 5.29 
+
+Stable 
+
+GM-AE 3.71 ± 1.45 23.75 ± 2.93 67.34 ± 15.02 7.02 ± 5.47 22.46 ± 6.03 TADM-3D 4.46 ± 1.20 22.12 ± 2.14 67.53 ± 11.35 8.34 ± 6.40 20.91 ± 5.60 NGP-Net 3.95 ± 1.24 23.22 ± 2.56 72.81 ± 9.57 4.66 ± 2.88 25.15 ± 4.41 MUMINS ∆b = 0 3.79 ± 1.90 24.36 ± 4.35 72.41 ± 15.06 7.52 ± 5.67 22.43 ± 7.43 
+
+MUMINS ∆b = GT 3.06 ± 1.71 26.16 ± 4.94 76.91 ± 15.83 6.00 ± 5.80 24.85 ± 7.98 
+
+Shrink 
+
+GM-AE 4.18 ± 1.46 22.67 ± 3.59 65.61 ± 13.55 5.40 ± 3.71 24.75 ± 5.96 
+
+TADM-3D 5.03 ± 1.50 21.03 ± 2.72 64.69 ± 12.31 6.60 ± 4.08 22.24 ± 4.89 NGP-Net 4.13 ± 1.58 22.85 ± 3.72 73.18 ± 12.19 5.34 ± 4.93 24.56 ± 4.96 
+
+MUMINS ∆b = 0 4.09 ± 1.75 23.12 ± 3.95 70.76 ± 14.38 5.73 ± 4.68 24.26 ± 5.75 
+
+MUMINS ∆b = GT 3.47 ± 1.73 24.43 ± 4.50 75.08 ± 14.90 4.82 ± 3.52 25.45 ± 5.97 
+
+All above 
+
+Copy ( ˆx(future) = x) 4.54 ± 1.56 21.91 ± 3.07 65.21 ± 12.66 5.82 ± 4.02 23.63 ± 5.21 
+
+GM-AE 4.05 ± 1.38 22.88 ± 3.06 65.69 ± 12.65 5.17 ± 3.56 24.65 ± 5.19 TADM-3D 4.91 ± 1.50 21.39 ± 2.52 66.77 ± 11.24 6.51 ± 4.60 22.83 ± 5.24 NGP-Net 4.13 ± 1.46 22.85 ± 2.94 71.34 ± 11.54 5.37 ± 3.74 24.30 ± 5.08 
+
+MUMINS ∆b = 0 3.95 ± 1.69 23.53 ± 3.96 71.40 ± 13.47 5.26 ± 4.16 24.89 ± 5.69 
+
+MUMINS ∆b = GT 3.18 ± 1.55 25.50 ± 4.56 78.01 ± 13.59 4.32 ± 3.48 26.75 ± 6.12 
+
+> OASIS-3 Brain MRI [17]
+
+CN 
+
+BrLP [29] 1.57 ± 0.24 27.16 ± 1.31 94.15 ± 1.19 6.90 ± 1.11 20.59 ± 1.34 TADM-3D [19] 1.21 ± 0.24 30.12 ± 1.73 95.00 ± 1.59 3.82 ± 0.80 26.06 ± 1.67 MUMINS ∆b = 0 1.15 ± 0.46 30.78 ± 2.87 95.21 ± 2.82 4.16 ± 1.84 25.66 ± 3.22 
+
+MUMINS ∆b = GT 1.06 ± 0.34 31.34 ± 2.40 95.52 ± 2.37 3.69 ± 1.14 26.37 ± 2.47 
+
+MCI 
+
+BrLP 1.55 ± 0.20 27.17 ± 1.10 94.24 ± 1.12 6.88 ± 0.91 20.58 ± 1.09 TADM-3D 1.19 ± 0.32 30.19 ± 1.95 95.02 ± 1.69 3.69 ± 1.02 26.47 ± 1.92 
+
+MUMINS ∆b = 0 0.98 ± 0.33 31.72 ± 2.17 96.25 ± 1.82 3.42 ± 1.21 27.01 ± 2.39 
+
+MUMINS ∆b = GT 0.95 ± 0.31 31.82 ± 2.17 96.61 ± 1.41 3.43 ± 1.21 27.00 ± 2.44 
+
+AD 
+
+BrLP 1.73 ± 0.25 26.17 ± 1.34 93.47 ± 1.36 7.74 ± 1.19 19.52 ± 1.39 TADM-3D 1.17 ± 0.21 30.01 ± 1.60 94.77 ± 2.15 3.79 ± 0.73 26.01 ± 1.56 MUMINS ∆b = 0 1.16 ± 0.29 30.44 ± 1.97 95.38 ± 2.03 4.18 ± 1.05 25.35 ± 2.06 
+
+MUMINS ∆b = GT 1.17 ± 0.31 30.44 ± 2.16 95.52 ± 1.74 4.27 ± 1.21 25.26 ± 2.31 
+
+All above 
+
+Copy ( ˆx(future) = x) 1.14 ± 0.56 30.91 ± 3.60 95.55 ± 3.37 4.34 ± 2.25 25.61 ± 3.98 
+
+BrLP 1.57 ± 0.24 27.12 ± 1.30 94.12 ± 1.20 6.94 ± 1.10 20.54 ± 1.33 TADM-3D 1.21 ± 0.25 30.12 ± 1.75 94.99 ± 1.62 3.80 ± 0.82 26.10 ± 1.69 MUMINS ∆b = 0 1.13 ± 0.44 30.87 ± 2.77 95.34 ± 2.71 4.08 ± 1.76 25.80 ± 3.12 
+
+MUMINS ∆b = GT 1.05 ± 0.34 31.35 ± 2.37 95.64 ± 2.28 3.69 ± 1.15 26.38 ± 2.47 
+
+On OASIS-3 brain MRI, MUMINS ( ∆b = 0) is es-sentially matched with the near-saturated copy baseline on whole-image metrics since baseline and follow-up differ subtly in most pairs, and ahead of TADM-3D and BrLP on all three (Table 1). At the ROI level, MUMINS and TADM-3D are closely matched: MUMINS edges TADM-3D on MCI ( 3.42 vs. 3.69 × 10 −2 MAE ROI ) but trails narrowly on CN ( 4.16 vs. 3.82 × 10 −2 MAE ROI ). Supplying ∆b = GT 
+
+lifts MUMINS’s aggregate ROI to its best reported scores, matching or leading TADM-3D on CN, MCI, and aggre-gate, with TADM-3D remaining stronger on AD ( 3.79 vs. 
+
+4.27 × 10 −2 MAE ROI ), where atrophy produces the largest anatomical change. Fig. 2 shows qualitative results of all methods. On lung CT, MUMINS yields the sparsest, lowest-amplitude error maps and shows little error over the nodule; TADM-3D spreads high error beyond the localized errors of GM-AE and NGP-Net. On brain MRI, all methods reconstruct well, so error maps use a much finer scale: MUMINS pro-duces the cleanest maps overall, BrLP yields visibly blurrier follow-ups (likely from its latent-space compression) with error concentrated around the central ventricles and outer cortical boundary, and TADM-3D distributes error more diffusely. Supp. Sec. I shows failure cases, such as abrupt nodule growth that MUMINS under-predicts. 
+
+Uncertainty. Table 2 scores the single-pass predicted σ
+
+against voxel-wise error, over the image and the ROI (nod-ule/brain). The meaningful measure differs by dataset. For Table 2. Uncertainty evaluation on both test sets, for the image and the ROI (nodule for CT, brain for MRI). Rows compare single-pass σ and 20 -seed MC std, each against voxel-wise error, and their agreement ( X). ρ: Spearman; PICP 95 → 0.95 ; mean ± std. 
+
+Lung CT Img Lung CT ROI Brain MRI Img Brain MRI ROI 
+
+> Pred  σ
+
+ρ ↑ 0.61 ±0.15 0.13 ±0.28 0.54 ±0.05 0.26 ±0.07 
+
+AUSE ↓ 0.02 ±0.01 0.06 ±0.05 0.002 ±0.001 0.03 ±0.01 PICP 95 0.91 ±0.06 0.80 ±0.22 0.98 ±0.02 0.97 ±0.04 
+
+MPIW 0.45 ±0.01 0.46 ±0.02 0.44 ±0.00 0.47 ±0.01 
+
+> MC std
+
+ρ ↑ 0.70 ±0.14 0.17 ±0.29 0.56 ±0.06 0.32 ±0.08 
+
+AUSE ↓ 0.01 ±0.01 0.05 ±0.05 0.001 ±0.001 0.02 ±0.01 PICP 95 0.78 ±0.14 0.61 ±0.23 0.20 ±0.05 0.59 ±0.14 
+
+MPIW 0.22 ±0.08 0.30 ±0.20 0.04 ±0.00 0.12 ±0.01 
+
+> X
+
+ρ ↑ 0.79 ±0.08 0.50 ±0.26 0.73 ±0.02 0.65 ±0.03 
+
+lung, the 64 3 volumes are cropped around the nodule, so whole-image scores are anatomically meaningful: σ lo-calizes error well ( ρ = 0 .61 ) and is reasonably calibrated (PICP 95 0.91 ), far cheaper than the 20 ×-costlier MC ref-erence ( ρ = 0 .70 , PICP 95 0.78 ). The nodule ROI is a small sub-region, so its correlations are unstable for both σ
+
+(ρ = 0 .13 ±0.28 ) and MC ( ρ = 0 .17 ±0.29 ) and not mean-ingfully interpretable. For the brain, volumes are skull-stripped, inflating whole-image scores with the large zero background, so uncertainty inside the ROI is the meaning-ful measure. There, reconstruction is near-saturated, and error is small and diffuse, leaving little structure to localize: MC’s repeated sampling gives a modest localization edge (ρ = 0 .32 vs. our 0.26 ), but calibration is the discriminat-ing axis, where the single diffusion process uncertainty σ
+
+remains better calibrated ( PICP 95 0.97 ) while MC severely under-covers ( 0.59 ). Across both datasets, both estimates are correlated (cross-ρ 0.79 lung, 0.65 brain ROI), so a sin-gle pass recovers much of the uncertainty structure MC ob-tains only by repeated sampling. This structure could stem from the learned variance head or the sampler’s injected stochasticity; setting η = 0 removes the latter, yet σ re-mains error-correlated, confirming the variance head learns meaningful uncertainty on its own (Supp. Sec. F). Figure 3 shows predicted uncertainty and absolute-error maps for representative cases (axial, sagittal, and coronal views in Supp. Fig. H.6). Sparsification curves (Fig. 4) show both estimators’ MAE dropping monotonically to-ward the oracle as high-uncertainty voxels are removed first; the single-pass curve sits above the 20-seed MC ref-erence, consistent with its higher AUSE (Table 2). 
+
+4.5. Ablation Studies 
+
+We ablate MUMINS on the PNG lung validation split [35]; the 8×-larger brain ( 128 3) configuration precludes exhaus-tive sweeps. Table 3 isolates five components on a shared 3D U-Net backbone [5] and training iterations: joint diffu-sion (JD), residual prediction (RP), blur conditioning (BC), uncertainty prediction (UP), and baseline re-injection (BR), age: 48  
+
+> Δτ: 2m
+> age: 51
+> Δτ: 43m
+> age: 47
+> Δτ: 2m
+> age: 54
+> Δτ: 1.7y
+> age: 68
+> Δτ: 1.5y
+> age: 81
+> Δτ: 2.8y
+> Lung CT samples Brain MRI samples
+> GT Baseline GT Follow-up Predicted Follow-up Predicted Uncertainty Absolute Error
+
+Figure 3. MUMINS follow-up and uncertainty predictions (test samples). ∆τ denotes inter-scan interval (months m, years y). 0.0 0.2 0.4 0.6 0.8           
+
+> Fraction of voxels removed
+> 0.000 0.025 0.050 0.075 0.100 0.125 0.150 0.175
+> Mean abs error of remaining
+> 0.0 0.2 0.4 0.6 0.8
+> Fraction of voxels removed
+> 0.00 0.01 0.02 0.03 0.04 0.05 0.06 0.07
+> ROI pred (20 seeds)
+> ROI Oracle
+> ROI MC std
+> Image pred (20 seeds)
+> Image Oracle
+> Image MC std
+
+(a) (b) 
+
+Figure 4. Sparsification curves on PNG lung CT (a) and OASIS brain MRI (b) test sets; ROI is the nodule (a) and brain (b). 
+
+starting from a single-channel diffusion (JD-free) as in typ-ical conditional DDPM models [19, 20, 29]. Predicting the image directly (rows 1–2) yields high variance but JD out-performs in all metrics the baseline; RP sharply tightens this spread (PSNR std 4.09 → 1.65 dB), and BC then lifts fidelity (PSNR 17 .40 → 20 .69 dB), with UP adding a fur-ther, essentially cost-free gain ( 21 .00 vs. 20 .69 dB). BR, a parameter-free inference-time mechanism, gives the largest gains (MAE 5.55 → 3.86 × 10 −2, PSNR 21 .00 → 23 .73 dB, SSIM 56 .27% → 72 .38% ). Full analysis, qualitative exam-ples, and sampler sweeps ( ζ, ˆs, η) are in Supp. Sec. F. 
+
+Table 3. Ablation study of MUMINS variants on the PNG vali-dation set [35]. Starting from an image-only conditional baseline (top row), we add joint diffusion (JD), residual prediction (RP), acquisition-blur difference conditioning (BC) with ∆b = 0 infer-ence, uncertainty prediction (UP) and baseline reinjection (BR). 
+
+JD RP BC UP BR MAE ( ×10 −2) ↓ PSNR (dB) ↑ SSIM ( %) ↑
+
+✗ ✗ ✗ ✗ ✗ 19.76 ± 10.82 14.19 ± 5.43 41.84 ± 26.55 
+
+✓ ✗ ✗ ✗ ✗ 11.54 ± 5.33 16.98 ± 4.09 54.28 ± 19.84 
+
+✓ ✓ ✗ ✗ ✗ 8.62 ± 1.68 17.40 ± 1.65 45.45 ± 10.15 
+
+✓ ✓ ✓ ✗ ✗ 5.75 ± 1.60 20.69 ± 2.29 54.64 ± 11.42 
+
+✓ ✓ ✓ ✓ ✗ 5.55 ± 1.70 21.00 ± 2.59 56.27 ± 12.49 
+
+✓ ✓ ✓ ✓ ✓ 3.86 ± 1.69 23.73 ± 3.98 72.38 ± 13.65 5. Conclusions 
+
+We presented MUMINS, a diffusion framework that syn-thesizes a follow-up scan and a voxel-wise uncertainty map in a single reverse diffusion process. Modeling a joint baseline-residual state with per-step baseline re-injection preserves fine anatomy while generating plausible change; a likelihood-based variance head yields uncertainty with-out Monte Carlo’s costlier repeated sampling. With no organ-specific components, MUMINS matches or outper-forms domain-specific baselines on lung CT and brain MRI, with single-pass uncertainty correlating cheaply with the MC reference. Two limitations remain: localization trails MC on near-saturated brain MRI targets, and predictions queried at different ∆τ from the same baseline are gener-ated independently, with no explicit mechanism enforcing cross-horizon consistency. Efficient computation of the de-noiser’s volumetric Jacobian for uncertainty estimation is a promising direction, as is extending MUMINS to further or-gans and modalities toward a general progression-synthesis model. 
+
+## References 
+
+[1] Christopher Bowles, Roger Gunn, Alexander Hammers, and Daniel Rueckert. Modelling the progression of alzheimer’s disease in mri using generative adversarial networks. In 
+
+Medical Imaging 2018: Image Processing , page 105741K. SPIE, 2018. 2 [2] Thomas Buder, Andreas Deutsch, Barbara Klink, and Anja Voss-B¨ ohme. Model-based evaluation of spontaneous tumor regression in pilocytic astrocytoma. PLoS computational bi-ology , 11(12):e1004662, 2015. 2 [3] Guillem Capellera, Antonio Rubio, Luis Ferraz, and Antonio Agudo. Unified uncertainty-aware diffusion for multi-agent trajectory modeling. In CVPR , pages 22476–22486, 2025. 3, 4, 5 [4] Guillem Capellera, Antonio Rubio, Luis Ferraz, and Antonio Agudo. Heteroscedastic diffusion for multi-agent trajectory modeling. IEEE transactions on pattern analysis and ma-chine intelligence , PP, 2026. 3, 5 [5] ¨Ozg¨ un C ¸ ic ¸ek, Ahmed Abdulkadir, Soeren S Lienkamp, Thomas Brox, and Olaf Ronneberger. 3d u-net: learning dense volumetric segmentation from sparse annotation. In 
+
+International conference on medical image computing and computer-assisted intervention , pages 424–432. Springer, 2016. 3, 5, 8 [6] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances in Neural Informa-tion Processing systems , 34:8780–8794, 2021. 3 [7] Yuheng Fan, Jianyang Xie, Yimin Luo, Yanda Meng, Savita Madhusudhan, Gregory YH Lip, Li Cheng, Yalin Zheng, and He Zhao. t hpm-ldm: Integrating individual historical record with population memory in latent diffusion-based glaucoma forecasting. In International Conference on Medical Image Computing and Computer-Assisted Intervention , pages 619– 629. Springer, 2025. 2 [8] Jiansheng Fang, Jingwen Wang, Anwei Li, Yuguang Yan, Hongbo Liu, Jiajian Li, Huifang Yang, Yonghe Hou, Xuen-ing Yang, Ming Yang, and Jiang Liu. Parameterized gompertz-guided morphological autoencoder for predicting pulmonary nodule growth. IEEE Transactions on Medical Imaging , 42(12):3602–3613, 2023. 2, 6, 7 [9] Hao Guan and Mingxia Liu. Domain adaptation for medical image analysis: A survey. IEEE Transactions on Biomedical Engineering , 69(3):1173–1185, 2022. 2 [10] Shengjuan Guo, Ao Jiang, Hao Gui, Feng Liu, and Mei Yang. Two-stage prediction for pulmonary nodule growth based on growth kinetics model. Journal of Mechanics in Medicine and Biology , 25(02):2540003, 2025. 2 [11] Christoforos Hadjichrysanthou, Alison K Ower, Frank de Wolf, Roy M Anderson, and Alzheimer’s Disease Neu-roimaging Initiative. The development of a stochastic math-ematical model of alzheimer’s disease to help improve the design of clinical trials of potential treatments. PloS one , 13 (1):e0190615, 2018. 2 [12] Mark M Hammer, Sumit Gupta, and Suzanne C Byrne. Vol-ume doubling times of benign and malignant nodules in lung cancer screening. Current problems in diagnostic radiology ,52(6):515–518, 2023. 2 [13] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-fusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. 3, 5 [14] Mohammad Mohaiminul Islam, Thijs P Kuipers, Sharvaree Vadgama, Coen de Vente, Afsana Khan, Clara I S´ anchez, and Erik J Bekkers. Longitudinal flow matching for trajectory modeling. arXiv preprint arXiv:2510.03569 , 2025. 2 [15] Caiwen Jiang, Xiaodan Xing, Zaixin Ou, Mianxin Liu, Walsh Simon, Guang Yang, and Dinggang Shen. Ciresdiff: A clinically-informed residual diffusion model for predict-ing idiopathic pulmonary fibrosis progression. In Machine Learning in Medical Imaging , pages 83–93, Cham, 2025. Springer Nature Switzerland. 3 [16] Siqi Kou, Lei Gan, Dequan Wang, Chongxuan Li, and Zhi-jie Deng. Bayesdiff: Estimating pixel-wise uncertainty in diffusion via bayesian inference. In ICLR , 2024. 3 [17] Pamela J LaMontagne, Tammie LS Benzinger, John C Mor-ris, Sarah Keefe, Russ Hornbeck, Chengjie Xiong, Elizabeth Grant, Jason Hassenstab, Krista Moulder, Andrei Vlassenko, Marcus E Raichle, Carlos Cruchaga, and Daniel Marcus. Oasis-3: Longitudinal neuroimaging, clinical, and cognitive dataset for normal aging and alzheimer disease. medRxiv ,2019. 2, 5, 6, 7 [18] Yamin Li, Jiancheng Yang, Yi Xu, Jingwei Xu, Xiaodan Ye, Guangyu Tao, Xueqian Xie, and Guixue Liu. Learning tu-mor growth via follow-up volume prediction for lung nod-ules. In International Conference on Medical Image Com-puting and Computer-Assisted Intervention , pages 508–517. Springer, 2020. 2 [19] Mattia Litrico, Francesco Guarnera, Mario Valerio Giuffrida, Daniele Rav` ı, and Sebastiano Battiato. Temporally-aware diffusion model for brain progression modelling with bidi-rectional temporal regularisation. Computerized Medical Imaging and Graphics , 127:102688, 2026. 2, 3, 5, 6, 7, 8 [20] Qinghui Liu, Elies Fuster-Garcia, Ivar Thokle Hovden, Bradley J. MacIntosh, Edvard O. S. Grødem, Petter Brandal, Carles Lopez-Mateu, Donatas Sedereviˇ cius, Karoline Sko-gen, Till Schellhorn, Atle Bjørnerud, and Kyrre Eeg Em-blem. Treatment-aware diffusion probabilistic model for lon-gitudinal mri generation and diffuse glioma growth predic-tion. IEEE Transactions on Medical Imaging , 44(6):2449– 2462, 2025. 2, 3, 6, 8 [21] Manfu Ma, Xiaoming Zhang, Yong Li, Xia Wang, Ruigen Zhang, Yang Wang, Penghui Sun, Xuegang Wang, and Xuan Sun. Convlstm coordinated longitudinal transformer under spatio-temporal features for tumor growth prediction. Com-puters in Biology and Medicine , 164:107313, 2023. 2 [22] John Mazziotta, Arthur Toga, Alan Evans, Peter Fox, Jack Lancaster, Karl Zilles, Roger Woods, Tomas Paus, Gregory Simpson, Bruce Pike, et al. A probabilistic atlas and refer-ence system for the human brain: International consortium for brain mapping (icbm). Philosophical Transactions of the Royal Society of London. Series B: Biological Sciences , 356 (1412):1293–1322, 2001. 2 [23] Gustav M¨ uller-Franzes, Jan Moritz Niehues, Firas Khader, et al. A multimodal comparison of latent denoising diffusion probabilistic models and generative adversarial networks for medical image synthesis. Scientific Reports , 13(1):12098, 2023. 3 [24] National Lung Screening Trial Research Team. Data from the national lung screening trial (NLST). The Cancer Imag-ing Archive , 2013. 2 [25] Alexander Quinn Nichol and Prafulla Dhariwal. Improved denoising diffusion probabilistic models. In International conference on machine learning , pages 8162–8171. PMLR, 2021. 3, 5 [26] Anna Oliveras, Roger Mar´ ı, Rafael Redondo, Oriol Guardi` a, Cynthia Ifeyinwa Ugwu, Ana Tost, Bhalaji Nagarajan, Car-olina Migliorelli, Vicent Ribas, and Petia Radeva. Anatomi-cally guided latent diffusion for high-resolution 3D chest CT synthesis. Scientific Reports , 2026. 3 [27] Walter HL Pinaya, Petru-Daniel Tudosiu, Jessica Dafflon, Pedro F Da Costa, Virginia Fernandez, Parashkev Nachev, Sebastien Ourselin, and M Jorge Cardoso. Brain imaging generation with latent diffusion models. In MICCAI Work-shop on Deep Generative Models , pages 117–126, 2022. 3 [28] Lemuel Puglisi. Turboprep, 2024. 5 [29] Lemuel Puglisi, Daniel C. Alexander, and Daniele Rav` ı. En-hancing spatiotemporal disease progression models via la-tent diffusion and prior knowledge. In Medical Image Com-puting and Computer Assisted Intervention – MICCAI 2024 ,pages 173–183, Cham, 2024. Springer Nature Switzerland. 2, 3, 5, 6, 7, 8 [30] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and Ilya Sutskever. Learning transferable visual models from natural language supervision. In Proceedings of the 38th International Conference on Machine Learning (ICML) , pages 8748–8763. PMLR, 2021. 3 [31] Luis M. Seijo and Javier J. Zulueta. The tip of the iceberg: a plethora of lung nodules in the general population. European Respiratory Journal , 63(6), 2024. 2 [32] Luke Shaw, Abdul-Lateef Haji-Ali, Marcelo Pereyra, and Konstantinos Zygalakis. Bayesian computation with genera-tive diffusion models by multilevel monte carlo. Philosoph-ical Transactions A , 383(2299):20240333, 2025. 3 [33] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. 5 [34] Jianlin Su, Murtadha Ahmed, Yu Lu, Shengfeng Pan, Wen Bo, and Yunfeng Liu. Roformer: Enhanced transformer with rotary position embedding. Neurocomputing , 568:127063, 2024. 5 [35] X. Tang, Z. Luo, F. Liu, W. Huang, and J. Zou. Ngp-net: A lightweight growth prediction network for pulmonary nod-ules. IEEE Transactions on Medical Imaging , 45(5):2468– 2480, 2026. 2, 4, 5, 6, 7, 8 [36] Guangyu Tao, Li Zhu, Qunhui Chen, Lekang Yin, Yamin Li, Jiancheng Yang, Bingbing Ni, Zheng Zhang, Chi Wan Koo, Pradnya D. Patil, Yinan Chen, Hong Yu, Yi Xu, and Xiaodan Ye. Prediction of future imagery of lung nodule as growth modeling with follow-up computed tomography scans using deep learning: a retrospective cohort study. Translational Lung Cancer Research , 11(2), 2022. 2 [37] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-reit, Llion Jones, Aidan N Gomez, Ł ukasz Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in Neu-ral Information Processing Systems . Curran Associates, Inc., 2017. 4 [38] Ruobing Wang, Zehao Qi, Shengjuan Guo, Jia Ni Zou, Feng Liu, and Wen Cai Huang. Predicting lung nodule growth from follow-up ct scans with deep isotropic network. In 
+
+2024 IEEE International Conference on Bioinformatics and Biomedicine (BIBM) , pages 2570–2576, 2024. 2 [39] Y. Wang, C. Zhou, L. Ying, H. P. Chan, E. Lee, A. Chugh-tai, L. M. Hadjiiski, and E. A. Kazerooni. Enhancing early lung cancer diagnosis: Predicting lung nodule progression in follow-up low-dose ct scan with deep generative model. 
+
+Cancers , 16(12):2229, 2024. 2 [40] Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Si-moncelli. Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing ,13(4):600–612, 2004. 6 [41] Julia Wolleb, Robin Sandk¨ uhler, Florentin Bieder, Philippe Valmaggia, and Philippe C Cattin. Diffusion models for im-plicit image segmentation ensembles. In International con-ference on medical imaging with deep learning , pages 1336– 1348. PMLR, 2022. 2, 3, 6 [42] Yutong Wu, Yifan Wang, Qining Zhang, Chuan Zhou, and Lei Ying. Early lung cancer diagnosis from virtual follow-up ldct generation via correlational autoencoder and latent flow matching, 2025. 2 [43] Yutong Xie and Quanzheng Li. Measurement-conditioned denoising diffusion probabilistic model for under-sampled medical image reconstruction. In International Conference on Medical Image Computing and Computer-Assisted Inter-vention , pages 655–664. Springer, 2022. 2, 3, 6 [44] Hantao Zhang, Yuhe Liu, Jiancheng Yang, Weidong Guo, Xinyuan Wang, and Pascal Fua. Diffatlas: Genai-fying atlas segmentation via image-mask diffusion. In Medical Image Computing and Computer Assisted Intervention – MICCAI 2025 , pages 161–172, Cham, 2026. Springer Nature Switzer-land. 3 [45] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 3836–3847, 2023. 3 [46] Ke Zou, Zhihao Chen, Xuedong Yuan, Xiaojing Shen, Meng Wang, and Huazhu Fu. A review of uncertainty estimation and its application in medical imaging. Meta-Radiology , 1 (1):100003, 2023. 2
