@@ -6,53 +6,50 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-20
-- 运行时间：2026-09-20 21:55:52 UTC
+- 最新运行日期：2026-09-21
+- 运行时间：2026-09-21 22:26:48 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：2
+- 本次总论文数：9
+- 精读区：1
 - 速读区：8
 
 ### 今日简报（AI）
-- 今日共生成 10 篇推荐（精读 2 篇，速读 8 篇）
-- 精读：《MDN-Control: Mask-Depth-Noise Guided Region Control for Multi-Subject Video Editing》（8.0/10）, 《Beyond Random Couplings: Contrastive Noise Alignment in Generative Flows》（8.0/10）
-- 速读：《What Makes a 3D Scene Editable? A Factorized Benchmark of Fidelity, Locality, Consistency, and Preservation》（7.0/10）, 《Backward SDEs-based Diffusion for Physics-Constrained Generation》（7.0/10）, 《GazeDiT: Gaze-Accurate Diffusion Image Generation for Eye Tracking via Spatial Conditioning》（7.0/10）
+- 今日共生成 9 篇推荐（精读 1 篇，速读 8 篇）
+- 精读：《SkillIR: Evolving Scene-Aware Skills for Agentic Image Restoration》（9.0/10）
+- 速读：《Physically Based Rendering in the Latent Space》（7.0/10）, 《4DGS-Fixer: Generative Sparse-View 4D Gaussian Splatting with Iterative Refinement Guided by Video Diffusion Priors》（7.0/10）, 《SafeStyle: Calibrated Style Residual Injection for Controllable Style-Leakage Trade-off in Diffusion Stylization》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202609/20/README](/202609/20/README)
+- 详情：[/202609/21/README](/202609/21/README)
 
 ### 精读区论文标签
-1. [MDN-Control: Mask-Depth-Noise Guided Region Control for Multi-Subject Video Editing](/202609/20/2609.16475v1-mdn-control-mask-depth-noise-guided-region-control-for-multi-subject-video-editing)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：免训练多主体视频编辑框架
-2. [Beyond Random Couplings: Contrastive Noise Alignment in Generative Flows](/202609/20/2609.18488v1-beyond-random-couplings-contrastive-noise-alignment-in-generative-flows)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：面向扩散与流匹配模型的训练期对比噪声对齐
+1. [SkillIR: Evolving Scene-Aware Skills for Agentic Image Restoration](/202609/21/2609.21468v1-skillir-evolving-scene-aware-skills-for-agentic-image-restoration)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：协调专用修复工具的智能体图像修复
 
 ### 速读区论文标签
-1. [What Makes a 3D Scene Editable? A Factorized Benchmark of Fidelity, Locality, Consistency, and Preservation](/202609/20/2609.14899v1-what-makes-a-3d-scene-editable-a-factorized-benchmark-of-fidelity-locality-consistency-and-preservation)  
+1. [Physically Based Rendering in the Latent Space](/202609/21/2609.21054v1-physically-based-rendering-in-the-latent-space)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向神经3D场景编辑的因子化评测基准
-2. [Backward SDEs-based Diffusion for Physics-Constrained Generation](/202609/20/2609.15702v1-backward-sdes-based-diffusion-for-physics-constrained-generation)  
+   evidence：图像扩散模型，潜空间物理渲染实现可控生成
+2. [4DGS-Fixer: Generative Sparse-View 4D Gaussian Splatting with Iterative Refinement Guided by Video Diffusion Priors](/202609/21/2609.21176v1-4dgs-fixer-generative-sparse-view-4d-gaussian-splatting-with-iterative-refinement-guided-by-video-diffusion-priors)  
    标签：评分：7.0/10、query:real-ir
-   evidence：扩散模型用于物理约束生成与逆问题
-3. [GazeDiT: Gaze-Accurate Diffusion Image Generation for Eye Tracking via Spatial Conditioning](/202609/20/2609.17814v1-gazedit-gaze-accurate-diffusion-image-generation-for-eye-tracking-via-spatial-conditioning)  
+   evidence：视频扩散先验引导稀疏视角4D高斯泼溅迭代细化
+3. [SafeStyle: Calibrated Style Residual Injection for Controllable Style-Leakage Trade-off in Diffusion Stylization](/202609/21/2609.21242v1-safestyle-calibrated-style-residual-injection-for-controllable-style-leakage-trade-off-in-diffusion-stylization)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于空间条件的可控扩散图像生成
-4. [To do($x$) or not to do($x$): Medical Image Counterfactuals for Dataset Augmentation](/202609/20/2609.14124v1-to-dox-or-not-to-dox-medical-image-counterfactuals-for-dataset-augmentation)  
+   evidence：扩散模型中的无训练风格残差注入
+4. [Edit-VAR: Taming Visual Autoregressive Model for Precise Video Editing](/202609/21/2609.21268v1-edit-var-taming-visual-autoregressive-model-for-precise-video-editing)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：基于视觉自回归模型的免训练免反演文本引导视频编辑
+5. [WS-NeRF: A Mamba-Driven World-State-Aware Adaptive Deblurring Neural Radiance Field](/202609/21/2609.21391v1-ws-nerf-a-mamba-driven-world-state-aware-adaptive-deblurring-neural-radiance-field)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：面向图像退化的自适应去模糊神经辐射场
+6. [Quantization-Aware Kalman Estimation for Diffusion Sampling](/202609/21/2609.21407v1-quantization-aware-kalman-estimation-for-diffusion-sampling)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：扩散采样的量化感知卡尔曼估计
+7. [Newton Deep Unfolding for Compressed Sensing](/202609/21/2609.14391v1-newton-deep-unfolding-for-compressed-sensing)  
    标签：评分：6.0/10、query:real-ir
-   evidence：条件生成模型用于图像增强与编辑
-5. [Reasoning with Image Generation](/202609/20/2609.16409v1-reasoning-with-image-generation)  
+   evidence：用于压缩感知图像重建的深度展开网络
+8. [Classification-oriented adaptive sensing via posterior sampling](/202609/21/2609.21812v1-classification-oriented-adaptive-sensing-via-posterior-sampling)  
    标签：评分：6.0/10、query:real-ir
-   evidence：把图像生成模型用作灵活的视觉推理机制
-6. [MUMINS: Metadata-conditioned Uncertainty-aware Medical Image Next-state Synthesis](/202609/20/2609.17169v1-mumins-metadata-conditioned-uncertainty-aware-medical-image-next-state-synthesis)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：带不确定性估计的高效扩散医学图像合成框架
-7. [Accelerating Diffusion Sampling via Speculative Draft Trees](/202609/20/2609.17691v1-accelerating-diffusion-sampling-via-speculative-draft-trees)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：加速扩散模型采样
-8. [Newer Is Not Fairer: Gender Stereotyping in Text-to-Image AI Across Model Generations](/202609/20/2609.18007v1-newer-is-not-fairer-gender-stereotyping-in-text-to-image-ai-across-model-generations)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：评估多代Stable Diffusion文本到图像生成模型的性别偏见
+   evidence：面向分类的自适应感知扩散后验采样
 
 
 <div class="dpr-home-promo-card">
