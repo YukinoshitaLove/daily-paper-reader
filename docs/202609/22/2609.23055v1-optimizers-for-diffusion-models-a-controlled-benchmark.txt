@@ -1,0 +1,1000 @@
+Title: Optimizers for Diffusion Models: A Controlled Benchmark
+
+URL Source: https://arxiv.org/pdf/2609.23055v1
+
+Published Time: Tue, 22 Sep 2026 00:55:16 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# Optimizers for Diffusion Models: A Controlled Benchmark 
+
+Arman Bolatov 1 Egor Shulgin 2 David Li 3 Abduragim Shtanchaev 3
+
+Sebastian U. Stich 1 Maxim Panov 3 Eric Moulines 3, 4 Peter Richtárik 2
+
+Martin Takáˇ c3
+
+> 1
+
+CISPA Helmholtz Center for Information Security 2KAUST 3MBZUAI 4EPITA 
+
+# Abstract 
+
+Discrete diffusion models now match autoregressive language models on several benchmarks, while the question of how best to train them has received far less at-tention: the optimizer is inherited from one paper to the next and never compared. New optimizers, meanwhile, are validated almost exclusively on autoregressive pretraining, a different objective on a different loss surface. We present a con-trolled optimizer benchmark across four diffusion formulations, to our knowledge the first for discrete diffusion: seven optimizers (AdamW, Lion, Muon, SOAP, MARS, MARS-M, Schedule-Free) on masked diffusion (text8), uniform diffu-sion (QM9, and LM1B through the Gaussian duality) and Gaussian diffusion on images (CelebA-64), each on a task with published reference values. Ev-ery optimizer receives the same search protocol, and every winner is retrained at the full budget with three seeds. AdamW is a strong default but not always the right choice: it is beaten by a resolved margin on two of the four tasks, and the winner changes with the formulation, so the optimizer deserves the same care as the rest of the training recipe. Notably, methods validated on autoregres-sive language model pretraining transfer well: Muon, MARS-M and SOAP each beat the tuned AdamW on at least one diffusion formulation. The benchmark, all runs and every figure are reproducible end to end from the released code at 
+
+https://github.com/armanbolatov/diffusion-baselines .
+
+# 1 Introduction 
+
+New optimizers are usually validated on autoregressive language model pretraining or on supervised vision and speech. Muon [Jordan et al., 2024], SOAP [Vyas et al., 2025] and MARS [Yuan et al., 2025] report their gains on autoregressive language models, Schedule-Free [Defazio et al., 2024] won the self-tuning track of the AlgoPerf competition [Dahl et al., 2023, Kasimbeg et al., 2025], whose workloads include no diffusion model, and the benchmarks that compare optimizers head to head [Schmidt et al., 2021, Semenov et al., 2025] likewise contain no diffusion task. Diffusion models [Sohl-Dickstein et al., 2015, Ho et al., 2020, Song et al., 2021b] are trained with a different objective, on a different loss surface, and often with a different backbone, a U-Net [Ronneberger et al., 2015] or a diffusion transformer [Peebles and Xie, 2023] rather than a causal decoder. Whether the reported gains carry over is open. Diffusion offers language models capabilities autoregression lacks: a diffusion language model de-noises the whole sequence at every step with bidirectional context, so it can decode many tokens in parallel, generate in any order, fill in the middle of a text, and revise tokens it has already produced [Gong et al., 2025, Schiff et al., 2025]. Trained from scratch, such models reach the level of strong autoregressive models at the 8B scale [Nie et al., 2025], and adapted from pretrained autoregressive models they match their sources on most benchmarks [Gong et al., 2025]. 
+
+> Preprint. arXiv:2609.23055v1 [cs.LG] 19 Sep 2026
+
+The question matters for discrete diffusion in particular. MDLM, UDLM and DUO [Sahoo et al., 2024, Schiff et al., 2025, Sahoo et al., 2025] all train with AdamW, with the same hyperparameters passed from one paper to the next rather than compared against alternatives. A practitioner training a diffusion language model today has no evidence about whether a different optimizer would help. We run a controlled benchmark of seven optimizers across four diffusion formulations: masked dif-fusion on text8, uniform diffusion on QM9, uniform diffusion trained through the Gaussian duality (DUO) on LM1B, and Gaussian image diffusion (DDPM) on CelebA-64. Two of the discrete tasks are natural language and one is the SMILES molecular language, and every formulation runs on a standard task with published reference values (Section 4.2). Our contributions are: 1. To our knowledge, the first controlled optimizer benchmark for discrete diffusion models, run alongside Gaussian image diffusion: seven optimizers, AdamW, Lion, Muon, SOAP, MARS, MARS-M and Schedule-Free AdamW, under one search protocol, with every win-ner retrained at the full budget on three seeds (protocol in Section 4.3 and Appendix F). 2. A reproducible benchmarking codebase that runs the search, the retraining and every figure and table in this paper end to end, released at https://github.com/armanbolatov/ diffusion-baselines .
+
+# 2 Related work 
+
+Benchmarking optimizers. Schmidt et al. [2021] evaluated fifteen optimizers under a fixed tuning budget and found no single method that won everywhere, and Choi et al. [2019] showed that the ranking itself turns on the tuning protocol. AlgoPerf [Dahl et al., 2023, Kasimbeg et al., 2025] set up a time-to-target protocol across several workloads but contains no diffusion task. Semenov et al. [2025] compare eleven optimizers on language model pretraining from 124M to 720M parameters and find AdEMAMix [Pagliardini et al., 2025], MARS and D-Muon [Liu et al., 2025a] ahead of AdamW. Wen et al. [2025] tune ten optimizers with per-optimizer coordinate descent and conclude that reported speedups over AdamW are smaller than claimed and shrink with scale. All of this work is on discriminative or autoregressive models. 
+
+Optimizers for diffusion. Schaipp [2025] benchmarks six optimizers on a denoising task over Navier-Stokes trajectories and reports Muon and SOAP reaching 18% lower final loss than AdamW. That paper also observes that Schedule-Free reaches a good loss while producing worse samples, which is the effect we measure on CelebA-64 with a full seven-optimizer ranking. On the the-ory side, Tyurin [2026] show that the choice of score matching objective changes whether gra-dient descent converges globally, even on Gaussian mixtures, a reminder that the denoising and score-matching objectives diffusion models train need not share the optimization landscape of the autoregressive cross-entropy. Chen et al. [2026] show that plain Muon plateaus late in diffusion transformer training because the fused QKV and MLP tensors of a transformer [Vaswani et al., 2017] couple subspaces during orthogonalization, and propose a chunked variant. Our backbone uses a fused QKV projection and our Muon is the plain, unchunked port (Appendix A), so any such plateau would act on our text8 and QM9 runs, where Muon nevertheless ties with or beats AdamW. 
+
+Diffusion language models. The formulations we train are masked diffusion [Sahoo et al., 2024, Austin et al., 2021, Lou et al., 2024, Shi et al., 2024] and uniform diffusion, trained either directly [Schiff et al., 2025], building on the categorical flows of Hoogeboom et al. [2021], or through the Gaussian duality of Sahoo et al. [2025]; Section 4.2 states their objectives. Masked diffusion also extends beyond natural language, to molecule generation among others [Lee et al., 2025]. A separate line obtains diffusion language models at scale, by converting pretrained autoregressive models [Gong et al., 2025, Ye et al., 2025] or by training from scratch [Nie et al., 2025]. von Rütte et al. [2025] study how the formulations scale, tuning batch size and learning rate carefully, but hold the optimizer fixed. We take the complementary view and vary the optimizer while holding the formulation fixed. 23 The optimizers 
+
+All seven methods consume the same stochastic gradient gt = ∇f (θt−1, ξ t) and differ in how they turn it into a step on the parameters θ. Below, η is the learning rate, λ the decoupled weight decay, 
+
+mt and vt are exponential moving averages with rates β1, β 2, and all operations between tensors of the same shape are element-wise; we omit bias corrections for clarity. Steepest descent under a norm comes in two forms [Crawshaw et al., 2025]: constrained, where the step is a linear minimization over a norm ball and has fixed size, and regularized, where the step scales with the gradient’s dual norm. Veprikov et al. [2025] extend this view with preconditioned norms; we use it to place the seven. 
+
+AdamW [Kingma and Ba, 2015, Loshchilov and Hutter, 2019] preconditions a momentum step by a running second-moment estimate [Duchi et al., 2011, Tieleman and Hinton, 2012]: 
+
+mt = β1mt−1 + (1 − β1)gt, vt = β2vt−1 + (1 − β2)g2 
+
+> t
+
+, θt = (1 − ηλ ) θt−1 − η mt
+
+√vt + ϵ .
+
+(1) The preconditioner changes every iteration, so this is regularized steepest descent in a moving metric rather than under a fixed norm [Schaipp et al., 2024, Crawshaw et al., 2025]. The weight decay [Krogh and Hertz, 1991] is decoupled: θ is shrunk outside the adaptive step instead of adding λθ to 
+
+gt where the preconditioner would rescale it. 
+
+Lion [Chen et al., 2023], found by symbolic program search over update rules, signs a momentum, but with two interpolation rates, one for the update and one for the stored state: 
+
+θt = θt−1 − η  sign( β1mt−1 + (1 − β1)gt) + λ θ t−1
+
+, mt = β2mt−1 + (1 − β2)gt, (2) with β2 > β 1 (defaults 0.99 and 0.9; both are tuned here), which weights the current gradient about tenfold against a plain moving average. With decoupled decay, Lion provably minimizes the loss subject to ∥θ∥∞ ≤ 1/λ [Chen et al., 2024]. 
+
+Muon [Jordan et al., 2024] is the one constrained method here, the linear minimizer over a spectral-norm ball [Bernstein and Newhouse, 2024, Pethick et al., 2025]: for a hidden weight matrix with momentum Mt = μM t−1 + Gt,
+
+θt = (1 − ηλ ) θt−1 − η′ NS 5(Mt), NS 5(M ) ≈ U V ⊤ for M = U ΣV⊤, (3) where NS 5 is a five-step Newton–Schulz iteration and η′ = 0 .2 ηpmax( m, n ) matches the update scale to AdamW’s [Liu et al., 2025a]. Embeddings, the output head and vectors take an AdamW step with their own learning rate. 
+
+SOAP [Vyas et al., 2025] runs the Adam update inside the eigenbasis (QL, Q R) of Shampoo’s [Gupta et al., 2018] two Kronecker factors, the curvature factorization introduced by K-FAC [Martens and Grosse, 2015]: 
+
+θt = θt−1 − η Q L
+
+˜Mt
+
+p ˜Vt + ϵ
+
+!
+
+Q⊤ 
+
+> R
+
+− ηλ θ t−1, ˜Mt = Q⊤
+
+> L
+
+MtQR, (4) with the basis refreshed every precondition_frequency steps. Fixing QL = QR = I recovers Adam; the refresh is where its extra cost lives. 
+
+MARS [Yuan et al., 2025] changes the gradient rather than the geometry, scaling a STORM-style [Cutkosky and Orabona, 2019] variance-reduction correction by gamma :
+
+ct = gt + γ β1
+
+1 − β1
+
+(gt − gt−1), (5) then takes the AdamW step with ct in place of gt in both moments; γ = 0 recovers AdamW, and scaling the correction well below one is what makes it work where earlier variance reduction did not help deep networks [Defazio and Bottou, 2019]. MARS-M [Liu et al., 2025b] feeds the same ct into Muon’s step, so the MARS–AdamW gap isolates the correction exactly, and the MARS-M–Muon gap approximately (their momentum damping differs, Appendix A). 
+
+Schedule-Free AdamW [Defazio et al., 2024] keeps Adam’s preconditioner and replaces momen-tum with an interpolation between a base iterate zt, where the step is taken, and its running average 3xt, which is what gets evaluated [Polyak and Juditsky, 1992]: 
+
+yt = (1 − β1)zt + β1xt, z t+1 = zt − ηt
+
+∇f (yt, ξ t)
+
+√vt + ϵ − ηtλy t, x t+1 = (1 − ct+1 ) xt + ct+1 zt+1 , (6) with weights ct+1 ∝ η2 
+
+> t
+
+. The average stands in for a decay schedule, so the learning rate stays flat and the run needs no fixed end point. Full pseudocode for all seven is in Appendix B. 
+
+# 4 Setup 
+
+4.1 Datasets 
+
+We use four datasets, one per diffusion formulation (Table 2, Appendix D); Appendix E gives the preprocessing in full. text8 [Mahoney, 2011] is 100M characters of cleaned Wikipedia over a 27-symbol alphabet, split 90M/5M/5M, trained on windows of 256. QM9 [Ramakrishnan et al., 2014] is 134k small molecules as canonical SMILES strings [Weininger, 1988], tokenized to a 40-symbol vocabulary and padded to length 32. LM1B [Chelba et al., 2014] is sentence-level news text, tok-enized with the bert-base-uncased WordPiece vocabulary [Devlin et al., 2019, Wolf et al., 2020] at length 128. CelebA [Liu et al., 2015] is 203k aligned face photographs, center-cropped to 140 pixels and resized to 64 × 64 ; its training set provides the FID reference statistics [Heusel et al., 2017]. 
+
+4.2 Diffusion formulations and models Why one formulation per task. Each discrete formulation is evaluated on the task its original paper positions it on: text8 has been the standard testbed for discrete diffusion since D3PM [Austin et al., 2021, Lou et al., 2024, Shi et al., 2024], QM9 is the flagship result of UDLM, and LM1B is the headline task of DUO; Gaussian diffusion runs on CelebA at 64 × 64 , one of the benchmarks of the DDIM paper [Song et al., 2021a]. This gives every pair published reference values (Appendix C) and keeps the question clean: we rank optimizers within a formulation, not formulations against each other; whether the ranking is consistent across the setups is measured in Section 5.6. All three discrete formulations train a continuous-time bound on the negative log-likelihood [Kingma et al., 2021, Campbell et al., 2022] of the form 
+
+L(θ) = Et∼U [0 ,1] Ezt∼qt(·| x)
+
+ w(t) ℓ x, p θ (· | zt, t ) , (7) where x is the clean token sequence, t ∈ [0 , 1] the diffusion time, zt the corrupted sequence drawn from the corruption kernel qt(· | x), pθ the denoising model, w(t) a time-dependent weight, and 
+
+ℓ a per-token reconstruction term. The three formulations differ only in qt, w and ℓ; we report the bound in each task’s customary unit, bits per character on text8 [Mikolov et al., 2012] and per-token perplexity on QM9 and LM1B [Jelinek et al., 1977]. 
+
+text8 with MDLM [Sahoo et al., 2024]. Masked diffusion replaces each token with a mask symbol 
+
+m independently with probability 1 − αt; the model fills masked positions given the rest. With the linear schedule αt = 1 − t, Eq. (7) becomes a weighted cross-entropy on the masked positions, 
+
+w(t) = 1 /t and ℓ = − P   
+
+> i:zit=m
+
+log pθ (xi | zt).
+
+QM9 with UDLM [Schiff et al., 2025]. Uniform diffusion resamples a corrupted token uniformly from the vocabulary, so, unlike masking, a corrupted token carries no flag and the model must also decide which positions to revise. Here ℓ is the evidence bound of Schiff et al. [2025], a cross-entropy between the analytic posterior and the model posterior with w(t) = −α′
+
+> t
+
+/(N α t) for vocabulary size 
+
+N .
+
+LM1B with DUO [Sahoo et al., 2025]. DUO trains the same uniform diffusion bound, obtained through the diffusion duality: uniform diffusion is the image of a Gaussian diffusion under an argmax. The model trains against the underlying Gaussian process for the first half of training, then switches to the discrete objective; we follow the original schedule. 
+
+CelebA-64 with DDPM [Ho et al., 2020]. Gaussian diffusion adds pixel noise over 1000 steps on a linear β schedule and the model predicts the noise, with the simple loss Et,ϵ ∥ϵ − ϵθ (xt, t )∥2.Because this loss is a poor guide to image quality, we also report FID [Heusel et al., 2017]. 4Table 1: Final metric after full-budget training, mean and standard deviation over three seeds. Lower is better; bold is the best per task. Cells are shaded on a diverging scale centered on AdamW, green better and red worse, the tint deepening with the size of the gap relative to each task’s spread; arrows mark the differences that the paired within-seed test resolves (beyond twice the standard error). Lion’s LM1B entry diverges on two of three seeds (Section 5.3).                                                                                             
+
+> text8 (MDLM) QM9 (UDLM) LM1B (DUO) CelebA-64 (DDPM) bpc ↓PPL ↓PPL ↓FID ↓
+> MARS-M 1.8072 ±0.0089 2.076 ±0.014 ↓62.2 ±0.4 ↑6.32 ±0.62
+> SOAP 1.8073 ±0.0100 2.066 ±0.013 ↑69.5 ±1.5 ↓10.52 ±1.41 ↓
+> Muon 1.8126 ±0.0040 2.069 ±0.014 ↑61.6 ±0.5 ↑8.58 ±0.99 ↓
+> AdamW 1.8154 ±0.0053 2.072 ±0.013 68.2 ±0.8 6.88 ±0.71 Lion 1.8509 ±0.0064 ↓2.068 ±0.014 ↑diverges 11.52 ±3.37 ↓
+> MARS 1.8526 ±0.0042 ↓2.074 ±0.013 ↓66.6 ±0.6 ↑12.01 ±1.70 ↓
+> Schedule-Free 1.9187 ±0.0012 ↓2.085 ±0.011 ↓101.5 ±5.3 ↓15.33 ±1.54 ↓
+
+Architectures. The three text and molecule tasks share one backbone: a bidirectional pre-norm transformer [Vaswani et al., 2017] with learned position embeddings, conditioned on the diffusion time through zero-initialized adaptive layer norm as in DiT [Peebles and Xie, 2023]. CelebA uses the DDPM U-Net as implemented in diffusers [von Platen et al., 2022]. Sizes are in Table 2 and the full architecture detail in Appendix D. All four share one training loop in PyTorch [Paszke et al., 2019]: bfloat16 autocast [Micikevicius et al., 2018], a warmup-stable-decay schedule [Hu et al., 2024, Hägele et al., 2024] with an untuned 10% warmup (the best warmup length is optimizer- and batch-dependent [Riabinin et al., 2026], so one fixed fraction keeps the comparison even but is optimal for none), and a divergence guard that stops a run whose loss becomes non-finite. Schedule-Free uses a constant learning rate after the same warmup, since a decay schedule would defeat its purpose. 
+
+4.3 Tuning protocol 
+
+Every optimizer gets the same treatment, since the outcome of an optimizer comparison depends on how the tuning budget is spent [Choi et al., 2019, Sivaprasad et al., 2020]. The search space is a discrete grid for lr , weight_decay and grad_clip , common to the optimizers up to the per-study deviations listed in Appendix F [Pascanu et al., 2013], plus the axes specific to each method (Table 3). We use Optuna [Akiba et al., 2019] with a multivariate TPE sampler [Bergstra et al., 2011, Watanabe, 2023] and Hyperband pruning [Li et al., 2018], running 100 trials per optimizer on text8 and QM9 and 50 on CelebA-64 and LM1B. Trials run at 20% of the full budget, the standard economy of tuning on a cheaper proxy [Yang et al., 2022, Hu et al., 2024, Dahl et al., 2023]; the proxy only selects configurations, and every number we report comes from full-budget retraining. Where a selected value sat on a grid edge we widened the boundary and re-ran the study; ten se-lections still sit on an edge (Appendix F), and three of the four CelebA-64 cases are on axes whose widened grids were never searched, so the Muon and MARS-M results there come from the narrower grid the study ran. The winning configuration is then retrained at the full budget with three seeds, and we report the final evaluation with the standard deviation across them. We never report the best point along a trajectory, since that is a selection over the same evaluation set, and we report the full search budget rather than the winning configuration alone [Dodge et al., 2019]. Tuning and benchmarking together used roughly 1400 GPU-hours on NVIDIA A6000, A100 and RTX PRO 6000 GPUs. 
+
+# 5 Results 
+
+5.1 text8: three alternatives tie with AdamW, three lose 
+
+MARS-M, SOAP and Muon finish within 0.009 bits per character of AdamW, and the paired test does not separate any of them from it (Table 1); Lion, MARS and Schedule-Free are worse by 0.036, 50 5000 10000 15000 20000 25000 30000             
+
+> Training step
+> 1.8 2.0 2.5 3.0
+> Validation bpc
+> 025 50 75 100 125 150
+> Training compute (PFLOPs)
+> 1.8 2.0 2.5 3.0
+> Validation bpc
+> AdamW Lion Muon Schedule-Free SOAP MARS MARS-M
+
+Figure 1: text8 validation bits per character on a log scale, mean over three seeds with a ±1 standard deviation band, against training steps (left) and cumulative training compute (right). The FLOP counts differ by at most 7% across optimizers, so the two panels nearly coincide; per-step wall-clock does not follow FLOPs (Table 6). 0 5000 10000 15000 20000 25000           
+
+> Training step
+> 2.10 2.20 2.30 2.40
+> Validation perplexity
+> 0200 400 600 800
+> Training compute (PFLOPs)
+> 2.10 2.20 2.30 2.40
+> Validation perplexity
+> AdamW Lion Muon Schedule-Free SOAP MARS MARS-M
+
+Figure 2: QM9 validation perplexity on a log scale, mean over three seeds with a ±1 standard deviation band, against training steps (left) and cumulative training compute (right). The FLOP counts differ by at most 13% across optimizers; per-step wall-clock does not follow FLOPs (Table 6, Appendix I). 0.037 and 0.103, all well outside seed variation. Of the six alternatives, 3 match AdamW, 3 lose to it, and none beats it. The geometry-aware methods lead only over roughly the first 6k steps (Figure 1). Schedule-Free has the lowest bits per character at every evaluation from 7.5k through 25.5k steps, but it has no decay phase, and the other six, whose schedules decay over the final 6k steps, all pass it by the end (Figure 1). Newer schedule-free variants, such as Schedule-Free+ [Defazio, 2026] and a schedule-free Muon, would be interesting to test in future work. 
+
+5.2 QM9: three alternatives beat AdamW, by a little 
+
+QM9 and LM1B are the two tasks where AdamW is beaten by margins the paired test resolves. In perplexity, the unit UDLM uses, SOAP finishes at 2.066, Lion at 2.068 and Muon at 2.069 against AdamW’s 2.072 (Table 1). The gaps are 0.1–0.3%, but they resolve because the seed moves all seven optimizers together. MARS-M sits behind AdamW, reversing its text8 placing, and Schedule-Free repeats its crossover, leading from 3.75k through 21.25k steps before the decay phase passes it (Figure 2); it ends last again. Perplexity is a likelihood bound, so we also check sample quality (Table 9, Appendix J). Validity, uniqueness and mean drug-likeness are flat across optimizers, and novelty is low for all of them because QM9 enumerates essentially every stable molecule with up to nine heavy atoms. Frechet ChemNet Distance [Preuer et al., 2018], the molecular analogue of FID, is the one graded metric, and it disagrees with the likelihood bound at τ = −0.43 : Schedule-Free finishes last of seven on perplexity and first on FCD. The loss-versus-samples disagreement on images (Section 5.4) is therefore not an artifact of image metrics. 60 5000 10000 15000 20000 25000 30000             
+
+> Training step
+> 60 80 100 200 400
+> Validation perplexity
+> 0200 400 600 800 1000 1200 1400
+> Training compute (PFLOPs)
+> 60 80 100 200 400
+> Validation perplexity
+> AdamW Muon Schedule-Free SOAP MARS MARS-M
+
+Figure 3: LM1B validation perplexity on a log scale, mean over three seeds with a ±1 standard deviation band, against training steps (left) and cumulative training compute (right). Lion is omit-ted: it diverges after DUO’s curriculum switch at step 15k on two of three seeds, ending near 10 4
+
+perplexity, and plotting it would flatten every other curve. 0 20000 40000 60000 80000 100000            
+
+> Training step
+> 10 100 20 50 200 500
+> FID
+> 020000 40000 60000 80000 100000
+> Training step
+> 0.100 0.02 0.05
+> Denoising MSE
+> AdamW Lion Muon Schedule-Free SOAP MARS MARS-M
+
+Figure 4: CelebA-64 monitor FID (left) and held-out denoising MSE (right) during training, mean over three seeds. Both are measured on the same runs: FID separates the optimizers while the MSE curves collapse onto each other. Lion’s FID is not monotone between 50k and 65k steps. 
+
+5.3 LM1B 
+
+LM1B is the task where AdamW loses most clearly, and the task where an optimizer breaks. Muon finishes at perplexity 61.6 and MARS-M at 62.2 against AdamW’s 68.2 (Figure 3), margins of six to seven points that the paired test resolves easily; MARS also resolves ahead (66.6), the first task where the MARS correction pays. SOAP, in first place on QM9, is behind AdamW here. Lion fails: all three seeds track the field until step 15k, where DUO’s Gaussian curriculum hands over to the discrete objective, then two of the three seeds climb past 10 3 perplexity while the third recovers to 91. Table 1 marks the entry as diverged, since a mean over the seeds ( 7940 ± 12800 )would be dominated by the failed pair. Schedule-Free is again at the back of the stable field, 33 points behind AdamW. One caveat applies to the whole LM1B column. Our 30k steps are 3% of the 1M-step budget of the MDLM and DUO papers (Appendix C), the models are far from converged, and the leading curves are still descending at the end of training (Figure 3). Whether this ordering holds at the full budget is left for future work. 
+
+5.4 CelebA-64: the loss and the samples disagree 
+
+CelebA-64 is the Gaussian formulation the discrete methods descend from, and the task with the most established sample-quality metric. The metrics disagree: the denoising loss spans just 1.8% from best to worst, while the headline FID (50k samples, DDIM-100 [Song et al., 2021a], EMA weights; the training monitor in Figure 4 uses 10k samples at 50 steps, Appendix H) runs from 6.3 to 15.3 and does not follow the loss ordering ( τ = −0.14 ). SOAP has the lowest loss and the fourth-best FID; Schedule-Free is third on loss and last on FID [cf. Schaipp, 2025], the long-standing warning of Theis et al. [2016] that a lower likelihood-style objective need not mean better samples. Paired against AdamW on the headline FID, five optimizers are worse and none is better; MARS-M has the lowest mean, 6.32 against AdamW’s 6.88, but the paired difference, −0.57 ± 0.57 , does not 7separate them. The monitor and headline orderings agree except that Lion and SOAP swap fourth and fifth, and AdamW reaches low FID earliest, 182.8 by 25k steps against above 284 for every other optimizer. 
+
+5.5 Cost is not what the FLOP count says 
+
+The matrix-preconditioner methods are cheap in arithmetic and expensive in practice (Table 6, Ap-pendix I). On the CelebA UNet, SOAP adds 0.3% to the FLOP count of a step but 190% to its wall-clock time, and Muon and MARS-M add 0.6% and 104%: their orthogonalization and eigen-decomposition work happens in many small matrix operations on convolution kernels, which use the GPU poorly, a cost a FLOP count alone would hide [Dehghani et al., 2022, Kaddour et al., 2023]. On the transformers the same methods run 8% (Muon on QM9) to 52% (SOAP on QM9, where the 
+
+768 -wide matrices make its eigendecompositions larger) over AdamW per step. Peak memory is within 3% everywhere except SOAP on QM9, where the preconditioners add 10%. 
+
+5.6 Rankings do not transfer across formulations 
+
+The transfer question has a negative answer. The Kendall correlation between the final orderings of the six task pairs runs from τ = −0.14 (QM9 against LM1B) to +0 .71 (text8 against CelebA-64), with five of the six pairs at or below +0 .43 . The most discordant pair, QM9 against LM1B, is a pair of language tasks, so the failure to transfer is not a text-versus-image artifact. Concretely, SOAP is second on text8, first on QM9, fifth on LM1B and fourth on CelebA-64; MARS-M is first, sixth, second and first; Lion is fifth, second, last and fifth: no optimizer carries its rank across the four formulations. The consistent findings are weaker and more useful: the tuned-AdamW baseline is beaten by a resolved margin only on QM9 and LM1B, Schedule-Free finishes last on all four tasks, and Lion sits near the bottom everywhere except QM9, where it is second. 
+
+# 6 Discussion 
+
+A tuned baseline is hard to beat. On text8 and CelebA-64 no alternative beats AdamW once AdamW is tuned with the same care; on QM9 the three that beat it do so by 0.003 to 0.006 perplexity, and only on LM1B do the margins grow real (Muon and MARS-M by six to seven perplexity). This is the pattern Lucic et al. [2018] found for generative models and Choi et al. [2019] for optimizers: much of a reported gain is the baseline’s tuning deficit. The clear negative results are Schedule-Free, last on every task, and Lion, which diverges after LM1B’s curriculum switch on two of three seeds; the clear cost result is that the matrix methods’ overhead shows up in wall-clock, not FLOPs. 
+
+Scope. We test one model size and one batch size per task, at 16.6M to 137M parameters; op-timizer gaps shrink with scale [Wen et al., 2025] and depend on batch size [Shallue et al., 2019], so the ordering here is a statement about this regime. Implementations follow the published algo-rithms, with one documented deviation, the MARS ports omit the norm clip, and with Muon in its plain, unchunked form (Appendix A). Sample quality is graded only where a standard metric exists, FID on CelebA-64 and FCD on QM9, and both disagree with the loss; whether the same holds for natural-language text is untested [Pillutla et al., 2021]. 
+
+Follow-up work. Three measurements would explain these rankings rather than report them. The first is the smoothness along each optimizer’s trajectory, in the generalized (L0, L 1) sense of Zhang et al. [2020] [Li et al., 2023, Gorbunov et al., 2024], the regime in which gradient clipping [Zhang et al., 2020, Koloskova et al., 2023] and sign-based updates [Crawshaw et al., 2022] have been analysed and from which Riabinin et al. [2026] derive the warmup length; it would test whether the tasks where AdamW is beaten have the friendlier curvature profile. The second is a batch-size slice of the benchmark to isolate the Schedule-Free effect [Zhang et al., 2025], run together with the newer schedule-free variants [Defazio, 2026]. The third is LM1B at its full 1M-step budget, without which its ordering is provisional (Section 5.3). 87 Conclusion 
+
+We benchmarked seven optimizers across four diffusion formulations under one tuning protocol, with every winner retrained at full budget over three seeds. A carefully tuned AdamW is a good default: no alternative beats it on text8 or CelebA-64, and on QM9 the three that do win by under 0.3% in perplexity. The tuning is what makes it good, though, and the alternatives deserve the same attention: on LM1B, Muon and MARS-M finish six to seven perplexity points ahead of AdamW, and Muon, MARS-M and SOAP each beat it on at least one formulation, while no optimizer wins everywhere and the ranking changes from one formulation to the next. The lesson for practitioners is to try the alternatives on the formulation at hand rather than inherit AdamW, and to judge them by a sample metric as well as the loss, since the two can disagree. 
+
+# References 
+
+Takuya Akiba, Shotaro Sano, Toshihiko Yanase, Takeru Ohta, and Masanori Koyama. Optuna: A next-generation hyperparameter optimization framework. In ACM SIGKDD International Con-ference on Knowledge Discovery and Data Mining (KDD) , 2019. Jacob Austin, Daniel D. Johnson, Jonathan Ho, Daniel Tarlow, and Rianne van den Berg. Struc-tured denoising diffusion models in discrete state-spaces. In Advances in Neural Information Processing Systems (NeurIPS) , 2021. James Bergstra, Rémi Bardenet, Yoshua Bengio, and Balázs Kégl. Algorithms for hyper-parameter optimization. In Advances in Neural Information Processing Systems (NIPS) , 2011. Jeremy Bernstein and Laker Newhouse. Old optimizer, new norm: An anthology, 2024. URL 
+
+https://arxiv.org/abs/2409.20325 .Å. Björck and C. Bowie. An iterative algorithm for computing the best estimate of an orthogonal matrix. SIAM Journal on Numerical Analysis , 8(2):358–364, 1971. doi: 10.1137/0708036. URL 
+
+https://doi.org/10.1137/0708036 .Xavier Bouthillier, Pierre Delaunay, Mirko Bronzi, Assya Trofimov, Brennan Nichyporuk, Justin Szeto, Nazanin Mohammadi Sepahvand, Edward Raff, Kanika Madan, Vikram Voleti, Samira Ebrahimi Kahou, Vincent Michalski, Tal Arbel, Chris Pal, Gael Varoquaux, and Pascal Vin-cent. Accounting for variance in machine learning benchmarks. In A. Smola, A. Dimakis, and I. Stoica, editors, Proceedings of Machine Learning and Systems , volume 3, pages 747– 769, 2021. URL https://proceedings.mlsys.org/paper_files/paper/2021/file/ 0184b0cd3cfb185989f858a1d9f5c1eb-Paper.pdf .Andrew Campbell, Joe Benton, Valentin De Bortoli, Thomas Rainforth, George Deligiannidis, and Arnaud Doucet. A continuous time framework for discrete denoising models. In Advances in Neural Information Processing Systems , volume 35, pages 28266–28279. Curran Associates, Inc., 2022. Ciprian Chelba, Tomas Mikolov, Mike Schuster, Qi Ge, Thorsten Brants, Phillipp Koehn, and Tony Robinson. One billion word benchmark for measuring progress in statistical language modeling. In Interspeech 2014 , pages 2635–2639. ISCA, 2014. doi: 10.21437/interspeech.2014-564. URL 
+
+https://doi.org/10.21437/interspeech.2014-564 .Chuyan Chen, Peng Sun, and Kun Yuan. Cmuon: Accelerating and stabilizing diffusion trans-former training via chunked momentum orthogonalization, 2026. URL https://arxiv.org/ abs/2608.02502 .Lizhang Chen, Bo Liu, Kaizhao Liang, and Qiang Liu. Lion secretly solves a constrained optimiza-tion: As Lyapunov predicts. In International Conference on Learning Representations , 2024. Xiangning Chen, Chen Liang, Da Huang, Esteban Real, Kaiyuan Wang, Hieu Pham, Xuanyi Dong, Thang Luong, Cho-Jui Hsieh, Yifeng Lu, and Quoc V. Le. Symbolic discovery of optimization algorithms. In Advances in Neural Information Processing Systems (NeurIPS) , 2023. 9Dami Choi, Christopher J. Shallue, Zachary Nado, Jaehoon Lee, Chris J. Maddison, and George E. Dahl. On empirical comparisons of optimizers for deep learning, 2019. URL https://arxiv. org/abs/1910.05446 .Michael Crawshaw, Mingrui Liu, Francesco Orabona, Wei Zhang, and Zhenxun Zhuang. Robustness to unbounded smoothness of generalized signsgd, 2022. URL https://arxiv.org/abs/2208. 11195 .Michael Crawshaw, Chirag Modi, Mingrui Liu, and Robert M. Gower. An exploration of non-Euclidean gradient descent: Muon and its many variants, 2025. URL https://arxiv.org/ abs/2510.09827 .Ashok Cutkosky and Francesco Orabona. Momentum-based variance reduction in non-convex SGD. In Advances in Neural Information Processing Systems , 2019. George E. Dahl, Frank Schneider, Zachary Nado, Naman Agarwal, Chandramouli Shama Sastry, Philipp Hennig, Sourabh Medapati, Runa Eschenhagen, Priya Kasimbeg, Daniel Suo, Juhan Bae, Justin Gilmer, Abel L. Peirson, Bilal Khan, Rohan Anil, Mike Rabbat, Shankar Krishnan, Daniel Snider, Ehsan Amid, Kongtao Chen, Chris J. Maddison, Rakshith Vasudev, Michal Badura, Ankush Garg, and Peter Mattson. Benchmarking neural network training algorithms, 2023. URL 
+
+https://arxiv.org/abs/2306.07179 .Aaron Defazio. ScheduleFree+: Scaling learning-rate-free & schedule-free learning to large lan-guage models, 2026. URL https://arxiv.org/abs/2605.19095 .Aaron Defazio and Léon Bottou. On the ineffectiveness of variance reduced optimization for deep learning. In Advances in Neural Information Processing Systems , 2019. Aaron Defazio, Xingyu Yang, Harsh Mehta, Konstantin Mishchenko, Ahmed Khaled, and Ashok Cutkosky. The road less scheduled. In Advances in Neural Information Processing Systems 37 ,pages 9974–10007. Neural Information Processing Systems Foundation, Inc. (NeurIPS), 2024. doi: 10.52202/079017-0320. URL https://doi.org/10.52202/079017-0320 .Mostafa Dehghani, Yi Tay, Anurag Arnab, Lucas Beyer, and Ashish Vaswani. The efficiency mis-nomer. In 10th International Conference on Learning Representations (ICLR) . OpenReview.net, 2022. Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. BERT: pre-training of deep bidirectional transformers for language understanding. In Jill Burstein, Christy Doran, and Thamar Solorio, editors, Proceedings of the 2019 Conference of the North American Chap-ter of the Association for Computational Linguistics: Human Language Technologies, NAACL-HLT 2019, Minneapolis, MN, USA, June 2-7, 2019, Volume 1 (Long and Short Papers) , pages 4171–4186. Association for Computational Linguistics, 2019. doi: 10.18653/v1/n19-1423. URL 
+
+https://doi.org/10.18653/v1/n19-1423 .Jesse Dodge, Suchin Gururangan, Dallas Card, Roy Schwartz, and Noah A. Smith. Show your work: Improved reporting of experimental results. In Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP) , pages 2185–2194. Association for Compu-tational Linguistics, 2019. doi: 10.18653/v1/d19-1224. URL https://doi.org/10.18653/ v1/d19-1224 .John Duchi, Elad Hazan, and Yoram Singer. Adaptive subgradient methods for online learning and stochastic optimization. Journal of Machine Learning Research , 12:2121–2159, 2011. Shansan Gong, Shivam Agarwal, Yizhe Zhang, Jiacheng Ye, Lin Zheng, Mukai Li, Chenxin An, Peilin Zhao, Wei Bi, Jiawei Han, Hao Peng, and Lingpeng Kong. Scaling diffusion language models via adaptation from autoregressive models. In International Conference on Learning Representations (ICLR) , 2025. Eduard Gorbunov, Nazarii Tupitsa, Sayantan Choudhury, Alen Aliev, Peter Richtárik, Samuel Horváth, and Martin Takáˇ c. Methods for convex (l0, l 1)-smooth optimization: Clipping, ac-celeration, and adaptivity, 2024. URL https://arxiv.org/abs/2409.14989 .10 Vineet Gupta, Tomer Koren, and Yoram Singer. Shampoo: Preconditioned stochastic tensor opti-mization. In International Conference on Machine Learning , pages 1842–1850, 2018. Alexander Hägele, Elie Bakouch, Atli Kosson, Loubna Ben Allal, Leandro Von Werra, and Martin Jaggi. Scaling laws and compute-optimal training beyond fixed training durations. In Advances in Neural Information Processing Systems (NeurIPS) , 2024. Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. GANs trained by a two time-scale update rule converge to a local nash equilibrium. In Advances in Neural Information Processing Systems , 2017. Nicholas J. Higham. Functions of Matrices: Theory and Computation . Society for Industrial and Applied Mathematics, Philadelphia, PA, USA, 2008. ISBN 978-0-898716-46-7. doi: 10.1137/1. 9780898717778. Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In Advances in Neural Information Processing Systems (NeurIPS) , 2020. Sture Holm. A simple sequentially rejective multiple test procedure. Scandinavian Journal of Statistics , 6(2):65–70, 1979. URL https://www.jstor.org/stable/4615733 .Emiel Hoogeboom, Didrik Nielsen, Priyank Jaini, Patrick Forré, and Max Welling. Argmax flows and multinomial diffusion: Learning categorical distributions. In Advances in Neural Information Processing Systems , volume 34, pages 12454–12465. Curran Associates, Inc., 2021. Shengding Hu, Yuge Tu, Xu Han, Chaoqun He, Ganqu Cui, Xiang Long, Zhi Zheng, Yewei Fang, Yuxiang Huang, Weilin Zhao, Xinrong Zhang, Zheng Leng Thai, Kaihuo Zhang, Chongyi Wang, Yuan Yao, Chenyang Zhao, Jie Zhou, Jie Cai, Zhongwu Zhai, Ning Ding, Chao Jia, Guoyang Zeng, Dahai Li, Zhiyuan Liu, and Maosong Sun. MiniCPM: Unveiling the potential of small language models with scalable training strategies. In Conference on Language Modeling (COLM) ,2024. F. Jelinek, R. L. Mercer, L. R. Bahl, and J. K. Baker. Perplexity—a measure of the difficulty of speech recognition tasks. The Journal of the Acoustical Society of America , 62(S1):S63–S63, 1977. doi: 10.1121/1.2016299. URL https://doi.org/10.1121/1.2016299 .Keller Jordan, Yuchen Jin, Vlado Boza, Jiacheng You, Franz Cesista, Laker Newhouse, and Jeremy Bernstein. Muon: An optimizer for hidden layers in neural networks. https://kellerjordan. github.io/posts/muon/ , 2024. Jean Kaddour, Oscar Key, Piotr Nawrot, Pasquale Minervini, and Matt Kusner. No train no gain: Revisiting efficient training algorithms for transformer-based language models. In Advances in Neural Information Processing Systems 36 , pages 25793–25818. Neural Information Processing Systems Foundation, Inc. (NeurIPS), 2023. doi: 10.52202/075280-1122. URL https://doi. org/10.52202/075280-1122 .Priya Kasimbeg, Frank Schneider, Runa Eschenhagen, Juhan Bae, Chandramouli Shama Sastry, Mark Saroufim, Boyuan Feng, Less Wright, Edward Z. Yang, Zachary Nado, Sourabh Medapati, Philipp Hennig, Michael Rabbat, and George E. Dahl. Accelerating neural network training: An analysis of the AlgoPerf competition. In International Conference on Learning Representations (ICLR) , 2025. Hyeongchan Kim. pytorch_optimizer: optimizer & lr scheduler & loss function collections in Py-Torch, 2021. URL https://github.com/kozistr/pytorch_optimizer .Diederik P. Kingma and Jimmy Ba. Adam: A method for stochastic optimization. In International Conference on Learning Representations (ICLR) , 2015. Diederik P. Kingma, Tim Salimans, Ben Poole, and Jonathan Ho. Variational diffusion models. In 
+
+Advances in Neural Information Processing Systems , volume 34, pages 21696–21707, 2021. Anastasia Koloskova, Hadrien Hendrikx, and Sebastian U. Stich. Revisiting gradient clipping: Stochastic bias and tight convergence guarantees, 2023. URL https://arxiv.org/abs/2305. 01588 .11 Anders Krogh and John A. Hertz. A simple weight decay can improve generalization. In Advances in Neural Information Processing Systems 4 (NIPS) , pages 950–957. Morgan Kaufmann, 1991. Seul Lee, Karsten Kreis, Srimukh Prasad Veccham, Meng Liu, Danny Reidenbach, Yuxing Peng, Saee Paliwal, Weili Nie, and Arash Vahdat. GenMol: A drug discovery generalist with discrete diffusion. arXiv preprint arXiv:2501.06158 , 2025. Haochuan Li, Jian Qian, Yi Tian, Alexander Rakhlin, and Ali Jadbabaie. Convex and non-convex op-timization under generalized smoothness, 2023. URL https://arxiv.org/abs/2306.01264 .Lisha Li, Kevin Jamieson, Giulia DeSalvo, Afshin Rostamizadeh, and Ameet Talwalkar. Hyperband: A novel bandit-based approach to hyperparameter optimization. Journal of Machine Learning Research , 18:1–52, 2018. Jingyuan Liu, Jianlin Su, Xingcheng Yao, Zhejun Jiang, Guokun Lai, Yulun Du, Yidao Qin, Weixin Xu, Enzhe Lu, Junjie Yan, Yanru Chen, Huabin Zheng, Yibo Liu, Shaowei Liu, Bohong Yin, Weiran He, Han Zhu, Yuzhi Wang, Jianzhou Wang, Mengnan Dong, Zheng Zhang, Yongsheng Kang, Hao Zhang, Xinran Xu, Yutao Zhang, Yuxin Wu, Xinyu Zhou, and Zhilin Yang. Muon is scalable for llm training, 2025a. URL https://arxiv.org/abs/2502.16982 .Yifeng Liu, Angela Yuan, and Quanquan Gu. MARS-M: When variance reduction meets matrices, 2025b. URL https://arxiv.org/abs/2510.21800 .Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang. Deep learning face attributes in the wild. In 2015 IEEE International Conference on Computer Vision (ICCV) , pages 3730–3738. IEEE, 2015. doi: 10.1109/iccv.2015.425. URL https://doi.org/10.1109/iccv.2015.425 .Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In 7th International Conference on Learning Representations, ICLR 2019, New Orleans, LA, USA, May 6-9, 2019 ,2019. URL https://openreview.net/forum?id=Bkg6RiCqY7 .Aaron Lou, Chenlin Meng, and Stefano Ermon. Discrete diffusion modeling by estimating the ratios of the data distribution. In International Conference on Machine Learning (ICML) , 2024. Mario Lucic, Karol Kurach, Marcin Michalski, Sylvain Gelly, and Olivier Bousquet. Are GANs cre-ated equal? a large-scale study. In Advances in Neural Information Processing Systems (NeurIPS) ,pages 698–707, 2018. Matt Mahoney. Large text compression benchmark. http://mattmahoney.net/dc/text.html ,2011. James Martens and Roger Grosse. Optimizing neural networks with Kronecker-factored approxi-mate curvature. In International Conference on Machine Learning , 2015. Paulius Micikevicius, Sharan Narang, Jonah Alben, Gregory Diamos, Erich Elsen, David Garcia, Boris Ginsburg, Michael Houston, Oleksii Kuchaiev, Ganesh Venkatesh, and Hao Wu. Mixed precision training. In International Conference on Learning Representations (ICLR) , 2018. Tomáš Mikolov, Ilya Sutskever, Anoop Deoras, Hai-Son Le, Stefan Kombrink, and Jan ˇ Cernocký. Subword language modeling with neural networks. Technical report, Brno University of Tech-nology, 2012. URL http://www.fit.vutbr.cz/~imikolov/rnnlm/char.pdf . Unpublished manuscript. Shen Nie, Fengqi Zhu, Zebin You, Xiaolu Zhang, Jingyang Ou, Jun Hu, Jun Zhou, Yankai Lin, Ji-Rong Wen, and Chongxuan Li. Large language diffusion models. arXiv preprint arXiv:2502.09992 , 2025. Anton Obukhov, Maximilian Seitzer, Po-Wei Wu, Semen Zhydenko, Jonathan Kyl, and Elvis Yu-Jing Lin. High-fidelity performance metrics for generative models in PyTorch. https: //github.com/toshas/torch-fidelity , 2020. Matteo Pagliardini, Pierre Ablin, and David Grangier. The AdEMAMix optimizer: Better, faster, older. In International Conference on Learning Representations (ICLR) , 2025. URL https: //openreview.net/forum?id=jj7b3p5kLY .12 Gaurav Parmar, Richard Zhang, and Jun-Yan Zhu. On aliased resizing and surprising subtleties in GAN evaluation. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 11400–11410. IEEE, 2022. doi: 10.1109/cvpr52688.2022.01112. URL https: //doi.org/10.1109/cvpr52688.2022.01112 .Razvan Pascanu, Tomas Mikolov, and Yoshua Bengio. On the difficulty of training recurrent neural networks. In Proceedings of the 30th International Conference on Machine Learning , volume 28 of Proceedings of Machine Learning Research , pages 1310–1318. PMLR, 2013. Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban Desmaison, Andreas Köpf, Ed-ward Yang, Zach DeVito, Martin Raison, Alykhan Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu Fang, Junjie Bai, and Soumith Chintala. PyTorch: An imperative style, high-performance deep learning library. In Advances in Neural Information Processing Systems , volume 32, pages 8024–8035, 2019. William Peebles and Saining Xie. Scalable diffusion models with transformers. In 2023 IEEE/CVF International Conference on Computer Vision (ICCV) , pages 4172–4182. IEEE, 2023. doi: 10. 1109/iccv51070.2023.00387. URL https://doi.org/10.1109/iccv51070.2023.00387 .Thomas Pethick, Wanyun Xie, Kimon Antonakopoulos, Zhenyu Zhu, Antonio Silveti-Falls, and Volkan Cevher. Training deep learning models with norm-constrained LMOs. In Proceedings of the 42nd International Conference on Machine Learning (ICML) , volume 267 of Proceedings of Machine Learning Research , pages 49069–49104. PMLR, 2025. Krishna Pillutla, Swabha Swayamdipta, Rowan Zellers, John Thickstun, Sean Welleck, Yejin Choi, and Zaid Harchaoui. MAUVE: Measuring the gap between neural text and human text using divergence frontiers. In M. Ranzato, A. Beygelzimer, Y. Dauphin, P. S. Liang, and J. Wortman Vaughan, editors, Advances in Neural Information Processing Systems , volume 34, pages 4816– 4828. Curran Associates, Inc., 2021. B. T. Polyak and A. B. Juditsky. Acceleration of stochastic approximation by averaging. SIAM Journal on Control and Optimization , 30(4):838–855, 1992. doi: 10.1137/0330046. URL https: //doi.org/10.1137/0330046 .Kristina Preuer, Philipp Renz, Thomas Unterthiner, Sepp Hochreiter, and Günter Klambauer. Fréchet ChemNet Distance: A metric for generative models for molecules in drug discovery. 
+
+Journal of Chemical Information and Modeling , 58(9):1736–1741, 2018. doi: 10.1021/acs.jcim. 8b00234. Raghunathan Ramakrishnan, Pavlo O. Dral, Matthias Rupp, and O. Anatole von Lilienfeld. Quan-tum chemistry structures and properties of 134 kilo molecules. Scientific Data , 1(1), 2014. doi: 10.1038/sdata.2014.22. URL https://doi.org/10.1038/sdata.2014.22 .RDKit Project. RDKit: Open-source cheminformatics. https://www.rdkit.org , 2026. Software, version 2026.03.5. Artem Riabinin, Andrey Veprikov, Arman Bolatov, Martin Takáˇ c, and Aleksandr Beznosikov. Where does warm-up come from? adaptive scheduling for norm-constrained optimizers, 2026. URL https://arxiv.org/abs/2602.05813 .Olaf Ronneberger, Philipp Fischer, and Thomas Brox. U-Net: Convolutional networks for biomed-ical image segmentation. In Medical Image Computing and Computer-Assisted Intervention – MICCAI 2015 , volume 9351 of Lecture Notes in Computer Science , pages 234–241. Springer, 2015. doi: 10.1007/978-3-319-24574-4_28. Subham Sahoo, Marianne Arriola, Yair Schiff, Aaron Gokaslan, Edgar Marroquin, Justin Chiu, Alexander Rush, and Volodymyr Kuleshov. Simple and effective masked diffusion language mod-els. In Advances in Neural Information Processing Systems 37 , pages 130136–130184. Neural Information Processing Systems Foundation, Inc. (NeurIPS), 2024. doi: 10.52202/079017-4135. URL https://doi.org/10.52202/079017-4135 .13 Subham Sekhar Sahoo, Justin Deschenaux, Aaron Gokaslan, Guanghan Wang, Justin Chiu, and Volodymyr Kuleshov. The diffusion duality. In International Conference on Machine Learning (ICML) , 2025. Fabian Schaipp. Optimization benchmark for diffusion models on dynamical systems, 2025. URL 
+
+https://arxiv.org/abs/2510.19376 .Fabian Schaipp, Ruben Ohana, Michael Eickenberg, Aaron Defazio, and Robert M. Gower. Momo: Momentum models for adaptive learning rates. In Ruslan Salakhutdinov, Zico Kolter, Kather-ine A. Heller, Adrian Weller, Nuria Oliver, Jonathan Scarlett, and Felix Berkenkamp, editors, 
+
+Forty-first International Conference on Machine Learning, ICML 2024, Vienna, Austria, July 21-27, 2024 , volume 235 of Proceedings of Machine Learning Research , pages 43542–43570. PMLR / OpenReview.net, 2024. URL https://proceedings.mlr.press/v235/schaipp24a.html .Yair Schiff, Subham Sekhar Sahoo, Hao Phung, Guanghan Wang, Sam Boshar, Hugo Dalla-torre, Bernardo P. de Almeida, Alexander Rush, Thomas Pierrot, and Volodymyr Kuleshov. Simple guidance mechanisms for discrete diffusion models. In International Conference on Learning Representations (ICLR) , 2025. Robin M. Schmidt, Frank Schneider, and Philipp Hennig. Descending through a crowded valley — benchmarking deep learning optimizers. In Proceedings of the 38th International Conference on Machine Learning (ICML) , volume 139 of Proceedings of Machine Learning Research , pages 9367–9376, 2021. Andrei Semenov, Matteo Pagliardini, and Martin Jaggi. Benchmarking optimizers for large language model pretraining, 2025. URL https://arxiv.org/abs/2509.01440 .Christopher J. Shallue, Jaehoon Lee, Joseph Antognini, Jascha Sohl-Dickstein, Roy Frostig, and George E. Dahl. Measuring the effects of data parallelism on neural network training. Journal of Machine Learning Research , 20(112):1–49, 2019. Jiaxin Shi, Kehang Han, Zhe Wang, Arnaud Doucet, and Michalis Titsias. Simplified and general-ized masked diffusion for discrete data. In Advances in Neural Information Processing Systems 37 , pages 103131–103167. Neural Information Processing Systems Foundation, Inc. (NeurIPS), 2024. doi: 10.52202/079017-3277. URL https://doi.org/10.52202/079017-3277 .Prabhu Teja Sivaprasad, Florian Mai, Thijs Vogels, Martin Jaggi, and François Fleuret. Optimizer benchmarking needs to account for hyperparameter tuning. In Proceedings of the 37th Interna-tional Conference on Machine Learning (ICML) , volume 119 of Proceedings of Machine Learn-ing Research , pages 9036–9045, 2020. Jascha Sohl-Dickstein, Eric A. Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsuper-vised learning using nonequilibrium thermodynamics. In Proceedings of the 32nd International Conference on Machine Learning (ICML) , volume 37 of Proceedings of Machine Learning Re-search , pages 2256–2265, 2015. Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. In Interna-tional Conference on Learning Representations (ICLR) , 2021a. Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data distribution. In Advances in Neural Information Processing Systems 32 (NeurIPS) , 2019. Yang Song and Stefano Ermon. Improved techniques for training score-based generative models. In 
+
+Advances in Neural Information Processing Systems 33 (NeurIPS) , 2020. Yang Song, Jascha Sohl-Dickstein, Diederik P. Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In Interna-tional Conference on Learning Representations (ICLR) , 2021b. Student. The probable error of a mean. Biometrika , 6(1):1–25, 1908. doi: 10.1093/biomet/6.1.1. Published under the pseudonym “Student” by William Sealy Gosset. 14 Ilya Sutskever, James Martens, George Dahl, and Geoffrey Hinton. On the importance of initial-ization and momentum in deep learning. In Proceedings of the 30th International Conference on Machine Learning (ICML) , volume 28 of Proceedings of Machine Learning Research , pages 1139–1147. PMLR, 2013. Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jon Shlens, and Zbigniew Wojna. Rethinking the inception architecture for computer vision. In 2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 2818–2826. IEEE, 2016. doi: 10.1109/cvpr.2016.308. URL 
+
+https://doi.org/10.1109/cvpr.2016.308 .Lucas Theis, Aäron van den Oord, and Matthias Bethge. A note on the evaluation of generative models. In International Conference on Learning Representations (ICLR) , 2016. Tijmen Tieleman and Geoffrey Hinton. Lecture 6.5—rmsprop: Divide the gradient by a running average of its recent magnitude, 2012. COURSERA: Neural Networks for Machine Learning. Alexander Tyurin. Global convergence of gradient descent for score matching in Gaussian mixtures via reverse Fisher divergence, 2026. URL https://arxiv.org/abs/2606.19876 .Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in Neural Infor-mation Processing Systems , volume 30. Curran Associates, Inc., 2017. Andrey Veprikov, Arman Bolatov, Aleksandr Bogdanov, Samuel Horváth, Aleksandr Beznosikov, Martin Takáˇ c, and Slavomir Hanzely. Preconditioned norms: A unified framework for steepest descent, quasi-newton and adaptive methods, 2025. URL https://arxiv.org/abs/2510. 10777 .Patrick von Platen, Suraj Patil, Anton Lozhkov, Pedro Cuenca, Nathan Lambert, Kashif Rasul, Mishig Davaadorj, Dhruv Nair, Sayak Paul, William Berman, Yiyi Xu, Steven Liu, and Thomas Wolf. Diffusers: State-of-the-art diffusion models. https://github.com/huggingface/ diffusers , 2022. Dimitri von Rütte, Janis Fluri, Omead Pooladzandi, Bernhard Schölkopf, Thomas Hofmann, and Antonio Orvieto. Scaling behavior of discrete diffusion language models, 2025. URL https: //arxiv.org/abs/2512.10858 .Nikhil Vyas, Depen Morwani, Rosie Zhao, Itai Shapira, David Brandfonbrener, Lucas Janson, and Sham M. Kakade. SOAP: improving and stabilizing shampoo using adam for language modeling. In The Thirteenth International Conference on Learning Representations, ICLR 2025, Singapore, April 24-28, 2025 , 2025. URL https://openreview.net/forum?id=IDxZhXrpNf .Phil Wang. lion-pytorch: Lion optimizer for PyTorch. https://github.com/lucidrains/ lion-pytorch , 2023. Software, version 0.2.4. Shuhei Watanabe. Tree-structured parzen estimator: Understanding its algorithm components and their roles for better empirical performance, 2023. URL https://arxiv.org/abs/2304. 11127 .David Weininger. SMILES, a chemical language and information system. 1. introduction to method-ology and encoding rules. Journal of Chemical Information and Computer Sciences , 28(1):31–36, 1988. doi: 10.1021/ci00057a005. URL https://doi.org/10.1021/ci00057a005 .Kaiyue Wen, David Hall, Tengyu Ma, and Percy Liang. Fantastic pretraining optimizers and where to find them, 2025. URL https://arxiv.org/abs/2509.02046 .Thomas Wolf, Lysandre Debut, Victor Sanh, Julien Chaumond, Clement Delangue, Anthony Moi, Pierric Cistac, Tim Rault, Rémi Louf, Morgan Funtowicz, Joe Davison, Sam Shleifer, Patrick von Platen, Clara Ma, Yacine Jernite, Julien Plu, Canwen Xu, Teven Le Scao, Sylvain Gugger, Mariama Drame, Quentin Lhoest, and Alexander M. Rush. Transformers: State-of-the-art natural language processing. In Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing: System Demonstrations , pages 38–45, Online, October 2020. Association for Computational Linguistics. doi: 10.18653/v1/2020.emnlp-demos.6. 15 Greg Yang, Edward J. Hu, Igor Babuschkin, Szymon Sidor, Xiaodong Liu, David Farhi, Nick Ry-der, Jakub Pachocki, Weizhu Chen, and Jianfeng Gao. Tensor programs V: Tuning large neural networks via zero-shot hyperparameter transfer, 2022. URL https://arxiv.org/abs/2203. 03466 .Jiacheng Ye, Zhihui Xie, Lin Zheng, Jiahui Gao, Zirui Wu, Xin Jiang, Zhenguo Li, and Lingpeng Kong. Dream 7b: Diffusion large language models, 2025. URL https://arxiv.org/abs/ 2508.15487 .Huizhuo Yuan, Yifeng Liu, Shuang Wu, Xun Zhou, and Quanquan Gu. MARS: Unleashing the power of variance reduction for training large models. In International Conference on Machine Learning (ICML) , 2025. Hanlin Zhang, Depen Morwani, Nikhil Vyas, Jingfeng Wu, Difan Zou, Udaya Ghai, Dean Foster, and Sham Kakade. How does critical batch size scale in pre-training? In International Conference on Learning Representations , 2025. Jingzhao Zhang, Tianxing He, Suvrit Sra, and Ali Jadbabaie. Why gradient clipping accelerates training: A theoretical justification for adaptivity, 2020. URL https://arxiv.org/abs/1905. 11881 .16 A Implementations 
+
+Four of the seven are used through their reference implementations: AdamW from PyTorch [Paszke et al., 2019], Lion from lion-pytorch [Wang, 2023], SOAP from pytorch-optimizer [Kim, 2021], and Schedule-Free from the authors’ schedulefree package. Muon, MARS and MARS-M are ported from the equations in the original papers, since no reference package covers the variants we need. Pseudocode for all seven is given in Section B. Both MARS ports use the approximate gradient correction, which reuses the previous step’s gradient 
+
+gt−1 instead of recomputing the previous parameters’ gradient on the current batch; the exact form needs a second backward pass per step, and Yuan et al. [2025] recommend the approximation. Neither port applies the norm clip on ct of the published algorithms, and the pseudocode below omits it. Muon and MARS-M run their AdamW branch with a separate learning rate adamw_lr , tuned as its own axis, following the Moonlight variant [Liu et al., 2025a]. Schedule-Free runs with a constant learning rate after warmup, while the other six use warmup-stable-decay. 
+
+# B Pseudocode 
+
+Each algorithm below is one full training loop, as run. Throughout, θt are the parameters at step t,
+
+ξt is the minibatch drawn at step t, gt = ∇f (θt−1, ξ t) is the stochastic gradient, ηt is the learning rate after the schedule multiplier is applied, and λ is the decoupled weight decay. All products, squares, divisions and comparisons between tensors of the same shape are element-wise. ⊙ denotes the element-wise product and ∥·∥ F the Frobenius norm. 
+
+Algorithm 1 AdamW [Loshchilov and Hutter, 2019]. The weight decay on line 7 acts on θ directly, outside the preconditioner, unlike an ℓ2 penalty folded into gt.
+
+Require: learning rate η, betas β1, β 2 ∈ [0 , 1) , ϵ, weight decay λ, steps T 
+
+> 1:
+
+m0 ← 0, v0 ← 0 
+
+> 2:
+
+for t = 1 to T do  
+
+> 3:
+
+gt ← ∇ f (θt−1, ξ t) 
+
+> 4:
+
+mt ← β1mt−1 + (1 − β1) gt ▷ first moment  
+
+> 5:
+
+vt ← β2vt−1 + (1 − β2) g2 
+
+> t
+
+▷ second moment  
+
+> 6:
+
+ˆmt ← mt/(1 − β t 
+
+> 1
+
+), ˆvt ← vt/(1 − β t 
+
+> 2
+
+) ▷ bias correction  
+
+> 7:
+
+θt ← θt−1 − ηt
+
+  ˆmt/(√ˆvt + ϵ) + λ θ t−1
+
+ 
+
+> 8:
+
+end for  
+
+> 9:
+
+return θT
+
+Algorithm 2 Lion [Chen et al., 2023]. The update is the sign of an interpolation that uses β1,while the stored momentum is a separate interpolation that uses β2 and is written after the update is formed. Because sign gives every coordinate unit magnitude, Lion needs a smaller η and a larger λ
+
+than AdamW to reach the same effective step and decay. 
+
+Require: learning rate η, betas β1, β 2 (tuned 0.9, 0.99 ), weight decay λ, steps T 
+
+> 1:
+
+m0 ← 0 
+
+> 2:
+
+for t = 1 to T do  
+
+> 3:
+
+gt ← ∇ f (θt−1, ξ t) 
+
+> 4:
+
+ct ← β1mt−1 + (1 − β1) gt ▷ interpolate for the update  
+
+> 5:
+
+ut ← sign( ct) 
+
+> 6:
+
+θt ← θt−1 − ηt
+
+ ut + λ θ t−1
+
+ 
+
+> 7:
+
+mt ← β2mt−1 + (1 − β2) gt ▷ momentum updated after the step  
+
+> 8:
+
+end for  
+
+> 9:
+
+return θT
+
+17 Algorithm 3 Newton–Schulz orthogonalization, NS 5 [Björck and Bowie, 1971, Higham, 2008]. Five iterations of a quintic polynomial drive the singular values of G towards one, so the output approximates the orthogonal factor U V ⊤ of G = U ΣV⊤ without an SVD. The coefficients are tuned so the iteration converges quickly for small initial singular values, and it runs in bfloat16. 
+
+Require: G ∈ Rm×n, steps N = 5 , (a, b, c ) = (3 .4445 , −4.7750 , 2.0315)  
+
+> 1:
+
+X ← G/ (∥G∥F + 10 −7) ▷ scale so the spectrum lies in the basin  
+
+> 2:
+
+if m > n then  
+
+> 3:
+
+X ← X⊤ ▷ operate on the wide orientation  
+
+> 4:
+
+end if  
+
+> 5:
+
+for i = 1 to N do  
+
+> 6:
+
+A ← XX ⊤ 
+
+> 7:
+
+B ← b A + c AA  
+
+> 8:
+
+X ← a X + BX ▷ X 7 → aX + bXX ⊤X + c(XX ⊤)2X 
+
+> 9:
+
+end for  
+
+> 10:
+
+if m > n then  
+
+> 11:
+
+X ← X⊤ ▷ undo the transpose  
+
+> 12:
+
+end if  
+
+> 13:
+
+return X ≈ U V ⊤
+
+Algorithm 4 Muon [Jordan et al., 2024] with the scaling and decay of Liu et al. [2025a]. Only hidden matrices are orthogonalized; scalars, embeddings and the output head take an AdamW step with their own rate adamw_lr , since orthogonalization is meaningless for them. The factor 0.2pmax( m, n )
+
+on line 11 matches the update RMS to AdamW’s, which is what lets a rate tuned for AdamW transfer. 
+
+Require: rates η and ηaw , momentum μ, weight decay λ, nesterov flag, steps T 
+
+> 1:
+
+partition parameters into matrices M and the rest A; B0 ← 0 
+
+> 2:
+
+for t = 1 to T do  
+
+> 3:
+
+for each θ ∈ A do  
+
+> 4:
+
+AdamW step (Algorithm 1) with rate ηaw  
+
+> 5:
+
+end for  
+
+> 6:
+
+for each θ ∈ M , of shape m × n do  
+
+> 7:
+
+Gt ← ∇ θ f (θt−1, ξ t) 
+
+> 8:
+
+Bt ← μB t−1 + Gt ▷ heavy-ball buffer  
+
+> 9:
+
+Ut ← Gt + μB t if nesterov else Bt ▷ Nesterov form [Sutskever et al., 2013]  
+
+> 10:
+
+Ot ← NS 5(Ut) ▷ Algorithm 3  
+
+> 11:
+
+η′ 
+
+> t
+
+← 0.2 ηt
+
+pmax( m, n ) 
+
+> 12:
+
+θt ← (1 − ηtλ) θt−1 − η′ 
+
+> t
+
+Ot ▷ decoupled decay, then the step  
+
+> 13:
+
+end for  
+
+> 14:
+
+end for  
+
+> 15:
+
+return θT
+
+# C How our budgets compare to published ones 
+
+Two of our four tasks are deliberately truncated, one is a full-budget replication, and CelebA-64 sits in between at one fifth of the DDIM paper’s training length. QM9 is a full-budget replication. Published UDLM results use 25k steps at batch 2048 with context 32 and a 92.4M parameter transformer [Schiff et al., 2025]; we use 25k steps, batch 2048, context 32 and 90.2M parameters. Our perplexities land in the published band, so the QM9 column can be read against the literature directly. text8 is truncated by a factor of 33. Published text8 results [Austin et al., 2021, Lou et al., 2024, Shi et al., 2024] use 70M to 92M parameter 12-layer transformers trained for 1M steps at batch 512 and context 256, about 131B characters or 1450 epochs over the 90M-character training split. We train a 16.6M parameter 8-layer model for 30k steps at the same batch size and context, 3.9B characters or 44 epochs: 33 times fewer steps at 4 to 5.6 times fewer parameters. Our bits per character are therefore far from the published 1.37 to 1.45 and are only compared within our own table. 18 Algorithm 5 SOAP [Vyas et al., 2025]. Adam is run inside the eigenbasis of Shampoo’s [Gupta et al., 2018] two Kronecker factors. The momentum is kept in the original basis and rotated each step, while the second moment is accumulated in the rotated basis. Refreshing QL, Q R only every 
+
+f steps is what makes the method affordable; one power iteration plus a QR is enough because the previous basis is a warm start. Fixing both Q to the identity recovers Adam. 
+
+Require: rate η, betas β1, β 2, ϵ, decay λ, precondition frequency f , steps T 
+
+> 1:
+
+L0, R 0, M 0, V 0 ← 0; QL, Q R ← eigenvectors of L0, R 0 
+
+> 2:
+
+for t = 1 to T do  
+
+> 3:
+
+Gt ← ∇ f (θt−1, ξ t) ▷ for a matrix layer m × n 
+
+> 4:
+
+˜Gt ← Q⊤
+
+> L
+
+Gt QR ▷ rotate the gradient  
+
+> 5:
+
+Mt ← β1Mt−1 + (1 − β1)Gt ▷ momentum in the original basis  
+
+> 6:
+
+˜Mt ← Q⊤
+
+> L
+
+Mt QR 
+
+> 7:
+
+Vt ← β2Vt−1 + (1 − β2) ˜Gt ⊙ ˜Gt ▷ second moment in the rotated basis  
+
+> 8:
+
+˜Nt ← ˜Mt/(√Vt + ϵ) ▷ the Adam step, taken in the eigenbasis  
+
+> 9:
+
+Nt ← QL ˜Nt Q⊤ 
+
+> R
+
+▷ rotate back  
+
+> 10:
+
+θt ← θt−1 − ηt
+
+ Nt + λ θ t−1
+
+ 
+
+> 11:
+
+Lt ← β2Lt−1 + (1 − β2) GtG⊤ 
+
+> t
+> 12:
+
+Rt ← β2Rt−1 + (1 − β2) G⊤ 
+
+> t
+
+Gt 
+
+> 13:
+
+if t mod f = 0 then  
+
+> 14:
+
+QL ← QR (LtQL), QR ← QR (RtQR) ▷ one power iteration, warm-started  
+
+> 15:
+
+end if  
+
+> 16:
+
+end for  
+
+> 17:
+
+return θT
+
+Algorithm 6 MARS [Yuan et al., 2025], AdamW instantiation, approximate variant. Line 4 extrap-olates along the gradient difference, which is the STORM [Cutkosky and Orabona, 2019] correction scaled by γ; γ = 0 recovers AdamW exactly. Both moments are built from the corrected ct rather than from gt, which the authors note is what keeps the per-coordinate scale right. We use the ap-proximate form, which reuses the previous step’s gradient instead of recomputing ∇f (θt−2, ξ t) and so costs one backward pass per step. Our port omits the norm clip on ct.
+
+Require: rate η, betas β1, β 2, ϵ, decay λ, scale γ, steps T 
+
+> 1:
+
+m0, v 0 ← 0; g0 ← 0 
+
+> 2:
+
+for t = 1 to T do  
+
+> 3:
+
+gt ← ∇ f (θt−1, ξ t) 
+
+> 4:
+
+ct ← gt + γ β1
+
+1 − β1
+
+(gt − gt−1) ▷ scaled gradient correction  
+
+> 5:
+
+mt ← β1mt−1 + (1 − β1) ct 
+
+> 6:
+
+vt ← β2vt−1 + (1 − β2) c2 
+
+> t
+
+▷ note ct, not gt 
+
+> 7:
+
+ˆmt ← mt/(1 − β t 
+
+> 1
+
+), ˆvt ← vt/(1 − β t 
+
+> 2
+
+) 
+
+> 8:
+
+θt ← θt−1 − ηt
+
+  ˆmt/(√ˆvt + ϵ) + λ θ t−1
+
+ 
+
+> 9:
+
+end for  
+
+> 10:
+
+return θT
+
+19 Algorithm 7 MARS-M [Liu et al., 2025b]. The same corrected gradient as Algorithm 6 is fed into Muon’s orthogonalized step instead of AdamW’s, so the difference between this and Algorithm 4 is exactly the correction on line 5. Note the momentum here is a convex combination, (1 − μ)
+
+weighting ct, where plain Muon adds Gt undamped. Scalars, embeddings and the output head take the AdamW branch as in Muon. 
+
+Require: rates η and ηaw , momentum μ, decay λ, scale γ, steps T 
+
+> 1:
+
+M0 ← 0, G0 ← 0 
+
+> 2:
+
+for t = 1 to T do  
+
+> 3:
+
+for each matrix θ ∈ M of shape m × n do  
+
+> 4:
+
+Gt ← ∇ θ f (θt−1, ξ t) 
+
+> 5:
+
+Ct ← Gt + γ μ
+
+1 − μ (Gt − Gt−1) 
+
+> 6:
+
+Mt ← μM t−1 + (1 − μ) Ct 
+
+> 7:
+
+Ot ← NS 5(Mt) 
+
+> 8:
+
+η′ 
+
+> t
+
+← 0.2 ηt
+
+pmax( m, n ) 
+
+> 9:
+
+θt ← (1 − ηtλ) θt−1 − η′ 
+
+> t
+
+Ot 
+
+> 10:
+
+end for  
+
+> 11:
+
+remaining parameters: AdamW step with rate ηaw  
+
+> 12:
+
+end for  
+
+> 13:
+
+return θT
+
+Algorithm 8 Schedule-Free AdamW [Defazio et al., 2024]. Three sequences are kept: gradients are taken at yt, the Adam step is applied to the base iterate zt, and the parameters that are evaluated are the running average xt. There is no first-moment buffer, so memory matches AdamW; momentum comes entirely from the interpolation on line 3. The averaging weights are proportional to η2 
+
+> t
+
+, which matters while the warmup rate is still rising, and the decay is applied at yt.
+
+Require: rate η, β1 (interpolation), β2, ϵ, decay λ, warmup Tw, steps T 
+
+> 1:
+
+z1 ← θ1, x1 ← θ1, v0 ← 0 
+
+> 2:
+
+for t = 1 to T do  
+
+> 3:
+
+yt ← (1 − β1) zt + β1 xt ▷ momentum by interpolation  
+
+> 4:
+
+gt ← ∇ f (yt, ξ t) ▷ gradient at y, not at x or z 
+
+> 5:
+
+vt ← β2vt−1 + (1 − β2) g2 
+
+> t
+> 6:
+
+ηt ← ηp1 − β t 
+
+> 2
+
+· min(1 , t/T w) ▷ warmup and bias correction fused  
+
+> 7:
+
+zt+1 ← zt − ηt gt/(√vt + ϵ) − ηtλ y t 
+
+> 8:
+
+ct+1 ← η2
+
+> t
+
+ P  
+
+> i≤t
+
+η2 
+
+> i
+
+▷ weighted, not uniform  
+
+> 9:
+
+xt+1 ← (1 − ct+1 ) xt + ct+1 zt+1  
+
+> 10:
+
+end for  
+
+> 11:
+
+return xT +1 ▷ evaluate and checkpoint at x
+
+LM1B is truncated the same way: published results use 1M steps and we use 30k, with the same architecture and per-step token count. For CelebA-64 the headline FID is computed with torch-fidelity [Obukhov et al., 2020], whose Inception features follow Szegedy et al. [2016], from 50k samples at 100 DDIM steps [Song et al., 2021a] against the training-set statistics, using EMA weights. The DDIM paper reports 6.53 at 100 steps for a model trained five times longer on a different crop, so the scales are close but not identical, and we use ours only to rank optimizers against each other. 
+
+# D Architecture details 
+
+The three text and molecule tasks share one backbone, a pre-norm transformer with bidirectional self-attention, since every position may condition on every other. Token embeddings are added to a learned position embedding. The diffusion time t ∈ [0 , 1] is mapped through a sinusoidal embedding and a two-layer MLP. It enters every block through adaptive layer norm, as in DiT: the layer norms carry no affine parameters of their own, and a zero-initialized linear layer predicts their scale and shift from the time embedding. At initialization the network is therefore a plain 20 Table 2: The four training tasks. Steps is the full benchmark budget, tune steps is the reduced budget used during hyperparameter search.                               
+
+> task params shape batch ctx steps tune steps text8 (MDLM) 16.6M 8L/256d/8h 512 256 30000 6000 QM9 (UDLM) 90.2M 12L/768d/12h 2048 32 25000 5000 LM1B (DUO) 137.1M 12L/768d/12h 512 128 30000 6000 CelebA-64 (DDPM) 78.7M UNet, ch 128 128 64px 100000 20000
+
+transformer. Attention uses dmodel /n head dimensions per head and the MLP widens by four with GELU. The output head is untied from the input embedding. Sizes are 8 layers, width 256, 8 heads for text8 (16.6M parameters) and 12 layers, width 768, 12 heads for QM9 (90.2M) and LM1B (137.1M, the difference being the 30k-token vocabulary). CelebA uses the U-Net of DDPM as implemented in diffusers [von Platen et al., 2022]: five resolution levels with channel widths 128 ×(1 , 2, 2, 2, 4) , two residual blocks per level, self-attention at the 16 × 16 level, and sinusoidal timestep embeddings, for 78.7M parameters. Sampling for FID uses an exponential moving average of the weights with decay 0.9999. 
+
+# E Data preparation 
+
+text8. The raw 100M-character file is mapped to integer ids, 26 letters plus space, with one extra id reserved for the MDLM mask symbol. The first 90M characters are the training split, the next 5M validation and the last 5M test, which is the split used by every text8 result we compare against. Training windows of 256 characters are drawn at uniformly random offsets, so each epoch sees a different segmentation. 
+
+QM9. We take the canonical SMILES field of the yairschiff/qm9 release used by UDLM and tokenize with the matching 40-symbol tokenizer, which treats multi-character atoms and bracketed groups as single tokens. Sequences are padded to 32 with a dedicated pad id that is masked out of the loss and the evaluation. A fixed random 5%/5% of molecules is held out for validation and test. 
+
+LM1B. We apply MDLM’s detokenizer to each sentence, then the bert-base-uncased WordPiece tokenizer, and pad or truncate to 128 tokens. Unlike MDLM, which trains on the full 30M sentences for a million steps, we stream the first two million sentences; at 30k steps and batch 512 the model makes roughly eight passes over this subset. 
+
+CelebA. Images come from the aligned-and-cropped release at 178 × 218 . We take a central 140 ×
+
+140 crop, resize to 64 × 64 , and scale pixels to [−1, 1] . Training applies a random horizontal flip; no other augmentation is used. The crop matches NCSN [Song and Ermon, 2019] and the DDPM line. The DDIM paper instead uses a 128 crop taken off-center, which is one reason our absolute FID is not comparable to theirs. Reference statistics for FID are computed over 50k training-split images. 
+
+# F Search grids and selected values 
+
+Three axes are shared. lr takes one of {10 −5, 3·10 −5, 10 −4, 3·10 −4, 10 −3, 3·10 −3, 10 −2, 3·10 −2},
+
+weight_decay one of {0, 0.01 , 0.1, 0.3, 1, 3}, grad_clip one of {0, 1}. Six studies departed from these, listed in Table 4: MARS was given a narrower lr range after early trials diverged at the extremes, Schedule-Free was given one extra weight_decay value on text8, and two CelebA-64 studies ran before the shared axes were finalised. The optimizer-specific axes are in Table 3. Table 5 lists the configuration selected for every task and optimizer, which is exactly what the benchmark runs used. 
+
+Selections on a grid edge. Ten remain. On text8, Lion takes the largest weight_decay and MARS the smallest gamma . On QM9, MARS-M takes the smallest momentum . On LM1B, AdamW and SOAP take the largest beta2 and Schedule-Free the smallest beta1 . On CelebA-64, Muon takes the smallest adamw_lr , and MARS-M the largest adamw_lr , the smallest lr and the smallest 
+
+gamma . Three of the four CelebA-64 cases (Muon’s adamw_lr , and MARS-M’s adamw_lr and lr )21 Table 3: Optimizer-specific search axes, the union of the value sets searched across studies; a few studies searched narrower sets on some axes (MARS’s smallest gamma on text8 only, narrower 
+
+adamw_lr and momentum in the early CelebA-64 studies), and the edge selections in the text are relative to the set each study searched. Every optimizer additionally sweeps the three shared axes listed in the text.                                                                                                                      
+
+> optimizer axis values AdamW beta1 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> beta2 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> Lion beta1 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> beta2 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> Muon adamw_lr {3·10 −6,1·10 −5,3·10 −5,1·10 −4,3·10 −4,1·10 −3,3·10 −3,
+> 0.01 ,0.03 }
+> momentum {0,0.2,0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> nesterov {0,1}
+> Schedule-Free beta1 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> beta2 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> SOAP beta1 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> beta2 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> precondition_frequency {10 ,50 }
+> MARS beta1 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+> beta2 {0.5,0.8,0.9,0.95 ,0.99 ,0.999 ,0.9999 }
+> gamma {3·10 −3,0.01 ,0.025 ,0.075 ,0.1,0.5,1}
+> MARS-M adamw_lr {3·10 −6,1·10 −5,3·10 −5,1·10 −4,3·10 −4,1·10 −3,3·10 −3,
+> 0.01 ,0.03 }
+> gamma {0.01 ,0.025 ,0.075 ,0.1,0.5,1}
+> momentum {0.5,0.8,0.9,0.95 ,0.99 ,0.999 }
+
+Table 4: Every study whose shared axes differed from the common grid, generated from the values each study actually searched. 
+
+task optimizer axis searched common text8 Schedule-Free weight_decay {0, . . . , 10 } (7) (6) text8 MARS lr {0.0001 , . . . , 0.01 } (5) (8) qm9 MARS lr {0.0001 , . . . , 0.01 } (5) (8) celeba64 Muon lr {1e − 05 , . . . , 0.01 } (7) (8) celeba64 MARS lr {0.0001 , . . . , 0.01 } (5) (8) celeba64 MARS-M lr {3e − 05 , . . . , 0.003 } (5) (8) 
+
+sit on axes whose widened grids were never searched. For these the reported value is a lower bound on what tuning could reach, so any comparison involving them understates that optimizer. 
+
+# G Statistics 
+
+Comparisons against AdamW are paired within seed, which removes the shared effect of the seed before the difference is taken [Student, 1908]. We call a difference resolved when it exceeds twice the standard error of the paired difference across the three seeds. We report each comparison on its own and do not correct for the six simultaneous tests per task [Holm, 1979]: the largest resolved gaps clear the threshold many times over (MARS on text8 at 59 standard errors of its paired difference, Muon on LM1B at 26) and would survive any standard correction, while the smallest, Lion on CelebA-64 at 2.2 and Muon on QM9 at 2.4, are marginal calls. A correction can only demote differences, never rescue a tie. Seed-to-seed variation is of the same order as several of the gaps we report, which is why the pairing matters [Bouthillier et al., 2021]. 
+
+# H Evaluation protocol 
+
+Discrete tasks. The continuous-time bound is estimated with 32 Monte Carlo timestep draws over five fixed evaluation batches of 128 sequences, and reported as bits per character on text8 and as 22 Table 5: Selected hyperparameters. These are the configurations retrained at the full budget with three seeds. 
+
+task optimizer lr wd clip other text8 (MDLM) AdamW 0.001 0.3 0 beta1=0.8 , beta2=0.8 
+
+Lion 0.0003 3 0 beta1=0.8 , beta2=0.9 
+
+Muon 0.01 0.1 1 adamw_lr=0.001 , momentum=0.5 , nesterov=False 
+
+Schedule-Free 0.01 1 0 beta1=0.95 , beta2=0.8 
+
+SOAP 0.003 0.3 0 precondition_frequency=10 , beta1=0.95 , beta2=0.95 
+
+MARS 0.001 1 0 gamma=0.003 , beta1=0.9 , beta2=0.9 
+
+MARS-M 0.003 0.3 1 adamw_lr=0.0003 , momentum=0.95 , gamma=0.025 
+
+QM9 (UDLM) AdamW 0.0003 0.01 1 beta1=0.8 , beta2=0.9 
+
+Lion 0.0001 0.3 1 beta1=0.8 , beta2=0.9 
+
+Muon 0.003 0.1 1 adamw_lr=1e-05 , momentum=0.5 , nesterov=False 
+
+Schedule-Free 0.001 1 1 beta1=0.9 , beta2=0.95 
+
+SOAP 0.001 0.3 0 precondition_frequency=10 , beta1=0.95 , beta2=0.9 
+
+MARS 0.001 0.01 1 gamma=0.075 , beta1=0.95 , beta2=0.9 
+
+MARS-M 0.003 0.1 1 adamw_lr=0.001 , momentum=0.5 , gamma=0.1 
+
+LM1B (DUO) AdamW 0.0003 0.3 1 beta1=0.8 , beta2=0.999 
+
+Lion 0.0003 0.3 1 beta1=0.9 , beta2=0.95 
+
+Muon 0.001 0 1 adamw_lr=0.001 , momentum=0.8 , nesterov=True 
+
+Schedule-Free 0.001 0.3 1 beta1=0.5 , beta2=0.99 
+
+SOAP 0.0003 1 1 precondition_frequency=10 , beta1=0.9 , beta2=0.999 
+
+MARS 0.001 0.01 1 gamma=0.075 , beta1=0.9 , beta2=0.99 
+
+MARS-M 0.001 0.01 1 adamw_lr=0.001 , momentum=0.9 , gamma=0.075 
+
+CelebA-64 (DDPM) AdamW 0.0003 0.01 0 beta1=0.95 , beta2=0.99 
+
+Lion 0.0001 0.3 1 beta1=0.9 , beta2=0.99 
+
+Muon 3e-05 0 0 adamw_lr=3e-05 , momentum=0.99 , nesterov=True 
+
+Schedule-Free 0.003 0.01 1 beta1=0.95 , beta2=0.95 
+
+SOAP 0.001 0.01 0 precondition_frequency=10 , beta1=0.9 , beta2=0.95 
+
+MARS 0.001 0.01 1 gamma=0.1 , beta1=0.9 , beta2=0.8 
+
+MARS-M 3e-05 0 0 adamw_lr=0.003 , momentum=0.95 , gamma=0.01 
+
+per-token perplexity, two to the power of the per-token bits, on QM9 and LM1B. The evaluation batches are identical across optimizers and seeds. On text8 this is the validation split, characters 90M to 95M of the cleaned dump. On QM9 and LM1B padding positions are excluded from both the numerator and the denominator. 
+
+CelebA-64. The denoising loss is the ϵ-prediction mean squared error on held-out images with freshly drawn timesteps and noise at each evaluation. The monitor FID is computed every 5000 steps from 10k samples at 50 DDIM steps [Song et al., 2021a] from the EMA weights [Song and Ermon, 2020], scored against the validation split. The headline FID is computed once at the end from 50k samples at 100 DDIM steps from the same EMA weights, scored against 50k training-split images, both with torch-fidelity [Obukhov et al., 2020]. Preprocessing and resizing choices shift FID on their own [Parmar et al., 2022], and the DDIM paper uses a 128 pixel crop taken off-center where we use the 140 center crop, so our headline values are close to that paper’s scale but not on it. Both FIDs are internally consistent and we use them only to compare optimizers. 
+
+# I Cost measurement 
+
+Per-step time is the median over all iterations past 500 of every seed, so compilation and warmup are excluded; memory is the peak allocation over the same range. Both are ratios against AdamW on the same task and hardware, and LM1B is omitted because its runs used different hardware. 
+
+# J Samples 
+
+Qualitative samples from the benchmarked models, one fixed sampling seed per task so the out-puts are comparable across optimizers. Weights follow each task’s evaluation protocol: EMA for CelebA-64 and raw final weights for the text and molecule tasks. Because every optimizer decodes from the same noise, well-converged models often emit an identical first sample. 23 Table 6: Median time per training step and peak memory, both relative to AdamW on the same task. Values above 1 are more expensive; the tint grows with the overhead. 
+
+text8 (MDLM) QM9 (UDLM) CelebA-64 (DDPM) time mem time mem time mem AdamW 1.00 1.00 1.00 1.00 1.00 1.00 Lion 1.00 0.99 0.99 0.99 1.05 0.98 Muon 1.14 0.99 1.08 0.99 2.04 0.98 Schedule-Free 1.00 1.00 1.01 1.00 1.01 1.00 SOAP 1.31 1.03 1.52 1.10 2.90 1.02 MARS 1.04 1.01 1.01 1.01 1.13 1.02 MARS-M 1.15 1.00 1.09 1.00 2.04 1.00 
+
+Figure 5: CelebA-64 faces, DDIM-100 as in the headline FID protocol, from the same four initial noise draws for every optimizer, one column per optimizer. DDIM is deterministic, so each column is the image that optimizer’s model assigns to the shared latents; the near-identical faces across optimizers show that the models learned nearly the same latent-to-image map. AdamW Lion Muon Schedule-Free SOAP MARS MARS-M 
+
+Table 7: Unconditional text8 samples from each optimizer’s model, 256 sampling steps. 
+
+optimizer sample (first 64 of 256 characters) AdamW x iat sedokungu wolozzuy portiuoudeyoimoo qamigu kamea nlako xan 
+
+Lion x ikprszdokungu woeozzly lortipoudeymimooljtmigubkamea nlako xao 
+
+Muon ddicture only a low low short of a common pamigabiam a n and x o 
+
+Schedule-Free x ist sedobunin woeozzly corti ouceymimoo jamigu kamea stano xao 
+
+SOAP xxiatriedokunin colozzen port piusecormoo quilgaliam a alkelax o 
+
+MARS x iap szdokungu joeozzly korti oudeymioxolqtmigubkamea nlako xao 
+
+MARS-M x iakrszukkuningiourzzukklortiuiuceymiddoljamigulkatea nlako aan 
+
+24 Table 8: Unconditional QM9 molecules from each optimizer’s model, with the fraction of its 1024 samples (as in Table 9) that parse as valid SMILES.                        
+
+> optimizer samples (SMILES) valid AdamW C#CC(=O)C1NC1C#N CC1CCC(=O)C(C)O1 100% Lion C#CC(CO)C(=O)C#N CC1CCC(=O)C(C)O1 100% Muon C#CC(CO)C(=O)C#N CC1CCC(=O)C(C)O1 99% Schedule-Free C#CC(=O)C1NC1C#N CC1CCC(=O)C(C)O1 98% SOAP C#CC(=O)C1NC1C#N CC1CCC(=O)C(C)O1 99% MARS C#CC(=O)C1NC1C#N CC1CCC(=O)C(C)O1 99% MARS-M C#CC(=O)C1NC1C=O CC1CCC(=O)C(C)O1 99%
+
+Table 9: QM9 sample quality over 1024 molecules per optimizer (one seed’s weights, matching the evaluation protocol, one fixed sampling seed), discussed in the QM9 results. Valid is the fraction that parses under RDKit [RDKit Project, 2026], unique the distinct fraction among the valid, novel the fraction of valid molecules absent from the training set, and FCD the Frechet ChemNet Distance [Preuer et al., 2018] to 10k training-set molecules.                                     
+
+> optimizer valid ↑unique ↑novel ↑FCD ↓
+> AdamW 99.6% 99.6% 8.6% 1.60 Lion 99.6% 99.5% 7.5% 1.69 Muon 99.3% 99.5% 8.8% 1.69 Schedule-Free 98.1% 99.6% 12.9% 1.47 SOAP 99.1% 99.3% 9.1% 1.66 MARS 99.3% 99.9% 7.0% 1.72 MARS-M 99.4% 99.7% 9.1% 1.54
+
+# K Reproduction 
+
+The code is released at https://github.com/armanbolatov/diffusion-baselines : the four diffusion schemes, the seven optimizers, the tuning and benchmark drivers, and the scripts that regenerate every table and figure in this paper from the run logs. The README gives the commands. 
+
+Assets and licenses. Datasets: text8 [Mahoney, 2011] is derived from a Wikipedia dump (text under CC BY-SA); QM9 [Ramakrishnan et al., 2014] and LM1B [Chelba et al., 2014] are used as distributed by their authors through the public Hugging Face mirrors named in Appendix E; CelebA [Liu et al., 2015] is used under its non-commercial research agreement. Software: Py-Torch and RDKit (BSD-3-Clause); diffusers , transformers , datasets , torch-fidelity ,
+
+pytorch_optimizer and schedulefree (Apache-2.0); Optuna, lion-pytorch and fcd_torch 
+
+(MIT). Versions are pinned in the released code. Table 10: LM1B samples from each optimizer’s model (raw final weights of one seed), length-conditioned to the median validation sentence length and decoded with 1000 ancestral steps under the uniform-state reverse process. The Lion model sampled here is one of the two seeds that diverge after the curriculum switch, so its row samples the failed model.          
+
+> optimizer sample (first 64 characters, median-length sentence) AdamW you shouldn ’ t eat water or bangladeshi bins if they want to ge
+> Lion film the financialonero war or. corporations proposition she the
+> Muon you don ’ t get water or fast, or if they want to study it and e
+> Schedule-Free bharatiya pcs mohammed toro brothers or wedding corporations pro
+> SOAP sbelle ’ blows shown brothers or wedding corporations as she pic
+> MARS you shouldn ’ t imagine naming or amiss proposition if they want
+> MARS-M she said she was metaphorical or technically corporationsy shevv
+
+25

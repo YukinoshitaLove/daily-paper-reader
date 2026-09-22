@@ -6,50 +6,66 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-21
-- 运行时间：2026-09-21 22:26:48 UTC
+- 最新运行日期：2026-09-22
+- 运行时间：2026-09-22 22:14:53 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：1
-- 速读区：8
+- 本次总论文数：14
+- 精读区：3
+- 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 9 篇推荐（精读 1 篇，速读 8 篇）
-- 精读：《SkillIR: Evolving Scene-Aware Skills for Agentic Image Restoration》（9.0/10）
-- 速读：《Physically Based Rendering in the Latent Space》（7.0/10）, 《4DGS-Fixer: Generative Sparse-View 4D Gaussian Splatting with Iterative Refinement Guided by Video Diffusion Priors》（7.0/10）, 《SafeStyle: Calibrated Style Residual Injection for Controllable Style-Leakage Trade-off in Diffusion Stylization》（7.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202609/21/README](/202609/21/README)
+今日筛出 14 篇论文，精读 3 篇、速读 11 篇，主线集中在扩散模型与图像分解/修复。
+
+最值得看的是两篇 8.0 分精读：《PixelART》无需潜变量与文生图预训练即可做图像到图层分解，《Patch-to-Global》用随机 Patch 扩散实现全切片图像的全局一致修复。
+
+普通读者可先从这两篇精读入手，再按需翻看 7.0 分的扩散调度、优化器基准与加速重建类速读。
+- 详情：[/202609/22/README](/202609/22/README)
 
 ### 精读区论文标签
-1. [SkillIR: Evolving Scene-Aware Skills for Agentic Image Restoration](/202609/21/2609.21468v1-skillir-evolving-scene-aware-skills-for-agentic-image-restoration)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：协调专用修复工具的智能体图像修复
+1. [PixelART: Image-to-Layer Decomposition without Latents or Text-to-Image Pretraining](/202609/22/2609.22789v1-pixelart-image-to-layer-decomposition-without-latents-or-text-to-image-pretraining)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：扩散Transformer实现图像分层编辑分解
+2. [Patch-to-Global: Random Patch Diffusion for Globally Consistent Megapixel Artifact Inpainting in Whole Slide Images](/202609/22/2609.24116v1-patch-to-global-random-patch-diffusion-for-globally-consistent-megapixel-artifact-inpainting-in-whole-slide-images)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：面向病理图像修复的潜在扩散补全
+3. [PixelDiT2: Representation-Grounded Pixel Diffusion Transformers](/202609/22/2609.24919v1-pixeldit2-representation-grounded-pixel-diffusion-transformers)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：像素空间扩散生成模型
 
 ### 速读区论文标签
-1. [Physically Based Rendering in the Latent Space](/202609/21/2609.21054v1-physically-based-rendering-in-the-latent-space)  
+1. [Leveraging Inference-Time Compute for Diffusion Models via Global Scheduling of Denoising Trajectories](/202609/22/2609.22867v1-leveraging-inference-time-compute-for-diffusion-models-via-global-scheduling-of-denoising-trajectories)  
    标签：评分：7.0/10、query:real-ir
-   evidence：图像扩散模型，潜空间物理渲染实现可控生成
-2. [4DGS-Fixer: Generative Sparse-View 4D Gaussian Splatting with Iterative Refinement Guided by Video Diffusion Priors](/202609/21/2609.21176v1-4dgs-fixer-generative-sparse-view-4d-gaussian-splatting-with-iterative-refinement-guided-by-video-diffusion-priors)  
+   evidence：扩散去噪的推理时计算调度
+2. [Optimizers for Diffusion Models: A Controlled Benchmark](/202609/22/2609.23055v1-optimizers-for-diffusion-models-a-controlled-benchmark)  
    标签：评分：7.0/10、query:real-ir
-   evidence：视频扩散先验引导稀疏视角4D高斯泼溅迭代细化
-3. [SafeStyle: Calibrated Style Residual Injection for Controllable Style-Leakage Trade-off in Diffusion Stylization](/202609/21/2609.21242v1-safestyle-calibrated-style-residual-injection-for-controllable-style-leakage-trade-off-in-diffusion-stylization)  
+   evidence：跨扩散模型形式的优化器基准
+3. [Accelerated Plug-and-Play Davis-Yin Splitting for Nonconvex Image Reconstruction](/202609/22/2609.23840v1-accelerated-plug-and-play-davis-yin-splitting-for-nonconvex-image-reconstruction)  
    标签：评分：7.0/10、query:real-ir
-   evidence：扩散模型中的无训练风格残差注入
-4. [Edit-VAR: Taming Visual Autoregressive Model for Precise Video Editing](/202609/21/2609.21268v1-edit-var-taming-visual-autoregressive-model-for-precise-video-editing)  
+   evidence：即插即用优化用于非凸图像恢复
+4. [Bridging Reconstruction and Generation: A Latent Distribution Perspective on Evaluation and Improvement](/202609/22/2609.24088v1-bridging-reconstruction-and-generation-a-latent-distribution-perspective-on-evaluation-and-improvement)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于视觉自回归模型的免训练免反演文本引导视频编辑
-5. [WS-NeRF: A Mamba-Driven World-State-Aware Adaptive Deblurring Neural Radiance Field](/202609/21/2609.21391v1-ws-nerf-a-mamba-driven-world-state-aware-adaptive-deblurring-neural-radiance-field)  
+   evidence：连接重建与生成的潜在分布评测视角
+5. [AlignMorph: Tuning-Free Diffusion Image Morphing via Explicit Semantic Transport](/202609/22/2609.24330v1-alignmorph-tuning-free-diffusion-image-morphing-via-explicit-semantic-transport)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向图像退化的自适应去模糊神经辐射场
-6. [Quantization-Aware Kalman Estimation for Diffusion Sampling](/202609/21/2609.21407v1-quantization-aware-kalman-estimation-for-diffusion-sampling)  
+   evidence：免调优扩散框架实现图像变形与编辑
+6. [PrismGPT: Proxy-Guided Learning for Region-Aware Photo Editing with Self-Synthesized Reasoning](/202609/22/2609.24768v1-prismgpt-proxy-guided-learning-for-region-aware-photo-editing-with-self-synthesized-reasoning)  
    标签：评分：7.0/10、query:real-ir
-   evidence：扩散采样的量化感知卡尔曼估计
-7. [Newton Deep Unfolding for Compressed Sensing](/202609/21/2609.14391v1-newton-deep-unfolding-for-compressed-sensing)  
+   evidence：区域感知照片编辑框架
+7. [Aggregated Posterior Predictive Checks for Generative Modeling](/202609/22/2609.20999v1-aggregated-posterior-predictive-checks-for-generative-modeling)  
    标签：评分：6.0/10、query:real-ir
-   evidence：用于压缩感知图像重建的深度展开网络
-8. [Classification-oriented adaptive sensing via posterior sampling](/202609/21/2609.21812v1-classification-oriented-adaptive-sensing-via-posterior-sampling)  
+   evidence：隐变量生成模型的后验检验
+8. [D3GS: Depth, DINO, and RGB Diffusion Co-Guided 3D Gaussian Splatting for Sparse-View Reconstruction](/202609/22/2609.22941v1-d3gs-depth-dino-and-rgb-diffusion-co-guided-3d-gaussian-splatting-for-sparse-view-reconstruction)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向分类的自适应感知扩散后验采样
+   evidence：扩散补全引导三维重建
+9. [Blind Deconvolution of Binary and Pattern Images with Pixel Intensity Constraints and Sparse Gradient Prior](/202609/22/2609.23268v1-blind-deconvolution-of-binary-and-pattern-images-with-pixel-intensity-constraints-and-sparse-gradient-prior)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：盲图像反卷积修复
+10. [Stochastic Flow Map for Count Data](/202609/22/2609.23290v1-stochastic-flow-map-for-count-data)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：面向计数数据的流与扩散生成模型
+11. [PhysReflect: Geometry and Perception Guided Diffusion for Physically-Plausible Mirror Reflections](/202609/22/2609.23442v1-physreflect-geometry-and-perception-guided-diffusion-for-physically-plausible-mirror-reflections)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：几何与感知引导的扩散生成镜面反射
 
 
 <div class="dpr-home-promo-card">
