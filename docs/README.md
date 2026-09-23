@@ -6,66 +6,63 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-22
-- 运行时间：2026-09-22 22:14:53 UTC
+- 最新运行日期：2026-09-23
+- 运行时间：2026-09-23 22:31:47 UTC
 - 运行状态：成功
 - 本次总论文数：14
-- 精读区：3
-- 速读区：11
+- 精读区：6
+- 速读区：8
 
 ### 今日简报（AI）
-今日筛出 14 篇论文，精读 3 篇、速读 11 篇，主线集中在扩散模型与图像分解/修复。
-
-最值得看的是两篇 8.0 分精读：《PixelART》无需潜变量与文生图预训练即可做图像到图层分解，《Patch-to-Global》用随机 Patch 扩散实现全切片图像的全局一致修复。
-
-普通读者可先从这两篇精读入手，再按需翻看 7.0 分的扩散调度、优化器基准与加速重建类速读。
-- 详情：[/202609/22/README](/202609/22/README)
+1) 今日从14篇中筛出6篇精读、8篇速读，聚焦图像恢复与低场MRI超分。
+2) 最值得看的是两篇9.0精读：ImIR的一体化图像恢复指令微调，以及不确定性感知的3D残差小波扩散用于超低场MRI超分
+- 详情：[/202609/23/README](/202609/23/README)
 
 ### 精读区论文标签
-1. [PixelART: Image-to-Layer Decomposition without Latents or Text-to-Image Pretraining](/202609/22/2609.22789v1-pixelart-image-to-layer-decomposition-without-latents-or-text-to-image-pretraining)  
+1. [ImIR: Image-Instruction Tuning for All-in-One Image Restoration](/202609/23/2609.25267v1-imir-image-instruction-tuning-for-all-in-one-image-restoration)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：用指令微调图像编辑模型实现一体化图像修复
+2. [Uncertainty-Aware 3D Residual Wavelet Diffusion for Ultra Low-Field MRI Super-Resolution](/202609/23/2609.25319v1-uncertainty-aware-3d-residual-wavelet-diffusion-for-ultra-low-field-mri-super-resolution)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：扩散模型用于MRI超分辨并采样后验不确定性
+3. [Directional Total Variation-Regularized Implicit Neural Representations (DTV-INR) for Continuous Super-Resolution in Degraded Imaging Domains](/202609/23/2609.25429v1-directional-total-variation-regularized-implicit-neural-representations-dtv-inr-for-continuous-super-resolution-in-degraded-imaging-domains)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于隐式神经表示与方向全变分正则的连续图像超分辨率
+4. [ASTRA-SR: Atmospheric Seeing and Turbulence Restoration for Astronomical Image Super-Resolution](/202609/23/2609.26731v1-astra-sr-atmospheric-seeing-and-turbulence-restoration-for-astronomical-image-super-resolution)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：面向天文图像的单帧盲修复与超分辨率
+5. [MirrorDistill: Illumination-Aware Latent Distillation for Efficient Low-Light Restoration](/202609/23/2609.25331v1-mirrordistill-illumination-aware-latent-distillation-for-efficient-low-light-restoration)  
    标签：评分：8.0/10、query:real-ir
-   evidence：扩散Transformer实现图像分层编辑分解
-2. [Patch-to-Global: Random Patch Diffusion for Globally Consistent Megapixel Artifact Inpainting in Whole Slide Images](/202609/22/2609.24116v1-patch-to-global-random-patch-diffusion-for-globally-consistent-megapixel-artifact-inpainting-in-whole-slide-images)  
+   evidence：通过潜空间蒸馏实现低光图像恢复
+6. [Mean Velocity Matching: Rethinking Generative Dynamics in Diffusion Models](/202609/23/2609.25444v1-mean-velocity-matching-rethinking-generative-dynamics-in-diffusion-models)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向病理图像修复的潜在扩散补全
-3. [PixelDiT2: Representation-Grounded Pixel Diffusion Transformers](/202609/22/2609.24919v1-pixeldit2-representation-grounded-pixel-diffusion-transformers)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：像素空间扩散生成模型
+   evidence：随机扩散生成动力学的预测参数化
 
 ### 速读区论文标签
-1. [Leveraging Inference-Time Compute for Diffusion Models via Global Scheduling of Denoising Trajectories](/202609/22/2609.22867v1-leveraging-inference-time-compute-for-diffusion-models-via-global-scheduling-of-denoising-trajectories)  
+1. [TTTIR: Unlocking Instance-Specific State Evolution via Test-Time Training for Image Restoration](/202609/23/2609.26151v1-tttir-unlocking-instance-specific-state-evolution-via-test-time-training-for-image-restoration)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：面向图像恢复的测试时训练
+2. [KwaiMind Technical Report](/202609/23/2609.26375v1-kwaimind-technical-report)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于扩散Transformer的商用图像编辑系统
+3. [Synthetic-Aperture Super-Resolution Imaging via Spatial-Frequency Shift in Near-Field Diffraction](/202609/23/2609.24039v1-synthetic-aperture-super-resolution-imaging-via-spatial-frequency-shift-in-near-field-diffraction)  
    标签：评分：7.0/10、query:real-ir
-   evidence：扩散去噪的推理时计算调度
-2. [Optimizers for Diffusion Models: A Controlled Benchmark](/202609/22/2609.23055v1-optimizers-for-diffusion-models-a-controlled-benchmark)  
+   evidence：结合深度学习恢复融合的超分辨成像
+4. [Bridging Reconstruction and Generation: A Latent Distribution Perspective on Evaluation and Improvement](/202609/23/2609.24088v1-bridging-reconstruction-and-generation-a-latent-distribution-perspective-on-evaluation-and-improvement)  
    标签：评分：7.0/10、query:real-ir
-   evidence：跨扩散模型形式的优化器基准
-3. [Accelerated Plug-and-Play Davis-Yin Splitting for Nonconvex Image Reconstruction](/202609/22/2609.23840v1-accelerated-plug-and-play-davis-yin-splitting-for-nonconvex-image-reconstruction)  
+   evidence：潜生成模型中重建与生成的桥接
+5. [VideoX-Qwen: Data-Centric Instruction-Based Video Editing](/202609/23/2609.26015v1-videox-qwen-data-centric-instruction-based-video-editing)  
    标签：评分：7.0/10、query:real-ir
-   evidence：即插即用优化用于非凸图像恢复
-4. [Bridging Reconstruction and Generation: A Latent Distribution Perspective on Evaluation and Improvement](/202609/22/2609.24088v1-bridging-reconstruction-and-generation-a-latent-distribution-perspective-on-evaluation-and-improvement)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：连接重建与生成的潜在分布评测视角
-5. [AlignMorph: Tuning-Free Diffusion Image Morphing via Explicit Semantic Transport](/202609/22/2609.24330v1-alignmorph-tuning-free-diffusion-image-morphing-via-explicit-semantic-transport)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：免调优扩散框架实现图像变形与编辑
-6. [PrismGPT: Proxy-Guided Learning for Region-Aware Photo Editing with Self-Synthesized Reasoning](/202609/22/2609.24768v1-prismgpt-proxy-guided-learning-for-region-aware-photo-editing-with-self-synthesized-reasoning)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：区域感知照片编辑框架
-7. [Aggregated Posterior Predictive Checks for Generative Modeling](/202609/22/2609.20999v1-aggregated-posterior-predictive-checks-for-generative-modeling)  
+   evidence：基于指令的视频编辑，改造视频生成骨干网络
+6. [Point Diffusion Mamba: Unified Diffusion-State-Space Modeling for Single-View 3D Reconstruction under Data Scarcity](/202609/23/2609.25538v1-point-diffusion-mamba-unified-diffusion-state-space-modeling-for-single-view-3d-reconstruction-under-data-scarcity)  
    标签：评分：6.0/10、query:real-ir
-   evidence：隐变量生成模型的后验检验
-8. [D3GS: Depth, DINO, and RGB Diffusion Co-Guided 3D Gaussian Splatting for Sparse-View Reconstruction](/202609/22/2609.22941v1-d3gs-depth-dino-and-rgb-diffusion-co-guided-3d-gaussian-splatting-for-sparse-view-reconstruction)  
+   evidence：扩散与状态空间建模用于三维重建
+7. [One-Step Generative Surrogate Models via Block-Triangular Joint Drifting](/202609/23/2609.26435v1-one-step-generative-surrogate-models-via-block-triangular-joint-drifting)  
    标签：评分：6.0/10、query:real-ir
-   evidence：扩散补全引导三维重建
-9. [Blind Deconvolution of Binary and Pattern Images with Pixel Intensity Constraints and Sparse Gradient Prior](/202609/22/2609.23268v1-blind-deconvolution-of-binary-and-pattern-images-with-pixel-intensity-constraints-and-sparse-gradient-prior)  
+   evidence：通过联合漂移实现一步生成模型
+8. [GeoComposer: Geometry-Grounded Photographic Composition Instruction](/202609/23/2609.26620v1-geocomposer-geometry-grounded-photographic-composition-instruction)  
    标签：评分：6.0/10、query:real-ir
-   evidence：盲图像反卷积修复
-10. [Stochastic Flow Map for Count Data](/202609/22/2609.23290v1-stochastic-flow-map-for-count-data)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：面向计数数据的流与扩散生成模型
-11. [PhysReflect: Geometry and Perception Guided Diffusion for Physically-Plausible Mirror Reflections](/202609/22/2609.23442v1-physreflect-geometry-and-perception-guided-diffusion-for-physically-plausible-mirror-reflections)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：几何与感知引导的扩散生成镜面反射
+   evidence：面向摄影构图的图像编辑与生成
 
 
 <div class="dpr-home-promo-card">
