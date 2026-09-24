@@ -6,63 +6,56 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-23
-- 运行时间：2026-09-23 22:31:47 UTC
+- 最新运行日期：2026-09-24
+- 运行时间：2026-09-24 22:36:52 UTC
 - 运行状态：成功
-- 本次总论文数：14
-- 精读区：6
-- 速读区：8
+- 本次总论文数：11
+- 精读区：2
+- 速读区：9
 
 ### 今日简报（AI）
-1) 今日从14篇中筛出6篇精读、8篇速读，聚焦图像恢复与低场MRI超分。
-2) 最值得看的是两篇9.0精读：ImIR的一体化图像恢复指令微调，以及不确定性感知的3D残差小波扩散用于超低场MRI超分
-- 详情：[/202609/23/README](/202609/23/README)
+- 今日共生成 11 篇推荐（精读 2 篇，速读 9 篇）
+- 精读：《Zero-Shot Object Removal via Attention Masking, Latent Anchoring, and Refinement》（8.0/10）, 《On the Diffusibility of High-Dimensional Latents》（8.0/10）
+- 速读：《Generating Chest X-Ray Counterfactuals by Specialising Foundation Image Models》（7.0/10）, 《StableVQ: Practical Guidelines for Stable Vector-Quantized Tokenizer Training》（7.0/10）, 《Diff-RF: Mutually Reinforced Image Registration and Fusion via Degradation-Aware Learning》（7.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202609/24/README](/202609/24/README)
 
 ### 精读区论文标签
-1. [ImIR: Image-Instruction Tuning for All-in-One Image Restoration](/202609/23/2609.25267v1-imir-image-instruction-tuning-for-all-in-one-image-restoration)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：用指令微调图像编辑模型实现一体化图像修复
-2. [Uncertainty-Aware 3D Residual Wavelet Diffusion for Ultra Low-Field MRI Super-Resolution](/202609/23/2609.25319v1-uncertainty-aware-3d-residual-wavelet-diffusion-for-ultra-low-field-mri-super-resolution)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：扩散模型用于MRI超分辨并采样后验不确定性
-3. [Directional Total Variation-Regularized Implicit Neural Representations (DTV-INR) for Continuous Super-Resolution in Degraded Imaging Domains](/202609/23/2609.25429v1-directional-total-variation-regularized-implicit-neural-representations-dtv-inr-for-continuous-super-resolution-in-degraded-imaging-domains)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于隐式神经表示与方向全变分正则的连续图像超分辨率
-4. [ASTRA-SR: Atmospheric Seeing and Turbulence Restoration for Astronomical Image Super-Resolution](/202609/23/2609.26731v1-astra-sr-atmospheric-seeing-and-turbulence-restoration-for-astronomical-image-super-resolution)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：面向天文图像的单帧盲修复与超分辨率
-5. [MirrorDistill: Illumination-Aware Latent Distillation for Efficient Low-Light Restoration](/202609/23/2609.25331v1-mirrordistill-illumination-aware-latent-distillation-for-efficient-low-light-restoration)  
+1. [Zero-Shot Object Removal via Attention Masking, Latent Anchoring, and Refinement](/202609/24/2609.28342v1-zero-shot-object-removal-via-attention-masking-latent-anchoring-and-refinement)  
    标签：评分：8.0/10、query:real-ir
-   evidence：通过潜空间蒸馏实现低光图像恢复
-6. [Mean Velocity Matching: Rethinking Generative Dynamics in Diffusion Models](/202609/23/2609.25444v1-mean-velocity-matching-rethinking-generative-dynamics-in-diffusion-models)  
+   evidence：基于冻结Stable Diffusion的零样本目标移除
+2. [On the Diffusibility of High-Dimensional Latents](/202609/24/2609.28473v1-on-the-diffusibility-of-high-dimensional-latents)  
    标签：评分：8.0/10、query:real-ir
-   evidence：随机扩散生成动力学的预测参数化
+   evidence：高维潜在表示的扩散可行性
 
 ### 速读区论文标签
-1. [TTTIR: Unlocking Instance-Specific State Evolution via Test-Time Training for Image Restoration](/202609/23/2609.26151v1-tttir-unlocking-instance-specific-state-evolution-via-test-time-training-for-image-restoration)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：面向图像恢复的测试时训练
-2. [KwaiMind Technical Report](/202609/23/2609.26375v1-kwaimind-technical-report)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于扩散Transformer的商用图像编辑系统
-3. [Synthetic-Aperture Super-Resolution Imaging via Spatial-Frequency Shift in Near-Field Diffraction](/202609/23/2609.24039v1-synthetic-aperture-super-resolution-imaging-via-spatial-frequency-shift-in-near-field-diffraction)  
+1. [Generating Chest X-Ray Counterfactuals by Specialising Foundation Image Models](/202609/24/2609.24879v1-generating-chest-x-ray-counterfactuals-by-specialising-foundation-image-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：结合深度学习恢复融合的超分辨成像
-4. [Bridging Reconstruction and Generation: A Latent Distribution Perspective on Evaluation and Improvement](/202609/23/2609.24088v1-bridging-reconstruction-and-generation-a-latent-distribution-perspective-on-evaluation-and-improvement)  
+   evidence：通过特化预训练生成模型实现反事实图像生成
+2. [StableVQ: Practical Guidelines for Stable Vector-Quantized Tokenizer Training](/202609/24/2609.26774v1-stablevq-practical-guidelines-for-stable-vector-quantized-tokenizer-training)  
    标签：评分：7.0/10、query:real-ir
-   evidence：潜生成模型中重建与生成的桥接
-5. [VideoX-Qwen: Data-Centric Instruction-Based Video Editing](/202609/23/2609.26015v1-videox-qwen-data-centric-instruction-based-video-editing)  
+   evidence：稳定面向图像生成模型的VQ分词器训练
+3. [Diff-RF: Mutually Reinforced Image Registration and Fusion via Degradation-Aware Learning](/202609/24/2609.28235v1-diff-rf-mutually-reinforced-image-registration-and-fusion-via-degradation-aware-learning)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于指令的视频编辑，改造视频生成骨干网络
-6. [Point Diffusion Mamba: Unified Diffusion-State-Space Modeling for Single-View 3D Reconstruction under Data Scarcity](/202609/23/2609.25538v1-point-diffusion-mamba-unified-diffusion-state-space-modeling-for-single-view-3d-reconstruction-under-data-scarcity)  
+   evidence：退化感知扩散框架用于配准融合与恢复
+4. [Ultra-fast Neural Inference for Stochastic Gaussian Splatting Denoising](/202609/24/2609.25604v1-ultra-fast-neural-inference-for-stochastic-gaussian-splatting-denoising)  
    标签：评分：6.0/10、query:real-ir
-   evidence：扩散与状态空间建模用于三维重建
-7. [One-Step Generative Surrogate Models via Block-Triangular Joint Drifting](/202609/23/2609.26435v1-one-step-generative-surrogate-models-via-block-triangular-joint-drifting)  
+   evidence：随机高斯泼溅渲染的时序神经去噪
+5. [CODA: Depth-Aligned Scene Completion and Object Decomposition from a Single RGB-D Image](/202609/24/2609.25654v1-coda-depth-aligned-scene-completion-and-object-decomposition-from-a-single-rgb-d-image)  
    标签：评分：6.0/10、query:real-ir
-   evidence：通过联合漂移实现一步生成模型
-8. [GeoComposer: Geometry-Grounded Photographic Composition Instruction](/202609/23/2609.26620v1-geocomposer-geometry-grounded-photographic-composition-instruction)  
+   evidence：从RGB-D图像进行场景补全的生成模型
+6. [EMERGE: Resolution-Agnostic Point Cloud Generation with Equivariant Graph-Based Diffusion](/202609/24/2609.26039v1-emerge-resolution-agnostic-point-cloud-generation-with-equivariant-graph-based-diffusion)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向摄影构图的图像编辑与生成
+   evidence：基于等变图扩散的点云生成
+7. [Discrete Diffusion Models via Evolving Variational Autoregressive Networks](/202609/24/2609.27306v1-discrete-diffusion-models-via-evolving-variational-autoregressive-networks)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：具有归一化密度的离散扩散模型
+8. [Robustness of Diffusion Models under Distribution Shift](/202609/24/2609.27546v1-robustness-of-diffusion-models-under-distribution-shift)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：扩散模型鲁棒性理论
+9. [ZoomDiff: A High-Fidelity Diffusion Model for Dual-Camera Smooth Zooming](/202609/24/2609.28083v1-zoomdiff-a-high-fidelity-diffusion-model-for-dual-camera-smooth-zooming)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：扩散模型用于高保真图像过渡
 
 
 <div class="dpr-home-promo-card">

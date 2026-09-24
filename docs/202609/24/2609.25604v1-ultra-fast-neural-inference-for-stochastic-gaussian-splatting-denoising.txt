@@ -1,0 +1,554 @@
+Title: Ultra-fast Neural Inference for Stochastic Gaussian Splatting Denoising
+
+URL Source: https://arxiv.org/pdf/2609.25604v1
+
+Published Time: Wed, 23 Sep 2026 00:34:08 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Ultra-fast Neural Inference for Stochastic Gaussian Splatting Denoising 
+
+## Chenxiao Hu 1 Hao Zhang 1 Yanchen Zhang 1 Meng Gai 1 Guoping Wang 1 Sheng Li 1∗
+
+> 1
+
+## School of Computer Science, Peking University {hineven, lisheng}@pku.edu.cn 
+
+# Abstract 
+
+Stochastic rendering eliminates the sorting and alpha blend-ing process in Gaussian splatting, at the cost of introduc-ing spatial noise. Formulating temporal denoising over the pixel stream shared by view-consistent stochastic splatting renderers, we propose a temporal neural denoiser validated on stochastic 2D Gaussian Splatting rendering, combining dual-path exponential moving average accumulation, per-pixel learned trust prediction for history validation, a fixed anisotropic spatial filter and a variance-gated composition with stabilization. The denoiser suppresses the noise, achiev-ing temporally stable, visually compelling outputs during free camera navigation, all while retaining the sort-free, blend-free rasterization performance. The combined pipeline retains a PSNR gap to sorted alpha-blending renderers, but the denoiser’s overhead stays below the time saved by remov-ing sorting and blending. 
+
+# 1 Introduction 
+
+Gaussian splatting represents a scene as anisotropic 3D Gaus-sians (3DGS) (Kerbl et al. 2023) or oriented 2D surfels (2DGS) (Huang et al. 2024) and renders it through depth sorting and alpha blending. Sorted compositing delivers noise-free images and high visual fidelity, but its cost grows linearly with scene complexity-more primitives, larger frusta, more output channels-until memory bandwidth and fill rate saturate. Engineering works keep the sort-and-blend struc-ture and optimize it directly, delivering large speedups with an unchanged rendering model (Feng et al. 2025; Wang et al. 2024; Hanson et al. 2025). Order-independent transparency methods remove the global sort and its view-dependent or-dering (Hou et al. 2025; Hahlbohm et al. 2025; Du et al. 2026). A third group redesigns the primitive itself, gaining more compact scenes or more accurate geometry (Ye et al. 2025, 2026). Our work follows a fourth route, stochastic ren-dering (Kheradmand et al. 2025; Sun et al. 2025; Rijsdijk et al. 2026), which removes sorting and blending altogether. With stochastic rendering, each fragment is retained with probability equal to its opacity contribution and resolved using a standard depth test. This eliminates global sorting,     
+
+> ∗Corresponding author. 2DGS ST-TAA Ours 2DGS Ours
+> 6.5 0.5 1.8 1.0
+> 8.0 ms 3.8 ms
+
+2.1× 
+
+> α-blend raster depth sort stochastic raster denoiser other
+
+Figure 1: Top left: Garden navigation. Bottom left: zoom-in by conventional α-blended 2DGS renderer, by stochastic ras-terization with ST-TAA (see Sec. 5), and by our approach on the same setting. ST-TAA suffers from residual Monte Carlo noise, whereas our method visually resembles the conven-tional renderer. Right: per-frame time breakdown. Despite the additional cost of denoising, our approach achieves sig-nificant speedup by avoiding the expensive Gaussian depth sort and α-blending required by conventional splatting. replaces alpha blending with opaque z-buffer compositing, and enables additional output channels to be decoded from a visibility buffer at minimal cost. The resulting image is an un-biased Monte Carlo estimate of conventional alpha blending. StochasticSplats (Kheradmand et al. 2025) demonstrates that the estimator matches the alpha-blended image in ex-pectation while running fast. Its remaining problem is Monte Carlo noise: at one sample per pixel, the estimate is far too noisy for practical use, and the generic temporal anti-aliasing (TAA, Karis (2014)) or frame averaging used to suppress it is insufficient under free camera navigation. Temporal accumulation can repair such noise, but it relies on accurate reprojection, which presumes view-consistent geometry. Per-view projection and per-Gaussian sorted com-positing violate this assumption. Several works improve the view consistency of splatting by refining the sorting strat-egy (Radl et al. 2024; Liu et al. 2025) or change the primitive or blending model (Shen et al. 2024; Huang et al. 2025), and work well within the sorted pipeline; others avoid Gaus-sian depth sorting altogether, anchoring geometry to world-space surfels whose per-pixel visibility is resolved exactly by z-buffering or depth peeling (Ye et al. 2025, 2026). For 1arXiv:2609.25604v1 [cs.CV] 22 Sep 2026 our experiments, we take a minimal modification of 2DGS from per-Gaussian to per-pixel depth ordering, as a prototype that keeps the scene representation mostly comparable to the vanilla baseline. 
+
+Our method. With semi-transparent fragments jittering between frames and no noise-free G-Buffer guidance, heuris-tics and generic anti-aliasing methods malfunction; a dedi-cated denoiser is required. We design a lightweight tempo-ral neural denoiser for view-consistent stochastic splatting. The denoiser maintains two exponential moving averages per pixel: an accumulated path accumulates raw stochastic samples and converges to the unbiased alpha-blended image; a denoised path accumulates spatially filtered frames, sup-pressing visually prominent noise in disocclusions with low frame accumulation. A variance gate blends the two averages per pixel. A neural network predicts how much reprojected history to trust per pixel; a fixed anisotropic mipmap spatial kernel with learned per-Gaussian parameters performs the filtering. The pipeline is optimised under a single photomet-ric objective. The denoiser’s overhead is far below the time saved by removing sorting and blending, as seen in Fig. 1. Our contributions are as follows: 
+
+• A formulation of temporal denoising over the per-pixel stream shared by view-consistent stochastic splatting renderers, and a lightweight neural denoiser for the stream denoising problem, optimised end-to-end and validated on a per-pixel-ordered 2DGS host. 
+
+• An experimental demonstration that this pairing makes stochastic rasterization beneficial: on a minimal per-pixel-ordered 2D Gaussian host, the pipeline approx-imates the converged Monte-Carlo quality on static views, stays visually satisfying under free navigation, runs faster than the sorted alpha-blending renderer. 
+
+# 2 Related Work 
+
+## 2.1 Gaussian Splatting and Rasterization Acceleration 
+
+3D Gaussian Splatting (3DGS) (Kerbl et al. 2023) repre-sents a scene as anisotropic 3D Gaussians and renders them with tile-based rasterization: primitives are depth-sorted per frame and alpha-blended front to back, achieving real-time radiance-field rendering with high visual quality. Keeping the representation and the sort-and-blend model unchanged, a line of work pushes efficiency further through aggres-sive culling and pipeline scheduling (Feng et al. 2025), Tensor-Core-friendly reformulation of the per-pixel compu-tations (Li et al. 2026), or precise splat localization and pruning (Hanson et al. 2025). 
+
+## 2.2 Gaussian Splatting Variants 
+
+A second body of work modifies the representation or the compositing model itself. One goal is view-consistency: eval-uating each Gaussian at a locally optimal per-pixel depth with hierarchical resorting (Radl et al. 2024), replacing al-pha blending with an order-independent weighted sum (Hou et al. 2025), anchoring the scene in opaque z-buffered sur-fels (Ye et al. 2025), or recovering the exact per-pixel or-der of semi-transparent surfels with depth peeling (Ye et al. 2026). A second goal is efficiency, through adaptive raster-ization radii and tile load balancing (Wang et al. 2024), order-independent compositing on mobile GPUs (Du et al. 2026), or z-buffered opaque layers with selective blend-ing (Hahlbohm et al. 2025). 
+
+Stochastic rendering. StochasticSplats (Kheradmand et al. 2025) applies stochastic transparency to splats: each fragment is emitted as fully opaque with probability equal to its opacity contribution, which removes sorting and blend-ing and makes each frame an unbiased Monte Carlo estimate of the alpha-blended image. The simplicity provides perfor-mance gain, but also brings severe Monte Carlo noise. The output only becomes visually satisfying after accumulating many frames, which assumes a static camera. Ray-traced for-mulations, compatible with stochastic or deterministic sam-pling (Sun et al. 2025; Moenne-Loccoz et al. 2024; Condor et al. 2025), sidestep splatting entirely, but forgo the through-put of rasterization. 2D Gaussian Splatting (2DGS) (Huang et al. 2024) rep-resents scenes as planar surfels, whose exact ray-splat in-tersection depth provides more view-consistency. Our work builds on this property: better consistency makes temporal reprojection more reliable and temporal denoising plausible. 
+
+## 2.3 Denoising, Super-Resolution, Anti-Aliasing 
+
+Kernel-predicting denoising, an influential family of Monte Carlo denoisers, predicts filtering kernels for noisy in-puts (Bako et al. 2017; Vogels et al. 2018); related variants regress the clean image from feature-guided inputs (Kalan-tari et al. 2015; Bitterli et al. 2016), operate on individual samples (Gharbi et al. 2019), or target self-supervision and interactive budgets (Yu et al. 2021; Back et al. 2022; Meng et al. 2020; Işık et al. 2021; Bálint et al. 2023). Our denoiser is very similar to this family, but is designed for purely noisy inputs. Regular real-time Monte Carlo denoisers commonly rely on noise-free G-buffers. Stochastic splatting emits no noise-free guidance so existing denoisers cannot be applied to stochastic Gaussian splatting with trivial modification. Zeng et al. (2026) uses neural network for real-time super-resolution on 3DGS rendering, while we employ neural net-work for denoising: a different post-processing task. Temporal Anti-Aliasing (Karis 2014) stabilizes frames by reprojecting the history buffer along motion vectors and clip-ping colors to the local neighborhood. Learning-based super-sampling follows the same history-driven paradigm (Xiao et al. 2020; Zhong et al. 2023; Yang et al. 2024). They ex-2pect near-noise-free input and reliable motion vectors, neither of which stochastic splatting provides. 
+
+# 3 Method 
+
+## 3.1 Overview 
+
+Standard alpha-blended 2DGS produces noise-free images, but pays for per-frame global depth sorting and heavy over-draw from semi-transparent fragments; both costs grow with primitive count, frustum size, and channel count. Stochas-tic rasterization removes both: each fragment is randomly retained with probability equal to its opacity contribution and resolved by an ordinary depth test, and auxiliary chan-nels decode from the visibility buffer at little extra cost. The resulting image is an unbiased Monte Carlo estimate of the alpha-blended reference, but its single-sample-per-pixel noise is visually prominent. Temporal filtering is a proven remedy for Monte Carlo noise. The denoiser must cost well below the savings from removing sorting and blending, run without the noise-free G-buffers conventional real-time denoisers rely on, and accu-mulate history only where the observed surface is viewpoint-invariant: a property standard 2DGS lacks due to per-Gaussian depth ordering. We therefore formulate temporal denoising over per-pixel stream of view-consistent stochastic renderer (Sec. 3.2) as a recurrent model with sparse learned components: 
+
+ct = R(ot, h t−1), (ts, t h) = fθ (ct),dt = Fϕ(ot), (St, D t) = U(ot, d t, h t−1, t s, t h),gt = Gγ (var t, n s, n h), ˆIt = gtDt + (1 − gt)St.
+
+(1) Here ot is the current stochastic observation (colour, depth, decoded payload), ht−1 the temporal state, and ˆIt the output frame. R reprojects the state into the current view and de-rives consistency features (Sec. 4.1); fθ predicts how much reprojected history each of two complementary paths may trust; Fϕ is a fixed anisotropic kernel with footprints param-eterised by learned neural-view scalars ϕ (Sec. 4.3); U is the exponential-moving-average update (Eq. (2)) yielding an ac-cumulated mean St over raw samples and a denoised mean 
+
+Dt over filtered frames; and Gγ is a variance gate (Eq. (3)) fusing the two means per pixel. R, F , U, G are fixed differ-entiable operators; learning is confined to the trust networks 
+
+θ, the gate scalar γ, and the payload ϕ, which are optimised jointly under a single photometric objective on ˆIt through the same recurrent state transition used at inference (Sec. 4.4). Validation instantiates the simplest host model satisfying the stream requirements (Sec. 3.3); Figure 2 illustrates the full pipeline. 
+
+## 3.2 The Stochastic Splatting Stream 
+
+Per pixel and per frame, a stochastic splatting renderer emits a visibility sample : Identity of the primitive winning an opaque depth test after stochastic retention, together with its depth ; auxiliary per-primitive payload channels (colors, or trainable parameters such as the neural-view scalars in Sec. 4.3) are decoded from the visibility sample at little extra cost. Two properties make this stream temporally denoisable: view-consistency, so history can be reprojected safely, and approximately unbiased decoded radiance, so accumulating samples converges to α-blended rendering. Noise magnitude and view-consistency vary across such renderers (Kherad-mand et al. 2025; Sun et al. 2025; Rijsdijk et al. 2026), they have a common issue: Low samples per pixel intro-duce prominent Monte Carlo noise. This can be effectively suppressed by our denoiser using only the above quantities. 
+
+## 3.3 Minimal Host Model 
+
+For validation we instantiate the simplest model that satis-fies the requirements: vanilla 2DGS with the per-Gaussian centre-depth ordering replaced by per-pixel depth ordering, rendered with the same stochastic visibility rule as our pri-mary baseline (Kheradmand et al. 2025) so the compari-son isolates the denoiser rather than the geometry model. A pretrained vanilla 2DGS scene is converted by full finetun-ing through a depth-peeling differentiable rasterizer (Everitt 2001; Laine et al. 2020); the conversion is not free, leaving a residual gap of about 1 dB to vanilla 2DGS on average. We deliberately keep the dense, unpruned reconstruction so the geometry stays comparable to the 2DGS baseline. 
+
+## 3.4 Denoiser Design 
+
+The compute budget left by the rasterization savings is nar-row, and the stream offers no noise-free G-Buffer. Fixed heuristics, e.g. blending by depth difference alone, are there-fore insufficient. We adopt a kernel-estimation-style denoiser that spends most of its budget predicting, per pixel, how much reprojected history can be trusted ( fθ of Eq. (1)), using only stream quantities (Sec. 3.2). 
+
+Accumulated and Denoised paths. Temporal accumula-tion of raw stochastic samples converges to the alpha-blended reference, but the first few frames are noisy, and suppressing that noise spatially would require aggressive blurring, which lowers the asymptotic quality ceiling once history is long. We therefore maintain two exponential-moving-average (EMA) chains in parallel: an accumulated path over raw samples, which dominates stable regions once history is sufficient, and a denoised path over spatially filtered frames, which covers short histories and fills disoccluded regions where re-projection is unreliable. A variance gate blends the two per pixel (Figure 3). 
+
+EMA path update ( U). At each frame, the previous tem-poral state is first warped into the current camera view (Sec. 4.1). Each path maintains a per-pixel running mean together with an effective sample count, its history length .Let Xprev be a path’s reprojected mean, n its reprojected his-tory length ( ns, nh for the two paths), x the current frame’s 3Accumulate            
+
+> Denoise
+> Postprocess
+> Reproject ℛ
+> Reprojected
+> Input
+> Stabilization
+> Current Input
+> 𝐶𝑜𝑙𝑜𝑟, 𝑉 0,1,2,3 , … Final
+> Output
+> Anisotropic
+> Filtering (4X)
+> Trust Prediction
+> 2x 3x3 Conv neural network
+> Reproject ℛ
+> Reprojected
+> Input
+> Calc 𝑎 𝑥 , 𝑎 𝑦 , 𝜌
+> 3x3 Smooth
+> Trust Prediction
+> 3x3 Conv neural network
+> 𝑬𝒏𝒄
+> 𝑬𝒏𝒄 Stochastic
+> Renderer
+> EMA Update
+> Previous
+> Accumulated Previous
+> Denoised 1 SPP
+> Denoised
+> t
+> 𝑡 𝑠
+> 𝑡 ℎ
+> Current
+> Denoised
+> Current
+> Accumulated
+> 2DGS
+> Render
+> Variance Gated
+> Compositio n
+> Trainable Module
+> 𝐹 𝜙
+> 𝑜 𝑡
+> ℎ𝑡−1
+> ℎ𝑡−1
+> →መ𝐼 𝑡 Loss
+> 𝑓 𝜃,𝑠 𝑓 𝜃,ℎ 𝑑 𝑡
+> 𝑆 𝑡 𝐷 𝑡
+> 𝒢 𝛾
+> 𝑣𝑎𝑟 𝑡
+
+Figure 2: Workflow of our denoiser for each frame (Eq. (1)) with trainable modules highlighted. The host stochastic rasterizer emits the 1 spp stream (Sec. 3.2). In the accumulated path (left), the previous accumulated state is reprojected into the current view and a convolutional predictor estimates the history trust ts from reprojection-derived motion, depth, and photometric cues. In the denoised path (middle), the current frame is spatially filtered by a fixed anisotropic mipmap kernel parameterised by smoothed neural-view scalars, and a lightweight head estimates the trust th of the reprojected denoised mean. In postprocessing 
+
+(right), both paths update their exponential moving average (EMA) states (Eq. (2)), a variance gate (Eq. (3)) composites the two means per pixel, and a stabilization pass ( STAB ) suppresses residual jitter. The updated states propagate to the next frame. 21.02 dB 24.10 dB 24.06 dB      
+
+> 25.70 dB 24.30 dB 25.72 dB
+> reference 4 frames
+> accumulated denoised variance gate composited 64 frames
+
+Figure 3: The two EMA paths and their composition at 4 (top) and 64 (bottom) accumulated frames under slow lateral camera motion; the zoomed region is marked on the refer-ence. The accumulated path is noisy at low frame counts but improves with history, while the denoised path is stable but blurry; the variance gate blends the two adaptively (white: prefer denoised, black: prefer accumulated). At 4 frames the not-yet-calibrated gate dips the composite marginally below the denoised path; the dip vanishes within a few frames. PSNR is computed on the zoomed region. value on that path (the spatially filtered colour or the raw stochastic colour) and t ∈ [0 , 1] the predicted trust. The state updates as 
+
+d = n · t + 1 , X = Xprev · n · t + xd , n ← min( d, n max ).
+
+(2) The trust t interpolates between two extremes: t = 1 appends the current frame as one full sample, an ordinary running average; t = 0 discards the history and restarts from the current frame; fractional values discount stale history without resetting it, damping ghosting. The denoised path uses a smaller history cap (24 vs. 128) for reactivity. A parallel running average of squared luminance on the accumulated path tracks the variance driving the composition gate. 
+
+Variance-gated composition ( Gγ ) and STAB. The fi-nal pixel mixes the two paths according to the accumu-lated path’s own uncertainty. Along the accumulated path we maintain a running average of squared luminance y2
+
+alongside the colour mean ¯y, giving the temporal variance 
+
+var = max( y2 − ¯y2, 0) and an estimate of the standard error of the mean, err = pvar /(ns + ϵ). The gate weight of the denoised path is 
+
+g = 1 − r ·  1 − clamp( γ · err , 0, 1) , r = 1 − e−ns/τ , (3) with a single learned scalar γ and a fixed time constant τ = 8 
+
+frames; the final colour is g · D + (1 − g) · S. Early on, r ≈ 0
+
+and the denoised path dominates; as history accumulates and the standard error shrinks, the sharp accumulated path takes over. Error spikes such as motion and disocclusion can raise 
+
+g again, pulling output to the denoised path. A stabilization pass ( STAB ) suppresses residual temporal jitter of the composited output: a lightweight TAA variant with neighborhood clamping, a uniform blend weight, and a color-consistency rescue against spurious disocclusion resets from depth jitter (details in the appendix). 
+
+Trust prediction ( fθ ). Most of the inference budget goes to the accumulated path’s trust ts, predicted by a small con-volutional network from motion, depth, and photometric-consistency cues; the denoised path’s th comes from a tiny head biased to distrust history at initialization (architectures in Sec. 4.2). When the camera is static, we override ts to 1, where samples are i.i.d. and the running mean is the minimum-variance estimator. 
+
+Spatial filtering ( Fϕ). The spatial filter must be nearly free yet cover a wide footprint: a fixed four-level anisotropic mipmap filter in the spirit of EWA filtering (Zwicker et al. 2002), driven per pixel by learned neural-view scalars V =(V0, V 1, V 2, V 3) baked into the surfels (Sec. 4.3). The payload is scene-specific and adds 10 floats per Gaussian. 44 Technical Details 
+
+## 4.1 Reprojection and Trust Features 
+
+The denoiser begins by warping the previous frame’s tem-poral state into the current view: each current pixel is unpro-jected to world space, reprojected into the previous image plane, and resampled with a 16-tap Catmull-Rom filter, re-trieving the previous denoised and accumulated means, the two history lengths, and the two trust maps. Holes left by stochastic sampling (invalid current depth) borrow the aver-age valid depth in a 3 × 3 neighbourhood, falling back to the far plane if the neighbourhood is empty. From the reprojection we derive four families of trust features : motion (screen-space motion magnitude, soft-compressed as m/ (m + 20) , and its square), depth (relative depth difference and its motion-gated product), photomet-ric (luminance and YCoCg distances to the two reprojected means), and state (reprojected trust maps, history lengths, and the forward-facing neural-view scalar V2, Sec. 4.3). To-gether with the current observation these form ct of Eq. (1); the exact channels are listed in the appendix. 
+
+## 4.2 History Trust Predictors 
+
+Accumulated-path trust ts. The predictor is a deep separa-ble convolutional stack with a hidden width of 8: a pointwise 
+
+1 × 1 encoder, two depthwise 3 × 3 + pointwise 1 × 1 blocks with SiLU activations, and a pointwise head whose first out-put channel, passed through a sigmoid, yields ts. Its 5 × 5
+
+receptive field captures local motion boundaries cheaply, and the head bias is initialised to zero ( ts = 0 .5 at training start). 
+
+Denoised-path trust th. A tiny head computes th: a single depthwise 3 × 3 convolution with SiLU followed by a point-wise projection to a scalar and a sigmoid. The output bias is initialised to −4 (th ≈ 0.02 at cold start), so the denoised path initially trusts the current frame almost entirely. The gate scalar γ is also learnable. 
+
+## 4.3 Spatial Anisotropic Mipmap Filtering 
+
+The filter operates on the 4-channel neural-view tensor V
+
+carried by the surfels, which is the baked form of the per-Gaussian payload ϕ of Eq. (1): V0, V 1, V 2 are the absolute dot products of three learnable per-surfel view vectors with the camera basis (up, right, and forward), V0, V 1 normal-ized by per-pixel depth and V2 controlling the film-space x-y correlation of the kernel; V3 is a learned scalar controlling blur strength. Trained jointly with the denoiser, these optimal filter footprints are baked into the Gaussian parameters. A fixed 3 × 3 Gaussian blur of the neural-view tensor yields smoothed scalars from which a 2 × 2 covariance ma-trix is built; its eigen-decomposition parameterises the filter over a 4-level mipmap pyramid of the current frame’s YCoCg colour, probed along the covariance’s major axis (exact con-struction in the appendix). The per-pixel filtering cost is thus bounded by 32 texel reads. 
+
+## 4.4 Training-Time Details 
+
+Training splits into two phases whose costs we account sep-arately: preparing the minimal host model (Stages 1–3), and the joint optimisation of the denoiser and the payload (Stage 4), which is the cost of our contribution. All other training configurations are deferred to the appendix. 
+
+Minimal host model (Stages 1–3). A vanilla 2DGS scene is optimised under the conventional per-Gaussian ordering (Stage 1, 30k steps), cleaned of low-opacity floaters by an opacity-only finetune (Stage 2, 1k steps), and converted to the per-pixel depth-ordered model of Sec. 3.3 by full finetun-ing through a depth-peeling differentiable rasterizer (Stage 3, 3k steps). This phase merely converts an off-the-shelf 2DGS reconstruction into our minimal host; a natively view-consistent splatting model would skip it. 
+
+Joint optimisation (Stage 4). All learned components of Eq. (1) are optimised jointly under a single photometric objective (L1 with small SSIM/LPIPS and auxiliary terms, appendix) on the final output ˆIt, with the host Gaussian geometry and colour frozen, using the deterministic tile-rendered image as a clean target. Gradients flow through the stochastic renderer, the spatial filter, both trust predictors, and the EMA-gate composition in a single graph; optimisa-tion proceeds with history states detached for training effi-ciency. Temporal behaviour is learned on synthetic camera chains whose length follows a curriculum up to 128 frames, matching the inference-time history cap (chain synthesis and trust-shaping regularisers in the appendix). The payload ϕ is baked per Gaussian and therefore trains per scene; the shared 
+
+θ adapts to a new scene with a short finetune (15k steps on the source scene, 4k steps on transferred scenes, ∼1 hour), and can be deployed with no per-scene denoiser training at some quality cost (zero-shot transfer, Sec. 5.5). 
+
+# 5 Experiments and Ablations 
+
+## 5.1 Implementation Details 
+
+We train with PyTorch and SlangPy (Slang project contrib-utors 2025) and implement the integrated renderer with NVRHI (NVRHI Developers 2026) (Vulkan backend); all experiments run on an NVIDIA RTX 3090 GPU. All scenes share the same hyper-parameters (details in Appendix) and the two-phase training recipe of Sec. 4.4 (room as the source scene). We provide code and running instructions for repro-duction in the supplements. 
+
+## 5.2 Experimental Setup 
+
+Datasets. We evaluate on the main release (7 scenes) of Mip-NeRF360 (Barron et al. 2022) and the training-data subset of TanksAndTemples (Knapitsch et al. 2017). All renderers are evaluated at the native training resolution (resized to 1600 px image width on both datasets); we cap the Gaussian count at 3-million for training efficiency. 5Baselines. We compare against the deterministic vanilla 2DGS tile renderer (Huang et al. 2024), which also ren-ders the reference images for all metrics, and against an adapted implementation of stochastic rasterization pipeline from StochasticSplats (Kheradmand et al. 2025). Stochas-ticSplats originally renders a 3DGS scene finetuned under StopThePop rasterization (Radl et al. 2024) which differs from our minimal 2DGS models. We render our per-pixel 2DGS scenes with the same stochastic rasterizer that feeds our denoiser, and reimplement the temporal anti-aliasing (TAA) accumulation described in that work on its output. We refer to this adapted baseline as ST-TAA below: base-line and denoiser consume the identical 1 spp stream of the identical scene representation, so any quality difference is at-tributable to the denoiser alone. We further compare against SVGF (Schied et al. 2017), classic real-time Monte Carlo denoiser, minimally adapted to the stochastic stream: 3x3 depth hole-fix, temporal accumulation with per-pixel lumi-nance moments, followed by an à-trous wavelet filter edge-stopped by depth and variance-guided luminance, with hand-tuned parameters (details in Appendix). On static cameras, ST-TAA reduces to equal-weight frame accumulation; we additionally report a 1024-sample reference accumulation (Ref. (1024) ), Monte-Carlo mean of 1024 independent 1 spp renders of the same view (or of each frame’s exact pose along navigation tracks), which upper-bounds what any temporal filter can extract from the stochastic stream. 
+
+Metrics. We report PSNR, SSIM, and LPIPS(VGG), plus ColorVideoVDP (Mantiuk et al. 2024) (JOD units) (CVVDP) for navigation video quality (synthesized from every 10th track frame of the ∼300 fps recordings for eval-uation speed, ∼30 fps). Temporal metrics are averaged over every 10th frame of each navigation track, using the vanilla tile-rendered images as the reference. 
+
+## 5.3 Static Quality on Benchmark Datasets 
+
+Table 1 reports static quality on the two benchmarks (per-scene numbers in the appendix). The remaining gap from the 1024 sample Monte-Carlo mean (Ref.) to the deterministic renderer is the residual cost of converting the geometry to the per-pixel model (Sec. 3.3). On a static camera any temporal filter can only converge to the reference. Our 128-frame out-put wins a small margin at equal samples. The win comes from the variance gate, which admixes a small fraction of the spatially filtered denoised path into the accumulated color. From a practical operating point, what matters is how quickly the output converges. Our 16-frame output closes most of the gap to the reference, coming within 1.1 dB of its 128-frame quality, and converges markedly faster than ST-TAA because its denoised path gathers spatially available samples (conver-gence curves in the appendix). On TanksAndTemples, where all methods are trained on the full capture of each scene, the 128-frame PSNR likewise closes to the bound (20.63 vs. 20.69 dB), with a small residual SSIM/LPIPS gap.                                                  
+
+> MipNeRF360 TanksAndTemples Method PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> 2DGS 29.45 0.875 0.199 21.50 0.700 0.379 Ref. (1024) 28.25 0.851 0.202 20.69 0.675 0.388 ST-TAA (128) 27.92 0.822 0.219 20.61 0.635 0.431
+> Ours (16) 26.89 0.741 0.330 20.33 0.548 0.496 Ours (98) 27.94 0.822 0.226 20.60 0.631 0.436 Ours (128) 28.02 0.829 0.217 20.63 0.640 0.428 Ours (z.s. 128) 28.03 0.829 0.217 20.62 0.639 0.428
+
+Table 1: Static quality, averaged per dataset; per-scene PSNR is reported in the appendix. Vanilla 2DGS is the determin-istic tile renderer (Huang et al. 2024). Ref. (1024) is the Monte-Carlo accumulation reference (Sec. 5). ST-TAA is the adapted StochasticSplats baseline (Sec. 5), accumulated over 128 static frames. Ours renders through the learned denoiser at 16, 98, or 128 accumulated frames (spp counts in parenthe-ses); the 98 spp point approximately matches ST-TAA (128) in wall-clock time, making it comparable (Table 3); bold marks the better of this equal-time pair in each column (both when equal after rounding). Ours (z.s.) deploys the room checkpoint on every scene with no per-scene denoiser train-ing (zero-shot transfer) (Sec. 5.5). 
+
+## 5.4 Temporal Quality under Free Navigation 
+
+Free navigation is a common real-time workload. We record camera tracks by hand in the interactive viewer on all seven MipNeRF360 scenes (provided in our supplements), mim-icking how a user actually navigates, and compare five ren-derers: raw 1 spp stochastic output, ST-TAA, SVGF, our de-noiser, and the vanilla tile renderer as the reference. Table 2 averages the metrics over the seven tracks (per-track numbers in the appendix). Our denoiser stays close to the deterministic reference, while ST-TAA fails to suppress the Monte Carlo noise and leaves heavy, clearly visible flickering under cam-era motion (Figure 4). Its collapse is not a convergence limit but a failure to retain valuable temporal history, which is what our learned trust prediction addresses. SVGF fares markedly better than plain TAA, but without noise-free guidance fea-tures its fixed edge-stopping strategy is severely interfered by floating Gaussians and holes in scenes. The Ref. (1024) ceil-ing sits well above every temporal method under navigation, whereas on static cameras our denoiser essentially reaches it (Table 1); the residual gap thus comes from reusing history across poses: reprojection mismatch and disocclusions. 
+
+## 5.5 Zero-Shot Transfer to Unseen Scenes 
+
+The trust predictors consume mostly relative cues of the stochastic error process, so the learned trust partially transfers across scenes. We test this by copying the room checkpoint verbatim to the other scenes, neutralising the scene-specific neural-view payload: the trust feature V2 fed to the trust estimator is set to zero, and the spatial filter falls back to a fixed isotropic kernel ( ax = ay = 2 , ρ = 0 ). In tables 1 6Method PSNR ↑ SSIM ↑ LPIPS ↓ CVVDP ↑ ms ↓                                        
+
+> Ref. (1024) 32.96 0.950 0.080 8.73 –Raw 1 spp 18.26 0.282 0.671 4.94 2.71 SS 1 spp †17.86 0.292 0.659 4.67 3.2 †
+> SS 4 spp †22.54 0.526 0.540 6.87 6.5 †
+> ST-TAA 21.48 0.418 0.615 5.95 2.88 SVGF 25.57 0.785 0.297 6.29 2.86 Ours 29.80 0.867 0.244 7.57 3.75 Ours (z.s.) 29.34 0.873 0.223 7.38 3.64
+
+Table 2: Quality under free camera navigation on MipN-eRF360, averaged over all scene tracks (per-track numbers in the appendix), using the 2DGS tile renderer as the reference. Raw 1 spp is the single-sample stochastic output; ST-TAA is the adapted StochasticSplats baseline, temporal accumu-lation without learned trust or spatial filtering; SVGF is the adapted variance-guided filtering baseline (see appendix). Ref. (1024) is the per-frame Monte-Carlo ceiling, not a prac-tical method. The last column is the mean per-frame time over the seven tracks on an RTX 3090. †SS 1 spp/4 spp are the official StochasticSplats model run on its own finetuned 3DGS scenes over the same camera tracks for 1 or 4 spp, measured against its own 1024 spp accumulation as the ref-erence (no ground truth exists on free tracks); it is listed to show that the 1 spp noise level is inherent with the stochastic formulation. Its per-frame error distribution closely tracks our Raw 1 spp row (per-frame PSNR correlation r = 0 .90 ,and its CVVDP score likewise matches our Raw 1 spp row). SS timings come from the official viewer. Ours (z.s.) deploys the room checkpoint on every scene with no per-scene de-noiser training (Sec. 5.5). and 2, static quality of Ours (z.s.) matches the fine-tuned model, while under navigation the zero-shot variant gives up some PSNR/CVVDP margin yet slightly improves SSIM and LPIPS: the fixed kernel filters more aggressively than the learned kernels, which is favored by the perceptual metrics. Either way the differences are small next to the margin over ST-TAA. Per-track numbers are in the appendix. 
+
+## 5.6 Performance Analysis 
+
+Table 3 reports per-frame rendering time averaged over the seven navigation tracks (per-scene numbers in the appendix). Raw stochastic rasterization is 2.9× faster than the sorted alpha-blending renderer on the same hardware-rasterization pipeline, and the full denoising pipeline keeps a 2.1× ad-vantage: the denoiser adds ∼1 ms per frame, nearly constant across scenes. The speedup varies considerably with scene content, from 1.2× (kitchen, where blending overdraw is low) to 3.5× (bicycle), consistent with the scaling behaviour of sorted blending (Sec. 3.1), and stays well above the de-noiser’s overhead.    
+
+> 2DGS (frame) ST-TAA Ours 2DGS (zoom)
+
+Figure 4: Garden (top) and Room (bottom) navigation tracks. Left: vanilla-rendered reference crop with the zoom region marked; right: the region for each renderer.        
+
+> Method (ms/frame) 7-track mean ↓
+> 2DGS Huang et al. (2024) 17.96 2DGS (hardware raster.) 7.99 Raw 1 spp 2.71 + TAA (ST-TAA) 2.88 Ours (full pipeline) 3.75
+
+Table 3: Per-frame rendering time, averaged over the seven navigation tracks (per-scene numbers in the appendix). The 2DGS row is the official implementation measured with aux-iliary channel outputs removed; the hardware raster. row is our hardware-rasterized reimplementation of 2DGS, in-cluded as a stronger baseline. The cost of denoiser is nearly constant across scenes. 
+
+## 5.7 Ablations 
+
+Table 4 ablates the learned trust prediction, the spatial fil-ter, and the final stabilization pass on the garden navigation track. The learned trust is the largest single component: forc-ing ts ≡ 1 approximates a naive ’always accumulate’ strat-egy. The spatial filter is the second contributor, providing filtered results in disoccluded or recently revealed regions. The stabilization pass improves all three per-frame metrics. 
+
+# 6 Discussion, Limitations, and Conclusion 
+
+Balancing Temporal Stability And Ghosting. We found that the final output can still exhibit visible flicker. We have to use STAB to trade temporal stability with some minor ghosting. We observe lower-than-expected predicted trust within flick-ering regions, which possibly relates to the limited capacity of predictor networks. To alleviate this issue, it is possible to further enhance the denoising path, or reduce the variance of the stochastic output distribution itself. 
+
+Performance across different rendering paths. Our current realization of the whole pipeline does not match the abso-lute single-channel throughput of highly optimised sorted-blending engines (Feng et al. 2025), order-independent com-positors (Du et al. 2026), or compact surfel-hybrid represen-7Variant PSNR ↑ SSIM ↑ LPIPS ↓                    
+
+> Full model 26.63 0.794 0.238
+> w/o tsprediction ( ts≡1)22.51 0.695 0.323 w/o tsprediction ( ts= heur .)25.82 0.755 0.268 w/o spatial filter 23.52 0.676 0.359 w/o stabilization pass 25.94 0.736 0.311
+
+Table 4: Ablations on the garden navigation track (evaluated on every 10th frame of the original 1563 frames, metrics against the vanilla tile renderer). The learned trust predic-tion is the most impactful single component, followed by the spatial filter. The stabilization pass improves all three metrics and, more importantly, removes most of the visi-ble temporal jitter at the cost of slight ghosting. For the 
+
+ts = heur . ablation, we replace the neural network with 
+
+ts = exp( −σ · |d1−d2| 
+
+> max( d1,d 2)
+
+) heuristic as a stronger baseline, where d1, d 2 are pixel depths of the reprojected/current pixels and σ is grid-searched on the same track for best performance (oracle). tations (Ye et al. 2025), and we make no claim of superiority over these differently engineered pipelines. However, the comparison also shifts with scene char-acteristics and host implementation. Sorted and blended pipelines pay per-fragment costs that grow with primitive count, overdraw, and the number of output channels, whereas the stochastic pipeline pays a roughly per-pixel cost plus a fixed denoiser overhead; recent stochastic renderers already drive hundreds of millions of Gaussians interactively (Rijs-dijk et al. 2026), where sorted pipelines struggle. Within this landscape, our contribution is deliberately narrow: removing the Monte-Carlo noise that has so far blocked the stochastic route under free navigation, at a ∼1ms per-frame overhead. 
+
+Composability and future work. These directions com-pose rather than compete. Because the denoiser’s input con-tract is only the view-consistent stochastic visibility stream of Sec. 3.2, it can in principle sit behind a culled or more compact representation (Ye et al. 2025) or a faster imple-mentation of stochastic rasterization (Rijsdijk et al. 2026). On the engineering side, the stochastic rasterization natively produces a noisy depth buffer at zero extra cost, which can po-tentially enable hierarchical Z-culling (Greene et al. 1993). Integration is left to future work. In all, we present a lightweight temporal neural denoiser that makes view-consistent stochastic Gaussian splatting practical for free-navigation rendering while preserving the efficiency of sort-free, blend-free rasterization. By decou-pling the stream denoising problem from a specific splatting representation, our approach offers a practical postprocessing stage for future stochastic renderers. 
+
+# References 
+
+Jonghee Back, Binh-Son Hua, Toshiya Hachisuka, and Bochang Moon. Self-supervised post-correction for Monte Carlo denoising. In ACM SIGGRAPH 2022 Confer-ence Proceedings , 2022. doi: 10.1145/3528233.3530730. Steve Bako, Thijs Vogels, Brian McWilliams, Mark Meyer, Jan Novák, Alex Harvill, Pradeep Sen, Tony DeRose, and Fabrice Rousselle. Kernel-predicting convolutional networks for denoising Monte Carlo renderings. ACM Transactions on Graphics , 36(4):97:1–97:14, 2017. doi: 10.1145/3072959.3073708. Martin Bálint, Krzysztof Wolski, Karol Myszkowski, Hans-Peter Seidel, and Rafał Mantiuk. Neural partitioning pyra-mids for denoising Monte Carlo renderings. In ACM SIGGRAPH 2023 Conference Proceedings , 2023. doi: 10.1145/3588432.3591562. Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P. Srinivasan, and Peter Hedman. Mip-nerf 360: Unbounded anti-aliased neural radiance fields. CVPR , 2022. Benedikt Bitterli, Fabrice Rousselle, Bochang Moon, José A. Iglesias-Guitián, David Adler, Kenny Mitchell, Wojciech Jarosz, and Jan Novák. Nonlinearly weighted first-order regression for denoising Monte Carlo renderings. 
+
+Computer Graphics Forum , 35(4):107–117, 2016. doi: 10.1111/cgf.12954. Jorge Condor, Sebastien Speierer, Lukas Bode, Aljaz Bozic, Simon Green, Piotr Didyk, and Adrian Jarabo. Don’t splat your gaussians: Volumetric ray-traced primitives for modeling and rendering scattering and emissive me-dia. ACM Transactions on Graphics , 44(1), 2025. doi: 10.1145/3711853. Xiaobiao Du, Yida Wang, Kun Zhan, and Xin Yu. Mobile-gs: Real-time gaussian splatting for mobile devices. In Inter-national Conference on Learning Representations (ICLR) ,2026. Cass Everitt. Interactive order-independent transparency. Technical report, NVIDIA Corporation, 2001. Guofeng Feng, Siyan Chen, Rong Fu, Zimu Liao, Yi Wang, Tao Liu, Boni Hu, Linning Xu, Zhilin Pei, Hengjie Li, Xiuhong Li, Ninghui Sun, Xingcheng Zhang, and Bo Dai. Flashgs: Efficient 3d gaussian splatting for large-scale and high-resolution rendering. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 26652–26662, 2025. Michaël Gharbi, Tzu-Mao Li, Miika Aittala, Jaakko Lehti-nen, and Frédo Durand. Sample-based Monte Carlo de-noising using a kernel-splatting network. ACM Trans-actions on Graphics , 38(4):125:1–125:12, 2019. doi: 10.1145/3306346.3322954. 8Ned Greene, Michael Kass, and Gavin Miller. Hierarchical z-buffer visibility. In Proceedings of the 20th Annual Con-ference on Computer Graphics and Interactive Techniques (SIGGRAPH) , pages 231–238. ACM, 1993. Florian Hahlbohm, Fabian Friederichs, Tim Weyrich, Li-nus Franke, Moritz Kappel, Susana Castillo, Marc Stam-minger, Martin Eisemann, and Marcus Magnor. Efficient perspective-correct 3d gaussian splatting using hybrid transparency. Computer Graphics Forum , 44(2), 2025. doi: 10.1111/cgf.70014. Alex Hanson, Allen Tu, Geng Lin, Vasu Singla, Matthias Zwicker, and Tom Goldstein. Speedy-splat: Fast 3d gaus-sian splatting with sparse pixels and sparse primitives. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 21537– 21546, 2025. Qiqi Hou, Randall Rauwendaal, Zifeng Li, Hoang Le, Farzad Farhadzadeh, Fatih Porikli, Alexei Bourd, and Amir Said. Sort-free gaussian splatting via weighted sum rendering. In International Conference on Learning Representations (ICLR) , 2025. Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao. 2d gaussian splatting for geometrically accurate radiance fields. In ACM SIGGRAPH 2024 Con-ference Papers , 2024. doi: 10.1145/3641519.3657428. Yi-Hua Huang, Ming-Xian Lin, Yang-Tian Sun, Ziyi Yang, Xiaoyang Lyu, Yan-Pei Cao, and Xiaojuan Qi. Deformable radial kernel splatting. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2025. Mustafa Işık, Krishna Mullia, Matthew Fisher, Jonathan Eisenmann, and Michaël Gharbi. Interactive Monte Carlo denoising using affinity of neural features. ACM Transactions on Graphics , 40(4):37:1–37:13, 2021. doi: 10.1145/3450626.3459793. Nima Khademi Kalantari, Steve Bako, and Pradeep Sen. A machine learning approach for filtering Monte Carlo noise. ACM Transactions on Graphics , 34(4):122:1– 122:12, 2015. doi: 10.1145/2766977. Brian Karis. High-quality temporal supersampling. In ACM SIGGRAPH 2014 Courses: Advances in Real-Time Ren-dering in Games . ACM, 2014. Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis. 3d gaussian splatting for real-time radiance field rendering. ACM Transactions on Graphics ,42(4):139:1–139:14, 2023. doi: 10.1145/3592433. Shakiba Kheradmand, Delio Vicini, George Kopanas, Dmitry Lagun, Kwang Moo Yi, Mark Matthews, and An-drea Tagliasacchi. Stochasticsplats: Stochastic rasteriza-tion for sorting-free 3d gaussian splatting. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 26326–26335, 2025. Arno Knapitsch, Jaesik Park, Qian-Yi Zhou, and Vladlen Koltun. Tanks and temples: Benchmarking large-scale scene reconstruction. ACM Transactions on Graphics , 36 (4):78:1–78:13, 2017. doi: 10.1145/3072959.3073599. Samuli Laine, Janne Hellsten, Tero Karras, Yeongho Seol, Jaakko Lehtinen, and Timo Aila. Modular primitives for high-performance differentiable rendering. ACM Trans-actions on Graphics , 39(6):194:1–194:14, 2020. doi: 10.1145/3414685.3417861. Sheng Li, Yang Sui, Yue Wu, Zhuoran Song, Bo Yuan, Xu-long Tang, and Yue Dai. Accelerating 3d gaussian splat-ting using tensor cores. arXiv preprint arXiv:2605.17855 ,2026. Weihang Liu, Yuke Li, Yuxuan Li, Jingyi Yu, and Xin Lou. Duplex-gs: Proxy-guided weighted blending for real-time order-independent gaussian splatting, 2025. URL https: //arxiv.org/abs/2508.03180. Rafal K. Mantiuk, Param Hanji, Maliha Ashraf, Yuta Asano, and Alexandre Chapiro. Colorvideovdp: A visual dif-ference predictor for image, video and display distor-tions. ACM Trans. Graph. , 43(4), July 2024. ISSN 0730-0301. doi: 10.1145/3658144. URL https://doi.org/10. 1145/3658144. Xiaoxu Meng, Quan Zheng, Amitabh Varshney, Gurprit Singh, and Matthias Zwicker. Real-time Monte Carlo de-noising with the neural bilateral grid. In Eurographics Symposium on Rendering - DL-only Track , pages 13–24, 2020. doi: 10.2312/sr.20201133. Nicolas Moenne-Loccoz, Ashkan Mirzaei, Or Perel, Ric-cardo de Lutio, Janick Martinez Esturo, Gavriel State, Sanja Fidler, Nicholas Sharp, and Zan Gojcic. 3d gaussian ray tracing: Fast tracing of particle scenes. ACM Transac-tions on Graphics , 43(6), 2024. doi: 10.1145/3687934. NVRHI Developers. Nvrhi. https://github.com/NVIDIA-RTX/NVRHI, 2026. Lukas Radl, Michael Steiner, Mathias Parger, Alexander Weinrauch, Bernhard Kerbl, and Markus Steinberger. Stopthepop: Sorted gaussian splatting for view-consistent real-time rendering. ACM Transactions on Graphics , 43 (4), 2024. doi: 10.1145/3658187. Joris Rijsdijk, Christoph Peters, Michael Weinmann, and Ri-cardo Marroquim. Gaussian point splatting. ACM Trans. Graph. , 45(4), 2026. doi: 10.1145/3811272. 9Christoph Schied, Anton Kaplanyan, Chris Wyman, Anjul Patney, Chakravarty R. Alla Chaitanya, John Burgess, Shiqiu Liu, Carsten Dachsbacher, Aaron Lefohn, and Marco Salvi. Spatiotemporal variance-guided filtering: Real-time reconstruction for path-traced global illumi-nation. In Proceedings of High Performance Graphics (HPG ’17) , pages 2:1–2:12, 2017. doi: 10.1145/3105762. 3105770. Zhuowen Shen, Yuan Liu, Zhang Chen, Zhong Li, Jiepeng Wang, Yongqing Liang, Zhengming Yu, Jingdong Zhang, Yi Xu, Scott Schaefer, Xin Li, and Wenping Wang. Solidgs: Consolidating gaussian surfel splatting for sparse-view surface reconstruction, 2024. URL https://arxiv.org/ abs/2412.15400. Slang project contributors. SlangPy: Python bindings for the Slang shading language. https://github.com/shader-slang/slangpy, 2025. Xin Sun, Iliyan Georgiev, Yun Fei, and Miloš Hašan. Stochastic ray tracing of transparent 3d gaussians. In Eu-rographics Symposium on Rendering (EGSR) , 2025. Thijs Vogels, Fabrice Rousselle, Brian McWilliams, Gerhard Röthlin, Alex Harvill, David Adler, Mark Meyer, and Jan Novák. Denoising with kernel prediction and asymmetric loss functions. ACM Transactions on Graphics , 37(4): 124:1–124:15, 2018. doi: 10.1145/3197517.3201388. Xinzhe Wang, Ran Yi, and Lizhuang Ma. Adr-gaussian: Accelerating gaussian splatting with adaptive radius. In 
+
+SIGGRAPH Asia 2024 Conference Papers , 2024. doi: 10.1145/3680528.3687675. Lei Xiao, Salah Nouri, Matt Chapman, Alexander Fix, Douglas Lanman, and Anton Kaplanyan. Neural su-persampling for real-time rendering. ACM Transactions on Graphics , 39(4):142:1–142:12, 2020. doi: 10.1145/ 3386569.3392376. Sipeng Yang, Yunlu Zhao, Yuzhe Luo, He Wang, Hongyu Sun, Chen Li, Binghuang Cai, and Xiaogang Jin. MNSS: Neural supersampling framework for real-time rendering on mobile devices. IEEE Transactions on Visualization and Computer Graphics , 30(7):4271–4284, 2024. doi: 10.1109/TVCG.2023.3259141. Keyang Ye, Tianjia Shao, and Kun Zhou. When gaussian meets surfel: Ultra-fast high-fidelity radiance field render-ing. ACM Transactions on Graphics , 44(4), 2025. doi: 10.1145/3730925. Keyang Ye, Hongzhi Wu, and Kun Zhou. Depth peeling for high-fidelity gaussian-enhanced surfel rendering. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2026. Jiaqi Yu, Yongwei Nie, Chengjiang Long, Wenju Xu, Qing Zhang, and Guiqing Li. Monte Carlo denoising via aux-iliary feature guided self-attention. ACM Transactions on Graphics , 40(6), 2021. doi: 10.1145/3478513.3480565. Huimin Zeng, Yue Bai, and Yun Fu. Arbitrary-scale 3d gaussian super-resolution. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 40, pages 12304–12312, 2026. Zhihua Zhong, Jingsen Zhu, Yuxin Dai, Chuankun Zheng, Guanlin Chen, Yuchi Huo, Hujun Bao, and Rui Wang. FuseSR: Super resolution for real-time rendering through efficient multi-resolution fusion. In SIGGRAPH Asia 2023 Conference Papers , 2023. doi: 10.1145/3610548. 3618209. Matthias Zwicker, Hanspeter Pfister, Jeroen van Baar, and Markus Gross. EWA splatting. IEEE Transactions on Vi-sualization and Computer Graphics , 8(3):223–238, 2002. doi: 10.1109/TVCG.2002.1021576. 10 This appendix provides additional implementation details, extended quantitative and qualitative evaluations, and further experiments that complement the main text. 
+
+# A Predictor Input Channels 
+
+Tables 5 and 6 list the exact per-channel inputs of the two trust predictors. All channels are per-pixel maps assembled during reprojection. Please refer to the code for more details. 
+
+Accumulated-path predictor architecture. The full layer sequence is: pointwise 1×1 encoder → depthwise 3×3 +pointwise 1×1 → pointwise 1×1 → depthwise 3×3 + point-wise 1×1 → pointwise head, all with SiLU activations and hidden width 8. The main text’s description of “two depth-wise 3×3 + pointwise 1×1 blocks” elides the intermediate pointwise layer between the two depthwise blocks for brevity.             
+
+> Ch. Input 0|Ycur −Ystoch |: luma diff to reprojected accumulated mean 1reprojected previous ts
+> 2squared compressed motion magnitude 3accumulated-path history length (normalised) 4compressed motion magnitude 5relative depth difference 6motion-gated relative depth difference 7forward-facing neural-view scalar ( V2)
+
+Table 5: Accumulated-path trust predictor ( ts) inputs, 8 chan-nels.             
+
+> Ch. Input 0|Ycur −Yden |: luma difference to reprojected denoised mean 1reprojected denoised-path luma 2reprojected previous th
+> 3denoised-path history length (normalised) 4compressed motion magnitude 5YCoCg distance to reprojected denoised mean 6relative depth difference 7squared compressed motion magnitude
+
+Table 6: Denoised-path trust head ( th) inputs, 8 channels. 
+
+# B Spatial Filter Details 
+
+Exact construction of the covariance matrix in the spatial-filtering section of the main text. A fixed 3 × 3 Gaus-sian blur of the 4-channel neural-view tensor produces smoothed scalars (V ′ 
+
+> 0
+
+, V ′ 
+
+> 1
+
+, V ′ 
+
+> 2
+
+, V ′ 
+
+> 3
+
+). Per-axis scales ax =relu( V ′ 
+
+> 1
+
+) + softplus( V ′ 
+
+> 3
+
+) and ay = relu( V ′ 
+
+> 0
+
+) + softplus( V ′ 
+
+> 3
+
+)
+
+(the softplus floor guarantees a minimum blur) and a nor-malised correlation ρ = tanh( V ′ 
+
+> 2
+
+) form the covariance ma-trix  ax zz ay
+
+ with z = ρ√axay + ϵ. Its eigen-decomposition gives major/minor axis lengths λ1, λ 2 and orientation θ. The minor axis selects the mip level clamp(log 2 λ2, 0, 3) ; four probes at offsets {− 1.5, −0.5, 0.5, 1.5} × λ2 along the ma-jor axis are trilinearly sampled and averaged with weights 
+
+ωi = exp  − 12 (oiλ2/λ 1)2.
+
+# C Stabilization Pass (STAB) Details 
+
+Purpose. The trust for the two EMA chains is not sharp enough, so large regions in the composited output retain a characteristic residual noise: temporally high-frequency (per-frame flicker that does not converge), spatially low-frequency (∼3 px blobs), and small in amplitude ( ∼0.05 in [0 , 1] ) but still visually annoying. Derived from TAA, STAB is a post-pass on the composited image that removes this jitter. It is bypassed whenever the camera is static (tolerance-based detection on the camera matrix). 
+
+Design. Let C be the current composited colour and H the previous stabilized frame, reprojected into the current view with Catmull–Rom sampling (which the reprojection stage already uses for the EMA chains). STAB computes 
+
+out = a · clamp( H, C − tol , C + tol) + (1 − a) · C, (4) where the neighbourhood tolerance tol = 12 (C3×3max −
+
+C3×3min ) + s is computed per channel from the current frame’s 
+
+3 × 3 neighbourhood (already available from history rectifi-cation) with slack s = 0 .04 ; the clamp bounds the ghosting amplitude to the slack level. The blend weight is a fixed 
+
+a = 0 .9, except that a depth-disocclusion test re-seeds the history ( a = 0 ) when the relative depth change exceeds 0.1,ensuring recovery on genuine surface changes. 
+
+Rescue (Color fix). Because the stochastic depth winner jitters even on stable surfaces, the depth re-seed false-fires on many pixels that could safely be smoothed. A rescue sig-nal may override the re-seed (OR-logic): the Color fix keeps blending when the clamped history is already close to the current frame, ∥C − clamp( H)∥∞ < 0.10 , a direct visual-difference test that is unlikely to fire on real motion edges; it can cause minor ghosting. Since the clamp caps ghosting regardless, rescuing is mostly safe. The output of Eq. (4) be-comes both the displayed frame and the next frame’s history. The cost of STAB is below measurement noise. 
+
+# D Training Configuration 
+
+Two-phase recipe. Table 7 summarises the training pipeline (main text, Training-Time Details). Stages 1–3 prepare the minimal host model: Stages 1–2 optimise a vanilla 2DGS scene under the conventional per-Gaussian ordering, and Stage 3 converts it to the per-pixel depth-ordered model of the main text by full finetuning through a depth-peeling dif-ferentiable rasterizer. Stage 4 trains the denoiser jointly with the neural-view payload under the stochastic renderer, with the remaining Gaussian parameters frozen. 
+
+Host model stages. Stage 1 trains vanilla 2DGS for 30k steps without normal regularisation ( λn = 0 ), on par with the 11 Stage Renderer Optimised Steps 1 Tile Rasterizer all 30k 2 Tile Rasterizer opacity 1k 3 Depth Peeler full finetune 3k 4 Stochastic Rasterizer denoiser + V0,1,2,3 15k / 4k 
+
+Table 7: Two-phase training recipe (four stages). Stage 4 trains 15k steps on room and transfers to every other scene with 4k steps, starting from the room denoiser. The 4k trans-fer is our default per-scene refinement. The room checkpoint can also be deployed with no per-scene denoiser training at some quality cost (main text, Zero-Shot Transfer). original 2DGS results; enabling the normal regulariser costs about 1 dB because it constrains surfel orientation. Stage 2 finetunes opacity only for 1k steps (penalty weight 0.003 ,prune threshold 0.05 ) to remove low-opacity floaters without touching geometry. 
+
+Objective. The final-frame loss combines L1, SSIM (0.05 ) and LPIPS ( 0.01 ) against the tile-rendered vanilla im-age—a clean, deterministic target—plus an auxiliary L1 term (weight 0.2) pulling the accumulated path toward the vanilla colour. 
+
+Synthetic temporal chains. Since no video sequences ex-ist for the training views, temporal behaviour is learned on synthetic camera chains: 70% of steps use temporal history, chain lengths follow a curriculum from 2 to 128 frames, and only the last 8 frames of each chain are rendered stochas-tically while older frames come from the cheap tile ren-derer ( fake start ), so a 128-frame chain costs about nine stochastic renders. Camera perturbations are sampled from five classes—lateral dolly, drift, large, small, and near-static (1/15 scale)—covering both smooth motion and disocclu-sion. 
+
+Trust shaping. Three small mechanisms stabilise the learned trust: (i) near-static regularisers pull ts → 1 and 
+
+th → 1 (both weights 0.01 ; fast transfer uses 0.005 for both and adds a disocclusion penalty of weight 0.05 on both) on near-static chains, encouraging full accumulation when nothing moves; (ii) an authoritative disocclusion mask com-puted from the tile renderer’s depth and opacity hard-zeroes predicted trust in genuinely disoccluded pixels during state updates, with an L1 penalty (weight 0.03 ) suppressing trust there during training; and (iii) the composition gate is forced to the denoised path for the first 2000 steps, so the gate scalar 
+
+γ is calibrated only after both paths produce meaningful out-puts. A symmetry regulariser (weight 0.01 ) keeps the spatial filter’s axis scales consistent. 
+
+# E SVGF Baseline Details 
+
+Our SVGF baseline follows Schied et al.’s SVGF: temporal accumulation with first/second luminance moments, then à-trous wavelet filtering edge-stopped by the estimated tempo-ral variance and geometry. It runs in the same Vulkan pipeline as our denoiser and consumes the identical 1 spp stream. The stochastic stream provides no noise-free G-buffer, so the fol-lowing minimum adaptations are made: 
+
+• Hole-fixed depth. Miss pixels of the 1 spp visibility pass carry no valid depth (flagged by zero accumulated alpha); they are filled from the nearest valid 3×3 neigh-bour before any depth use, and pixels with no valid neighbour fall back to the far plane. All reprojection and edge-stopping read this hole-fixed depth. 
+
+• Temporal accumulation. Per pixel, the previous frame’s integrated colour and moments are reprojected (current depth → world → previous camera, Catmull-Rom history sampling) and blended exponentially: c ←
+
+(1 − α) chist + α c cur with α = 0 .02 , likewise for the luminance moments m1, m 2. A pixel is treated as dis-occluded (reset to the current frame) when fewer than 2 of the 4 nearest previous-depth texels pass the relative-depth test with threshold 0.4. The feedback history is the pre-filter integrated colour, as in classic SVGF. 
+
+• Spatial filter. A single à-trous iteration (stride 1) of the 3×3 binomial kernel 116 [1 2 1; 2 4 2; 1 2 1] (we tried multiple iterations and it blurs the output vio-lently, causing significant visual quality downgrade. Thus, we only kept 1 iteration.). Per-tap weights com-bine a relative-depth bilateral term against the 3×3-smoothed centre depth, exp  −| ∆z|/(σz ¯z+10 −2) with 
+
+σz = 0 .3, and the variance-guided luminance term 
+
+exp  −| ∆l|/(σl
+
+√var + 10 −2) with σl = 8 , where 
+
+var = max(0 , ¯m2 − ¯m21) is estimated from the 3×3-averaged moments. The paper’s depth-gradient and nor-mal terms are dropped: the 1 spp winner depth jitters between surfaces, so screen-space depth gradients are noise (they quantise the filter taps into a visible grid), and no surface normals exist. All parameters ( α = 0 .02 , one à-trous iteration, σl = 8 ,
+
+σz = 0 .3, disocclusion threshold 0.4) were hand-tuned on the interactive viewer for the best visual trade-off between residual noise and blur; per-track numbers are included in Table 13. 
+
+# F Per-Scene Rendering Performance 
+
+Table 9 reports the per-scene per-frame times underlying the main text’s performance table, measured on the navi-gation tracks (RTX 3090, median of three pipelined runs). Sorted alpha blending varies widely with scene content ( 4.5–
+
+13 .7 ms), while the full stochastic pipeline stays in a narrow band ( 3.4–4.0 ms); the denoiser’s marginal cost over raw ras-terization is about 1.0 ms on every scene. Table 8 adds the SVGF baseline and the zero-shot variant, which share the same stochastic rasterization front end and differ only in the post-processing stage. 12 Scene SVGF Ours (zero-shot) bicycle 2.94 3.76 bonsai 2.63 3.44 counter 2.91 3.66 garden 2.97 3.75 kitchen 3.00 3.76 room 3.04 3.79 stump 2.56 3.35 mean 2.86 3.64 
+
+Table 8: Per-scene per-frame rendering time (ms) for the SVGF baseline and the zero-shot variant, measured under the identical protocol as Table 9. Both consume the same 1 spp stochastic stream; SVGF replaces the learned post-processing with hand-tuned variance-guided filtering, and the zero-shot variant skips per-scene denoiser training. 
+
+Scene 2DGS 2DGS (hw) Raw ST-TAA Ours Speedup bicycle 29.32 13.73 2.86 3.03 3.95 3.5 ×
+
+bonsai 17.66 8.14 2.49 2.66 3.52 2.3 ×
+
+counter 16.24 6.33 2.74 2.89 3.75 1.7 ×
+
+garden 16.27 6.57 2.79 2.97 3.85 1.7 ×
+
+kitchen 10.38 4.49 2.84 3.01 3.86 1.2 ×
+
+room 13.94 6.18 2.89 3.04 3.88 1.6 ×
+
+stump 21.91 10.47 2.38 2.53 3.44 3.0 ×
+
+mean 17.96 7.99 2.71 2.88 3.75 2.1 ×
+
+Table 9: Per-scene per-frame rendering time (ms) on the navigation tracks. 2DGS is the official CUDA tile ren-derer with auxiliary channels removed; 2DGS (hw) is our hardware-rasterized reimplementation of the same sorted alpha-blending algorithm; Raw is 1 spp stochastic rasteriza-tion; ST-TAA adds the baseline temporal accumulation; Ours 
+
+is the full denoising pipeline. Speedup is 2DGS (hw) over Ours. 
+
+# G Static Convergence Curve 
+
+Figure 5 shows how static-view quality builds up over the first accumulated frames. Each point renders the same static view for k consecutive frames and reports PSNR against ground truth, averaged over the 24 held-out views of garden. On static views ST-TAA reduces to equal-weight Monte-Carlo accu-mulation. We verified its curve coincides with an explicit ref-erence accumulator to within 0.02 dB over the whole range. Our denoiser converges markedly faster at low frame counts because its spatially filtered denoised path carries the output before temporal history builds up, and then stays on the same Monte-Carlo convergence trajectory as plain accumulation. 
+
+# H Variance Gate Ablation 
+
+Table 10 ablates the variance gate on the garden navigation track: forcing the per-pixel composition weight g to either 1 2 4 8 16 Frames Accumulated 16 18 20 22 24 26 PSNR (dB) 
+
+> Ours ST-TAA Vanilla 2DGS (26.73)
+
+Figure 5: Static-view convergence on garden. PSNR versus the number of accumulated frames on a static camera, av-eraged over the 24 held-out views. The dashed line marks the deterministic vanilla 2DGS renderer, which renders each frame identically and independently of accumulation. 
+
+Variant PSNR ↑ SSIM ↑ LPIPS ↓
+
+Full model (learned g) 26.63 0.794 0.238 
+
+g ≡ 0 (accumulated path only) 25.14 0.751 0.298 
+
+g ≡ 1 (denoised path only) 25.95 0.752 0.247 
+
+Table 10: Variance-gate ablation on the garden navigation track (same protocol as the ablation table in the paper). g is the per-pixel weight of the denoised path in the final composition in the main text; forcing it to either path exclusively degrades all three metrics. The learned gate improves over the better fixed extreme by 0.68 dB PSNR. path exclusively is strictly worse than the learned gate on all three metrics. 
+
+# I Per-Scene and Per-Track Results 
+
+Tables 11 and 12 report the per-scene PSNR underlying the main text’s static-quality averages, and Table 13 reports the per-track numbers underlying the main text’s navigation ta-ble. Table 14 reports the per-track breakdown of the offi-cial StochasticSplats 1 spp/4 spp rows. Table 15 reports the per-track breakdown of the main text’s zero-shot transfer ex-periment. The hand-recorded navigation camera tracks used for all track evaluations are provided in the code supplement under data/tracks/ .
+
+Denoiser stage. Table 16 lists the full Stage-4 configura-tion. 13 PSNR ↑ per scene Average Method bicycle bonsai counter garden kitchen room stump PSNR ↑ SSIM ↑ LPIPS ↓
+
+2DGS 24.71 32.12 28.82 26.73 32.49 31.53 29.74 29.45 0.875 0.199 Ref. (1024) 24.20 30.65 28.14 26.15 30.24 30.51 27.88 28.25 0.851 0.202 ST-TAA (128) 24.08 30.10 27.83 25.86 29.76 30.14 27.63 27.92 0.822 0.219 
+
+Ours (16) 23.58 28.80 26.90 24.69 28.40 29.34 26.54 26.89 0.741 0.330 Ours (98) 24.09 30.20 27.84 25.82 29.80 30.22 27.58 27.94 0.822 0.226 Ours (128) 24.13 30.32 27.91 25.90 29.91 30.30 27.65 28.02 0.829 0.217 Ours (zero-shot, 16) 23.66 28.96 26.99 24.83 28.56 29.33 26.67 27.00 0.746 0.332 Ours (zero-shot, 128) 24.14 30.33 27.92 25.92 29.93 30.29 27.66 28.03 0.829 0.217 
+
+Table 11: Static quality on the MipNeRF360 held-out test views. 2DGS is the deterministic tile renderer of 2D Gaussian Splatting (Huang et al.). ST-TAA is the baseline adapted from StochasticSplats (Kheradmand et al.): temporal accumulation over 128 static frames without a learned denoiser. Ref. (1024) is the Monte-Carlo accumulation reference (main text, Experimental Setup). 
+
+Ours renders through the learned denoiser at 16, 98, or 128 accumulated frames; Ours (zero-shot) deploys the room checkpoint on every scene with no per-scene denoiser training (main text, Zero-Shot Transfer). Per-scene PSNR with dataset averages of all metrics; bold marks the better of the equal-time pair, ST-TAA (128) vs. Ours (98), in each column (both when equal after rounding).                                                                                      
+
+> PSNR ↑per scene Average Method Barn Caterpillar Church Courthouse Ignatius Meetingroom Truck PSNR ↑SSIM ↑LPIPS ↓
+> 2DGS 22.82 20.33 21.52 21.73 19.78 22.68 21.65 21.50 0.700 0.379 Ref. (1024) 22.39 19.84 19.87 21.17 19.11 21.42 21.04 20.69 0.675 0.388 ST-TAA (128) 22.35 19.75 19.75 21.11 19.05 21.30 20.96 20.61 0.635 0.431
+> Ours (16) 22.07 19.46 19.42 20.83 18.79 21.01 20.72 20.33 0.548 0.496 Ours (98) 22.32 19.74 19.75 21.09 19.03 21.32 20.98 20.60 0.631 0.436 Ours (128) 22.34 19.77 19.78 21.11 19.05 21.34 21.00 20.63 0.640 0.428 Ours (zero-shot, 16) 22.04 19.40 19.37 20.80 18.74 20.97 20.71 20.29 0.539 0.501 Ours (zero-shot, 128) 22.34 19.76 19.77 21.10 19.05 21.34 20.99 20.62 0.639 0.428
+
+Table 12: Static quality on TanksAndTemples. All methods are trained on the full capture of each scene; we evaluate every 8th frame. Rows follow Table 11; bold marks the better of the equal-time pair, ST-TAA (128) vs. Ours (98), in each column (both when equal after rounding). Ours (zero-shot) deploys the room checkpoint with no per-scene denoiser training (main text, Zero-Shot Transfer). 14 PSNR ↑ / LPIPS ↓ SSIM ↑ / CVVDP ↑
+
+Track 1 spp ST-TAA SVGF Ref. Ours 1 spp ST-TAA SVGF Ref. Ours bicycle (161 frames) 16.81 19.82 22.05 29.87 26.39 0.289 0.407 0.709 0.925 0.807 
+
+0.639 0.588 0.346 0.088 0.284 4.28 5.29 5.23 8.34 6.84 
+
+bonsai (166 frames) 19.28 23.00 28.17 34.54 31.98 0.313 0.486 0.868 0.967 0.914 
+
+0.690 0.629 0.241 0.060 0.253 5.57 6.66 7.23 8.96 8.25 
+
+counter (126 frames) 18.05 20.97 23.98 33.76 30.35 0.257 0.367 0.766 0.956 0.880 
+
+0.717 0.677 0.339 0.099 0.271 4.52 5.42 5.71 8.82 7.50 
+
+garden (157 frames) 16.08 19.61 23.37 31.34 26.63 0.244 0.394 0.720 0.944 0.794 
+
+0.606 0.531 0.308 0.067 0.238 4.60 5.81 6.11 8.80 7.15 
+
+kitchen (181 frames) 19.24 22.33 27.98 33.67 30.95 0.306 0.450 0.854 0.955 0.906 
+
+0.643 0.579 0.240 0.066 0.192 5.69 6.58 7.40 8.93 8.07 
+
+room (185 frames) 20.79 24.00 28.82 34.70 33.64 0.334 0.476 0.884 0.968 0.950 
+
+0.697 0.647 0.232 0.089 0.171 5.46 6.52 7.24 8.80 8.29 
+
+stump (179 frames) 17.54 20.61 24.59 32.89 28.66 0.229 0.347 0.692 0.936 0.815 
+
+0.705 0.656 0.376 0.093 0.300 4.48 5.37 5.11 8.46 6.89 
+
+Average 18.26 21.48 25.57 32.96 29.80 0.282 0.418 0.785 0.950 0.867 
+
+0.671 0.615 0.297 0.080 0.244 4.94 5.95 6.29 8.73 7.57 
+
+Table 13: Track-averaged quality under free camera navigation on MipNeRF360, using the vanilla 2DGS tile renderer as the reference. Each track occupies two rows: the first reports PSNR (left) and SSIM (right), the second LPIPS (left) and CVVDP (right). Raw 1 spp is the single-sample stochastic output; ST-TAA applies generic temporal accumulation without learned trust or spatial filtering; SVGF is the adapted variance-guided filtering baseline (Sec. E); Ref. (1024) is the per-frame Monte-Carlo ceiling (main text, Experimental Setup), not a practical method. The generic TAA warp fails to accumulate reliably under the heavy 1 spp noise, while our learned trust gating keeps the temporal history usable. 
+
+PSNR ↑ SSIM ↑ LPIPS ↓ CVVDP ↑
+
+Track SS 1 spp SS 4 spp SS 1 spp SS 4 spp SS 1 spp SS 4 spp SS 1 spp SS 4 spp bicycle 15.70 20.08 0.275 0.483 0.634 0.523 3.65 6.18 
+
+bonsai 18.84 23.68 0.314 0.557 0.689 0.580 5.21 7.36 
+
+counter 18.13 22.60 0.273 0.475 0.702 0.597 4.31 6.47 
+
+garden 15.90 20.78 0.273 0.528 0.590 0.449 4.54 6.84 
+
+kitchen 18.83 24.48 0.313 0.594 0.641 0.488 5.62 7.71 
+
+room 21.05 25.50 0.365 0.605 0.668 0.560 5.35 7.21 
+
+stump 16.59 20.64 0.229 0.441 0.690 0.581 3.98 6.30 
+
+Average 17.86 22.54 0.292 0.526 0.659 0.540 4.67 6.87 
+
+Table 14: Per-track breakdown of the official StochasticSplats rows of the main text’s navigation table: the official model on its own finetuned 3DGS scenes, measured against its own 1024 spp accumulation (no ground truth exists on free camera tracks). SS 4 spp renders through the official viewer’s multi-sample path with a small fix so that each MSAA sample draws an independent stochastic sample (as released, all samples share one draw). All metrics are computed on every 10th track frame (the stride-10 dumps underlying the corresponding main-table rows; ColorVideoVDP uses the same stride-10 videos). 15 PSNR ↑ SSIM ↑ LPIPS ↓ CVVDP ↑
+
+Track Ours zero-shot Ours zero-shot Ours zero-shot Ours zero-shot bicycle 26.39 25.86 0.807 0.817 0.284 0.255 6.84 6.56 bonsai 31.98 30.91 0.914 0.914 0.253 0.205 8.25 7.83 counter 30.35 29.68 0.880 0.891 0.271 0.248 7.50 7.32 garden 26.63 26.82 0.794 0.808 0.238 0.235 7.15 7.12 kitchen 30.95 30.61 0.906 0.914 0.192 0.162 8.07 8.07 
+
+room 33.64 33.59 0.950 0.948 0.171 0.179 8.29 8.25 stump 28.66 27.91 0.815 0.817 0.300 0.275 6.89 6.51 Average 29.80 29.34 0.867 0.873 0.244 0.223 7.57 7.38 
+
+Table 15: Per-track breakdown of the zero-shot transfer experiment (main text, Zero-Shot Transfer): the room checkpoint deployed verbatim on every scene, with the neural-view payload neutralised (the trust feature V2 is set to zero and the spatial filter falls back to a fixed isotropic kernel, x = y = 2 and ρ = 0 in the covariance parameterisation of the main text). Ours is the per-scene fine-tuned configuration of the main navigation table. The zero-shot variant trades a small PSNR/CVVDP margin for slightly better SSIM/LPIPS. 
+
+Parameter Value finetune steps 15k (4k for fast transfer) loss L1 + 0.05 SSIM + 0.01 LPIPS auxiliary vanilla-colour loss (accumulated path) 0.2
+
+temporal step ratio 0.7
+
+stochastic suffix length K 8
+
+chain-length curriculum 2 → 128 
+
+max perturbation angle / position 3.0◦ / 0.003 × scene radius drift / lateral-dolly chain fractions 0.25 / 0.25 
+
+lateral dolly total length 0.5–1.1 mhistory caps nmax (denoised / accumulated) 24 / 128 
+
+near-static trust regularisers ( ts / th) 0.01 / 0.01 (0.005 / 0.005 in fast transfer) disocclusion mask: depth threshold τd 0.02 (relative) disocclusion mask: min opacity / colour tolerance 0.6 / 0.05 
+
+disocclusion trust penalty weight 0.03 (fast transfer adds 0.05 on both paths) filter axis-symmetry regulariser 0.01 
+
+gate warmup (forced denoised output) 2000 steps gate scalar minimum scale 10 −4
+
+gate time constant τ 8 frames 
+
+Table 16: Stage-4 training configuration. 16
