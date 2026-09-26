@@ -6,47 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-25
-- 运行时间：2026-09-25 22:53:34 UTC
+- 最新运行日期：2026-09-26
+- 运行时间：2026-09-26 22:14:54 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：4
+- 本次总论文数：4
+- 精读区：0
 - 速读区：4
 
 ### 今日简报（AI）
-- 今日共生成 8 篇推荐（精读 4 篇，速读 4 篇）
-- 精读：《TOLA: Text-aware One-Step Latent Adaptation for Diffusion-based Text Image Super-Resolution》（10.0/10）, 《CARE: Condition-Aware Representation Regularization for Diffusion Models》（8.0/10）
-- 速读：《Entropy-map SSIM analysis of Salt and Pepper Noise Removal via Recursive Median Filterring》（7.0/10）, 《A Study of the Limits of Collaborative DCT-Based Image Denoising via Interpretable Neural Networks》（7.0/10）, 《GAPS: Generative Active Pseudo-view Selection for Sparse-View 3D Gaussian Splatting》（6.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202609/25/README](/202609/25/README)
+今日速读4篇、精读挂零，OREO以7.0/10领跑3D生成保真度对齐。  
+最值得看的是OREO的3D生成保真度对齐，以及DeepFusion的布局自回归与扩散融合视觉文本生成。  
+普通读者可先读OREO摘要和结论，再按兴趣扫另两篇速读。
+- 详情：[/202609/26/README](/202609/26/README)
 
 ### 精读区论文标签
-1. [TOLA: Text-aware One-Step Latent Adaptation for Diffusion-based Text Image Super-Resolution](/202609/25/2609.29240v1-tola-text-aware-one-step-latent-adaptation-for-diffusion-based-text-image-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：基于扩散的文本图像超分辨率
-2. [CARE: Condition-Aware Representation Regularization for Diffusion Models](/202609/25/2609.28561v1-care-condition-aware-representation-regularization-for-diffusion-models)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：面向扩散模型训练的条件感知表示正则化
-3. [Generative Atmospheric Super-Resolution from Heterogeneous In Situ Observations through Composable Interfaces](/202609/25/2609.29027v1-generative-atmospheric-super-resolution-from-heterogeneous-in-situ-observations-through-composable-interfaces)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：结合预训练扩散先验的生成式大气超分辨率
-4. [FB-GDM: Fully-Bayesian Guided Diffusion Models for High-Dimensional Linear Inverse Problems via Unsupervised Variational Inference](/202609/25/2609.29216v1-fb-gdm-fully-bayesian-guided-diffusion-models-for-high-dimensional-linear-inverse-problems-via-unsupervised-variational-inference)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：面向线性逆问题的全贝叶斯引导扩散模型
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Entropy-map SSIM analysis of Salt and Pepper Noise Removal via Recursive Median Filterring](/202609/25/2609.25266v1-entropy-map-ssim-analysis-of-salt-and-pepper-noise-removal-via-recursive-median-filterring)  
+1. [OREO: Fidelity Alignment in 3D Generation via On-the-fly Rendering-Editing Optimization](/202609/26/2609.29788v1-oreo-fidelity-alignment-in-3d-generation-via-on-the-fly-rendering-editing-optimization)  
    标签：评分：7.0/10、query:real-ir
-   evidence：图像去噪修复并提出熵图SSIM评价指标
-2. [A Study of the Limits of Collaborative DCT-Based Image Denoising via Interpretable Neural Networks](/202609/25/2609.29334v1-a-study-of-the-limits-of-collaborative-dct-based-image-denoising-via-interpretable-neural-networks)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：图像去噪作为基础图像修复问题
-3. [GAPS: Generative Active Pseudo-view Selection for Sparse-View 3D Gaussian Splatting](/202609/25/2609.23436v2-gaps-generative-active-pseudo-view-selection-for-sparse-view-3d-gaussian-splatting)  
+   evidence：利用二维扩散先验与强化编辑提升三维生成保真度
+2. [Planning and Rendering in Concert: DeepFusion of Autoregressive Layouts and Diffusion for Visual Text Generation](/202609/26/2609.22916v1-planning-and-rendering-in-concert-deepfusion-of-autoregressive-layouts-and-diffusion-for-visual-text-generation)  
    标签：评分：6.0/10、query:real-ir
-   evidence：用预训练图像扩散模型生成伪视角以监督三维高斯泼溅
-4. [Code Plans, Diffusion Renders: Open-Ended Generative World Modeling](/202609/25/2609.26458v1-code-plans-diffusion-renders-open-ended-generative-world-modeling)  
+   evidence：自回归布局规划与连续扩散渲染的联合学习
+3. [Belted Engression: Sufficient Dimension Reduction for Generative Distributional Regression](/202609/26/2609.23789v1-belted-engression-sufficient-dimension-reduction-for-generative-distributional-regression)  
    标签：评分：6.0/10、query:real-ir
-   evidence：结合视频生成的生成式世界建模
+   evidence：生成式分布回归框架
+4. [Orlicz space relaxation of total variation denoising](/202609/26/2609.26645v1-orlicz-space-relaxation-of-total-variation-denoising)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：变分全变分图像去噪模型
 
 
 <div class="dpr-home-promo-card">
