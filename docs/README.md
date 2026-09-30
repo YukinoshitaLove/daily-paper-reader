@@ -6,89 +6,71 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-29
-- 运行时间：2026-09-29 23:38:58 UTC
+- 最新运行日期：2026-09-30
+- 运行时间：2026-09-30 23:22:08 UTC
 - 运行状态：成功
-- 本次总论文数：22
-- 精读区：11
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 22 篇推荐（精读 11 篇，速读 11 篇）
-- 精读：《PhoenixSR: Generative Heterogeneous Distillation Unleashes Efficient Models for Real-World Super-Resolution》（10.0/10）, 《LoCoVSR: Local Context Diffusion Posterior Sampling for Video Super-Resolution》（10.0/10）
-- 速读：《Learning to Replace MCMC in Split-Gibbs Diffusion Posterior Sampling via Deep Unfolding》（8.0/10）, 《Learning Polarization Image Restoration with General Restoration Priors》（8.0/10）, 《CLIMB-flow: Coupled Linear Inverse posterior sampling via Multiscale-Based flow》（8.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202609/29/README](/202609/29/README)
+今日精选 17 篇图像超分与增强研究，精读 6 篇、速读 11 篇。最值得关注的是物理引导的低场 MRI 超分（9.0 分）与域自适应零样本增强（9.0 分），前者用退化模型结合 SRGAN，后者靠局部约束扩散引导。普通读者可优先看这两篇的精读笔记，再按需浏览多轮图像编辑与工具参数控制等速读方向。
+- 详情：[/202609/30/README](/202609/30/README)
 
 ### 精读区论文标签
-1. [PhoenixSR: Generative Heterogeneous Distillation Unleashes Efficient Models for Real-World Super-Resolution](/202609/29/2609.30988v1-phoenixsr-generative-heterogeneous-distillation-unleashes-efficient-models-for-real-world-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：生成式异构蒸馏迁移扩散先验用于真实世界超分辨率
-2. [LoCoVSR: Local Context Diffusion Posterior Sampling for Video Super-Resolution](/202609/29/2609.32742v1-locovsr-local-context-diffusion-posterior-sampling-for-video-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：基于扩散后验采样的视频超分辨率
-3. [In-Token Learning for High-Fidelity Image Restoration via Diffusion Transformers](/202609/29/2609.33523v1-in-token-learning-for-high-fidelity-image-restoration-via-diffusion-transformers)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：基于扩散Transformer的图像修复与超分辨率
-4. [Fill2SR: Repurposing Inpainting Diffusion Transformers for Real-World Super-Resolution](/202609/29/2609.33582v1-fill2sr-repurposing-inpainting-diffusion-transformers-for-real-world-super-resolution)  
-   标签：评分：10.0/10、query:real-ir
-   evidence：复用修复扩散Transformer实现真实世界超分辨率
-5. [TaskIR: Task-Driven Image Restoration via Degradation Adaptation and Task Feedback](/202609/29/2609.31170v1-taskir-task-driven-image-restoration-via-degradation-adaptation-and-task-feedback)  
+1. [PGDM-MRSRGAN: Physics-Guided Degradation Model with an SRGAN Framework for Magnetic Resonance Image Super-Resolution: Applications in Low-Field MRI](/202609/30/2609.30431v1-pgdm-mrsrgan-physics-guided-degradation-model-with-an-srgan-framework-for-magnetic-resonance-image-super-resolution-applications-in-low-field-mri)  
    标签：评分：9.0/10、query:real-ir
-   evidence：基于退化适配的两阶段统一任务驱动图像修复
-6. [Convergent Plug-and-Play Image Restoration with Annealed Noise Levels](/202609/29/2609.32393v1-convergent-plug-and-play-image-restoration-with-annealed-noise-levels)  
+   evidence：物理引导退化模型与SRGAN用于MRI超分辨
+2. [Domain-adaptive Zero-Shot Image Enhancement via Locality-Constrained Diffusion Guidance](/202609/30/2609.35289v1-domain-adaptive-zero-shot-image-enhancement-via-locality-constrained-diffusion-guidance)  
    标签：评分：9.0/10、query:real-ir
-   evidence：带退火噪声水平的即插即用图像修复收敛性分析
-7. [DPAMixerSR: An Efficient Degradation-Pattern-Aware Model for Image Super-Resolution](/202609/29/2609.32705v1-dpamixersr-an-efficient-degradation-pattern-aware-model-for-image-super-resolution)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：退化模式感知的高效图像超分辨率
-8. [Residual Diffusion Implicit Models](/202609/29/2609.33020v1-residual-diffusion-implicit-models)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：残差扩散隐式模型使前向过程对齐真实退化以求解逆问题
-9. [Perturb-and-Solve: Efficient Learned-Operator Conditioning for Latent Diffusion Inverse Problems](/202609/29/2609.33171v1-perturb-and-solve-efficient-learned-operator-conditioning-for-latent-diffusion-inverse-problems)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：潜扩散逆问题用于去模糊、修复与超分辨率
-10. [Constrained Edit Fields for Training-Free Flow Editing](/202609/29/2609.33735v1-constrained-edit-fields-for-training-free-flow-editing)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于整流流模型的免训练文本引导图像编辑
-11. [ENet-GP: Unified Document Image Restoration](/202609/29/2609.33758v1-enet-gp-unified-document-image-restoration)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：面向复合退化的统一文档图像修复
+   evidence：基于局部性约束扩散引导的零样本图像增强
+3. [DecFlowEdit: Self-Localized Flow-based Image Editing via Guidance Decoupling](/202609/30/2609.34237v1-decflowedit-self-localized-flow-based-image-editing-via-guidance-decoupling)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于引导解耦的流式图像编辑
+4. [Livin' on a Prior: Likelihood Score Approximation for Inverse Problems](/202609/30/2609.34446v1-livin-on-a-prior-likelihood-score-approximation-for-inverse-problems)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：利用生成先验求解包括修复在内的逆问题
+5. [Weighting Schedules Govern What and When Score-Based Generative Models Learn from Multimodal Data](/202609/30/2609.35322v1-weighting-schedules-govern-what-and-when-score-based-generative-models-learn-from-multimodal-data)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：研究分数生成扩散模型的权重调度机制
+6. [Simplex Diffusion Models](/202609/30/2609.35553v1-simplex-diffusion-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：将扩散过程提升到概率单纯形的离散扩散模型
 
 ### 速读区论文标签
-1. [Learning to Replace MCMC in Split-Gibbs Diffusion Posterior Sampling via Deep Unfolding](/202609/29/2609.30539v1-learning-to-replace-mcmc-in-split-gibbs-diffusion-posterior-sampling-via-deep-unfolding)  
+1. [On-Policy Self-Distillation for Multi-Turn Image Editing](/202609/30/2609.35611v1-on-policy-self-distillation-for-multi-turn-image-editing)  
    标签：评分：8.0/10、query:real-ir
-   evidence：用深度展开替代Split-Gibbs扩散后验采样中的MCMC
-2. [Learning Polarization Image Restoration with General Restoration Priors](/202609/29/2609.30728v1-learning-polarization-image-restoration-with-general-restoration-priors)  
+   evidence：面向多轮图像编辑的在线策略自蒸馏
+2. [FlowTool: Controlling Tool Parameter in Image Retouching via Flow Matching](/202609/30/2609.35673v1-flowtool-controlling-tool-parameter-in-image-retouching-via-flow-matching)  
    标签：评分：8.0/10、query:real-ir
-   evidence：全能偏振图像复原框架
-3. [CLIMB-flow: Coupled Linear Inverse posterior sampling via Multiscale-Based flow](/202609/29/2609.33834v1-climb-flow-coupled-linear-inverse-posterior-sampling-via-multiscale-based-flow)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：扩散先验用于成像贝叶斯逆问题
-4. [SNaP: One-Step Posterior Sampling for Noisy Inverse Problems](/202609/29/2609.34071v1-snap-one-step-posterior-sampling-for-noisy-inverse-problems)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：用流模型对含噪逆问题的一步后验采样
-5. [Structured Residual Connectivity Matters for Diffusion Transformers](/202609/29/2609.33203v1-structured-residual-connectivity-matters-for-diffusion-transformers)  
+   evidence：将工具式图像修饰建模为流匹配的图像编辑框架
+3. [ContraFM-S2O: Flow Matching-Based One-step SAR-to-Optical Image Translation Model with Contrastive Learning](/202609/30/2609.31378v1-contrafm-s2o-flow-matching-based-one-step-sar-to-optical-image-translation-model-with-contrastive-learning)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向扩散Transformer的结构化残差连接改进
-6. [RepFlow: Reciprocal Supervision Improves Generation and Representation in Flow Models](/202609/29/2609.33217v1-repflow-reciprocal-supervision-improves-generation-and-representation-in-flow-models)  
+   evidence：基于流匹配的SAR到光学图像翻译生成模型
+4. [PredRA: Fast Medical Image Translation by Deterministic Component Extraction and Controlled Stochastic Refinement](/202609/30/2609.31912v1-predra-fast-medical-image-translation-by-deterministic-component-extraction-and-controlled-stochastic-refinement)  
    标签：评分：7.0/10、query:real-ir
-   evidence：互惠监督同时提升流生成模型的生成与表示
-7. [InfoEdit: Probing Global Layout Reasoning in Infographic Editing](/202609/29/2609.33286v1-infoedit-probing-global-layout-reasoning-in-infographic-editing)  
+   evidence：确定性成分提取与受控随机细化结合的快速医学图像翻译
+5. [An End-to-End Latent-Rollout Approach for Pushing Few-Step ImageNet-$256$ Generation to FID $1.11$ without Fréchet Losses](/202609/30/2609.32376v1-an-end-to-end-latent-rollout-approach-for-pushing-few-step-imagenet-256-generation-to-fid-111-without-frchet-losses)  
    标签：评分：7.0/10、query:real-ir
-   evidence：信息图编辑与全局布局推理基准
-8. [Mixed-Noise Plug-and-Play with Infimal Convolution Fidelities and Multiple Priors](/202609/29/2609.33897v1-mixed-noise-plug-and-play-with-infimal-convolution-fidelities-and-multiple-priors)  
+   evidence：端到端潜空间展开实现少步ImageNet生成
+6. [RefAdapt-DiT: Adaptive Joint Attention for Reference-Conditioned Diffusion Transformers](/202609/30/2609.32415v1-refadapt-dit-adaptive-joint-attention-for-reference-conditioned-diffusion-transformers)  
    标签：评分：7.0/10、query:real-ir
-   evidence：可证明收敛的即插即用逆成像方法
-9. [IDM-Net: A Lightweight Illumination-Decoupled Modulation Network for Low-Light Image Enhancement](/202609/29/2609.30962v1-idm-net-a-lightweight-illumination-decoupled-modulation-network-for-low-light-image-enhancement)  
+   evidence：参考条件扩散Transformer的自适应联合注意力
+7. [PIC-UIE: Predicting Image-Adaptive Corrections for Lightweight Underwater Image Enhancement](/202609/30/2609.33318v1-pic-uie-predicting-image-adaptive-corrections-for-lightweight-underwater-image-enhancement)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：轻量水下图像增强恢复可见度、色彩与细节
+8. [JIVE: Jacobian-Informed Volume Expansion for Diverse Generative Sampling](/202609/30/2609.33906v1-jive-jacobian-informed-volume-expansion-for-diverse-generative-sampling)  
+   标签：评分：7.0/10、query:real-ir
+   evidence：免训练提升生成采样多样性的框架
+9. [Fysiverse-3D-Vision Technical Report: Generating Executable 3D Worlds from Images through Unified Spatial Reasoning](/202609/30/2609.25741v1-fysiverse-3d-vision-technical-report-generating-executable-3d-worlds-from-images-through-unified-spatial-reasoning)  
    标签：评分：6.0/10、query:real-ir
-   evidence：低光照图像增强，属于图像修复任务
-10. [Panoptic Scene Program Diffusion Transformer](/202609/29/2609.31780v1-panoptic-scene-program-diffusion-transformer)  
+   evidence：从单张图像生成式重建3D场景
+10. [InGuard: Towards Generalized Inner Guardrail for Safe Text-to-Image Generation](/202609/30/2609.27620v1-inguard-towards-generalized-inner-guardrail-for-safe-text-to-image-generation)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向组合式文本生成图像的全景场景程序扩散Transformer
-11. [One-Step Generative Modeling via Unbalanced Optimal Transport](/202609/29/2609.32708v1-one-step-generative-modeling-via-unbalanced-optimal-transport)  
+   evidence：利用模型自身表征实现安全文本到图像生成的内部护栏
+11. [Spackle: Completing Large View Single Image NVS with Adaptive Gaussians](/202609/30/2609.30941v1-spackle-completing-large-view-single-image-nvs-with-adaptive-gaussians)  
    标签：评分：6.0/10、query:real-ir
-   evidence：基于非平衡最优传输的一步生成建模
+   evidence：结合3D高斯泼溅与扩散模型的混合框架
 
 
 <div class="dpr-home-promo-card">
