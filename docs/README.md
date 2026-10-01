@@ -6,71 +6,56 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-30
-- 运行时间：2026-09-30 23:22:08 UTC
+- 最新运行日期：2026-10-01
+- 运行时间：2026-10-01 23:41:27 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：12
+- 精读区：1
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇图像超分与增强研究，精读 6 篇、速读 11 篇。最值得关注的是物理引导的低场 MRI 超分（9.0 分）与域自适应零样本增强（9.0 分），前者用退化模型结合 SRGAN，后者靠局部约束扩散引导。普通读者可优先看这两篇的精读笔记，再按需浏览多轮图像编辑与工具参数控制等速读方向。
-- 详情：[/202609/30/README](/202609/30/README)
+今日筛选12篇图像编辑与生成论文，精读1篇、速读11篇，聚焦可控编辑与模型安全。最值得关注的是8.0分的免训练空间控制方法 Attention-Scoped Guidance，以及速读中 HyperErase 的多概念擦除方向。普通读者可优先看免训练编辑思路，成本低、易上手，再按需了解概念擦除。
+- 详情：[/202610/01/README](/202610/01/README)
 
 ### 精读区论文标签
-1. [PGDM-MRSRGAN: Physics-Guided Degradation Model with an SRGAN Framework for Magnetic Resonance Image Super-Resolution: Applications in Low-Field MRI](/202609/30/2609.30431v1-pgdm-mrsrgan-physics-guided-degradation-model-with-an-srgan-framework-for-magnetic-resonance-image-super-resolution-applications-in-low-field-mri)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：物理引导退化模型与SRGAN用于MRI超分辨
-2. [Domain-adaptive Zero-Shot Image Enhancement via Locality-Constrained Diffusion Guidance](/202609/30/2609.35289v1-domain-adaptive-zero-shot-image-enhancement-via-locality-constrained-diffusion-guidance)  
-   标签：评分：9.0/10、query:real-ir
-   evidence：基于局部性约束扩散引导的零样本图像增强
-3. [DecFlowEdit: Self-Localized Flow-based Image Editing via Guidance Decoupling](/202609/30/2609.34237v1-decflowedit-self-localized-flow-based-image-editing-via-guidance-decoupling)  
+1. [Attention-Scoped Guidance: Training-Free Spatial Control for Image Editing](/202610/01/2609.37492v1-attention-scoped-guidance-training-free-spatial-control-for-image-editing)  
    标签：评分：8.0/10、query:real-ir
-   evidence：基于引导解耦的流式图像编辑
-4. [Livin' on a Prior: Likelihood Score Approximation for Inverse Problems](/202609/30/2609.34446v1-livin-on-a-prior-likelihood-score-approximation-for-inverse-problems)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：利用生成先验求解包括修复在内的逆问题
-5. [Weighting Schedules Govern What and When Score-Based Generative Models Learn from Multimodal Data](/202609/30/2609.35322v1-weighting-schedules-govern-what-and-when-score-based-generative-models-learn-from-multimodal-data)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：研究分数生成扩散模型的权重调度机制
-6. [Simplex Diffusion Models](/202609/30/2609.35553v1-simplex-diffusion-models)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：将扩散过程提升到概率单纯形的离散扩散模型
+   evidence：面向指令图像编辑的免训练空间控制采样器
 
 ### 速读区论文标签
-1. [On-Policy Self-Distillation for Multi-Turn Image Editing](/202609/30/2609.35611v1-on-policy-self-distillation-for-multi-turn-image-editing)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：面向多轮图像编辑的在线策略自蒸馏
-2. [FlowTool: Controlling Tool Parameter in Image Retouching via Flow Matching](/202609/30/2609.35673v1-flowtool-controlling-tool-parameter-in-image-retouching-via-flow-matching)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：将工具式图像修饰建模为流匹配的图像编辑框架
-3. [ContraFM-S2O: Flow Matching-Based One-step SAR-to-Optical Image Translation Model with Contrastive Learning](/202609/30/2609.31378v1-contrafm-s2o-flow-matching-based-one-step-sar-to-optical-image-translation-model-with-contrastive-learning)  
+1. [HyperErase: Scale-Calibrated Hypernetwork for Multi-Concept Erasure in Text-to-Image Models](/202610/01/2609.31154v1-hypererase-scale-calibrated-hypernetwork-for-multi-concept-erasure-in-text-to-image-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于流匹配的SAR到光学图像翻译生成模型
-4. [PredRA: Fast Medical Image Translation by Deterministic Component Extraction and Controlled Stochastic Refinement](/202609/30/2609.31912v1-predra-fast-medical-image-translation-by-deterministic-component-extraction-and-controlled-stochastic-refinement)  
+   evidence：文本到图像生成模型中的超网络概念擦除
+2. [Precise Editing and Flexible Referencing for Interactable Worlds](/202610/01/2609.34470v1-precise-editing-and-flexible-referencing-for-interactable-worlds)  
    标签：评分：7.0/10、query:real-ir
-   evidence：确定性成分提取与受控随机细化结合的快速医学图像翻译
-5. [An End-to-End Latent-Rollout Approach for Pushing Few-Step ImageNet-$256$ Generation to FID $1.11$ without Fréchet Losses](/202609/30/2609.32376v1-an-end-to-end-latent-rollout-approach-for-pushing-few-step-imagenet-256-generation-to-fid-111-without-frchet-losses)  
+   evidence：视频世界模型的精确编辑与灵活引用
+3. [SAGE: Subspace Alignment for Classifier-Free Guidance in Mixture-of-Experts Diffusion Models](/202610/01/2609.34525v1-sage-subspace-alignment-for-classifier-free-guidance-in-mixture-of-experts-diffusion-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：端到端潜空间展开实现少步ImageNet生成
-6. [RefAdapt-DiT: Adaptive Joint Attention for Reference-Conditioned Diffusion Transformers](/202609/30/2609.32415v1-refadapt-dit-adaptive-joint-attention-for-reference-conditioned-diffusion-transformers)  
+   evidence：面向专家混合扩散模型无分类器引导的子空间对齐正则化
+4. [FestDPO: Few-step Generator Alignment with Direct Preference Optimization](/202610/01/2609.34673v1-festdpo-few-step-generator-alignment-with-direct-preference-optimization)  
    标签：评分：7.0/10、query:real-ir
-   evidence：参考条件扩散Transformer的自适应联合注意力
-7. [PIC-UIE: Predicting Image-Adaptive Corrections for Lightweight Underwater Image Enhancement](/202609/30/2609.33318v1-pic-uie-predicting-image-adaptive-corrections-for-lightweight-underwater-image-enhancement)  
+   evidence：用直接偏好优化对齐少步生成模型
+5. [eval-unlearn: Benchmarking unlearning in Text-to-Image Diffusion Models](/202610/01/2609.35269v1-eval-unlearn-benchmarking-unlearning-in-text-to-image-diffusion-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：轻量水下图像增强恢复可见度、色彩与细节
-8. [JIVE: Jacobian-Informed Volume Expansion for Diverse Generative Sampling](/202609/30/2609.33906v1-jive-jacobian-informed-volume-expansion-for-diverse-generative-sampling)  
+   evidence：面向文本到图像扩散模型概念遗忘的评测基准框架
+6. [Improving Generative Model Self-Training with Geometrically Modified Outputs](/202610/01/2609.35512v1-improving-generative-model-self-training-with-geometrically-modified-outputs)  
    标签：评分：7.0/10、query:real-ir
-   evidence：免训练提升生成采样多样性的框架
-9. [Fysiverse-3D-Vision Technical Report: Generating Executable 3D Worlds from Images through Unified Spatial Reasoning](/202609/30/2609.25741v1-fysiverse-3d-vision-technical-report-generating-executable-3d-worlds-from-images-through-unified-spatial-reasoning)  
+   evidence：利用几何修改输出的生成模型自训练
+7. [Latent Space Is Not Flat: Rethinking Latent Structure for 3D Medical Image Synthesis](/202610/01/2609.32794v1-latent-space-is-not-flat-rethinking-latent-structure-for-3d-medical-image-synthesis)  
    标签：评分：6.0/10、query:real-ir
-   evidence：从单张图像生成式重建3D场景
-10. [InGuard: Towards Generalized Inner Guardrail for Safe Text-to-Image Generation](/202609/30/2609.27620v1-inguard-towards-generalized-inner-guardrail-for-safe-text-to-image-generation)  
+   evidence：面向三维医学图像合成的潜生成模型
+8. [OOD Generalization as a Bifurcation Problem](/202610/01/2609.33562v1-ood-generalization-as-a-bifurcation-problem)  
    标签：评分：6.0/10、query:real-ir
-   evidence：利用模型自身表征实现安全文本到图像生成的内部护栏
-11. [Spackle: Completing Large View Single Image NVS with Adaptive Gaussians](/202609/30/2609.30941v1-spackle-completing-large-view-single-image-nvs-with-adaptive-gaussians)  
+   evidence：面向连续时间生成模型分布外生成的混合采样引导策略
+9. [PrefLUT: Reusable and Refinable Personalized Color Editing from Pairwise Preferences](/202610/01/2609.34133v1-preflut-reusable-and-refinable-personalized-color-editing-from-pairwise-preferences)  
    标签：评分：6.0/10、query:real-ir
-   evidence：结合3D高斯泼溅与扩散模型的混合框架
+   evidence：基于可复用偏好建模LUT的个性化色彩编辑
+10. [Enhanced Video Text Editing with Trajectory-Aligned Glyph Rendering](/202610/01/2609.34178v1-enhanced-video-text-editing-with-trajectory-aligned-glyph-rendering)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：基于扩散模型与字形引导的视频文本编辑
+11. [Scaling Versatile 3D Assets Editing with a Million-Scale Dataset](/202610/01/2609.34271v1-scaling-versatile-3d-assets-editing-with-a-million-scale-dataset)  
+   标签：评分：6.0/10、query:real-ir
+   evidence：百万规模数据训练生成流模型进行三维资产编辑
 
 
 <div class="dpr-home-promo-card">
