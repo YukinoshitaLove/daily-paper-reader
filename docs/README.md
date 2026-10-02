@@ -6,56 +6,71 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-10-01
-- 运行时间：2026-10-01 23:41:27 UTC
+- 最新运行日期：2026-10-02
+- 运行时间：2026-10-02 23:32:24 UTC
 - 运行状态：成功
-- 本次总论文数：12
-- 精读区：1
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日筛选12篇图像编辑与生成论文，精读1篇、速读11篇，聚焦可控编辑与模型安全。最值得关注的是8.0分的免训练空间控制方法 Attention-Scoped Guidance，以及速读中 HyperErase 的多概念擦除方向。普通读者可优先看免训练编辑思路，成本低、易上手，再按需了解概念擦除。
-- 详情：[/202610/01/README](/202610/01/README)
+今日精读6篇、速读11篇，共筛出17篇AI论文，重点覆盖逆问题求解与视频超分。最值得看的是《Principled MAP estimation》用MAP估计弥合收敛与性能差距（9.0分），以及《RelayVSR》用大小模型协作实现高效真实视频超分（9.0分）。普通读者可优先从这两篇精读入手，再按兴趣浏览HDR重建与扩散模型动态等速读方向。
+- 详情：[/202610/02/README](/202610/02/README)
 
 ### 精读区论文标签
-1. [Attention-Scoped Guidance: Training-Free Spatial Control for Image Editing](/202610/01/2609.37492v1-attention-scoped-guidance-training-free-spatial-control-for-image-editing)  
+1. [Principled MAP estimation for inverse problems: bridging the gap between convergence and performance](/202610/02/2609.37529v1-principled-map-estimation-for-inverse-problems-bridging-the-gap-between-convergence-and-performance)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：结合扩散去噪器的逆问题 MAP 估计
+2. [RelayVSR: Large-Small Model Collaboration for Efficient Real-World Video Super-Resolution](/202610/02/2609.37850v1-relayvsr-large-small-model-collaboration-for-efficient-real-world-video-super-resolution)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：基于生成模型的高效真实世界视频超分
+3. [Restoring without Forgetting: Filter-Level Continual Image Restoration via Parameter-Space Integrated Gradients](/202610/02/2609.38591v1-restoring-without-forgetting-filter-level-continual-image-restoration-via-parameter-space-integrated-gradients)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：滤波器级持续图像修复框架
+4. [MDIRNET: Multi-Degradation Image Restoration Network via Deep Unfolding](/202610/02/2610.01655v1-mdirnet-multi-degradation-image-restoration-network-via-deep-unfolding)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：统一多退化图像修复网络
+5. [Improved Distributional Diffusion Models](/202610/02/2609.37147v1-improved-distributional-diffusion-models)  
    标签：评分：8.0/10、query:real-ir
-   evidence：面向指令图像编辑的免训练空间控制采样器
+   evidence：面向图像生成的分布扩散模型与DiT骨干
+6. [DC-SAE: Deep Compression Semantic Autoencoder for Faster Diffusion Convergence](/202610/02/2609.39222v1-dc-sae-deep-compression-semantic-autoencoder-for-faster-diffusion-convergence)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：面向潜空间生成模型加速扩散训练的高压缩语义自编码器
 
 ### 速读区论文标签
-1. [HyperErase: Scale-Calibrated Hypernetwork for Multi-Concept Erasure in Text-to-Image Models](/202610/01/2609.31154v1-hypererase-scale-calibrated-hypernetwork-for-multi-concept-erasure-in-text-to-image-models)  
+1. [Lens Flare Removal and Reconstruction](/202610/02/2609.39527v1-lens-flare-removal-and-reconstruction)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：基于扩散模型的大面积镜头光晕去除
+2. [ExpandDiff: Dynamic Range Expanding Diffusion for Single-Image HDR Reconstruction](/202610/02/2609.39624v1-expanddiff-dynamic-range-expanding-diffusion-for-single-image-hdr-reconstruction)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：面向单图像 HDR 重建的扩散流程
+3. [From Modes to Memories: Characterizing the Scale-Space Dynamics of Diffusion Models](/202610/02/2609.39648v1-from-modes-to-memories-characterizing-the-scale-space-dynamics-of-diffusion-models)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：扩散模型去噪器的尺度空间动力学
+4. [Looped Diffusion Transformer](/202610/02/2609.40305v1-looped-diffusion-transformer)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：循环扩散Transformer改进文本到图像扩散模型
+5. [AutoRef: Harness Optimization for Agentic Multi-Reference Image Generation](/202610/02/2609.35530v1-autoref-harness-optimization-for-agentic-multi-reference-image-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：文本到图像生成模型中的超网络概念擦除
-2. [Precise Editing and Flexible Referencing for Interactable Worlds](/202610/01/2609.34470v1-precise-editing-and-flexible-referencing-for-interactable-worlds)  
+   evidence：智能体多参考图像生成的工具链优化
+6. [On the spectral properties of generative denoiser Jacobians](/202610/02/2609.36210v1-on-the-spectral-properties-of-generative-denoiser-jacobians)  
    标签：评分：7.0/10、query:real-ir
-   evidence：视频世界模型的精确编辑与灵活引用
-3. [SAGE: Subspace Alignment for Classifier-Free Guidance in Mixture-of-Experts Diffusion Models](/202610/01/2609.34525v1-sage-subspace-alignment-for-classifier-free-guidance-in-mixture-of-experts-diffusion-models)  
+   evidence：扩散模型去噪器雅可比谱分析与正则化
+7. [Back2Struct: Making Structured Images Editable Again](/202610/02/2609.37016v1-back2struct-making-structured-images-editable-again)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向专家混合扩散模型无分类器引导的子空间对齐正则化
-4. [FestDPO: Few-step Generator Alignment with Direct Preference Optimization](/202610/01/2609.34673v1-festdpo-few-step-generator-alignment-with-direct-preference-optimization)  
+   evidence：从结构化图像恢复可编辑矢量代码
+8. [LDM-is-AE: Latent Diffusion Model is an Auto-Encoder for End-to-End Image Generation](/202610/02/2609.37080v1-ldm-is-ae-latent-diffusion-model-is-an-auto-encoder-for-end-to-end-image-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：用直接偏好优化对齐少步生成模型
-5. [eval-unlearn: Benchmarking unlearning in Text-to-Image Diffusion Models](/202610/01/2609.35269v1-eval-unlearn-benchmarking-unlearning-in-text-to-image-diffusion-models)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：面向文本到图像扩散模型概念遗忘的评测基准框架
-6. [Improving Generative Model Self-Training with Geometrically Modified Outputs](/202610/01/2609.35512v1-improving-generative-model-self-training-with-geometrically-modified-outputs)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：利用几何修改输出的生成模型自训练
-7. [Latent Space Is Not Flat: Rethinking Latent Structure for 3D Medical Image Synthesis](/202610/01/2609.32794v1-latent-space-is-not-flat-rethinking-latent-structure-for-3d-medical-image-synthesis)  
+   evidence：面向图像生成的端到端单阶段潜在扩散模型
+9. [PreviewDiff: Multimodal Critic-Guided Search over Diffusion Latents](/202610/02/2609.36199v1-previewdiff-multimodal-critic-guided-search-over-diffusion-latents)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向三维医学图像合成的潜生成模型
-8. [OOD Generalization as a Bifurcation Problem](/202610/01/2609.33562v1-ood-generalization-as-a-bifurcation-problem)  
+   evidence：面向扩散中间潜变量的免训练测试时搜索
+10. [Visual Anomaly Synthesis for Model Selection in Data Scarcity](/202610/02/2609.37360v1-visual-anomaly-synthesis-for-model-selection-in-data-scarcity)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向连续时间生成模型分布外生成的混合采样引导策略
-9. [PrefLUT: Reusable and Refinable Personalized Color Editing from Pairwise Preferences](/202610/01/2609.34133v1-preflut-reusable-and-refinable-personalized-color-editing-from-pairwise-preferences)  
+   evidence：用预训练生成模型编辑无缺陷图像合成缺陷
+11. [Targeted Visual Counterfactual Explanations for Contrastive Vision-Language Model](/202610/02/2609.37638v2-targeted-visual-counterfactual-explanations-for-contrastive-vision-language-model)  
    标签：评分：6.0/10、query:real-ir
-   evidence：基于可复用偏好建模LUT的个性化色彩编辑
-10. [Enhanced Video Text Editing with Trajectory-Aligned Glyph Rendering](/202610/01/2609.34178v1-enhanced-video-text-editing-with-trajectory-aligned-glyph-rendering)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：基于扩散模型与字形引导的视频文本编辑
-11. [Scaling Versatile 3D Assets Editing with a Million-Scale Dataset](/202610/01/2609.34271v1-scaling-versatile-3d-assets-editing-with-a-million-scale-dataset)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：百万规模数据训练生成流模型进行三维资产编辑
+   evidence：潜在扩散修复模型修改区域生成反事实
 
 
 <div class="dpr-home-promo-card">
