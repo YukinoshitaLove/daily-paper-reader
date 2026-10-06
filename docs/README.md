@@ -6,63 +6,47 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-10-04
-- 运行时间：2026-10-04 22:52:01 UTC
+- 最新运行日期：2026-10-06
+- 运行时间：2026-10-06 00:38:01 UTC
 - 运行状态：成功
-- 本次总论文数：13
-- 精读区：2
-- 速读区：11
+- 本次总论文数：9
+- 精读区：4
+- 速读区：5
 
 ### 今日简报（AI）
-今日共筛出13篇论文，精读2篇、速读11篇，聚焦视觉生成与图像重建。
-
-最值得关注的是两项8分工作：像素扩散模型的对抗训练，以及复合退化下基于人脸与车牌识别的视频超分评测。
-
-普通读者可优先看这两篇精读，若关注生成与重建效率，再顺带浏览速读中的多分辨率即插即用重建和一阶视觉生成统一训练。
-- 详情：[/202610/04/README](/202610/04/README)
+今日精读4篇、速读5篇，视频修复与编辑是主线，FastVR以9.0分领跑。最值得看一步扩散做流式视频修复，以及用运动证据驱动的拖拽式编辑。普通读者可先读FastVR了解实时修复思路，再按需跟进视频生成后训练综述。
+- 详情：[/202610/06/README](/202610/06/README)
 
 ### 精读区论文标签
-1. [Adversarial Training for Pixel Diffusion](/202610/04/2609.38170v1-adversarial-training-for-pixel-diffusion)  
+1. [FastVR: Efficient Streaming Video Restoration with One-Step Diffusion](/202610/06/2609.36757v1-fastvr-efficient-streaming-video-restoration-with-one-step-diffusion)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：一步扩散流式视频修复，提升推理效率
+2. [Drag as Evidence: Motion-Grounded Latent Recomposition for Drag-Based Editing](/202610/06/2609.36755v1-drag-as-evidence-motion-grounded-latent-recomposition-for-drag-based-editing)  
    标签：评分：8.0/10、query:real-ir
-   evidence：通过对抗后训练改进像素扩散模型生成质量
-2. [FANVIDv2: Evaluating Video Super-Resolution by Face and Licence-Plate Recognition Under Compound Degradation](/202610/04/2609.39649v1-fanvidv2-evaluating-video-super-resolution-by-face-and-licence-plate-recognition-under-compound-degradation)  
+   evidence：拖动式图像编辑，将像素空间形变证据注入生成采样轨迹
+3. [BAM! Bayesian Anything Model: a foundation model for generative computational imaging](/202610/06/2609.39660v1-bam-bayesian-anything-model-a-foundation-model-for-generative-computational-imaging)  
    标签：评分：8.0/10、query:real-ir
-   evidence：复合退化下的视频超分辨率评测基准
+   evidence：面向物理感知生成计算成像的基础模型与后验采样
+4. [Consecutive Posterior Fusion for Diffusive Recovery of Unobservable Image Structures](/202610/06/2610.03261v1-consecutive-posterior-fusion-for-diffusive-recovery-of-unobservable-image-structures)  
+   标签：评分：8.0/10、query:real-ir
+   evidence：扩散后验采样恢复逆问题中不可观测的图像结构
 
 ### 速读区论文标签
-1. [Multiresolution Block-Coordinate Plug-and-Play Algorithm for Image Reconstruction](/202610/04/2609.35227v1-multiresolution-block-coordinate-plug-and-play-algorithm-for-image-reconstruction)  
+1. [TripleFlow: Training-Free Video Object Removal by Bridging Residual Editing and Native Generation](/202610/06/2609.39157v1-tripleflow-training-free-video-object-removal-by-bridging-residual-editing-and-native-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：分块坐标的即插即用图像重建
-2. [Unifying Distributional Training for One-Step Visual Generation](/202610/04/2609.35763v3-unifying-distributional-training-for-one-step-visual-generation)  
+   evidence：免训练视频物体移除，耦合编辑与生成
+2. [Video Generation Models: A Survey of Post-Training and Alignment](/202610/06/2610.00812v1-video-generation-models-a-survey-of-post-training-and-alignment)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向一步视觉生成的统一分布训练框架
-3. [Multimodal Flow: Unified Flow Modeling of Language and Vision in Embedding Spaces](/202610/04/2609.40362v1-multimodal-flow-unified-flow-modeling-of-language-and-vision-in-embedding-spaces)  
+   evidence：视频生成模型与后训练对齐综述
+3. [Controlling Polar Exposure to Delay Memorization in Diffusion Models](/202610/06/2610.02780v1-controlling-polar-exposure-to-delay-memorization-in-diffusion-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：语言与视觉的全连续生成模型
-4. [VIEScore2: Unified Image Evaluation with Spatially Grounded Explanations](/202610/04/2610.00994v1-viescore2-unified-image-evaluation-with-spatially-grounded-explanations)  
+   evidence：通过控制极坐标曝光延缓扩散模型记忆化
+4. [ProgressNet: Sketching and Prompting with a Frozen Text-to-Image Model](/202610/06/2610.03512v1-progressnet-sketching-and-prompting-with-a-frozen-text-to-image-model)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向图像生成与编辑任务的统一评估器
-5. [Do MLLM Judges Judge the Edit? Auditing Bias in Image Editing Evaluation with Verified Quality Preservation](/202610/04/2610.01670v1-do-mllm-judges-judge-the-edit-auditing-bias-in-image-editing-evaluation-with-verified-quality-preservation)  
+   evidence：基于冻结文生图模型的免训练渐进式图像编辑
+5. [Depth as Time in One-Step Generative Models](/202610/06/2610.03626v1-depth-as-time-in-one-step-generative-models)  
    标签：评分：7.0/10、query:real-ir
-   evidence：审计多模态大模型对图像编辑的评测偏差
-6. [When Text-to-Image Helps Editing: The Effects of Conditioning During Denoising](/202610/04/2610.01681v1-when-text-to-image-helps-editing-the-effects-of-conditioning-during-denoising)  
-   标签：评分：7.0/10、query:real-ir
-   evidence：借助文生图任务切换的指令式图像编辑
-7. [Mandela-Bench: Multimodal Models Remember Canonical Images Instead of Seeing Them](/202610/04/2609.32763v1-mandela-bench-multimodal-models-remember-canonical-images-instead-of-seeing-them)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：面向指令式图像编辑事实篡改检测的基准
-8. [ViTeX-Bench: Benchmarking High-Fidelity Video Scene Text Editing](/202610/04/2609.40356v1-vitex-bench-benchmarking-high-fidelity-video-scene-text-editing)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：高保真视频场景文本编辑基准
-9. [Manifold-Constrained Initial Noise Optimization for Efficient Generative Model Alignment](/202610/04/2610.00365v1-manifold-constrained-initial-noise-optimization-for-efficient-generative-model-alignment)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：通过噪声优化实现高效生成模型对齐
-10. [Discrete Wasserstein Flows for One-Step Generative Modeling](/202610/04/2610.01355v1-discrete-wasserstein-flows-for-one-step-generative-modeling)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：有限状态空间上的单步生成建模
-11. [Unsupervised Domain Adaptation for Enhanced Radiometer Image Precipitation Estimation using Conditional Flow Matching](/202610/04/2610.01890v1-unsupervised-domain-adaptation-for-enhanced-radiometer-image-precipitation-estimation-using-conditional-flow-matching)  
-   标签：评分：6.0/10、query:real-ir
-   evidence：流匹配用于图像无监督域适应
+   evidence：一步生成模型与扩散去噪轨迹
 
 
 <div class="dpr-home-promo-card">

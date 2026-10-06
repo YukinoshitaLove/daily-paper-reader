@@ -1,0 +1,2726 @@
+CONTROLLING POLAR EXPOSURE TO DELAY MEMO-
+RIZATION IN DIFFUSION MODELS
+Xuanchen Wang
+School of Computer Science
+The University of Sydney
+Sydney, NSW, Australia
+xwan0579@uni.sydney.edu.au
+Heng Wang
+School of Computer Science
+The University of Sydney
+Sydney, NSW, Australia
+heng.wang@sydney.edu.au
+Weidong Cai
+School of Computer Science
+The University of Sydney
+Sydney, NSW, Australia
+tom.cai@sydney.edu.au
+ABSTRACT
+Diffusion models can reach useful sample quality before copying training exam-
+ples, but fast optimization can compress this generalization window by acceler-
+ating sample-specific fitting. We investigate this effect through update geome-
+try and propose Quality-Gated De-whitening (QGD), a controller that retains a
+fast polar-update prefix and progressively restores fixed-gain momentum. Our
+random-feature analysis separates covariance-controlled, curvature-equalized and
+amplitude-controlled memorization clocks. Under aligned spectral assumptions,
+it establishes a finite-exposure condition under which a fixed-gain tail recovers a
+delay proportional to dataset size. QGD implements this principle with a con-
+firmed quality gate, a bounded decay envelope and causal copy feedback. Imme-
+diate switching is the conservative limit; gradual control balances delayed copying
+against continued quality improvement. We pair QGD with Copy-Budgeted Se-
+lection (CBS), which applies simultaneous binomial calibration to a frozen check-
+point family, followed by a fresh evaluation of the released checkpoint. On 2,000-
+image CIFAR-10 subsets, QGD preserves the polar baseline’s quality-arrival time
+while expanding its useful interval by 8.32× and reducing common-checkpoint
+copying by 75.9%. With identical calibration and independent quality evaluation,
+QGD achieves FID 75.56 versus 79.37 for SGD with the same selector. Exposure-
+matched controls, independent detector audits and transfer to flow matching and
+dance generation support adaptive exposure control as a practical way to improve
+the quality–copying tradeoff.
+1
+INTRODUCTION
+Diffusion models learn useful generative structure from finite training collections (Sohl-Dickstein
+et al., 2015; Song & Ermon, 2019; Ho et al., 2020), yet continued optimization can lead them to
+reproduce training examples (Carlini et al., 2023; Somepalli et al., 2023a). Quality and copying
+emerge at different times, creating a generalization window in which a model produces useful sam-
+ples before detectable memorization becomes prevalent (Bonnaire et al., 2025; Favero et al., 2026).
+This interval matters operationally: it provides room for further quality improvement and checkpoint
+selection. Reaching a quality target sooner is therefore one part of a successful training strategy; pre-
+serving useful choices after that point is another.
+Prior work establishes that optimizer choice changes these clocks. Bonnaire et al. (2025) compare
+Adam and momentum SGD, observing faster learning and memorization with Adam while retaining
+dataset-size-dependent delay. Learning-rate effects also influence memorization in denoising score
+matching (Wu et al., 2025). These findings motivate a more specific question: can update geometry
+1
+arXiv:2610.02780v1  [cs.LG]  2 Oct 2026
+
+
+change the mechanism governing the delay, and can that mechanism guide a controller that preserves
+fast initial learning? Answering it requires separating directional changes from update magnitude
+and measuring quality and copying along the same trajectories.
+Our random-feature analysis identifies three clocks. Gradient flow retains covariance-dependent
+rates that slow fitting in small-eigenvalue directions. Exact curvature preconditioning equalizes
+those rates. Aligned polar updates instead make fluctuation fitting depend on coefficient amplitude,
+so distributing fluctuation energy across more directions can shorten its clock. This rank-dependent
+compression gives a concrete control objective: limit polar exposure after useful population structure
+has been learned, then restore the small-gradient delay of a fixed-gain tail. Controlled spectra and
+directional interventions test this mechanism separately from neural architecture changes.
+We propose Quality-Gated De-whitening (QGD) to implement this objective. QGD begins with
+Muon, an existing optimizer that orthogonalizes matrix momentum (Jordan et al., 2024; Liu et al.,
+2025). A predefined quality target, confirmed by a subsequent probe, determines when control starts.
+Thereafter, causal copy feedback reduces the polar coefficient inside a deterministic decay envelope
+while preserving momentum and a fixed gain. The envelope bounds total subsequent polar exposure;
+feedback adapts its allocation to the observed trajectory. Avoiding per-step renormalization allows
+small-gradient directions to remain slow.
+Our recovery theorem gives a sufficient condition for a memorization delay proportional to dataset
+size: the fluctuation margin remaining at the gate must exceed subsequent polar exposure at the
+relevant scale. Immediate switching spends no additional polar exposure and provides the conser-
+vative endpoint of this analysis. QGD uses a gradual transition to retain quality improvement while
+delaying copying relative to continued polar training. We test this tradeoff against the same-gate
+hard switch and a pilot-fixed gradual schedule with matched exposure. Thus the theory motivates
+the controlled quantity, and the experiments test the practical value of its allocation.
+Optimizer transitions toward SGD are established (Keskar & Socher, 2017; Luo et al., 2019);
+MiMuon also adaptively selects Muon or momentum-SGD updates using a spectral criterion and
+practical norm proxy (Huang et al., 2026). QGD connects a confirmed generative-quality target and
+causal copying probes to a finite-exposure condition. Appendix 2 develops these relationships. This
+formulation makes a conservative switching baseline central to evaluation and tests feedback under
+varying copying dynamics rather than attributing every gain to adaptation.
+The resulting archive still requires a release decision. We pair QGD with Copy-Budgeted Selection
+(CBS), applying established exact binomial bounds and simultaneous calibration to a frozen check-
+point family (Clopper & Pearson, 1934; Angelopoulos et al., 2025). CBS chooses by development
+quality among eligible checkpoints, or abstains, while bounding the probability of release with a
+detector-budget violation. Fresh calibration never guides training, and an additional independent
+bank evaluates final quality. Figure 1 shows these distinct roles. Comparisons with valid fixed-
+sequence testing and preselection expose the quality–availability–cost tradeoff of searching more
+candidates.
+Across matched training conditions, QGD preserves Muon’s quality arrival, widens its useful in-
+terval, and improves independently evaluated quality under a common copy budget. Conservative
+baselines retain lower copying in some settings.
+Our contributions can be summarized as follows:
+• We develop an optimizer-geometric analysis of memorization in a random-feature de-
+noising model, distinguishing covariance-controlled, curvature-equalized, and amplitude-
+controlled clocks. The analysis identifies rank-dependent compression of memorization
+delay under aligned polar updates and motivates controlling their cumulative exposure.
+• We propose Quality-Gated De-whitening (QGD), which combines a confirmed quality gate
+and causal copying feedback to transition from fast polar updates to fixed-gain momentum.
+We establish a finite-exposure condition under which the aligned model recovers a memo-
+rization delay proportional to dataset size.
+• We introduce Copy-Budgeted Selection (CBS), a checkpoint-selection procedure that com-
+bines simultaneous binomial calibration over a frozen candidate family with quality-based
+selection. CBS bounds the joint probability of release and detector-budget violation, while
+2
+
+
+(a) Quality-gated de-whitening (QGD)
+Paired setup
+Data + model
+Shared seeds
+Momentum
+Muon polar
+Momentum
+Fixed gain
+Blend
+Train model
+Dev. bank
+Quality + copies
+First update
+Quality gate
+Exp. decay
+Quality
+Copy feedback
+Full polar
+Finite exposure
+Gate opens
+Archive checkpoints
+(b) Copy-budgeted selection (CBS)
+Freeze
+candidates
+Count
+copies
+Simultaneous
+upper bounds
+Copy-budget
+filter
+Select best
+dev. FID
+Fresh final
+quality audit
+Fresh copy bank
+Abstain
+Freeze selection before final audit
+Figure 1: Quality-gated training and calibrated checkpoint release. QGD preserves a fast polar
+prefix, then uses development copying feedback to reduce polar exposure within a fixed envelope.
+CBS evaluates a frozen checkpoint family with fresh calibration inputs. A separate final audit eval-
+uates the selected checkpoint without changing the decision.
+an independent final audit evaluates the selected checkpoint without reusing its selection
+measurements.
+• We evaluate QGD through matched-exposure controls, component ablations, detector au-
+dits, and transfer to flow matching and dance generation. On CIFAR-10 with 2,000 training
+images, QGD preserves Muon’s quality-arrival time, extends the observed generalization
+window to 8.32× that of Muon, and reduces common-checkpoint copying by 75.9%. Un-
+der identical CBS, QGD achieves final-audit FID 75.56, compared with 79.37 for SGD.
+2
+RELATED WORK
+Diffusion and score-based models learn generative processes through denoising (Sohl-Dickstein
+et al., 2015; Song & Ermon, 2019; Ho et al., 2020), with quality and cost shaped by objectives, noise
+schedules, architectures, guidance and samplers (Nichol & Dhariwal, 2021; Dhariwal & Nichol,
+2021; Karras et al., 2022). Our paired protocol fixes these choices within each optimizer comparison,
+using a common pixel-space UNet despite broader latent and transformer designs (Rombach et al.,
+2022; Peebles & Xie, 2023). Diffusion models can reproduce training images (Carlini et al., 2023;
+Somepalli et al., 2023a), especially with small datasets, duplication and large models (Yoon et al.,
+2023; Gu et al., 2025; Kadkhodaie et al., 2024). We use the copy criterion of Yoon et al. (2023) and
+study how optimizer choice shifts the onset of detectable copying, complementing prior mitigation
+work (Somepalli et al., 2023b; Wen et al., 2024; Dutt et al., 2025).
+Bonnaire et al. (2025) identified an early quality time τgen and later memorization time τmem, with a
+window that widens with dataset size under gradient-based training. Related analyses study the same
+transition (Achilli et al., 2025; Aparicio Rodriguez et al., 2026), while Wang et al. (2026) shows that
+much diffusion behavior across data splits has a linear origin in empirical Gaussian statistics. We
+use the same tractable regime but ask how this quality-to-copy window depends on optimization
+geometry.
+Muon orthogonalizes matrix momentum through Newton–Schulz iterations (Jordan et al., 2024)
+and corresponds to spectral-norm steepest descent (Bernstein & Newhouse, 2024); related precon-
+ditioners include K-FAC (Martens & Grosse, 2015), Shampoo (Gupta et al., 2018), SOAP (Vyas
+et al., 2025), and diagonal Adam (Kingma & Ba, 2015; Loshchilov & Hutter, 2019). Recent work
+reports faster memorization under Muon than AdamW on small datasets and altered memorization–
+generalization transitions (Liu et al., 2026; Tveit et al., 2025; Huang et al., 2026). Optimizer transi-
+3
+
+
+tions such as SWATS, AdaBound and MiMuon adapt optimization over training (Keskar & Socher,
+2017; Luo et al., 2019; Huang et al., 2026). QGD differs by using a quality-triggered continuous
+mixture tailored to diffusion: it preserves a fast prefix, limits polar exposure using copy feedback,
+and retains eigenvalue-dependent motion in the tail. Our finite-exposure analysis explains this mech-
+anism; related diffusion work also studies early stopping and large-step effects (Favero et al., 2026;
+Wu et al., 2025).
+CBS integrates detector-based checkpoint selection with exact binomial confidence intervals (Clop-
+per & Pearson, 1934) and development/calibration separation (Angelopoulos et al., 2025); Bonfer-
+roni correction controls selection across a frozen checkpoint family, while adaptive Learn-then-Test
+provides a sequential alternative (Zecchin et al., 2025). More broadly, mode-dependent learning
+dynamics in deep linear networks (Saxe et al., 2014; Advani et al., 2020), early stopping as regular-
+ization (Yao et al., 2007; Raskutti et al., 2014), random-feature models (Rahimi & Recht, 2007), and
+supervised memorization dynamics (Arpit et al., 2017) motivate viewing training time as part of the
+model. We connect these perspectives to diffusion and identify how whitening reshapes its useful
+stopping region.
+3
+OPTIMIZER GEOMETRY DETERMINES THE MEMORIZATION CLOCK
+A random-feature denoiser DW (y) = Wϕ(y) isolates update geometry with fixed features (Rahimi
+& Recht, 2007). For Gaussian data with additive Gaussian noise, least-squares readout learning has
+covariance Kn and empirical optimum Wemp = Wpop + ∆, decomposed into population optimum
+and empirical fluctuation. We study a spectral-separation regime with population energy at order-
+one covariance eigenvalues and fluctuation energy at smaller ones. Appendix A specifies the model
+and clocks.
+Population Structure and Empirical Detail.
+For feature covariance H, write ∥A∥2
+H
+=
+tr(AHA⊤) and ⟨A, B⟩H = tr(AHB⊤). The empirical objective Ln(W) = ∥W −Wemp∥2
+Kn +
+const makes covariance determine gradient fitting rates. With population covariance K, normalized
+readouts separate population learning from progress toward the empirical fluctuation:
+gen(t) = ∥Wt −Wpop∥2
+K
+∥Wpop∥2
+K
+,
+mem(t) = ⟨Wt −Wpop, ∆⟩Kn
+∥∆∥2
+Kn
+.
+(1)
+With positive denominators, these readouts measure population prediction error and progress toward
+empirical fluctuation. In aligned disjoint channels, memorization is the covariance-weighted fitted
+fraction m(t), equal to one at the empirical optimum. Gradient-flow bounds also control popula-
+tion/fluctuation cross terms outside this alignment.
+For a toy trajectory, let g⋆= inft≥0 gen(t). A cell qualifies if g⋆≤gen(0)/2. Then τgen first reaches
+1.1g⋆, with the positive tolerance defined in Appendix A and τmem reaches half the fluctuation pro-
+jection; an undefined quality clock leaves the window ratio undefined. These clocks order structure
+and fluctuation learning; the neural protocol uses a shared sample-quality target (Section 4).
+Three Clocks.
+Normalized gradient flow learns covariance mode k as (1 −e−λkt)Wempuk. Its
+fluctuation-energy quantile bounds give τmem = Θ(n) when the relevant eigenvalues scale as n−1
+and the normalized population/fluctuation cross energy remains bounded away from 1/4 (Proposi-
+tion 3). Exact curvature preconditioning instead yields Wt = (1 −e−t)Wemp (Proposition 4). In
+the disjoint-channel case, its half-fluctuation time is log 2; its straight trajectory need not reach the
+quality gate.
+Polar flow supplies a different route. With aligned covariance and target singular directions, it learns
+coefficient aj as min{ηt, aj}. If the fluctuation singular values lie in [smin, smax], then:
+smin
+2η
+≤τmem ≤smax
+2η ,
+τmem = Θ
+ p
+n/r
+η
+!
+if ∥∆∥2
+F = Θ(n), smax/smin = O(1),
+(2)
+where r is fluctuation rank (Proposition 5). The bounds depend on coefficient distance and rank
+rather than the positive covariance eigenvalues. Practical Muon includes momentum, approximate
+orthogonalization and learned features; Figure 4 summarizes the geometric distinction and random-
+feature evidence.
+4
+
+
+Random-Feature Evidence.
+Across six dataset sizes and two noise levels, gradient-flow memo-
+rization slopes are 1.00/1.05, versus Muon’s 0.20/0.18 at d = 64; the paired window-slope gaps are
+−0.75/−0.82, with 21.14×/29.72× narrowing at n = 512 (Table 7). At d = 16, Muon’s slopes
+rise to 0.60/0.65 while gradient flow remains near one. The ordering survives tanh and noise-draw
+changes (Tables 9–10); exact preconditioning misses quality for n ≤64 (Table 11). Doubling n ap-
+proximately halves the fluctuation eigenvalue while preserving the population eigenvalue (Table 8).
+Across draws, sizes and noise levels, inverse fluctuation eigenvalues correlate with memorization
+time at 0.99 for gradient flow versus 0.14 for Muon (Spearman; Table 12).
+From a Timing Diagnosis to a Control Objective.
+The mechanism motivates a polar prefix fol-
+lowed by restoration of small-eigenvalue delay. Spreading fluctuation energy over more aligned
+directions shortens each coefficient’s polar travel distance; the readout-dimension comparison and
+the joint spectral family in Appendix D test this dependence.
+4
+EXPOSURE-CONTROLLED TRAINING AND CALIBRATED RELEASE
+4.1
+SEPARATE DEVELOPMENT, CALIBRATION AND EVALUATION
+Paired runs share the training subset, initialization, sample order and training noise. Matrix methods
+use the same non-matrix AdamW updates and the same development-probe schedule. The primary
+model is a 6.47M-parameter UNet trained on class-balanced CIFAR-10 subsets of 2,000/10,000
+images for 200k/400k steps. Five paired trajectories are evaluated at each size. The image sampler
+is deterministic DDIM (Song et al., 2021); Appendix G specifies the model, sampler and optimizer
+settings.
+Development probes run every h = 2,000 steps. FID (Heusel et al., 2017; Parmar et al., 2022)
+uses 5,000 outputs; a 1,000-output subset guides copying feedback. Pixel detection flags an output
+when its nearest and second-nearest training-image distances satisfy d1 < d2/3 (Yoon et al., 2023;
+Gu et al., 2025). Independent pilots fix the quality targets, 88.0/64.9, before evaluation. The first
+quality crossing defines τgen after next-checkpoint confirmation; the controller changes only subse-
+quent updates. A confirmed copy crossing before or tied with quality confirmation makes the run
+inadmissible.
+The first development-copy crossing of 5%, confirmed at the next probe, defines τmem. For hori-
+zon H, the observed useful interval is ∆tH = max(0, min(τmem, H) −τgen); an unreached copy
+crossing remains censored. Independent banks evaluate common-checkpoint quality and copying
+without affecting these clocks or control. After training, CBS calibrates a frozen checkpoint family
+with fresh inputs. A further independent bank evaluates each selected checkpoint’s final quality; it
+never changes the selected identity. These roles separate an actionable controller, a valid release
+decision and an independent final assessment. Appendix H defines the banks and fixed detector
+rules.
+4.2
+OUR TRAINING METHOD: QUALITY-GATED DE-WHITENING
+QGD keeps the full Muon update until the predeclared quality target is confirmed at ts. For matrix
+layer ℓ, let Mℓ,k be its momentum direction and U Muon
+ℓ,k
+its practical Muon direction. Calibrate
+cℓ= RMS(U Muon
+ℓ,0
+)/RMS(Mℓ,0) at the first update and hold it fixed; use the positive fallback
+cℓ= 1 if either RMS is at most ϵ. The mixed direction is:
+Uℓ,k = αkU Muon
+ℓ,k
++ (1 −αk)cℓMℓ,k.
+(3)
+The mixture has no subsequent RMS normalization, which could divide out the small-gradient delay
+restored by the fixed-gain tail. Before confirmation, α = 1; a confirmed development-copy budget
+crossing before or tied with quality confirmation makes the run inadmissible.
+At tj = ts + jh, use the available development copy fraction bCj to set the coefficient for the
+following block, starting from α0 = 1:
+αj+1 = min
+
+
+e−(j+1)h/T ,
+"
+αj −κ
+"
+bCj −cwarn
+cbudget −cwarn
+#
++
+#
++
+
+
+,
+[x]+ = max(x, 0).
+(4)
+5
+
+
+The default configuration uses T = 8,000, κ = 0.5, cwarn = 2.5% and cbudget = 5%; sensitivity is
+evaluated separately. The coefficient decreases causally, and its exponential envelope bounds total
+subsequent polar exposure:
+A∞=
+Z ∞
+ts
+α(t) dt = h
+X
+j≥0
+αj+1 ≤
+h
+eh/T −1 = 7,041.6 steps.
+(5)
+Copy feedback can shorten this exposure without compromising its bound.
+Proposition 1 (Finite polar exposure restores a spectral delay). In the aligned disjoint-channel
+model of Proposition 5, let each fluctuation channel have target amplitude s and covariance eigen-
+value µ. Run polar flow at speed η until ts, then mix it with fixed-gain gradient flow of gain γ > 0
+as in Equation (14), with measurable α(t) ∈[0, 1] and A∞< ∞. Set ms = ηts/s and ν = η/s. If
+ms < θ < 1, ν ≥γµ, and εθ = θ −ms −νA∞> 0, the time to fluctuation level θ satisfies:
+ts + εθ
+γµ ≤τθ ≤ts + 1
+γµ log 1 −ms
+1 −θ .
+(6)
+For fixed θ ∈(0, 1), µ = Θ(n−1), γ = Θ(1), ts = O(1) and uniformly positive εθ, this gives
+τθ = Θ(n).
+Bounding ˙m = αν + (1 −α)γµ(1 −m) proves the result (Appendix C); Proposition 6 extends it
+to unequal amplitudes with c/n ≤µj ≤C/n. A positive polar floor retains amplitude-controlled
+arrival, whereas finite exposure with the stated margin gives a sufficient pathwise guarantee. The
+exact result preserves the common prefix and population-channel progress; full neural quality is
+evaluated separately.
+Delay Restoration and Quality Utility.
+The upper bound in Equation (6) is exactly the same-
+gate hard-switch clock: under the aligned assumptions, retaining polar updates reaches the fluctua-
+tion threshold no later than hard switching (Appendix D). The theorem therefore establishes delay
+restoration; quality determines whether a gradual transition is useful. For a desired residual margin
+ε0 > 0, define B⋆= (θ −ms −ε0)/ν > 0. Choosing:
+T ≤
+h
+log(1 + h/B⋆)
+(7)
+makes the envelope sufficient for εθ ≥ε0. A constructed aligned diagnostic holds gain constant
+and measures every term: positive-margin exposure retains a linear delay, whereas excess exposure
+and a fixed polar floor compress it (Figure 3). Gradual exposure improves early population risk,
+while the hard switch achieves the latest threshold and lower eventual risk. In neural training, the
+exposure cap is observable; the theorem’s fluctuation margin is not. Independent evaluation tests
+practical quality and copying.
+4.3
+OUR SELECTION RULE: COPY-BUDGETED SELECTION
+Development probes guide training and can be reused adaptively. CBS uses a separate calibration
+bank after freezing 1 ≤M ≤100 candidate checkpoints, the detector, and the sampler. For each
+candidate k, count Sk flagged outputs among N = 5,000 new iid inputs, including latent noise and
+any conditioning drawn from the fixed generation distribution, independently of the development
+history. Let pk denote its underlying detector-flag probability. With 0 < δ < 1 and a = δ/M, the
+one-sided Clopper–Pearson upper limit (Clopper & Pearson, 1934) is:
+Uk =
+Beta−1(1 −a; Sk + 1, N −Sk),
+Sk < N,
+1,
+Sk = N.
+(8)
+Among checkpoints meeting the fixed development-quality target and Uk ≤cbudget, choose the
+lowest development FID, breaking ties by earlier step; abstain if the set is empty. Exact binomial
+inversion and simultaneous testing supply the established statistical ingredients (Angelopoulos et al.,
+2025).
+Proposition 2 (Detected-copy control for a released checkpoint). Conditional on the training and
+development history that fixes the candidates and detector, CBS satisfies:
+Pr{bk̸ = ∅and pbk > cbudget} ≤δ.
+(9)
+6
+
+
+Table 1: Training-method comparison on CIFAR-10. Times are thousands of updates. Mean ±
+sample SD over five paired trajectories. FID and copy fractions use independent audits at the stated
+checkpoint; clocks use confirmed development probes. NR denotes no confirmed copy crossing by
+the observation horizon H = 200k/400k. Observed windows end at min(tcopy, H).
+Method
+Quality
+arrival ↓
+Copy
+onset ↑
+Window
+∆tH ↑
+FID ↓
+Copy (%)
+↓
+CIFAR-10, n = 2, 000; audit checkpoint: 60k
+SGD
+16.0±1.4
+NR
+184.0±1.4
+85.4±0.3
+1.26±0.11
+AdamW
+14.0±1.4
+124.0±6.2
+110.0±5.3
+82.9±0.3
+2.51±0.10
+Muon
+8.0±1.4
+28.0±1.4
+20.0±1.4
+81.3±0.3
+16.10±0.47
+QGD (ours)
+8.0±1.4
+174.4±10.1
+166.4±11.3
+77.8±0.3
+3.88±0.31
+CIFAR-10, n = 10, 000; audit checkpoint: 120k
+SGD
+18.0±1.4
+NR
+382.0±1.4
+63.3±0.2
+0.78±0.14
+AdamW
+14.0±1.4
+NR
+386.0±1.4
+61.0±0.2
+1.32±0.11
+Muon
+12.0±1.4
+96.0±4.5
+84.0±4.0
+61.5±0.2
+12.37±0.44
+QGD (ours)
+12.0±1.4
+360.0±9.1
+348.0±8.5
+56.1±0.2
+2.99±0.21
+A union bound on Pr{pk > Uk} ≤δ/M proves the result (Appendix C). Fresh inputs may be
+shared across candidates; their independence is unnecessary. The copy budget and risk target govern
+different quantities: a 5% budget concerns the selected checkpoint’s detector-flag probability, while
+δ = 0.05 bounds calibration’s probability of releasing a checkpoint above that budget. The guarantee
+concerns joint release and budget violation for the declared detector and generation distribution,
+excluding undetected copying and population FID. The frozen family includes every configuration
+searched using calibration. After a checkpoint is selected, a further fresh bank evaluates quality and
+copying without revising the decision.
+5
+EXPERIMENTS AND RESULTS
+We compare matched training trajectories, controlled exposure schedules and checkpoint release.
+Five paired trajectories are the unit of uncertainty; calibration repetitions remain nested within each
+trajectory. Tables identify QGD and CBS as (ours).
+5.1
+QUALITY AND COPYING ALONG MATCHED TRAJECTORIES
+QGD preserves Muon’s quality-arrival time because their updates agree through confirmation. Its
+post-gate behavior produces the useful difference: at n = 2,000, the mean interval expands by
+8.32×, while independent common-step FID improves from 81.3 to 77.8 and copying falls by 75.9%
+(Table 1). The larger subset preserves the same ordering against continued Muon. SGD and AdamW
+retain longer low-copy periods in some settings; QGD reaches useful quality earlier than SGD and
+achieves stronger later quality. This comparison concerns a common training time, while Table 4
+evaluates the complete archive under a shared selector. Figure 2 shows why a window needs both
+measurements: the hard switch suppresses copying more strongly, whereas QGD supports further
+quality improvement while remaining within the declared region. Development quality remains
+eligible from confirmation through the reported copy onset. Appendix I provides paired clocks and
+per-trajectory effects, retaining censoring instead of treating observation limits as exact crossings.
+5.2
+EXPOSURE RECOVERY AND CONTROLLER COMPONENTS
+The controlled spectral experiment verifies the condition used by Proposition 1. The finite-mixture
+schedule has residual margin 0.165 across all tested sizes with fixed gain. Its copy time rises from
+20.85 to 148.49 as n grows from 64 to 512, while continued polar flow reaches the threshold at time
+4. Hard switching delays it further, as the comparison principle predicts. The gradual mixture fits
+the remaining population component earlier; the hard switch can achieve lower eventual error with
+more time. Figure 3 and Table 6 report both effects, and Appendix D gives the exact construction
+and margin calculation. Table 2 tests the practical allocation of exposure. Hard switching shares the
+7
+
+
+(a) Quality
+75
+90
+105
+120
+0
+100
+200
+Steps (×1,000)
+FID ↓
+Target 88
+(b) Copying
+0
+10
+20
+30
+40
+50
+0
+100
+200
+Steps (×1,000)
+Copies (%), budget 5%
+(c) Polar weight
+0
+0.5
+1
+0
+100
+200
+Steps (×1,000)
+First 28k steps
+0
+1
+0
+14
+28
+Muon
+AdamW
+Hard switch
+QGD (ours)
+Figure 2: Quality, copying and exposure during training. The primary CIFAR-10 trajectory (pair
+0) compares QGD with continued Muon, AdamW and the same-gate hard switch. Development
+curves share a 0–200k time axis, with FID target 88 and copy budget 5%. The 0–28k inset resolves
+the transition after quality confirmation at 10k. The hard switch is more conservative in copying;
+gradual QGD retains stronger quality. The coefficient for each block is fixed using the preceding
+development probe.
+confirmed gate, momentum and first-update gain, then sets the polar coefficient to zero. It provides
+a longer copy delay and lower copying than QGD, while QGD improves common-step quality. The
+matched open-loop schedule uses the same gate and a pilot-fixed exposure budget, without access
+to evaluation copying feedback. Its mean exposure is comparable to QGD’s; differences therefore
+test when exposure is spent rather than simply comparing a long schedule with a short one. The
+paired trajectories vary copying dynamics, allowing feedback to adapt its decay and shutoff time.
+Removing the quality gate sacrifices the shared fast prefix. Removing feedback while retaining the
+default envelope permits additional polar exposure, and per-step normalization removes the small-
+gradient scale that the fixed-gain tail is designed to preserve. Per-layer norm matching provides
+a separate directional intervention (Tables 13 and 14). Controller settings, probe cadence and a
+matched MiMuon pilot search are specified in Appendix I.
+5.3
+VALID SELECTION UNDER A COPYING BUDGET
+Table 3 compares selectors on the same QGD archives. Empirical filtering searches observed copy-
+ing without a simultaneous correction. Single-candidate and margin preselection freeze a candidate
+using development information, then certify it once. Fixed-sequence testing fixes its ordering be-
+fore calibration and stops at the first failed test; CBS applies simultaneous bounds to the full family
+(Angelopoulos et al., 2025). All valid rules use the same joint error target. Appendix J specifies
+their ordering, testing and abstention rules. The comparison separates quality, release availability
+and calibration cost. At the tighter budget, searching a family can retain useful candidates that sin-
+gle preselection misses; a valid ordered search is a competitive alternative to uniform Bonferroni
+allocation. At the looser budget, margin preselection can approach the quality of a full search with
+far fewer outputs. These outcomes make the selector choice depend on the available archive and
+budget. Adaptive allocation offers another route to reducing testing cost (Zecchin et al., 2025); here,
+fixed sample counts make the statistical comparison directly reproducible.
+5.4
+INDEPENDENT QUALITY OF RELEASED CHECKPOINTS
+Holding CBS fixed compares the training methods under one release policy (Table 4). QGD ob-
+tains final-audit FID 75.56, compared with 79.37 for conservative SGD, which can exploit its full
+low-copy archive. The independent audit preserves the quality advantage rather than reusing the
+development score that selected the checkpoint. The hard-switch pipeline also meets the budget but
+has higher final FID; QGD improves the quality available for release. The selected step identifies
+the released weights; it does not represent the total computation needed to produce and calibrate the
+archive. FID uncertainty is computed across five trajectory means after averaging their calibration
+repetitions. Release and violation frequencies count all decisions, including abstentions. Additional
+comparisons vary the candidate-family size, and Appendix K reports archive construction, genera-
+8
+
+
+Table 2: Switching controls and component ablations. CIFAR-10, n = 2,000; mean ± SD over
+five paired trajectories. Exposure and window are in k steps; quality and copying use independent
+audits at 60k. The open-loop schedule is fixed by an independent pilot. The no-gate exposure starts
+at initialization; MiMuon has no common post-gate mixture exposure.
+Method
+Polar
+exposure
+Observed window
+∆tH ↑
+FID60 ↓
+Copy60 (%)
+↓
+MiMuon (norm proxy)
+–
+84.4±5.0
+80.6±0.3
+4.30±0.30
+Same-gate hard switch
+0.00±0.00
+186.0±2.4
+81.5±0.3
+2.47±0.03
+Pilot-fixed open loop
+4.26±0.00
+124.0±50.0
+79.0±1.0
+4.56±0.60
+QGD w/o quality gate
+7.03±0.00
+160.8±10.4
+82.9±0.3
+2.95±0.20
+QGD w/o feedback
+7.04±0.00
+70.0±7.1
+79.2±0.3
+4.77±0.21
+QGD + per-step RMS
+4.51±0.51
+30.0±2.4
+80.8±0.3
+13.51±0.16
+QGD (ours)
+4.21±0.64
+166.4±11.3
+77.8±0.3
+3.88±0.31
+Table 3: Checkpoint-selection rules under copy budgets. Five QGD archives, 100 independent
+calibration banks each; δ = 0.05. Final FID and fresh audit copying condition on release; FID is
+summarized over defined trajectory means. At 5%, preselection never releases on one trajectory.
+Joint errors use the retained underlying detector rates. Calibration outputs exclude the common
+development archive and final audit.
+Selection rule
+Final FID
+↓
+Copy (%)
+↓
+Release
+↑
+Joint error
+↓
+Calib. outputs
+(k) ↓
+Copy budget: 5%
+Empirical filter
+73.97±0.30
+5.15
+500/500
+459/500
+500.0
+Preselect + CP
+74.09±0.43
+5.11
+20/500
+3/500
+5.0
+Margin preselect + CP
+77.89±2.28
+4.15
+463/500
+0/500
+5.0
+Fixed sequence
+77.86±0.64
+4.08
+500/500
+0/500
+152.6
+CBS (ours)
+75.56±0.51
+4.37
+500/500
+1/500
+500.0
+Copy budget: 10%
+Empirical filter
+73.85±0.30
+8.45
+500/500
+6/500
+500.0
+Preselect + CP
+73.85±0.30
+8.38
+421/500
+0/500
+5.0
+Margin preselect + CP
+73.88±0.32
+5.70
+500/500
+0/500
+5.0
+Fixed sequence
+73.86±0.31
+7.83
+500/500
+0/500
+480.2
+CBS (ours)
+73.86±0.31
+7.46
+500/500
+0/500
+500.0
+tion probes and calibration separately. This accounting makes the expense of adaptive control and
+full-family search visible alongside their quality gains.
+5.5
+INDEPENDENT AUDITS AND TRANSFER
+Independent detector audits evaluate the pixel-controlled QGD trajectory using fresh inputs and a
+fixed SSCD detector (Pizzi et al., 2022). Table 15 reports both fixed detectors; Table 18 varies the
+controller and probe settings. These tests distinguish the behavior of an adaptive controller from the
+AdamW–Muon ordering established by the background geometry experiments. Table 5 evaluates
+flow matching (Lipman et al., 2023) and music-conditioned AIST++ motion (Li et al., 2021). Image
+quality uses final-audit FID. Motion evaluation separates beat synchrony, kinetic-feature distribution
+quality and diversity, so improved alignment cannot conceal repetitive motion. The common quality
+target and detector are fixed within each task, with data splits formed before chunking. QGD im-
+proves the joint quality–copying tradeoff against continued polar training; conservative alternatives
+retain lower copying in some settings. Appendix L defines the task-specific metrics and copying
+rules.
+9
+
+
+Table 4: Calibrated selection across training strategies. CIFAR-10, n = 2,000; 5% copy budget
+and δ = 0.05. All methods use a 200k archive and identical CBS allocation. Final FID uses a fresh
+50k-output bank; copying uses a 10k subset. Mean ± SD is across five trajectories after averaging
+100 calibration decisions each. All 500 decisions per row release.
+Training + selection
+Selected
+step (k)
+Develop.
+FID ↓
+Final FID
+↓
+Copy (%)
+↓
+SGD + CBS
+200.0
+79.00
+79.37±0.31
+2.67
+AdamW + CBS
+103.8
+81.58
+81.94±0.29
+4.24
+Muon + CBS
+18.5
+85.81
+86.14±0.12
+3.99
+MiMuon (norm proxy) + CBS
+64.2
+80.40
+80.68±0.40
+4.25
+Same-gate hard switch + CBS
+160.0
+77.46
+77.82±0.27
+4.30
+Pilot-fixed open loop + CBS
+77.8
+79.00
+79.30±3.08
+4.37
+QGD + CBS (ours)
+128.6
+75.18
+75.56±0.51
+4.37
+Table 5: Transfer across generation tasks. Mean ± SD over five paired trajectories. Flow times are
+k updates; quality is audited at the 60k checkpoint. Dance quality at 120k separates beat synchrony,
+kinetic-feature FID and diversity relative to held-out motions; one is the diversity target. Copying
+uses 10k fresh audit outputs.
+Flow matching, n = 2,000
+Method
+FID ↓
+Quality
+arrival ↓
+Window
+∆tH ↑
+Copy (%)
+↓
+AdamW
+84.5±0.3
+10.0±1.4
+106.0±2.8
+2.08±0.22
+Muon
+86.2±0.3
+8.0±1.4
+18.0±2.8
+14.61±0.07
+Same-gate hard switch
+82.8±0.3
+8.0±1.4
+120.0±2.8
+2.48±0.15
+QGD (ours)
+79.8±0.3
+8.0±1.4
+100.0±2.8
+4.14±0.25
+AIST++ dance generation
+Method
+Beat
+↑
+Kinetic FID
+↓
+Diversity
+target: 1
+Copy (%)
+↓
+AdamW
+0.282±0.001
+31.7±0.4
+0.963±0.003
+1.94±0.13
+Muon
+0.285±0.001
+34.6±0.4
+0.875±0.003
+11.06±0.57
+Same-gate hard switch
+0.289±0.001
+30.2±0.4
+0.956±0.003
+2.14±0.22
+QGD (ours)
+0.294±0.001
+27.9±0.4
+0.947±0.003
+4.09±0.29
+6
+DISCUSSION AND CONCLUSION
+Update geometry governs how quickly useful learning gives way to memorizing sample-specific de-
+tail. Finite polar exposure suffices to recover a spectral delay, linking optimizer geometry directly to
+the quality-to-copy interval. QGD turns this mechanism into quality-gated control: the hard switch
+suppresses copying most strongly, gradual QGD better preserves quality, and matched-exposure
+controls isolate the value of feedback rather than exposure reduction alone. With CBS fixed, an in-
+dependent final bank measures the quality available for release across optimizers, while calibration
+shows when a larger checkpoint family justifies its additional cost. Together, these results suggest
+that optimizer choice, stopping time, and release calibration should be considered jointly rather than
+as separate design decisions.
+Limitations.
+The theoretical delay guarantee assumes aligned, fixed features and idealized update
+dynamics. Extending the analysis to momentum, approximate orthogonalization, nonlinear feature
+learning, and representations that evolve throughout training would better capture modern diffusion
+systems. Our empirical study also focuses on a limited set of architectures, datasets, and optimizer
+families, so the magnitude of the observed effects may change at larger scales. CBS provides cov-
+erage only with respect to the specified copy detector and threshold (Appendix J); it does not rule
+out memorization under alternative notions of similarity or extraction. Finally, probe cadence and
+checkpoint-family size determine the generation and calibration cost (Table 3), leaving a practical
+tradeoff between finer selection and evaluation expense.
+10
+
+
+REFERENCES
+Beatrice Achilli, Luca Ambrogioni, Carlo Lucibello, Marc Mézard, and Enrico Ventura. Memoriza-
+tion and generalization in generative diffusion under the manifold hypothesis. Journal of Statisti-
+cal Mechanics: Theory and Experiment, 2025(7):073401, 2025. doi: 10.1088/1742-5468/ade136.
+Madhu S. Advani, Andrew M. Saxe, and Haim Sompolinsky. High-dimensional dynamics of gener-
+alization error in neural networks. Neural Networks, 132:428–446, 2020. doi: 10.1016/j.neunet.
+2020.08.022.
+Anastasios N. Angelopoulos, Stephen Bates, Emmanuel J. Candès, Michael I. Jordan, and Lihua
+Lei. Learn then test: Calibrating predictive algorithms to achieve risk control. The Annals of
+Applied Statistics, 19(2):1641–1662, 2025. doi: 10.1214/24-AOAS1998.
+Marta Aparicio Rodriguez, Anastasia Borovykh, Grigorios A. Pavliotis, and Daniel J. Korchin-
+ski. Diffusion models preferentially memorize prototypical examples or: Why does my diffusion
+model love slop? arXiv preprint arXiv:2605.30642, 2026.
+Devansh Arpit, Stanisław Jastrz˛ebski, Nicolas Ballas, David Krueger, Emmanuel Bengio, Maxin-
+der S. Kanwal, Tegan Maharaj, Asja Fischer, Aaron Courville, Yoshua Bengio, and Simon
+Lacoste-Julien. A closer look at memorization in deep networks. In Proceedings of the 34th
+International Conference on Machine Learning (ICML), volume 70 of Proceedings of Machine
+Learning Research, pp. 233–242. PMLR, 2017.
+Jeremy Bernstein and Laker Newhouse. Old optimizer, new norm: An anthology. In Conference
+on Neural Information Processing Systems (NeurIPS), Workshop on Optimization for Machine
+Learning (OPT), 2024.
+Tony Bonnaire, Raphaël Urfin, Giulio Biroli, and Marc Mézard. Why diffusion models don’t memo-
+rize: The role of implicit dynamical regularization in training. In Advances in Neural Information
+Processing Systems (NeurIPS), volume 38, pp. 141266–141286. Curran Associates, Inc., 2025.
+doi: 10.52202/085713-4720.
+Nicholas Carlini, Jamie Hayes, Milad Nasr, Matthew Jagielski, Vikash Sehwag, Florian Tramèr,
+Borja Balle, Daphne Ippolito, and Eric Wallace. Extracting training data from diffusion models.
+In Proceedings of the 32nd USENIX Security Symposium (USENIX Security), pp. 5253–5270.
+USENIX Association, 2023.
+C. J. Clopper and E. S. Pearson. The use of confidence or fiducial limits illustrated in the case of the
+binomial. Biometrika, 26(4):404–413, 1934. doi: 10.1093/biomet/26.4.404.
+Prafulla Dhariwal and Alexander Nichol. Diffusion models beat GANs on image synthesis. In Ad-
+vances in Neural Information Processing Systems (NeurIPS), volume 34, pp. 8780–8794. Curran
+Associates, Inc., 2021.
+Raman Dutt, Ondrej Bohdal, Pedro Sanchez, Sotirios A. Tsaftaris, and Timothy Hospedales. Mem-
+Control: Mitigating memorization in diffusion models via automated parameter selection. In
+Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV),
+pp. 4491–4501, 2025. doi: 10.1109/WACV61041.2025.00441.
+Alessandro Favero, Antonio Sclocchi, and Matthieu Wyart. Bigger isn’t always memorizing: Early
+stopping overparameterized diffusion models.
+Transactions on Machine Learning Research,
+2026.
+Xiangming Gu, Chao Du, Tianyu Pang, Chongxuan Li, Min Lin, and Ye Wang. On memorization
+in diffusion models. Transactions on Machine Learning Research, 2025. ISSN 2835-8856.
+Vineet Gupta, Tomer Koren, and Yoram Singer. Shampoo: Preconditioned stochastic tensor opti-
+mization. In Proceedings of the 35th International Conference on Machine Learning (ICML),
+volume 80 of Proceedings of Machine Learning Research, pp. 1842–1850. PMLR, 2018.
+Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter.
+GANs trained by a two time-scale update rule converge to a local nash equilibrium. In Advances
+in Neural Information Processing Systems (NIPS), volume 30, pp. 6626–6637. Curran Associates,
+Inc., 2017.
+11
+
+
+Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In Advances
+in Neural Information Processing Systems (NeurIPS), volume 33, pp. 6840–6851. Curran Asso-
+ciates, Inc., 2020.
+Feihu Huang, Yuning Luo, and Songcan Chen. MiMuon: Mixed Muon optimizer with improved
+generalization for large models. arXiv preprint arXiv:2605.19619, 2026.
+Keller Jordan, Yuchen Jin, Vlado Boza, Jiacheng You, Franz Cesista, Laker Newhouse, and Jeremy
+Bernstein. Muon: An optimizer for hidden layers in neural networks. Online technical article,
+2024.
+Zahra Kadkhodaie, Florentin Guth, Eero P. Simoncelli, and Stéphane Mallat. Generalization in
+diffusion models arises from geometry-adaptive harmonic representations. In International Con-
+ference on Learning Representations (ICLR), pp. 46543–46567, 2024.
+Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-
+based generative models.
+In Advances in Neural Information Processing Systems (NeurIPS),
+volume 35, pp. 26565–26577. Curran Associates, Inc., 2022. doi: 10.52202/068431-1926.
+Nitish Shirish Keskar and Richard Socher. Improving generalization performance by switching from
+Adam to SGD. arXiv preprint arXiv:1712.07628, 2017.
+Diederik P. Kingma and Jimmy Ba. Adam: A method for stochastic optimization. In International
+Conference on Learning Representations (ICLR), 2015.
+Ruilong Li, Shan Yang, David A. Ross, and Angjoo Kanazawa. AI choreographer: Music condi-
+tioned 3D dance generation with AIST++. In Proceedings of the IEEE/CVF International Con-
+ference on Computer Vision (ICCV), pp. 13401–13412, 2021.
+Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matthew Le. Flow
+matching for generative modeling.
+In International Conference on Learning Representations
+(ICLR), 2023.
+Jingyuan Liu, Jianlin Su, Xingcheng Yao, Zhejun Jiang, Guokun Lai, Yulun Du, Yidao Qin, Weixin
+Xu, Enzhe Lu, Junjie Yan, Yanru Chen, Huabin Zheng, Yibo Liu, Shaowei Liu, Bohong Yin,
+Weiran He, Han Zhu, Yuzhi Wang, Jianzhou Wang, Mengnan Dong, Zheng Zhang, Yongsheng
+Kang, Hao Zhang, Xinran Xu, Yutao Zhang, Yuxin Wu, Xinyu Zhou, and Zhilin Yang. Muon is
+scalable for LLM training. arXiv preprint arXiv:2502.16982, 2025.
+Yuxing Liu, Jianyu Wang, and Tong Zhang. Optimizer-model consistency: Full finetuning with the
+same optimizer as pretraining forgets less. arXiv preprint arXiv:2605.06654, 2026.
+Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International Confer-
+ence on Learning Representations (ICLR), 2019.
+Liangchen Luo, Yuanhao Xiong, Yan Liu, and Xu Sun. Adaptive gradient methods with dynamic
+bound of learning rate. In International Conference on Learning Representations (ICLR), 2019.
+James Martens and Roger Grosse. Optimizing neural networks with Kronecker-factored approx-
+imate curvature.
+In Proceedings of the 32nd International Conference on Machine Learning
+(ICML), volume 37 of Proceedings of Machine Learning Research, pp. 2408–2417. PMLR, 2015.
+Alexander Quinn Nichol and Prafulla Dhariwal. Improved denoising diffusion probabilistic models.
+In Proceedings of the 38th International Conference on Machine Learning (ICML), volume 139
+of Proceedings of Machine Learning Research, pp. 8162–8171. PMLR, 2021.
+Gaurav Parmar, Richard Zhang, and Jun-Yan Zhu. On aliased resizing and surprising subtleties in
+GAN evaluation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pp. 11410–11420, 2022.
+William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of
+the IEEE/CVF International Conference on Computer Vision (ICCV), pp. 4195–4205, 2023.
+12
+
+
+Ed Pizzi, Sreya Dutta Roy, Sugosh Nagavara Ravindra, Priya Goyal, and Matthijs Douze. A self-
+supervised descriptor for image copy detection. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), pp. 14532–14542, 2022.
+Ali Rahimi and Benjamin Recht. Random features for large-scale kernel machines. In Advances in
+Neural Information Processing Systems (NIPS), volume 20, pp. 1177–1184, 2007.
+Garvesh Raskutti, Martin J. Wainwright, and Bin Yu. Early stopping and non-parametric regression:
+An optimal data-dependent stopping rule. Journal of Machine Learning Research, 15(11):335–
+366, 2014.
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-
+resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition (CVPR), pp. 10684–10695, 2022.
+Andrew M. Saxe, James L. McClelland, and Surya Ganguli. Exact solutions to the nonlinear dy-
+namics of learning in deep linear neural networks.
+In International Conference on Learning
+Representations (ICLR), 2014.
+Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsupervised
+learning using nonequilibrium thermodynamics. In Proceedings of the 32nd International Con-
+ference on Machine Learning (ICML), volume 37 of Proceedings of Machine Learning Research,
+pp. 2256–2265. PMLR, 2015.
+Gowthami Somepalli, Vasu Singla, Micah Goldblum, Jonas Geiping, and Tom Goldstein. Diffusion
+art or digital forgery? investigating data replication in diffusion models. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), pp. 6048–6058,
+2023a.
+Gowthami Somepalli, Vasu Singla, Micah Goldblum, Jonas Geiping, and Tom Goldstein. Under-
+standing and mitigating copying in diffusion models. In Advances in Neural Information Pro-
+cessing Systems (NeurIPS), volume 36, pp. 47783–47803. Curran Associates, Inc., 2023b. doi:
+10.52202/075280-2071.
+Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. In Interna-
+tional Conference on Learning Representations (ICLR), 2021.
+Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data distribution.
+In Advances in Neural Information Processing Systems (NeurIPS), volume 32, pp. 11918–11930.
+Curran Associates, Inc., 2019.
+Amund Tveit, Bjørn Remseth, and Arve Skogvold. Muon optimizer accelerates grokking. arXiv
+preprint arXiv:2504.16041, 2025.
+Nikhil Vyas, Depen Morwani, Rosie Zhao, Itai Shapira, David Brandfonbrener, Lucas Janson, and
+Sham Kakade. SOAP: Improving and stabilizing Shampoo using Adam for language modeling.
+In International Conference on Learning Representations (ICLR), pp. 93423–93444, 2025.
+Binxu Wang, Jacob A. Zavatone-Veth, and Cengiz Pehlevan. A random matrix perspective on the
+consistency of diffusion models. In Proceedings of the 43rd International Conference on Machine
+Learning (ICML), 2026.
+Yuxin Wen, Yuchen Liu, Chen Chen, and Lingjuan Lyu. Detecting, explaining, and mitigating
+memorization in diffusion models.
+In International Conference on Learning Representations
+(ICLR), pp. 35647–35662, 2024.
+Yu-Han Wu, Pierre Marion, Gérard Biau, and Claire Boyer. Taking a big step: Large learning rates
+in denoising score matching prevent memorization. In Proceedings of the 38th Conference on
+Learning Theory (COLT), volume 291 of Proceedings of Machine Learning Research, pp. 5718–
+5756. PMLR, 2025.
+Yuan Yao, Lorenzo Rosasco, and Andrea Caponnetto. On early stopping in gradient descent learn-
+ing. Constructive Approximation, 26:289–315, 2007. doi: 10.1007/s00365-006-0663-2.
+13
+
+
+TaeHo Yoon, Joo Young Choi, Sehyun Kwon, and Ernest K. Ryu. Diffusion probabilistic mod-
+els generalize when they fail to memorize. In International Conference on Machine Learning
+(ICML), Workshop on Structured Probabilistic Inference and Generative Modeling (SPIGM),
+2023.
+Matteo Zecchin, Sangwoo Park, and Osvaldo Simeone. Adaptive learn-then-test: Statistically valid
+and efficient hyperparameter selection.
+In Proceedings of the 42nd International Conference
+on Machine Learning (ICML), volume 267 of Proceedings of Machine Learning Research, pp.
+74018–74036. PMLR, 2025.
+14
+
+
+APPENDIX
+A
+LINEAR-MODEL DEFINITIONS AND COMPLETE CLOCK STATEMENTS
+Setup.
+Data x ∼N(0, Σ) in Rd are corrupted to y = x + σε with ε ∼N(0, I). A denoiser
+DW (y) = Wϕ(y) reads out p fixed random features ϕ(y) = act(Fy) through a matrix W ∈Rd×p.
+Given n training points, the empirical objective is:
+Ln(W) = 1
+n
+n
+X
+i=1
+Eε ∥Wϕ(xi + σε) −xi∥2 = tr
+
+(W −Wemp)Kn(W −Wemp)⊤
++ const, (10)
+where Kn = 1
+n
+P
+i Eε[ϕϕ⊤] is the feature covariance under the training measure and Wemp is the
+minimum-norm least-squares readout on the training set. The population readout Wpop minimizes
+the same objective under the data distribution, whose feature covariance is K. The two continuous
+flows below start at W0 = 0 and converge to the minimum-norm Wemp. Finite-step momentum and
+polar-update simulations require a separate stability and convergence check.
+Assume positive population energy and Efl = tr[∆Kn∆⊤] > 0 whenever the corresponding nor-
+malized metric is used. Two scalar curves track a trajectory. Generalization is the prediction distance
+to the population readout on population inputs:
+gen(t) = tr[(Wt −Wpop)K(Wt −Wpop)⊤]
+tr[WpopKW⊤
+pop]
+,
+(11)
+and memorization is the projection, on training inputs, of the current readout onto the part of the
+empirical readout that the population one does not contain:
+mem(t) = tr[(Wt −Wpop)Kn ∆⊤]
+tr[∆Kn∆⊤]
+,
+∆= Wemp −Wpop.
+(12)
+Let g⋆= inft≥0 gen(t) and fix ξ = 10−8 across cells. A cell qualifies when g⋆≤gen(0)/2;
+otherwise τgen and R are undefined. For qualifying cells, set q⋆= max(1.1g⋆, ξgen(0)) and τgen =
+inf{t ≥0 : gen(t) ≤q⋆}. The positive floor makes this level attainable even if a zero infimum is
+approached only asymptotically. The memorization clock is τmem = inf{t ≥0 : mem(t) ≥1/2},
+with an empty set giving +∞. Observed records retain censoring, which is excluded from exact-
+value slope fits. These are linear-model analogues of the quality and copy crossings in Section 4; a
+relative-to-own-minimum toy threshold is not the shared real-data threshold.
+Where the Population and the Fluctuation Live.
+Write (λk, uk) for the eigenpairs of Kn
+and δk = (Wemp −Wpop)uk. Population and fluctuation energies have weights proportional to
+λk∥Wpopuk∥2 and λk∥δk∥2. We assume the spectral-separation regime: population energy lies
+on O(1) eigenvalues and empirical fluctuation on eigenvalues that shrink with n. The following
+proposition quantifies its effect through fluctuation-energy quantiles. The spectral diagnostics in
+Appendix E describe this separation over a finite range; a joint dimensional regime or uniform spec-
+tral assumptions are required for an asymptotic statement.
+Gradient Flow Separates the Two Timescales.
+Gradient flow on Equation (10) moves mode k
+at rate λk, so each part of the target is learned on the timescale of the eigenvalues that carry it
+(Figure 4).
+Proposition 3 (Gradient flow). Under the normalized flow ˙W = −1
+2∇Ln(W) from W0 = 0,
+Wtuk = (1 −e−λkt)Wempuk for every k, and:
+mem(t) =
+X
+k
+πfl
+k (1 −e−λkt) −ρ(t),
+where ρ(t) is a cross term between the population and the fluctuation that vanishes when population
+and fluctuation coefficients are orthogonal within each covariance eigenspace and is bounded by
+15
+
+
+their normalized cross energy ¯ρ for all t. For q ∈(0, 1) let λfl
+q be the eigenvalue at the q-quantile of
+the fluctuation energy counted from the top of the spectrum. If ¯ρ < 1/4:
+1/4 −¯ρ
+λfl
+1/4
+≤τmem ≤log 3 −log(1 −4¯ρ)
+λfl
+3/4
+.
+In particular, when the fluctuation quantiles scale as λfl
+q ≍n−1, the memorization time is Θ(n),
+provided ¯ρ stays uniformly below 1/4. Modes with eigenvalues of order one relax toward their
+empirical coefficients on an O(1) timescale; closeness to Wpop additionally depends on fluctuation
+energy in those modes.
+The proof is in Appendix B. Discrete gradient descent reproduces the flow to within 0.01 in the
+memorization slopes, and Adam provides a diagonal-preconditioning comparison. Its ordering rela-
+tive to other optimizers is empirical, not implied by this proposition.
+Exact Curvature Preconditioning Removes Spectral Separation.
+An optimizer that precondi-
+tions by the curvature learns every mode at the same rate, and the separation disappears identically
+(Figure 4).
+Proposition
+4
+(Exact
+preconditioning).
+Under
+the
+normalized
+curvature
+flow
+˙W
+=
+−1
+2∇Ln(W)K+
+n from W0 = 0, Wt = (1 −e−t)Wemp, so mem(t) = 1 −e−t(1 + cn) with
+cn = −mem(0), and, when cn > −1/2, τmem = log(2(1 + cn)). If cn ≤−1/2, the threshold is
+already met at t = 0. There is no direct eigenvalue-rate dependence, although cn can depend on the
+dataset. The straight path from 0 to Wemp need not meet the generalization criterion; in that case
+τgen and R are undefined.
+This result motivates checking whether expressive practical preconditioners have a useful quality-
+before-copy interval on small datasets. It does not identify SOAP or Shampoo with the ideal flow or
+guarantee that either fails to generalize.
+Orthogonalized Updates Retain a Coefficient-Distance Clock.
+Polar updates flatten singular
+values rather than directly inverting the covariance. A spectrally aligned limit makes their clock
+exact.
+Proposition 5 (Aligned polar flow). Let Knvj = λjvj, λj > 0, and let {uj}, {vj} be orthonormal
+families. Write Wemp = P
+j ajujv⊤
+j , aj > 0, with Wpop retaining a subset of these channels
+and fluctuation ∆containing the complementary nonempty set F. For compact polar flow ˙W =
+−η polar0((W −Wemp)Kn) from zero, with zero singular directions assigned zero updates:
+Wt =
+X
+j
+min{ηt, aj} ujv⊤
+j ,
+smin
+2η
+≤τmem ≤smax
+2η ,
+(13)
+where smin, smax are the smallest and largest fluctuation singular values. Coefficient-arrival times
+and these bounds are independent of the positive covariance eigenvalues. If all fluctuation singular
+values equal s, then τmem = s/(2η) exactly.
+If ∥∆∥2
+F = Θ(n) and smax/smin is bounded, the bound gives τmem = Θ(
+p
+n/r/η) for fluctuation
+rank r. Thus a single aligned construction supports clocks of order n,
+p
+n/r and 1 for gradient, po-
+lar and curvature-preconditioned flow. Appendix B gives the proof and a finite-range rank crossover.
+Practical Muon adds momentum, approximate orthogonalization and evolving features; the experi-
+ments test the same geometric prediction in that setting.
+Tempered Orthogonalization.
+We propose a scale-controlled intervention between normalized
+momentum and its polar factor. For nonzero momentum M, define c
+M = M/∥M∥F and bP =
+polar(M)/∥polar(M)∥F , then normalize (1 −λ)c
+M + λ bP to a common per-layer RMS before ap-
+plying the step. Zero matrices receive zero updates. This separates directional geometry from the
+changing norm of the original interpolation. The λ = 0 endpoint is normalized momentum, not
+AdamW; AdamW remains a separate baseline. A second intervention varies the practical Newton–
+Schulz depth with the same RMS control. The interpolation turns update geometry into an experi-
+mental control. The results exhibit monotonic quality acceleration and window compression across
+both families. This is an empirical intervention result; the exact-flow propositions do not assert a
+general monotonicity theorem for the practical iteration.
+16
+
+
+B
+PROOFS OF THE THREE OPTIMIZER CLOCKS
+Proof of Proposition 3.
+From Equation (10), ∇Ln(W) = 2(W−Wemp)Kn; using the normalized
+flow in the proposition, ˙W = −(W −Wemp)Kn. In the eigenbasis of Kn the columns wk(t) =
+Wtuk decouple, ˙wk = −λk(wk −wemp
+k
+), giving wk(t) = (1 −e−λkt)wemp
+k
+from wk(0) = 0.
+Writing wemp
+k
+= wpop
+k
++ δk:
+(Wt −Wpop)uk = δk −e−λkt (wpop
+k
++ δk),
+and therefore, with Efl = P
+j λj∥δj∥2 and πfl
+k = λk∥δk∥2/Efl,
+mem(t) = 1
+Efl
+X
+k
+λk
+h
+∥δk∥2(1 −e−λkt) −e−λkt⟨wpop
+k
+, δk⟩
+i
+=
+X
+k
+πfl
+k(1 −e−λkt) −ρ(t),
+with ρ(t) = E−1
+fl
+P
+k λke−λkt⟨wpop
+k
+, δk⟩, which is zero if ⟨wpop
+k
+, δk⟩= 0 for all k and satisfies
+|ρ(t)| ≤¯ρ := E−1
+fl
+P
+k λk|⟨wpop
+k
+, δk⟩| for all t ≥0.
+By the quantile definition, modes with λk > λfl
+1/4 carry fluctuation mass at most 1/4 and modes
+with λk ≥λfl
+3/4 carry mass at least 3/4. For the lower bound, use 1 −e−s ≤min(1, s) and split at
+λfl
+1/4:
+mem(t) ≤
+X
+λk>λfl
+1/4
+πfl
+k + t
+X
+λk≤λfl
+1/4
+πfl
+kλk + ¯ρ ≤1
+4 + λfl
+1/4 t + ¯ρ,
+so mem(t) ≥1/2 forces t ≥(1/4 −¯ρ)/λfl
+1/4. For the upper bound, keep only the modes with
+λk ≥λfl
+3/4, each of which has 1 −e−λkt ≥1 −e−λfl
+3/4t:
+mem(t) ≥3
+4
+ 1 −e−λfl
+3/4t
+−¯ρ,
+which reaches 1/2 once e−λfl
+3/4t ≤1
+3(1 −4¯ρ), that is for t ≥
+ log 3 −log(1 −4¯ρ)
+
+/λfl
+3/4. For
+modes with eigenvalues bounded away from zero, the response approaches its empirical coefficient
+at an O(1) exponential rate. Translating that response into a bound on population prediction error
+additionally requires controlling the fluctuation component and its interaction with the population
+covariance K.
+Proof of Proposition 4.
+With the preconditioner K+
+n , ˙W = −(W −Wemp)KnK+
+n = −(W −
+Wemp) on the range of Kn; the minimum-norm Wemp has its rows in that range and W0 = 0 has no
+component off it, so Wt = (1 −e−t)Wemp. Substituting into the definition of mem gives:
+mem(t) = tr[(∆−e−tWemp)Kn∆⊤]
+Efl
+= 1 −e−t(1 + cn),
+cn = tr[WpopKn∆⊤]
+Efl
+= −mem(0).
+If cn > −1/2, the first half-threshold crossing is t = log(2(1 + cn)); otherwise it is already met at
+zero. The generalization curve is gen(t) = ∥((1 −s)Wemp −Wpop)K1/2∥2
+F /∥WpopK1/2∥2
+F with
+s = e−t, a quadratic in s whose minimizer and minimum value are determined by Wemp, Wpop,
+and K. When the minimum over s ∈[0, 1] exceeds half of gen(0) the trajectory never enters the
+generalization phase under our definition.
+Proof of Proposition 5.
+For the channel partition in the proposition, direct substitution gives:
+mem(t) =
+X
+j∈F
+ωj min{ηt/sj, 1},
+ωj =
+λjs2
+j
+P
+ℓ∈F λℓs2
+ℓ
+.
+In the aligned subspace write Wt = P
+j bj(t)ujv⊤
+j . The gradient direction is P
+j λj(bj −aj)ujv⊤
+j ,
+whose compact polar factor is P
+j sign(bj −aj)ujv⊤
+j because λj > 0. Thus ˙bj = η sign(aj −bj),
+17
+
+
+with zero velocity after arrival, and bj(0) = 0. Its solution is bj(t) = min{ηt, aj}, establishing
+the coefficient-clipping formula and preservation of alignment. Orthogonality of the two channel
+families eliminates the population cross term in the memorization projection, giving the weighted
+memory expression below. Before t = θsmin/η, every summand’s clipped response is below θ. At
+t = θsmax/η, every response is at least θ. Since the positive weights sum to one, these facts give
+Equation (13).
+Rank Bound.
+Writing r = |F|, suppose cEn ≤∥∆∥2
+F ≤CEn and smax/smin ≤κ, with
+constants independent of n, r. The RMS fluctuation singular value is ∥∆∥F /√r, and:
+∥∆∥F
+κ√r ≤smin ≤smax ≤κ∥∆∥F
+√r
+.
+Consequently:
+√cE
+2κη
+rn
+r ≤τmem ≤κ√CE
+2η
+rn
+r .
+This r is fluctuation rank; interpreting it as total update rank requires the two ranks to be comparable.
+With unequal sj, the exact crossing still depends on the metric weights ωj, while the displayed
+bounds remain uniform in positive curvature.
+An Explicit Three-Clock Comparison.
+If the fluctuation channels have a common covariance
+eigenvalue λfl = c/n and common singular value s = a
+p
+n/r, the same target gives:
+τ GF
+1/2 = n log 2
+ηGFc ,
+τ polar
+1/2
+=
+a
+2ηpolar
+rn
+r ,
+τ prec
+1/2 = log 2
+ηprec
+.
+Here the comparison flows are respectively ˙W = −ηGF(W −Wemp)Kn and ˙W = −ηprec(W −
+Wemp)KnK+
+n . Population channels with order-one target coefficients and order-one covariance
+eigenvalues have order-one coefficient-learning clocks after fixing the corresponding learning-rate
+normalization. Thus this construction retains a coefficient-distance delay under polar flow while
+removing the inverse-curvature delay. A statement about the full population-risk threshold τgen
+additionally requires that threshold to remain comparable across n; coefficient arrival alone does not
+establish that property.
+A Finite-Range Rank Crossover.
+The aligned equal-singular-value family s(n, r) = a
+p
+1 + n/r
+has the exact clock τ1/2 = a
+p
+1 + n/r/(2η). Its local log–log slope in n is:
+∂log τ1/2
+∂log n
+= 1
+2
+n
+n + r.
+This explicit family has a nearly flat clock when n ≪r and approaches the square-root regime
+when n ≫r; increasing rank lowers the slope over a fixed finite range of n. Its fluctuation energy
+is ∥∆∥2
+F = a2(n + r), so the order-n energy assumption applies in the regime n ≳r. For the pure
+p
+n/r family, changing a fixed rank changes the prefactor, not the asymptotic exponent.
+Why Tempering is an Empirical Intervention.
+For a general matrix gradient, singular vectors
+need not coincide with eigenvectors of Kn. The polar factor therefore does not define an inde-
+pendent constant-rate update in each covariance eigenmode. A convex combination of normalized
+momentum and polar directions does not imply monotonic crossing times, and finite Newton–Schulz
+iterations need not monotonically move every singular value toward one. The proposed compari-
+son fixes the update RMS and reports the observed response rather than asserting a monotonicity
+theorem.
+C
+CONTROLLER AND CHECKPOINT-SELECTION PROOFS
+Mixed Flow and its Relation to the Practical Controller.
+The aligned-flow analysis uses exact
+compact polar directions and a fixed gradient gain:
+˙W = −α(t)η polar0((W −Wemp)Kn) −(1 −α(t))γ(W −Wemp)Kn,
+(14)
+18
+
+
+It omits practical momentum and approximate Newton–Schulz orthogonalization.
+We assume
+h, T > 0, κ ≥0, 0 ≤cwarn < cbudget < 1, and 0 < δ < 1. Equation (4) is nonincreasing
+and satisfies αj+1 ≤e−(j+1)h/T . Summing this geometric series gives Equation (5), independently
+of the accuracy of development copy estimates.
+Proof of Proposition 1.
+Both directions preserve alignment. Before the threshold θ < 1, every
+fluctuation channel has coefficient b(t) < s and follows:
+˙b(t) = α(t)η + (1 −α(t))γµ(s −b(t)).
+The coefficients start from the common value b(ts) = ηts and remain equal. The weighted mem-
+orization projection therefore equals m(t) = b(t)/s; the population cross term vanishes by the
+disjoint-channel assumption. It follows that:
+˙m = α(t)ν + (1 −α(t))γµ(1 −m).
+Integrating ˙m ≤α(t)ν + γµ gives:
+m(t) ≤ms + νA∞+ γµ(t −ts).
+Consequently reaching θ requires the lower bound in Equation (6). For the other direction, ν ≥
+γµ ≥γµ(1 −m) implies:
+˙m ≥γµ(1 −m),
+m(t) ≥1 −(1 −ms)e−γµ(t−ts).
+The right-hand side reaches θ at the claimed upper bound. This also establishes finite arrival. The
+bounds hold pathwise for every measurable coefficient schedule obeying the exposure constraint,
+including a schedule shortened by causal copy feedback. Under the stated uniform constants, both
+bounds are of order n. The always-polar claim follows from m(t) = min{ηt/s, 1}.
+Why a Fixed Polar Floor is Insufficient.
+If the post-gate coefficient has a fixed floor α(t) ≥a >
+0, then ˙m ≥aη/s up to the threshold, so:
+τθ −ts ≤(θ −ms)s
+aη
+.
+Such a floor retains an amplitude-controlled upper bound and cannot yield the stated linear-in-n
+delay when s = Θ(
+p
+n/r) and η = Θ(1). In contrast, the exponential envelope in Equation (4)
+bounds total post-gate exposure, regardless of whether the copy-feedback term activates.
+Quality and Scale Qualifications.
+The QGD and full-polar trajectories coincide through ts. Sub-
+sequently every population-channel coefficient continues monotonically toward its target, so its
+population-projection error does not increase. Full prediction error also includes fluctuation en-
+ergy, and neural FID is outside this statement. Per-step normalization of the gradient branch can
+invalidate the spectral conclusion: with equal residual fluctuation singular values and already fitted
+population channels, normalized gradient and normalized polar updates have identical directions.
+Normalizing the final mixture, or matching the reference scale at a switch dominated only by fluc-
+tuation gradients, can remove the small-µ factor. These are distinct ablations rather than covered
+implementations.
+Proposition 6 (Heterogeneous fluctuation channels). Retain the aligned disjoint-channel model and
+the mixed flow Equation (14), but permit fluctuation channel j to have arbitrary sj > 0 and µj > 0.
+Let:
+ωj =
+µjs2
+j
+P
+ℓ∈F µℓs2
+ℓ
+,
+ms =
+X
+j∈F
+ωj min{ηts/sj, 1},
+ν =
+X
+j∈F
+ωjη/sj.
+Write µmin = minj∈F µj and µmax = maxj∈F µj. If ms < θ < 1, η/sj ≥γµj for every
+fluctuation channel, and εθ = θ −ms −νA∞> 0, then:
+ts +
+εθ
+γµmax
+≤τθ ≤ts +
+1
+γµmin
+log 1 −ms
+1 −θ .
+Consequently, the linear-in-n delay holds for a uniformly bounded fluctuation spectral band c/n ≤
+µj ≤C/n, provided the other uniform conditions of Proposition 1 hold.
+19
+
+
+Proof.
+Let rj(t) = bj(t)/sj ∈[0, 1]. Orthogonality gives m(t) = P
+j ωjrj(t). Until channel j
+reaches its target:
+˙rj = α(t)η/sj + (1 −α(t))γµj(1 −rj).
+After arrival, both directions are zero and rj = 1. Hence, at almost every time, including after
+individual channels saturate,
+γµj(1 −rj) ≤˙rj ≤α(t)η/sj + γµj(1 −rj).
+The left inequality uses η/sj ≥γµj ≥γµj(1 −rj) before arrival and equality at saturation.
+Averaging the inequalities yields:
+γµmin(1 −m) ≤˙m ≤α(t)ν + γµmax(1 −m) ≤α(t)ν + γµmax.
+Integrating the upper bound establishes the lower bound on the crossing time. Exponential com-
+parison with the lower differential inequality establishes its upper bound. The result reduces to
+Proposition 1 when all fluctuation channels have the same amplitude and curvature.
+Proof of Proposition 2.
+Condition on the full history used to construct the family, including train-
+ing data, optimizer randomness, reused development probes, candidate-selection decisions, and de-
+tector calibration. The family and detector are now fixed, while certification inputs are iid and
+independent of that history. Thus Sk ∼Binomial(N, pk) for each fixed k. Exact one-sided bino-
+mial inversion gives Pr{pk > Uk} ≤δ/M. A union bound, which does not require independence
+across candidates, gives:
+Pr{∃k : pk > Uk} ≤δ.
+On its complement, every selected candidate has pbk ≤Ubk ≤cbudget. This proves the conditional
+statement; averaging over the history also gives the unconditional one.
+Scope of the Certificate.
+Equation (9) bounds the joint event of releasing a checkpoint whose
+detected-copy probability exceeds the budget. It is not a probability bound conditional on the event
+of release. It concerns the frozen detector, released weights, training reference set, sampler, and
+conditioning distribution, and does not certify undetected semantic copying or unseen deployment
+distributions. It supplies no population-FID guarantee. After certification results are revealed, new
+adaptively trained checkpoints require new independent certification samples or a separately justified
+sequential method.
+D
+HARD-SWITCH ORDERING AND AN EXPOSURE DESIGN RULE
+Proposition 7 (Same-gate hard switching maximizes the aligned delay). Retain the equal-channel
+assumptions of Proposition 1, including ν ≥γµ, and compare trajectories starting from the same
+ms at ts. For every measurable α(t) ∈[0, 1], the mixed-flow fluctuation fraction satisfies:
+mα(t) ≥mhard(t) = 1 −(1 −ms)e−γµ(t−ts),
+τ α
+θ ≤τ hard
+θ
+= ts + 1
+γµ log 1 −ms
+1 −θ .
+(15)
+The comparison holds up to threshold arrival and does not require a finite exposure integral. Un-
+der the positive-margin condition, Proposition 1 bounds how much delay a finite-exposure mixture
+retains relative to this reference.
+Proof.
+Before saturation:
+˙mα = γµ(1 −mα) + α(t)
+
+ν −γµ(1 −mα)
+
+≥γµ(1 −mα).
+The bracket is nonnegative because mα ∈[0, 1] and ν ≥γµ. Multiplication by the integrating factor
+eγµ(t−ts), or scalar comparison from the shared initial value, yields Equation (15). At saturation the
+fraction remains one, which also preserves the ordering.
+20
+
+
+Table 6: Fluctuation arrival in the aligned spectral diagnostic. Exact mixed-flow threshold times
+τ1/2 for the family in Equation (16). “Finite” and “Excess” denote the T = 0.8 and T = 3 exponen-
+tial mixtures. The lower-bound column applies to the finite mixture; hard switching attains its upper
+bound. All gains and the gate state are fixed across n.
+n
+Finite lower bound
+Hard
+Finite
+Excess
+Floor
+Polar
+64
+12.55
+27.95
+20.85
+5.25
+9.62
+4.00
+128
+23.10
+53.90
+39.09
+5.40
+10.65
+4.00
+256
+44.19
+105.80
+75.56
+5.48
+11.28
+4.00
+512
+86.38
+209.60
+148.49
+5.52
+11.62
+4.00
+Choosing an Admissible Envelope.
+Let 0 < ε0 < θ −ms and ν > 0. The desired inequality
+θ −ms −νA∞≥ε0 follows from A∞≤B⋆= (θ −ms −ε0)/ν. For the blockwise exponential
+envelope, Equation 5 gives:
+h
+eh/T −1 ≤B⋆
+⇐⇒
+eh/T ≥1 + h
+B⋆
+⇐⇒
+T ≤
+h
+log(1 + h/B⋆).
+Copy feedback can reduce exposure below the envelope. This is a sufficient design rule when the
+aligned-model quantities are identified. Development detector counts do not identify ms or ν in a
+neural network, so the practical controller’s measured exposure alone does not certify this model-
+specific margin. The heterogeneous result uses ν in place of ν.
+What Can Improve After a Gradual Transition.
+Fluctuation delay and population-channel
+progress are distinct.
+A population coefficient b with target a and eigenvalue λ follows ˙b =
+αη + (1 −α)γλ(a −b) before saturation. If η ≥γλa, the polar component accelerates this coef-
+ficient relative to the same-gate gradient tail. Its population-projection error can therefore decrease
+faster while fluctuation fitting also accelerates. Full population risk sums these two effects and has
+no universal ordering. Practical FID, changing features, momentum, and detector copying remain
+empirical quantities.
+A Joint Rank–Size Family with Every Margin Term Specified.
+For n ∈{64, 128, 256, 512},
+set fluctuation rank r = n/64 and use the (r + 1)-dimensional aligned quadratic:
+K = Kn = diag(1/4, n−1, . . . , n−1),
+Wpop = diag(3, 0, . . . , 0),
+Wemp = diag(3, 8, . . . , 8).
+(16)
+Consequently ∥∆∥2
+F = 64r = n, ∥∆∥2
+Kn = 1, the fluctuation amplitude ratio is one, and the popu-
+lation/fluctuation cross term is zero. The population eigenvalue remains 1/4, while every fluctuation
+eigenvalue is exactly 1/n. Thus this construction jointly realizes the amplitude, spectral, rank, and
+alignment assumptions. It tests the conditional theorem in a specified growing-dimensional family;
+finite-range Gaussian-feature experiments serve a separate role.
+All flows start at zero and use η = γ = 1, including across dataset sizes. A shared full-polar prefix
+ends at ts = 2, giving population and fluctuation coefficients both equal to two. Therefore s = 8,
+ms = 1/4, ν = 1/8, and θ = 1/2. The diagnostic conditions on this common switch state. For
+h = 1/4, the admissible mixture sets αj+1 = e−(j+1)h/0.8 on block [ts + jh, ts + (j + 1)h); the
+excess-exposure mixture instead uses T = 3. These schedules spend respectively A∞= 0.681500
+and 2.876736, yielding margins 0.164813 and −0.109592. The other controls use α = 0 after
+the gate (hard switch), α = 0.2 (positive floor), or α = 1 (always polar). For a desired margin
+ε0 = 0.15, the design rule gives B⋆= 0.8 and T ≤0.919342, so T = 0.8 is admissible.
+Table 6 verifies both sides of Equation (6) in every admissible cell. The hard-switch post-gate
+delay is exactly n log(3/2). A log–log fit to the finite mixture’s post-gate delays over the four sizes
+has slope 0.986, compared with 0.038 for excess exposure, 0.111 for a positive floor, and zero for
+always-polar flow. These finite-range fits describe the computed family; the asymptotic linear claim
+follows from the uniform positive margin and fixed gain, rather than from the fit alone.
+21
+
+
+Full-Risk Tradeoff at a Common Time.
+For the same construction, full normalized population
+risk is:
+gen(t) =
+
+1 −bpop(t)
+3
+2
++ 4
+9
+bfl(t)
+8
+2
+.
+(17)
+At n = 256 and t = 4, the finite mixture has risk 0.05471, versus 0.06997 for hard switching. Its
+population-projection term is 0.00575, versus 0.04088. With a longer observation horizon H = 8n,
+the hard switch eventually reaches lower minimum full risk, 0.03506 at t = 10.77, whereas the finite
+mixture reaches 0.05346 at t = 5.34. Figure 3 displays this crossing together with the exposure
+margins and clock scaling. The diagnostic demonstrates faster early utility with a retained delay; it
+does not make gradual exposure uniformly optimal.
+Numerical Reproducibility.
+All 20 diagnostic configurations are evaluated using the exact block-
+wise integration procedure described below. On a constant-α block of duration u, let k = (1−α)γλ.
+For k > 0, an unsaturated coefficient with target a and starting value b0 evolves exactly as:
+b(u) = min
+n
+a, b0 +
+
+a −b0 + αη
+k
+
+(1 −e−ku)
+o
+.
+For k = 0 it is min{a, b0 + αηu}. Threshold arrival is obtained by analytic inversion within the
+first crossing block, with no Euler-step approximation. Risk minima use scalar minimization within
+every block that can improve the current value; the nondecreasing fluctuation-risk term bounds the
+remaining search. The script checks the threshold equation to 10−10, the lower and upper clock
+bounds, hard-switch ordering, the exact polar clock, and risk values against a finer plotting grid.
+The finite observation horizon is H = 8n for every schedule.
+(a) Exposure margin
+-0.1
+0
+0.1
+0.2
+0.3
+Hard
+Finite
+Excess
+Post-gate schedule
++0.250
++0.165
+-0.110
+(b) Fluctuation clock
+4
+16
+64
+256
+64
+128
+256
+512
+Training-set size n
+(c) Population risk
+0.03
+0.06
+0.09
+0.12
+2
+4
+8
+12
+Time after polar start
+n = 256
+Hard switch
+Finite exposure
+Excess exposure
+Polar floor
+Always polar
+Figure 3: Exposure, delay and early quality in the aligned model. (a) Hard switching and finite
+exposure retain positive margins; excessive exposure exceeds the available margin. (b) Admissible
+exposure preserves dataset-size delay, while excess exposure and a positive floor compress it. (c) At
+n = 256, finite exposure improves early full population risk, while hard switching reaches lower risk
+later. Curves use Equation (16); Table 6 and Appendix D specify the exact solver and parameters.
+E
+BACKGROUND RANDOM-FEATURE DIAGNOSTICS
+The finite-range summaries in this appendix provide the background clock comparisons visualized
+in Figure 4. They are distinct from the fully specified and directly integrated spectral family in Ap-
+pendix D. The background records contain clock and spectral annotations rather than reconstructed
+training trajectories. The aligned diagnostic has a complete exact-flow solver.
+Experimental Setting.
+The random-feature setting uses d = 64, with eight covariance directions
+of unit variance and the remaining 56 at variance 0.1; p = 4096 random features with Fij ∼
+N(0, 1/d); and ReLU or tanh activations. Noise levels are σ ∈{0.25, 0.5} and dataset sizes are
+n ∈{16, 32, 64, 128, 256, 512}. The noise bank contains m = 1024 fixed draws per point, nested
+across n, with an m = 512 comparison. The population readout uses fresh population inputs and
+the Gaussian conditional mean as target. Closed-form flows and finite-step Adam/Muon trajectories
+share the eligibility and crossing definitions in Section 3.
+22
+
+
+Clock and Slope Calculations.
+OLS fits regress log crossing time on log dataset size using com-
+mon supports. Window slopes are computed as βR = βmem −βgen within each draw. Bracketed
+ranges use all 55 = 3,125 bootstrap resamples of the five draw records, with the same draw indices
+for paired differences. Undefined quality clocks are excluded before fitting; the Newton quality fit
+therefore uses n ≥128. The summaries aggregate 960 per-condition clock records using the fitting
+and resampling procedures described above.
+Spectral Separation and Optimizer Ordering.
+The population median eigenvalue has log–log
+slope −0.02, while the fluctuation median has slope −1.00. The population eigenvalue changes by
+a factor of 1.072 across the dataset sizes. The all-size ordering in Table 11 follows from the same
+per-size clocks used for Table 7, so the exponent and level summaries agree arithmetically. The
+Newton quality gate is not reached for n ≤64, and its ratio is undefined there. Gradient-descent
+slopes differ from gradient flow by at most 0.01.
+Table 7: Quality and memorization scaling in the random-feature model. Five draws, ReLU,
+d = 64 unless indicated. Brackets are bootstrap ranges across draws. Slopes use common fit
+supports and R = τmem/τgen; Newton quality slopes use n ≥128.
+σ
+optimizer
+τmem slope
+τgen slope
+R/RGF at 512
+0.25
+gradient flow
+1.00 [0.99, 1.01]
+0.10
+1.000
+0.25
+Adam
+0.65 [0.64, 0.66]
+0.08
+0.275
+0.25
+Muon
+0.20 [0.19, 0.21]
+0.05
+0.047
+0.25
+Newton
+0.00 [0.00, 0.00]
+0.00
+0.008
+0.5
+gradient flow
+1.05 [1.04, 1.06]
+0.10
+1.000
+0.5
+Adam
+0.70 [0.69, 0.71]
+0.08
+0.270
+0.5
+Muon
+0.18 [0.17, 0.19]
+0.05
+0.034
+0.5
+Newton
+0.00 [0.00, 0.00]
+0.00
+0.006
+0.25
+Muon, d = 16
+0.60 [0.59, 0.61]
+0.05
+0.203
+0.5
+Muon, d = 16
+0.65 [0.64, 0.66]
+0.05
+0.183
+Table 8: Spectral diagnostics. ReLU, σ = 0.25. Median indices, normalized eigenvalues, and
+fluctuation/population energy ratio summarize the covariance spectrum.
+n
+pop. index
+λpop
+fluct. index
+λfl
+energy ratio
+16
+4
+1.40 × 10−1
+40
+5.20 × 10−3
+0.200
+32
+4
+1.38 × 10−1
+72
+2.60 × 10−3
+0.184
+64
+4
+1.36 × 10−1
+136
+1.30 × 10−3
+0.169
+128
+4
+1.34 × 10−1
+264
+6.51 × 10−4
+0.156
+256
+4
+1.32 × 10−1
+520
+3.25 × 10−4
+0.143
+512
+4
+1.31 × 10−1
+1032
+1.63 × 10−4
+0.132
+Table 9: Quality and memorization scaling with tanh features. Same five-draw and bootstrap-
+range conventions as Table 7.
+σ
+optimizer
+τmem slope
+τgen slope
+R/RGF at 512
+0.25
+gradient flow
+1.15 [1.14, 1.16]
+0.12
+1.000
+0.25
+Adam
+0.80 [0.79, 0.81]
+0.10
+0.255
+0.25
+Muon
+0.30 [0.29, 0.31]
+0.06
+0.036
+0.5
+gradient flow
+1.10 [1.09, 1.11]
+0.10
+1.000
+0.5
+Adam
+0.75 [0.74, 0.76]
+0.08
+0.270
+0.5
+Muon
+0.24 [0.23, 0.25]
+0.05
+0.035
+23
+
+
+Table 10: Sensitivity to the number of noise draws. Comparison of m = 512 and m = 1024;
+brackets are bootstrap ranges.
+σ
+quantity
+m = 1024
+m = 512
+0.25
+gradient flow βmem
+1.00 [0.99, 1.01]
+1.01 [1.00, 1.02]
+0.25
+Muon βmem
+0.20 [0.19, 0.21]
+0.21 [0.20, 0.22]
+0.25
+Muon–GF βR gap
+-0.75 [-0.75, -0.75]
+-0.75 [-0.75, -0.74]
+0.5
+gradient flow βmem
+1.05 [1.04, 1.06]
+1.06 [1.05, 1.07]
+0.5
+Muon βmem
+0.18 [0.17, 0.19]
+0.19 [0.18, 0.20]
+0.5
+Muon–GF βR gap
+-0.82 [-0.82, -0.82]
+-0.82 [-0.82, -0.81]
+Table 11: Window-ratio comparisons. Within each noise group, gradient-flow R is absolute and
+the other optimizers are normalized to it. Newton is – where it never reaches the quality gate.
+σ = 0.25
+σ = 0.5
+n
+RGF
+Muon
+Adam
+Newton
+RGF
+Muon
+Adam
+Newton
+16
+2.20
+0.636
+0.864
+–
+2.60
+0.577
+0.846
+–
+32
+4.11
+0.378
+0.687
+–
+5.02
+0.327
+0.673
+–
+64
+7.66
+0.225
+0.547
+–
+9.70
+0.185
+0.536
+–
+128
+14.30
+0.134
+0.435
+0.028
+18.75
+0.105
+0.426
+0.021
+256
+26.68
+0.080
+0.346
+0.015
+36.21
+0.059
+0.339
+0.011
+512
+49.78
+0.047
+0.275
+0.008
+69.96
+0.034
+0.270
+0.006
+Table 12: Clock and spectral-descriptor correlations. Spearman correlations of memorization
+time with spectral descriptors, pooling 60 draw/size/noise cells per optimizer. These are pooled
+associations; within each fixed draw and noise level, both quantities increase with size. A constant
+clock has undefined correlation (–).
+optimizer
+inverse fluct. eigenvalue
+fluct. nuclear norm
+gradient flow
+0.99
+1.00
+gradient descent
+0.99
+1.00
+Adam
+0.99
+1.00
+Muon
+0.14
+0.22
+Newton
+–
+–
+Paired Gaps and Dimensional Dependence.
+The ReLU Muon-minus-gradient-flow R-slope
+gaps at d = 64 are −0.75 and −0.82; the d = 16 gaps are −0.35 and −0.35. For tanh, the
+corresponding d = 64 gaps are −0.79 and −0.81. Each value is recomputed as the paired difference
+of βmem −βgen on the same draw and size support. The small-readout experiment changes the
+relative dimensional regime; network-width slopes are a separate neural-model intervention, not a
+numerical identity forced by the aligned-flow theorem.
+F
+DIRECTIONAL INTERVENTIONS AT MATCHED MAGNITUDE
+The following controls isolate direction at fixed per-layer RMS on the small CIFAR-10 setting.
+They normalize every update and therefore differ from QGD’s fixed-gain tail. Table 13 varies the
+momentum–polar mixture; Table 14 varies orthogonalization depth. Their window ratio is R =
+τmem/τgen, distinct from the observed interval in the main tables.
+24
+
+
+(a) Learning geometry
+Feature covariance
+Population
+Fluctuation
+O(1)
+O(1/n)
+Covariance-mode learning rates
+Gradient flow
+Fast
+Slow
+Exact preconditioning
+Equal rates
+Muon
+Momentum
+Ideal polar
+Unit singular values
+Update rank ≤ d
+(b) Random-feature windows
+σ = 0.25
+σ = 0.5
+0.5
+1
+10
+100
+16
+32
+64
+128
+256
+512
+Training-set size n
+Window ratio R
+0.5
+1
+10
+100
+16
+32
+64
+128
+256
+512
+Training-set size n
+Window ratio R
+Gradient flow
+Adam
+Muon
+Newton
+Figure 4: Geometry and random-feature evidence. Gradient flow preserves covariance-dependent
+rates, exact curvature preconditioning equalizes them, and polar updates flatten singular values.
+In the displayed comparison, the window ordering is Newton < Muon < Adam < gradient flow
+wherever all quality clocks exist. Newton points are omitted where the quality gate is not reached.
+Full assumptions and draw-level results appear in Appendices A–E.
+Table 13: Momentum–polar interpolation at matched update RMS. Equal-RMS intervention;
+times in thousands of steps.
+λ
+τgen
+τmem
+R
+0.00
+16
+164
+10.25
+0.25
+14
+112
+8.00
+0.50
+12
+70
+5.83
+0.75
+10
+44
+4.40
+1.00
+8
+28
+3.50
+Table 14: Sensitivity to Newton–Schulz iteration count. Times in thousands of steps.
+iterations
+τgen
+τmem
+R
+1
+12
+84
+7.00
+2
+10
+50
+5.00
+5
+8
+28
+3.50
+G
+IMPLEMENTATION AND EVALUATION PROTOCOL
+Data, Paired Trajectories and Model.
+CIFAR-10 inputs are scaled to [−1, 1]. Class-balanced
+nested subsets use a fixed split seed, with 2,000 or 10,000 training images. The primary study uses
+no augmentation to expose the quality-to-copy transition under a common image distribution. The
+10,000 held-out test images provide the fixed FID reference statistics. Five paired initializations are
+indexed 0–4; data order, training noise and initialization agree between methods within a pair. They
+are the unit of the reported mean and sample standard deviation.
+25
+
+
+The image model is a 6.47M-parameter DDPM-style UNet with GroupNorm, SiLU, two residual
+blocks per level, attention at 16×16, and no dropout. Training uses batch 128, ϵ prediction, a 1,000-
+step linear noise schedule, bf16 computation and fp32 optimizer state. The observation horizons are
+200k and 400k updates. EMA decay is 0.999 from initialization; the released weights, sampler and
+generation distribution are fixed before certification.
+Optimizer Conventions.
+AdamW uses (β1, β2) = (0.9, 0.999) and zero weight decay. Muon
+uses momentum 0.90, Nesterov momentum, five Newton–Schulz iterations with coefficients
+(3.4445, −4.7750, 2.0315), and scale 0.2
+p
+max(r, c) for an r ×c matrix. Convolutional parameters
+are flattened as output channels by all remaining dimensions. Biases, normalization parameters and
+time embeddings use AdamW at 2 × 10−4 for every matrix-method comparison. SGD uses Nes-
+terov momentum and the independently chosen pilot learning rate. The base optimizers are tuned
+first; QGD and the open-loop control then receive nine additional controller configurations using the
+frozen Muon prefix. Matrix learning rates and branch thresholds are selected before evaluating the
+paired trajectories; Table 16 records the candidate menus and selected configurations.
+QGD preserves the Muon momentum buffer and its Nesterov convention. At the first update, the gain
+is the ratio of Muon-direction RMS to momentum-direction RMS, with ϵ = 10−12 and a fallback of
+one if either RMS is below that value. The gain is fixed thereafter. Neither the momentum branch nor
+the final mixture is normalized per step. If α = 0, the implementation skips the orthogonalization
+calculation while retaining the common momentum state.
+Causal Event Order.
+At a probe checkpoint, the current weights are evaluated before the fol-
+lowing update block is chosen. A crossing is confirmed only if the next probe also meets its cri-
+terion. The quality crossing timestamp is retained for the measured window, while control begins
+at confirmation. Copy confirmation before or at quality confirmation makes the run inadmissible.
+An unconfirmed final event remains unresolved. After a quality gate, an inadmissibility flag never
+retroactively changes earlier updates. Final audit results and calibration results are never supplied to
+the controller.
+Sampling and Quality Banks.
+DDIM uses 50 evenly spaced inference steps and η = 0. Develop-
+ment FID uses 5,000 fixed latent inputs every 2,000 training steps; its 1,000-sample subset supplies
+development copying. Trajectory quality audits use fresh 50,000-output banks for checkpoint read-
+outs. Once a checkpoint has been chosen for release, final FID uses a separate 50,000-output bank,
+with the same feature extractor and reference convention across methods. The independent audit
+is not used to select a different checkpoint. Held-out reference statistics are fixed throughout, and
+development, calibration and final-audit banks serve the distinct roles defined above.
+H
+INDEPENDENT DETECTOR AUDITS
+The primary pixel detector compares an output against its own training reference set, using the near-
+est and second-nearest Euclidean distances and the ratio rule d1 < d2/3. The trajectory and final
+copy audits use 10,000 outputs from their fresh 50,000-output quality bank; each bank is indepen-
+dent of development and calibration. Independent binomial fluctuations in these audits are distinct
+from the 1,000-sample development probe that changes QGD’s schedule.
+The alternate detector uses the pretrained SSCD descriptor, unit-normalized features and Euclidean
+distance in feature space (Pizzi et al., 2022). The nearest-neighbor ratio threshold is fixed at d1 <
+d2/3 for both detectors. Table 15 reports fresh-audit copying for QGD and its baselines. SSCD
+does not guide the pixel-controlled trajectory. This comparison tests detector dependence; it does
+not establish calibrated sensitivity to all forms of copying.
+Detector-specific rates quantify the declared rule’s outputs. They are not guarantees against all
+semantic copying. The training set, feature extractor, threshold, released weights, sampler and con-
+ditioning distribution form part of the fixed certification specification.
+26
+
+
+Table 15: Independent copying audits under two detectors. CIFAR-10, n = 2,000, 60k check-
+point. Mean ± SD over five trajectories; each detector uses a fresh 10k-output audit. SSCD is used
+only for this audit, after the pixel-controlled trajectory is frozen.
+Method
+Pixel copying (%) ↓
+SSCD copying (%) ↓
+SGD
+1.30±0.10
+1.18±0.07
+AdamW
+2.44±0.17
+2.26±0.11
+Muon
+16.02±0.35
+13.52±0.27
+Same-gate hard switch
+2.51±0.22
+2.19±0.15
+Pilot-fixed open loop
+4.34±0.51
+3.97±0.42
+QGD (ours)
+3.96±0.40
+3.55±0.22
+Table 16: Independent pilot allocation and selected settings. Each method uses nine prespecified
+pilot configurations. The quality threshold and open-loop schedule are frozen before constructing
+the five paired evaluation trajectories. The hard switch shares QGD settings and has no separately
+fitted transition.
+Method
+Nine-configuration search
+Selected setting
+SGD
+η ∈{1, 2, 4}10−4; β ∈{.85, .90, .95}
+η = 2 · 10−4, β = .9
+AdamW
+η ∈{1, 2, 4}10−4; β1 ∈{.85, .90, .95}
+η = 2 · 10−4, β = .9
+Muon
+η ∈{1, 2, 4}10−4; β ∈{.85, .90, .95}
+η = 2 · 10−4, β = .9
+MiMuon (norm proxy)
+η ∈{1, 2, 4}10−4; ρ ∈{.5, 1, 2}
+η = 2 · 10−4, ρ = 1
+QGD (ours)
+T ∈{4, 8, 12}k; κ ∈{.25, .5, .75}
+T = 8k, κ = .5
+Pilot-fixed open loop
+T ∈
+{3.8, 4.5, 5.2, 5.9, 6.6, 7.3, 8, 8.7, 9.4}k
+T = 5.2k
+I
+CONTROLLER CONTROLS AND PAIRED UNCERTAINTY
+Comparison Definitions.
+The same-gate hard switch follows precisely QGD’s prefix until quality
+confirmation, then sets α = 0 permanently without resetting momentum or recalibrating the gain.
+The open-loop comparator keeps the same gate, momentum and gain but fixes its gradual schedule
+using a separate development pilot. Its exposure is matched at the aggregate pilot level; it cannot
+use an evaluation trajectory’s future copying to choose a schedule. Matching total exposure isolates
+its causal allocation from a simple change in duration.
+MiMuon uses the practical norm-proxy branch choice of Huang et al. (2026).
+A layer-
+relative threshold is fixed from the independent pilot menu.
+At the first update, freeze ζℓ=
+ρ max(∥Mℓ,0∥F , 10−12); use the Muon branch when ∥Mℓ,k∥F ≥ζℓand raw momentum other-
+wise. Either branch may follow the other. Its raw momentum branch retains the declared original
+convention rather than silently acquiring QGD’s gain. This comparison uses the practical norm-
+proxy diffusion adaptation. Pilot selection and sensitivity expose the effect of the threshold rather
+than relying on a single unexplained value.
+The no-quality-gate variant begins its transition from initialization. The no-feedback variant retains
+the quality gate and default exponential envelope with κ = 0. The per-step RMS variant normalizes
+the final matrix mixture to the Muon reference scale. Directional magnitude controls use the stated
+per-layer matching convention. Every control preserves the data pairing and observation horizon.
+Paired Aggregation.
+Clocks, audit readouts and available intervals are computed within each
+trajectory before averaging. Censored copy crossings retain their observation limits; the observed
+interval is truncated at that limit. A mixture of observed and censored events is not summarized as an
+uncensored mean onset. Ratios of average intervals and averages of paired ratios answer different
+questions; the headline specifies the former, and the paired records retain both. Table 19 reports
+paired selected-quality differences; Table 17 gives the full controller comparison, and Table 20 gives
+individual QGD clocks and schedules.
+For checkpoint selection, each trajectory has 100 independent calibration repetitions. FID is aver-
+aged over released decisions within a trajectory, then summarized across the five trajectory means.
+27
+
+
+Table 17: Complete training-controller comparisons. Five paired CIFAR-10 trajectories, n =
+2,000; mean ± SD. Observed windows stop at the copy crossing or the 200k observation horizon.
+FID and copying use independent audits at 60k.
+Method
+Quality (k)
+Copy (k)
+Window (k)
+FID60
+Copy60 (%)
+SGD
+16.0±1.4
+NR
+184.0±1.4
+85.4±0.3
+1.26±0.11
+AdamW
+14.0±1.4
+124.0±6.2
+110.0±5.3
+82.9±0.3
+2.51±0.10
+Muon
+8.0±1.4
+28.0±1.4
+20.0±1.4
+81.3±0.3
+16.10±0.47
+MiMuon (norm proxy)
+10.0±1.4
+94.4±6.2
+84.4±5.0
+80.6±0.3
+4.30±0.30
+Same-gate hard switch
+8.0±1.4
+194.0±3.2
+186.0±2.4
+81.5±0.3
+2.47±0.03
+Pilot-fixed open loop
+8.0±1.4
+132.0±50.5
+124.0±50.0
+79.0±1.0
+4.56±0.60
+QGD w/o quality gate
+14.0±1.4
+174.8±11.5
+160.8±10.4
+82.9±0.3
+2.95±0.20
+QGD w/o feedback
+8.0±1.4
+78.0±8.4
+70.0±7.1
+79.2±0.3
+4.77±0.21
+QGD + per-step RMS
+8.0±1.4
+38.0±3.2
+30.0±2.4
+80.8±0.3
+13.51±0.16
+QGD (ours)
+8.0±1.4
+174.4±10.1
+166.4±11.3
+77.8±0.3
+3.88±0.31
+Table 18: Sensitivity to controller settings and probe cadence. CIFAR-10, n = 2,000; 60k
+quality/copying readouts. Each row changes one setting from T = 8k, κ = 0.5, warning 2.5%,
+cadence 2k. Exposure is obtained by evaluating the causal recursion on the corresponding fixed
+probe trajectory.
+Setting
+Exposure (k)
+FID60 ↓
+Copy60 (%) ↓
+Default
+4.21±0.64
+77.8±0.3
+3.88±0.31
+Decay T=4k
+2.41±0.20
+78.5±0.3
+3.65±0.30
+Decay T=12k
+5.17±1.04
+77.7±0.3
+4.57±0.34
+Feedback kappa=0.25
+5.24±0.33
+78.0±0.3
+4.40±0.33
+Feedback kappa=0.75
+3.58±0.81
+78.3±0.3
+3.84±0.21
+Warning=2Warning=3Probe cadence=1k
+3.43±0.96
+77.9±0.3
+3.78±0.24
+Probe cadence=4k
+4.46±0.30
+78.3±0.3
+4.79±0.14
+This separates between-trajectory uncertainty from calibration-bank variability. Conditional-on-
+release quality averages do not alter the denominator of release or joint-error frequencies.
+J
+FROZEN-FAMILY CALIBRATION AND SELECTOR COMPARISON
+The small-subset archive contains checkpoints at 2, 4, . . . , 200k, fixed before certification. Qual-
+ity eligibility uses the predeclared development target; a saved crossing checkpoint becomes el-
+igible after its subsequent confirmation. A family includes every seed, hyperparameter, weight
+averaging choice and sampler configuration searched using a shared calibration decision.
+The
+method/trajectory comparisons are separately declared families; their comparative evaluation does
+not provide one certificate for post-calibration selection across methods.
+For each fixed family and bank, candidate k contributes a count Sk ∼Binomial(5,000, pk). The
+simulation uses the specified underlying detector probabilities to audit joint error. These underly-
+ing probabilities are not revealed to the controller or any selector. Counts are sampled once per
+candidate/bank and reused across competing selection rules. Each calibration repetition records the
+selected checkpoint or abstention, and the reported summaries aggregate release frequencies, joint
+violations and final-audit readouts.
+Valid and Diagnostic Rules.
+Empirical filtering chooses the best development FID among candi-
+dates satisfying Sk/N ≤cbudget; it is a diagnostic rule without simultaneous error control. Single
+preselection chooses one quality-eligible candidate using development copying at the full budget;
+margin preselection uses 0.8cbudget. Each then applies a level-δ one-sided binomial test to that can-
+didate alone, abstaining on failure without trying another. These two rules have valid joint error
+control.
+28
+
+
+Table 19: Paired differences in selected checkpoint quality. Baseline final FID minus QGD final
+FID under CBS at a 5% copy budget. Mean ± sample SD is over the five paired trajectory differences
+after averaging each trajectory over its 100 calibration decisions.
+Baseline
+Final FID difference
+SGD
+3.81±0.33
+AdamW
+6.38±0.31
+Muon
+10.57±0.51
+MiMuon (norm proxy)
+5.11±0.19
+Same-gate hard switch
+2.25±0.31
+Pilot-fixed open loop
+3.74±2.89
+Table 20: Quality gates and adaptive transition schedules. The coefficient is set using the probe
+at the listed zero time for the following block. Times are k steps. Every schedule obeys the 7.0416k
+exposure envelope.
+Trajectory
+Quality
+Confirm.
+α = 0
+Exposure
+Copy onset
+FID60
+0
+8
+10
+20
+4.450
+174
+77.83
+1
+8
+10
+18
+3.837
+170
+77.38
+2
+10
+12
+22
+4.685
+160
+78.16
+3
+6
+8
+14
+3.273
+184
+77.67
+4
+8
+10
+20
+4.805
+184
+77.91
+Fixed-sequence testing orders the eligible family using development information alone. It applies
+level-δ tests in that fixed order and stops at the first failure, selecting the best development FID
+among the consecutively certified candidates. The order affects power but not validity; stopping at
+the first failure is essential (Angelopoulos et al., 2025). CBS instead constructs simultaneous upper
+bounds with per-candidate error δ/M and chooses the best development FID among all eligible
+certified candidates. Ties use the earlier checkpoint.
+The fixed sequence orders by ascending development-copy fraction, with earlier step breaking ties.
+Every method uses fresh calibration inputs independent of training and development. The guar-
+antee is for the joint event of release and detector-budget violation. It does not bound violation
+conditional on release and does not certify population FID. A subsequent model revision requires
+fresh calibration or a separately justified sequential procedure. Adaptive Learn-then-Test addresses
+a complementary setting with sequential sampling and early termination (Zecchin et al., 2025).
+Family Size and Uncertainty.
+All denominators for release and joint error include abstentions.
+Final FID and final audited copying average released checkpoints. The family-size comparison
+freezes a smaller, development-chosen candidate set before its calibration and updates the Bonfer-
+roni allocation accordingly. Repeated-bank error frequencies describe the declared fixture families;
+they do not replace Proposition 2’s distribution-free argument.
+K
+COMPUTATION AND PRACTICAL COST
+The timing configuration uses one NVIDIA A100 accelerator, bf16 training, batch 128, and the
+50-step DDIM sampler. Table 22 separates model updates, development probes, calibration and
+the final audit. The operation-time model uses 60/72/82/75 ms per SGD/AdamW/Muon/MiMuon
+update, 63 ms for the fixed-gain momentum tail and 84 ms for a mixed update. A development
+probe costs 90 s for generation/features plus 5 s for copying on shared samples; calibration costs
+43 s per 5k outputs, and the final 50k quality audit costs 900 s. Research-only trajectory audits are
+additional to the deployment accounting. The copying probe reuses the generated quality samples;
+its additional time is detector computation, rather than a second full generation pass. Shared work
+is counted once.
+The full cost of a released model includes constructing the archive, not just training to its selected
+checkpoint. QGD can skip Newton–Schulz calculations after its coefficient reaches zero, but genera-
+29
+
+
+Table 21: Sensitivity to checkpoint-family size. QGD archives at a 5% copy budget, δ = 0.05.
+Thinned families are fixed before calibration and reuse the same candidate-level binomial draws for
+paired comparison. Each candidate receives 5k outputs; CBS uses δ/M.
+Candidates M
+Cadence (k)
+Final FID
+Release
+Joint error
+Outputs (k)
+20
+10
+75.98±0.59
+500/500
+0/500
+100
+50
+4
+75.75±0.59
+500/500
+3/500
+250
+100
+2
+75.56±0.51
+500/500
+1/500
+500
+Table 22: End-to-end cost accounting for a 200k checkpoint archive. Hours from the operation-
+time model in Appendix K. Development quality generation/features cost 90s and the copy check
+adds 5s on shared samples. CBS uses 500k outputs; the independent final quality audit uses 50k.
+The full open-loop polar branch remains active because its exponential coefficient never reaches
+zero.
+Method
+Train
+Develop.
+CBS
+Final audit
+Total
+SGD
+3.33
+2.64
+1.19
+0.25
+7.42
+AdamW
+4.00
+2.64
+1.19
+0.25
+8.08
+Muon
+4.56
+2.64
+1.19
+0.25
+8.64
+MiMuon (norm proxy)
+4.17
+2.64
+1.19
+0.25
+8.25
+Same-gate hard switch
+3.50
+2.64
+1.19
+0.25
+7.58
+Pilot-fixed open loop
+4.66
+2.64
+1.19
+0.25
+8.74
+QGD (ours)
+3.65
+2.64
+1.19
+0.25
+7.74
+tion probes and final calibration remain material. A smaller candidate family reduces calibration out-
+puts at the cost of fewer choices. The selector comparison therefore reports both quality/availability
+and the number of generated calibration outputs.
+L
+TRANSFER METRICS AND GENERATION SETTINGS
+Image Flow Matching.
+The image comparison uses the same UNet and small CIFAR-10 subset
+with the conditional flow-matching objective of Lipman et al. (2023). The interpolation is xt =
+(1 −t)z + tx, with z ∼N(0, I), uniform t ∈[0, 1], and velocity target x −z. Sampling uses 50
+uniform Heun steps. The flow observation horizon is 220k updates; motion uses 300k, with the same
+2k probe cadence and 5% copy threshold. Model architecture, batch, time distribution and solver
+are fixed across methods. Development quality uses a predeclared FID target of 89.1; final quality
+follows the independent image-audit protocol.
+Music-Conditioned Motion.
+The AIST++ configuration uses a 4M-parameter pose generator and
+20-second sequences. Source performances are assigned to training, development and audit groups
+before chunking, with 400 training, 100 development and 100 audit recording groups; overlapping
+chunks remain within one split. Music features and the pose representation are fixed across methods.
+Beat alignment compares motion beats with music beats and has a predeclared threshold of 0.270.
+Motion features use root-centered, body-scale-normalized joint positions, retaining root motion sep-
+arately. The 48-dimensional kinetic descriptor contains each of 23 non-root joints’ mean squared
+speed and acceleration (46 components), plus root horizontal and vertical kinetic energy. Compo-
+nents are standardized using development-pilot statistics. Kinetic feature FID compares its means
+and covariances and is reported separately from beat synchrony. Diversity is the average pairwise
+distance in the same standardized motion-feature space, normalized by the corresponding held-out
+reference diversity; matching the reference scale is the target, rather than increasing diversity with-
+out limit. Pose copying applies the fixed nearest-neighbor ratio d1 < d2/3 in this standardized
+kinetic space. Its flag rate concerns the declared coarse descriptor; it does not certify the absence of
+semantic or frame-level copying. Table 23 provides the per-trajectory transfer readouts. The joint
+evaluation prevents high beat alignment from concealing repetitive or unrealistic motion.
+30
+
+
+Table 23: Transfer clocks and complete common-checkpoint readouts. Five paired trajectories
+per setting. Times are k steps; flow quality is FID at 60k and dance quality is beat alignment at 120k.
+Main-text dance realism and diversity are independent additional quality dimensions.
+Method
+Quality (k)
+Copy (k)
+Window (k)
+Quality
+Copy (%)
+Flow matching
+SGD
+16.0±1.4
+200.0±3.7
+184.0±2.8
+86.4±0.3
+1.17±0.13
+AdamW
+10.0±1.4
+116.0±3.7
+106.0±2.8
+84.5±0.3
+2.08±0.22
+Muon
+8.0±1.4
+26.0±3.7
+18.0±2.8
+86.2±0.3
+14.61±0.07
+Same-gate hard switch
+8.0±1.4
+128.0±3.7
+120.0±2.8
+82.8±0.3
+2.48±0.15
+QGD (ours)
+8.0±1.4
+108.0±3.7
+100.0±2.8
+79.8±0.3
+4.14±0.25
+AIST++ dance
+SGD
+28.0±1.4
+260.0±3.7
+232.0±2.8
+0.279±0.001
+1.08±0.10
+AdamW
+26.0±1.4
+232.0±3.7
+206.0±2.8
+0.282±0.001
+1.94±0.13
+Muon
+20.0±1.4
+58.0±3.7
+38.0±2.8
+0.285±0.001
+11.06±0.57
+Same-gate hard switch
+20.0±1.4
+210.0±3.7
+190.0±2.8
+0.289±0.001
+2.14±0.22
+QGD (ours)
+20.0±1.4
+180.0±3.7
+160.0±2.8
+0.294±0.001
+4.09±0.29
+31
