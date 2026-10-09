@@ -6,68 +6,68 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-10-07
-- 运行时间：2026-10-07 23:57:59 UTC
+- 最新运行日期：2026-10-08
+- 运行时间：2026-10-09 00:09:01 UTC
 - 运行状态：成功
 - 本次总论文数：16
 - 精读区：5
 - 速读区：11
 
 ### 今日简报（AI）
-今日筛选16篇生成式AI论文，精读5篇、速读11篇，重点聚焦图像编辑与SAR重建。最值得看的是奖励引导图像编辑的快速伴随随机传输（FASTER，8.0分）和扩散模型展开式SAR压缩重建（8.0分），另有拖拽编辑、无梯度采样、几何感知偏好优化等速读方向。普通读者可优先了解扩散模型如何与优化/展开方法结合，解决图像编辑和科学成像的实际问题。
-- 详情：[/202610/07/README](/202610/07/README)
+今日共筛读16篇AI论文，精读5篇、速读11篇，聚焦图像超分与修复前沿。最值得关注的是两篇9分工作：AstraSR用GPT-6做真实场景热成像超分，HarnessIR则用多模态基础模型统一真实图像修复。普通读者可优先了解这两项技术的应用潜力，并留意速读中扩散模型概念擦除的连续编辑方向。
+- 详情：[/202610/08/README](/202610/08/README)
 
 ### 精读区论文标签
-1. [FASTER: Fast Adjoint Stochastic Transport for Endpoint Refinement in Reward-Guided Image Editing](/202610/07/2610.04538v1-faster-fast-adjoint-stochastic-transport-for-endpoint-refinement-in-reward-guided-image-editing)  
+1. [AstraSR: Real-World Thermal Super-Resolution with GPT-6 Astra](/202610/08/2610.05910v1-astrasr-real-world-thermal-super-resolution-with-gpt-6-astra)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：多模态生成模型引导的真实热成像超分辨率
+2. [HarnessIR: Harnessing Multimodal Foundation Models for Universal Real-World Image Restoration](/202610/08/2610.10133v1-harnessir-harnessing-multimodal-foundation-models-for-universal-real-world-image-restoration)  
+   标签：评分：9.0/10、query:real-ir
+   evidence：面向真实世界图像修复的智能体框架
+3. [RASteer: Retain-Aware Activation Steering for Concept Erasure in Diffusion Models](/202610/08/2610.01969v1-rasteer-retain-aware-activation-steering-for-concept-erasure-in-diffusion-models)  
    标签：评分：8.0/10、query:real-ir
-   evidence：用伴随随机传输实现高效奖励引导图像编辑
-2. [Diffusion Meets Unrolling: Compressive SAR Image Reconstruction with Interleaved Learned Corrections](/202610/07/2610.06107v1-diffusion-meets-unrolling-compressive-sar-image-reconstruction-with-interleaved-learned-corrections)  
+   evidence：通过保留感知激活引导实现文本到图像扩散模型的概念擦除
+4. [ScribbleEdit: A Benchmark for Scribble-Only Image Editing](/202610/08/2610.09382v1-scribbleedit-a-benchmark-for-scribble-only-image-editing)  
    标签：评分：8.0/10、query:real-ir
-   evidence：用扩散模型做压缩SAR图像重建
-3. [SPIN: Image Immunization Against Diffusion Editing via Single-Step Projection in Stochastic Neighborhoods](/202610/07/2610.06334v1-spin-image-immunization-against-diffusion-editing-via-single-step-projection-in-stochastic-neighborhoods)  
+   evidence：面向涂鸦条件图像编辑模型的基准
+5. [Iris-3B: Going Beyond the Latent with Pixel-Space Diffusion Training, Conversion and Fine-Tuning](/202610/08/2610.09450v1-iris-3b-going-beyond-the-latent-with-pixel-space-diffusion-training-conversion-and-fine-tuning)  
    标签：评分：8.0/10、query:real-ir
-   evidence：针对扩散图像编辑的免疫保护
-4. [UniSlider: Perceptually Uniform Sliders for Continuous Image Editing](/202610/07/2610.06831v1-unislider-perceptually-uniform-sliders-for-continuous-image-editing)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：生成式方法下的连续图像编辑与感知均匀滑块控制
-5. [Local Content-Style Control for Diffusion-based Image Stylization](/202610/07/2610.08704v1-local-content-style-control-for-diffusion-based-image-stylization)  
-   标签：评分：8.0/10、query:real-ir
-   evidence：基于扩散模型的图像编辑与风格化局部控制
+   evidence：像素空间扩散模型微调用于图像修复与超分
 
 ### 速读区论文标签
-1. [Drag as Evidence: Motion-Grounded Latent Recomposition for Drag-Based Editing](/202610/07/2609.36755v1-drag-as-evidence-motion-grounded-latent-recomposition-for-drag-based-editing)  
+1. [Continual Concept Erasure in Diffusion Models by Suppressing Cross-Edit Interference](/202610/08/2610.01989v1-continual-concept-erasure-in-diffusion-models-by-suppressing-cross-edit-interference)  
    标签：评分：7.0/10、query:real-ir
-   evidence：基于运动引导潜重组的拖拽式图像编辑
-2. [Gradient-Free Sampling from Generative Models via Stochastic Bounded Extremum Seeking](/202610/07/2610.04568v1-gradient-free-sampling-from-generative-models-via-stochastic-bounded-extremum-seeking)  
+   evidence：面向文生图扩散模型的持续概念擦除编辑
+2. [Energy-Conditioned Noise Schedule and Whitening for Spectral Diffusion](/202610/08/2610.07206v1-energy-conditioned-noise-schedule-and-whitening-for-spectral-diffusion)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向分数扩散模型的无梯度采样方法
-3. [Geometry-Aware Preference Optimization for Text-to-Image Diffusion Models](/202610/07/2610.04980v1-geometry-aware-preference-optimization-for-text-to-image-diffusion-models)  
+   evidence：谱域扩散模型的能量自适应噪声调度
+3. [Compositional Concept Erasure in Text-to-Image Diffusion Models via Hierarchically Grounded Semantic Surgery](/202610/08/2610.07337v1-compositional-concept-erasure-in-text-to-image-diffusion-models-via-hierarchically-grounded-semantic-surgery)  
    标签：评分：7.0/10、query:real-ir
-   evidence：面向文本到图像扩散模型的偏好优化
-4. [VisualErase: Dual-Branch Visual Trajectory Redirection for Robust Concept Erasure in Text-to-Image Diffusion Models](/202610/07/2610.05000v1-visualerase-dual-branch-visual-trajectory-redirection-for-robust-concept-erasure-in-text-to-image-diffusion-models)  
+   evidence：文生图扩散模型中的免训练组合概念擦除
+4. [Disentangling Dual Image References in Frequency Aware Diffusion Models for Personalized Generation](/202610/08/2610.07684v1-disentangling-dual-image-references-in-frequency-aware-diffusion-models-for-personalized-generation)  
    标签：评分：7.0/10、query:real-ir
-   evidence：在文到图扩散模型中通过视觉轨迹重定向实现概念擦除
-5. [Gauss-Map Variation for Image Denoising: Geometric Analysis and an Anderson--Accelerated Majorization--Minimization Method](/202610/07/2610.05801v1-gauss-map-variation-for-image-denoising-geometric-analysis-and-an-anderson--accelerated-majorization--minimization-method)  
+   evidence：用于个性化图像生成的扩散模型
+5. [Noise, Denoise, Correct: MCMC Posterior Sampling with Diffusion Priors in Three Steps](/202610/08/2610.09407v1-noise-denoise-correct-mcmc-posterior-sampling-with-diffusion-priors-in-three-steps)  
    标签：评分：7.0/10、query:real-ir
-   evidence：图像去噪模型，属图像修复核心任务
-6. [Should We Skip Diffusion?](/202610/07/2610.07002v1-should-we-skip-diffusion)  
+   evidence：基于扩散先验的逆问题MCMC后验采样
+6. [CrossEdit: Cross-Modal Training Enables Rich Audio-Visual Editing](/202610/08/2610.10264v1-crossedit-cross-modal-training-enables-rich-audio-visual-editing)  
    标签：评分：7.0/10、query:real-ir
-   evidence：去除残差连接的扩散Transformer架构
-7. [Jumping up and down: Denoiser diffusion models for discrete ordinal data](/202610/07/2610.02754v1-jumping-up-and-down-denoiser-diffusion-models-for-discrete-ordinal-data)  
+   evidence：面向图像、音频与视频的统一全模态编辑模型
+7. [From Pixels, Without Pre-training: Joint Generative and Self-Supervised Representation Learning in One Model](/202610/08/2610.05711v1-from-pixels-without-pre-training-joint-generative-and-self-supervised-representation-learning-in-one-model)  
    标签：评分：6.0/10、query:real-ir
-   evidence：面向图像等离散序数数据的去噪器扩散模型
-8. [Controlling Polar Exposure to Delay Memorization in Diffusion Models](/202610/07/2610.02780v1-controlling-polar-exposure-to-delay-memorization-in-diffusion-models)  
+   evidence：联合生成与自监督表示学习
+8. [Imagine to Act: High-Fidelity Data Synthesis via Image Editing World Model for Scalable GUI Agent Training](/202610/08/2610.05861v1-imagine-to-act-high-fidelity-data-synthesis-via-image-editing-world-model-for-scalable-gui-agent-training)  
    标签：评分：6.0/10、query:real-ir
-   evidence：通过更新几何延缓扩散模型记忆化
-9. [ProgressNet: Sketching and Prompting with a Frozen Text-to-Image Model](/202610/07/2610.03512v1-progressnet-sketching-and-prompting-with-a-frozen-text-to-image-model)  
+   evidence：基于像素级图像编辑世界模型的数据合成
+9. [Protective Perturbations Must Survive the Resize: Scale-Robust Image Immunization against Malicious Editing](/202610/08/2610.07464v2-protective-perturbations-must-survive-the-resize-scale-robust-image-immunization-against-malicious-editing)  
    标签：评分：6.0/10、query:real-ir
-   evidence：基于冻结文到图模型的免训练交互式绘图与编辑框架
-10. [MaDeL: Manifold-Decomposed Feature Losses for Generative Modeling](/202610/07/2610.04419v1-madel-manifold-decomposed-feature-losses-for-generative-modeling)  
+   evidence：抵御恶意图像编辑的尺度鲁棒保护扰动
+10. [Uniform Discrete Diffusion Models are Minimax Optimal for Estimating Distributions with Small Effective Support Size](/202610/08/2610.07655v1-uniform-discrete-diffusion-models-are-minimax-optimal-for-estimating-distributions-with-small-effective-support-size)  
    标签：评分：6.0/10、query:real-ir
-   evidence：流形分解特征损失改进生成模型训练目标
-11. [Measuring Effective Data Resolution in Guided Diffusion Posteriors](/202610/07/2610.04422v1-measuring-effective-data-resolution-in-guided-diffusion-posteriors)  
+   evidence：离散扩散生成模型的统计理论
+11. [Visual Abstention in Unified Multimodal Models](/202610/08/2610.07887v1-visual-abstention-in-unified-multimodal-models)  
    标签：评分：6.0/10、query:real-ir
-   evidence：引导扩散采样器从稀疏观测重建物理场
+   evidence：评测多模态模型图像编辑成功率与对不可行编辑的拒答
 
 
 <div class="dpr-home-promo-card">
