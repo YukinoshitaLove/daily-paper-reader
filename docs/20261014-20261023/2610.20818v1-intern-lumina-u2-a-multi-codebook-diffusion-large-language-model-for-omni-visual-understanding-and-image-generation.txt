@@ -1,0 +1,3897 @@
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language
+Model for Omni-Visual Understanding and Image Generation
+Qian Yu1,3*, Zongyang Qiu1,4*, Juncheng Yan1,8*, Hongliang Li1*, Qi Qin3*, Keqi Wang1*, Siqi Luo1,11,
+Junkui Ju5, Yapeng Mi1, Tiantian Lu1, Tian Liu1, Pengyu Xie1, Chenhao Ji1, Minghui Zhang1,
+Yiang Zhao1,7, Siyu Yan1, Haiying Xu1, Yanbo Wang1,8, Jianghan Shen1, Yuandong Pu1, Jiayi Lei1, Borui
+Zhang8, Jinxin Shi1, Bo Zhang1, Yuhang Zang1, Shenglong Ye1, Lixin Gu1, Hongjie Zhang1, Linghan Liu1,
+Xinyuan Chen1, Yuewen Cao1, Lihe Zhang7, Xiaohong Liu2,11, Junjun He1, Qiangwei Liu5, Qi Zhang1,
+Yu Cheng1, Tianfan Xue1,10†, Hui Xiong4†, Chang Xu3†, Yu Qiao1,2†, Yihao Liu1† and Bin Fu1,6†
+1Shanghai AI Laboratory
+2Shanghai Innovation Institute
+3The University of Sydney
+4HKUST(GZ)
+5Huawei Technologies, Shenzhen, China
+6SIAT, CAS
+7Dalian University of Technology
+8Tsinghua University
+9USTC
+10The Chinese University of Hong Kong
+11Shanghai Jiao Tong University
+*Equal contribution.
+†Corresponding authors.
+ç Project Page
+a Code
+Model
+Abstract—Unified multimodal generation covers discrete, continuous, and hybrid paradigms. Discrete approaches
+with single-codebook visual tokenizers align naturally with text modeling but have limited representational capacity.
+Continuous and hybrid approaches retain richer visual representations, but they model text and images in hetero-
+geneous spaces with different training objectives, potentially introducing optimization conflicts between modalities
+with misaligned representation spaces. These choices expose a central question: how to efficiently model high-
+capacity visual representations alongside textual content in a shared optimization space within a single backbone.
+We present Intern Lumina U2, to our knowledge the first diffusion language model to represent multi-codebook
+visual tokens in a fully discrete space. Each visual position is represented by a group of codes from complemen-
+tary codebooks, increasing its representational capacity while preserving compatibility with discrete text modeling.
+At the input, the embeddings are concatenated at each position; at the output, a lightweight multi-codebook au-
+toregressive head predicts the codes within each position sequentially, while the diffusion backbone processes all
+positions in parallel. Built on the unified 4D representation of AToken, Intern Lumina U2 supports image, video, and
+3D inputs within a single backbone and achieves leading performance among unified models in visual understand-
+ing, image generation, and image editing. We further build a full-stack training, inference, and evaluation system
+on both Ascend and NVIDIA platforms to verify the cross-platform effectiveness of our model. We also improve
+the inference efficiency through a stability-aware sampling strategy, which combines confidence-plateau-guided
+unmasking approach with drift-triggered cache refreshing mechanisms, accelerating image generation by 4.45×.
+Figure 1: Overview of Intern Lumina U2’s versatile omni-visual understanding and generation capabilities.
+arXiv:2610.20818v1  [cs.CV]  14 Oct 2026
+
+
+Figure 2: Showcases of Intern Lumina U2 on image generation, editing, and scientific-diagram generation.
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+1. Introduction
+Unified multimodal models integrate visual understanding and generation within a single
+model (Chameleon Team, 2024; Deng et al., 2025; Tian et al., 2026).
+However, architectural
+sharing alone does not constitute complete unification, since understanding and generation may
+still rely on separate representations and training objectives (Qiu et al., 2026).
+To go beyond
+architectural unification, we identify two principles for unifying understanding and generation more
+comprehensively. First, text and visual content should be mapped into a shared optimization space
+under a single objective. Although hybrid designs (Deng et al., 2025; Fan et al., 2025; Tian et al.,
+2026) can achieve high visual fidelity by retaining continuous visual states and delegating synthesis
+to a continuous decoder, they optimize visual generation with a continuous objective distinct from
+the text objective and often adopt separate visual encoders for understanding and generation, leading
+to optimization difficulties. Second, the generation process should respect the intrinsic structure
+of each modality. Text follows a natural sequential order, whereas visual content has no canonical
+generation order: each region depends on both its local neighborhood and long-range global context.
+The generation process should therefore decode text sequentially while refining visual content in
+parallel with bidirectional context.
+Discrete masked diffusion provides a natural basis for satisfying the requirements above. It applies
+a masked-prediction objective to discrete text and visual tokens, thereby optimizing both modalities
+within a common discrete space. Under this formulation, each task is specified by partitioning the
+token sequence into observed conditioning tokens and masked prediction targets. Understanding and
+generation are thereby cast as distinct conditional queries to the same model, rather than as separate
+tasks with task-specific objectives. Moreover, masked diffusion decodes tokens in parallel through
+iterative refinement without imposing a fixed generation order (Nie et al., 2025; Chang et al., 2022;
+Yang et al., 2025; Xin et al., 2025), allowing each spatial position to be refined with bidirectional
+access to both local and global context. However, existing discrete unified models (Xin et al., 2025; Xie
+et al., 2025a; Yang et al., 2025) remain limited in visual representation capacity, as single-codebook
+tokenization compresses the visual information at each position into a single discrete code. Such a
+compact representation is insufficient both for faithful reconstruction and for covering the full range
+of visual tasks (Ma et al., 2025a). This motivates us to design a unified discrete framework that
+carries a high-capacity visual representation in a shared space under a single training objective, while
+modeling it efficiently with a unified backbone.
+To this end, we present Intern Lumina U2, to our knowledge the first diffusion language model
+that models multi-codebook visual states in a fully discrete space, with AToken (Lu et al., 2026) as the
+visual tokenizer and LLaDA2.0 (Bie et al., 2025) as the backbone. Intern Lumina U2 encodes images,
+videos, and 3D assets into a unified 4D code space and organizes these visual tokens together with
+text tokens in a unified packed-sequence format, so that understanding and generation across all these
+modalities are formulated over the same sequence representation and handled by a shared backbone.
+Each visual position carries K complementary codes: independent embedding tables concatenated
+at the input preserve codebook identity for efficient training, while a lightweight multi-codebook
+autoregressive head models the dependencies among the codes within each position. Within this
+shared representation, a multi-task masking mechanism assigns each task its own masking scheme,
+so that understanding, generation, and editing across modalities are trained jointly under a single
+objective. For image generation, a stability-aware inference strategy commits tokens at confidence
+plateaus and refreshes the cache on hidden-state drift, achieving a 4.45× end-to-end speedup. We
+further build the operators, parallelization strategies, and system adaptations for training, inference,
+and evaluation on 1,024 Ascend 910B NPUs, with a smaller-scale NVIDIA reference run using the
+same architecture and optimization recipe but a smaller training budget for cross-platform validation.
+3
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Extensive experiments on image, video, and 3D understanding, as well as image generation and
+editing, demonstrate the effectiveness of this unified design. To our knowledge, Intern Lumina U2
+is the first diffusion language model to support this full combination of visual modalities and capa-
+bilities. Trained on data curated by a unified pipeline that organizes heterogeneous sources under a
+common protocol, the model achieves leading performance among unified multimodal models across
+our evaluations. With only 1.4B activated parameters, it ranks first on six of ten image-understanding
+benchmarks and improves on eight of ten over the same-backbone LLaDA2.0-Uni (Bie et al., 2026).
+It also shows superior performance on all three video benchmarks (Fu et al., 2025b; Zhou et al.,
+2025b; Li et al., 2024) and on 3D MM-Vet (Qi et al., 2024), and among unified models it delivers
+strong text-to-image generation on DPG-Bench (Hu et al., 2024), UniGenBench (Wang et al., 2025b),
+TIIF-Bench (Wei et al., 2026), and GenEval (Ghosh et al., 2023). It also performs strongly on physics-
+faithful scientific-diagram generation. These results establish Intern Lumina U2 as a competitive uni-
+fied discrete foundation model for omni-visual understanding and generation.
+Contributions.
+• Multi-codebook discrete modeling for unified dLLMs. To our knowledge, Intern Lumina U2
+is the first unified diffusion language model built on multi-codebook visual states, with visual
+prediction factorized across spatial positions and codebooks.
+• Omni-visual understanding in a unified discrete space. Intern Lumina U2 is the first diffusion
+language model to unify visual understanding across images, videos, and 3D assets with image gen-
+eration and editing, moving unified multimodal modeling toward a general omni-visual paradigm.
+• Full-stack adaptation and validation on Ascend. We complete the full-stack adaptation of Intern
+Lumina U2 on 1,024 Ascend 910B NPUs, enabling end-to-end training, inference, and comprehen-
+sive evaluation on the platform.
+• Efficient image-generation inference.
+We introduce Plateau-Halton sampling with V-verify
+(PHV), which commits tokens at confidence plateaus and refreshes the cache on hidden-state
+drift, achieving a 4.45× speedup in end-to-end image-generation latency with a favorable
+quality–efficiency trade-off.
+• Broad empirical validation. Intern Lumina U2 achieves leading performance across image, video,
+and 3D understanding, text-to-image generation, image editing, and scientific-diagram generation,
+demonstrating the effectiveness and breadth of the proposed unified framework.
+2. Related Work
+We relate Intern Lumina U2 to four bodies of work: unified multimodal models, diffusion language
+models, multi-codebook visual representations, and inference acceleration for masked diffusion. Ta-
+ble 1 groups representative systems by backbone paradigm and summarizes their capability and de-
+sign profile; Intern Lumina U2 is the only system in the comparison that combines image genera-
+tion, perception across images, videos, and 3D assets, and masked-diffusion decoding over a multi-
+codebook visual state. It represents all three visual input modalities with discrete backbone tokens
+and generates images without a separate continuous diffusion or flow generator.
+Unified multimodal understanding and generation.
+One line of work models image generation as
+discrete visual-token prediction within the backbone. Chameleon and Emu3 use a shared vocabulary
+for text and visual codes under next-token prediction (Chameleon Team, 2024; Wang et al., 2026a),
+whereas MMaDA and Lumina-DiMOO use masked prediction for both modalities (Yang et al., 2025;
+4
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Xin et al., 2025). Related discrete-generation designs include Janus and Janus-Pro, which decou-
+ple the understanding encoder from the generation tokenizer (Wu et al., 2025b; Chen et al., 2025);
+VAR and OneCAT, which use coarse-to-fine next-scale prediction (Tian et al., 2024; Li et al., 2026a);
+and Emu3.5, which converts next-token image decoding to bidirectional parallel prediction for faster
+inference (Cui et al., 2025). A second line models image generation in a continuous space with a
+diffusion or flow objective. Transfusion combines text next-token loss with image diffusion in one
+Transformer (Zhou et al., 2025a), UniFluid models each position with a diffusion head (Fan et al.,
+2025), BAGEL and InternVL-U use ViT features for understanding and VAE-space flow matching for
+generation (Deng et al., 2025; Tian et al., 2026), and SenseNova-U1 moves flow matching to pixel
+space (SenseNova Team, 2026). A third, hybrid route predicts discrete semantic visual tokens in the
+backbone and reconstructs images with a separate continuous generator. LLaDA2.0-Uni follows this
+design: its backbone models text and visual tokens under a shared masked-prediction objective, while
+a diffusion decoder synthesizes images conditioned on the predicted visual tokens (Bie et al., 2026).
+Single-codebook discrete representations constrain the detail and semantics carried at each visual
+position. Continuous and hybrid designs support richer image synthesis, but retain a continuous gen-
+erative objective distinct from text-token classification, either within the backbone or in a separate
+generator. Intern Lumina U2 instead uses multi-codebook discrete representations for image, video,
+and 3D inputs, while training text prediction and image generation under a shared objective.
+Diffusion language models.
+LLaDA showed that masked diffusion language models trained from
+scratch can match strong AR baselines, replacing left-to-right decoding with parallel iterative recov-
+ery (Nie et al., 2025), and LLaDA2.0 converts a pretrained AR Mixture-of-Experts model into a block-
+wise diffusion LM, preserving its knowledge while enabling parallel decoding (Bie et al., 2025). This
+family has been extended to vision in several ways: LLaDA-V feeds features from a vision encoder into
+the diffusion LM for understanding (You et al., 2026a), and LLaDA-o pairs discrete masked diffusion
+for text with continuous diffusion for images (You et al., 2026b). Among the unified models discussed
+above, MMaDA and Lumina-DiMOO extend masked prediction to both text and image tokens (Yang
+et al., 2025; Xin et al., 2025), while LLaDA2.0-Uni adopts the converted LLaDA2.0 backbone with
+block-wise masked prediction (Bie et al., 2026). Intern Lumina U2 also starts from LLaDA2.0-mini
+and extends this family along two axes: the visual state becomes a multi-codebook visual token, and
+the same model covers image, video, and 3D inputs.
+Multi-codebook representations and depth decoding.
+Residual and factorized quantization raise
+the capacity of discrete visual states without lengthening the spatial grid: RQ-Transformer decodes
+residual codes with a spatial-plus-depth Transformer (Lee et al., 2022), VILA-U brings multi-codebook
+depth decoding into an AR unified model (Wu et al., 2025d), UniTok folds H×W×K codes into H×W
+backbone positions (Ma et al., 2025a), and TokenBridge documents the dependence that is lost when
+the codes of one position are predicted independently (Wang et al., 2025c). AToken supplies the
+shared image/video/3D multi-codebook representation used here (Lu et al., 2026). These works
+establish multi-codebook modeling in autoregressive systems. Intern Lumina U2 instead makes the
+multi-codebook visual token the visual state of a masked-diffusion language model: the backbone
+refines spatial positions in parallel, while the multi-codebook AR head models the dependence among
+codes within each position (Section 3.4). This factorization keeps the backbone sequence length
+independent of K without treating the codebooks as conditionally independent.
+Accelerating masked-diffusion decoding.
+Acceleration methods for masked generation follow two
+routes. Learning-based methods train an auxiliary model so that few large jumps replace many re-
+finement steps; a recent representative learns latent controlled dynamics for masked image genera-
+5
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Table 1: Capability and design checklist for representative unified multimodal models, grouped by backbone
+paradigm. Discrete tokens refers to the visual state inside the backbone; Masked-diff. decoding marks models that
+generate visual tokens by iterative masked denoising rather than left-to-right prediction; Multi-codebook denotes
+multiple codes per visual position with their dependence modeled explicitly; Diffusion text marks models that
+also generate text through the masked-diffusion process rather than autoregressively; No continuous generator
+marks systems that decode images through backbone tokens, without a separate continuous (diffusion or flow)
+generator. Systems: Emu3 (Wang et al., 2026a), Emu3.5 (Cui et al., 2025), Janus-Pro (Chen et al., 2025), VILA-
+U (Wu et al., 2025d), UniTok (Ma et al., 2025a), BAGEL (Deng et al., 2025), InternVL-U (Tian et al., 2026),
+SenseNova-U1 (SenseNova Team, 2026), Show-o2 (Xie et al., 2025b), Show-o (Xie et al., 2025a), MMaDA (Yang
+et al., 2025), Lavida-O (Li et al., 2026b), Lumina-DiMOO (Xin et al., 2025), LLaDA2.0-Uni (Bie et al., 2026).
+Supported modalities
+Representation and decoding
+Model
+Image
+und.
+Image
+gen.
+Video
+und.
+3D
+und.
+Discrete
+tokens
+Masked-diff.
+decoding
+Multi-
+codebook
+Diffusion
+text
+No continuous
+generator
+Autoregressive
+Emu3
+
+
+
+
+
+
+
+
+
+Emu3.5
+
+
+
+
+
+
+
+
+
+Janus-Pro
+
+
+
+
+
+
+
+
+
+VILA-U
+
+
+
+
+
+
+
+
+
+UniTok
+
+
+
+
+
+
+
+
+
+BAGEL
+
+
+
+
+
+
+
+
+
+InternVL-U
+
+
+
+
+
+
+
+
+
+SenseNova-U1
+
+
+
+
+
+
+
+
+
+Show-o2
+
+
+
+
+
+
+
+
+
+Masked diffusion
+Show-o
+
+
+
+
+
+
+
+
+
+MMaDA
+
+
+
+
+
+
+
+
+
+Lavida-O
+
+
+
+
+
+
+
+
+
+Lumina-DiMOO
+
+
+
+
+
+
+
+
+
+LLaDA2.0-Uni
+
+
+
+
+
+
+
+
+
+Intern Lumina U2
+
+
+
+
+
+
+
+
+
+tion (Zhu et al., 2026). Training-free methods instead reshape the sampler: MaskGIT-style schedules
+fix how many positions commit per round (Chang et al., 2022), Fast-dLLM commits every position
+whose probability clears an absolute threshold (Wu et al., 2026a), low-discrepancy reveal orders im-
+prove which positions commit (Besnier et al., 2025), and cached sampler state with fixed-interval
+refresh removes redundant backbone work (Xin et al., 2025). Our sampler follows the training-free
+route. Because visual-token confidence sits far below the absolute thresholds of Fast-dLLM-style com-
+mit rules (Section 6.2.2), it adapts both the commit schedule and the cache refresh from temporal
+signals, confidence plateaus and measured hidden-state drift (Section 6.2).
+3. Model Architecture
+3.1. Overview
+As shown in Figure 3, Intern Lumina U2 is a masked diffusion language model that supports visual
+understanding over images, videos, and 3D assets, as well as image generation and editing within a
+unified model (Figure 3). To model all tasks with a single backbone and a shared training objective,
+we represent every modality as discrete tokens. Specifically, visual inputs (images, videos, and 3D
+assets) are first converted into visual tokens by a frozen visual tokenizer, AToken (Section 3.2), while
+6
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Figure 3: Overall architecture of Intern Lumina U2. Visual inputs are encoded into visual tokens by AToken
+and text into text tokens; the MoE diffusion LLM recovers masked text tokens through the text head, with text
+answers generated by block diffusion, and masked visual tokens through the multi-codebook AR head, which
+predicts the K codes of each visual token sequentially.
+text is converted into text tokens by the native tokenizer of the base language model, LLaDA2.0-mini.
+The resulting visual and text tokens, together with the target tokens (either a text answer or a target
+image, represented as the mask tokens), are arranged into a single sequence. The MoE diffusion
+LLM (Section 3.3) processes this sequence and predicts the masked tokens in a modality-specific
+manner. Masked text tokens are predicted by a text head and generated block by block. In contrast,
+masked visual tokens are predicted by a multi-codebook AR head (Section 3.4): each visual token
+contains K=8 discrete codes, and the head predicts visual tokens at different positions in parallel
+while generating the discrete codes within each token sequentially. Finally, the AToken decoder maps
+the predicted visual codes back to pixels.
+3.2. Unified Visual Tokenizer
+The visual tokenizer serves as the interface between raw visual data (images, videos, and 3D assets)
+and the model, and therefore constrains both generation and understanding. As discussed in the
+previous section, Intern Lumina U2 places two requirements on its visual tokenizer: (1) it must pro-
+duce discrete visual tokens that can be modeled in the same way as text tokens, so that all tasks can
+share a single masked-diffusion objective; and (2) these tokens must preserve both the low-level detail
+for generation and the high-level semantics needed for understanding. However, existing tokenizers
+are typically specialized for either low-level detail or high-level semantics. For example, tokenizers
+7
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+trained for reconstruction, such as VQGAN (Esser et al., 2021), keep fine detail but are not trained
+to align with language, whereas semantic encoders such as SigLIP (Zhai et al., 2023) align well with
+text but are not trained to reconstruct pixels.
+We therefore adopt AToken (Lu et al., 2026) as the visual tokenizer. AToken is initialized from a
+pretrained SigLIP2 encoder (Tschannen et al., 2025) and trained jointly for reconstruction and under-
+standing. As a result, its tokens carry semantic structure while still supporting faithful reconstruction.
+In addition, AToken encodes images, videos, and 3D assets into a shared 4D latent space, so that a
+single tokenizer serves all three modalities. We use its discrete configuration, which quantizes each
+location of the latent grid with finite scalar quantization (FSQ) (Mentzer et al., 2024) over K=8 code-
+books. Each codebook is a vocabulary of 4096 entries, and a code is the index of one entry, so each
+location is represented by K codes c = (c1, . . . , cK), one per codebook. We call such a location a visual
+position and its K codes a visual token (Figure 3). Compared with a single code per position, the eight
+codes give the representation more capacity for fine visual detail. The tokenizer is kept frozen during
+training, and the grid shapes, flattening orders, and structural tokens are listed in Appendix B.
+3.3. Backbone
+We build our backbone upon LLaDA2.0-mini (Bie et al., 2025), a masked diffusion language model
+obtained by converting a pretrained autoregressive mixture-of-experts (MoE) language model (Ling
+Team, 2025) into a block diffusion model. It has 16B parameters in total, of which 1.4B are activated
+per token. Among its 20 Transformer layers, the first employs a dense feed-forward network, while
+the remaining 19 are MoE layers. Each MoE layer consists of 256 routed experts and a single shared
+expert, with 8 routed experts activated per token. LLaDA2.0-mini is a language model which generates
+text via block diffusion: a sequence is divided into blocks of consecutive tokens, and each block is
+denoised by masked diffusion conditioned on all preceding blocks. Accordingly, it generates text
+block by block at inference: the masked tokens within the current block are predicted in parallel and
+iteratively refined over several denoising steps, while the key–value cache of previously completed
+blocks is reused. Since LLaDA2.0-mini already performs masked diffusion over text, we can directly
+inherit its language capabilities without an additional autoregressive-to-diffusion conversion (Gong
+et al., 2025; Ye et al., 2025a; Bie et al., 2025).
+We introduce two modifications to LLaDA2.0-mini while keeping all other components unchanged,
+including the Transformer layers, the text embedding table, the text head, and the <|mask|> token.
+First, we add the visual input and output interfaces described in Section 3.4, which account for 0.65B
+parameters. Second, we replace the attention mask with our proposed task-aware attention mask.
+LLaDA2.0-mini was trained exclusively on text with a block-wise attention mask, whereas our Intern
+Lumina U2 also contains visual conditions and visual answers. We therefore design a task-aware
+attention mask that controls attention among these segments according to the task (Section 3.5). It
+is worthy to mention that we retain the native positional encoding (e.g. 1D RoPE (Su et al., 2024)) of
+the backbone for visual tokens, rather than introducing a dedicated 2D or 3D scheme, which preserves
+the positional prior learned in pretraining. Since 1D RoPE does not explicitly encode spatial structure,
+the spatial or spatio-temporal layout of each visual input is instead indicated by structural delimiter
+tokens inserted into the sequence (Appendix B). In this way, images, videos, and 3D assets are all
+represented in the same 1D token sequence as text.
+3.4. Multi-Codebook Input and Output
+With a multi-codebook tokenizer, each visual position is represented by K codes, all of which must
+be encoded at the input and predicted at the output. We compare three designs for handling the K
+8
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+codes of a visual token. The first flattens them into K separate tokens, which multiplies the sequence
+length by K. The second keeps one backbone token per visual position but predicts the K codes
+independently, which ignores the dependence among them. The third keeps one backbone token
+per visual position and models the K codes jointly. Our Intern Lumina U2 adopts the third design:
+at the input, the codes of each visual position are merged into a single backbone token, and at the
+output, they are predicted jointly by the multi-codebook AR head. In the remainder of this section, we
+provide the detailed design of our multi-codebook input and output interface. We use c = (c1, . . . , cK)
+to denote the K codes at a visual position, ek = Ek(ck) to denote the embedding of code ck (defined
+below), and h ∈Rd (d=2048) to denote the last-layer hidden state of the backbone at the same
+position.
+Figure 4: Three candidate input interfaces for multi-codebook visual tokens. We adopt the third design: inde-
+pendent embeddings for the eight codebooks, concatenation at each spatial position, and projection into one
+backbone token.
+Input interface.
+The visual input interface maps the K codes of each visual position to a single vector
+in the hidden space. Each codebook k has its own embedding table Ek, which holds an embedding
+for each of its 4096 codes, together with a mask entry and several special entries that mark the layout
+of visual inputs (Table 18). When a visual position is masked, all of its K codes are replaced with the
+mask entry. The input vector x of a visual position is obtained by concatenating its K code embeddings
+and applying a linear projection,
+x = Win
+
+E1(c1); E2(c2); . . . ; EK(cK)
+
+,
+Win ∈Rd×Kd.
+(1)
+This design offers two advantages. First, merging the codes of each position before they enter the
+backbone keeps the sequence length independent of K. Second, since each codebook has its own
+embedding table, the visual codes need not be added to the text vocabulary, and no index offsets are
+needed to distinguish the codebooks. To demonstrate the effectiveness of our design, we compare it
+with two alternatives that use shared embedding tables (in Table 15 and Figure 10).
+9
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Output interface: multi-codebook AR head.
+The visual output interface predicts the K codes
+of each visual position from the single hidden state h. Similar to the depth transformers of RQ-
+Transformer (Lee et al., 2022) and VILA-U (Wu et al., 2025d), we capture the dependencies among
+these codes by factorizing their joint distribution autoregressively along the codebook index:
+p(c | h) =
+K
+Y
+k=1
+p(ck | h, c<k) .
+(2)
+We implement this factorization with a multi-codebook AR head, a 6-layer causal Transformer of width
+d that performs the prediction autoregressively along the codebook dimension. For each visual posi-
+tion, the input to the head is a sequence of length K, which we refer to as the depth sequence. The first
+element is q + s1, where q = Wq h + bq is a linear projection of the backbone hidden state with bias
+bq; for k ≥2, the k-th element is ek−1 + sk, where ek−1 = Ek−1(ck−1) is the embedding of the preced-
+ing code, obtained from the embedding tables of the input interface (Eq. (1)), and sk is a learnable
+embedding of position k in the depth sequence. In addition, each block of the head is conditioned
+through adaptive LayerNorm (adaLN) (Peebles and Xie, 2023) on q + uk at position k, where uk is
+a second learnable embedding of position k, so that the backbone output directly modulates every
+prediction step. Finally, a separate classifier W out
+k
+∈R4096×d for each codebook maps the output of
+the head at position k to the logits for ck.
+To validate this factorization, we compare the multi-codebook AR head with a parallel head that
+predicts the codes independently, ppar(c | h) = Q
+k p(ck | h). Note that the parallel head is a special
+case of Eq. (2) in which each factor drops the conditioning on c<k, while Eq. (2) follows directly from
+the chain rule and makes no independence assumption. Consequently, with ideal conditional models,
+the cross-entropy of the multi-codebook AR head is never higher than that of the parallel head, with
+equality if and only if the K codes are conditionally independent given h. Table 16 quantifies this
+gain in practice.
+During training, our multi-codebook AR head is optimized with teacher forcing (Figure 5). For
+each masked visual position, the depth sequence is constructed from the ground-truth codes:
+
+q + s1, egt
+1 + s2, . . . , egt
+K−1 + sK
+
+,
+(3)
+where egt
+k = Ek(cgt
+k ) is the embedding of the ground-truth code cgt
+k of codebook k. Because the head is
+causal, a single forward pass produces the logits of all K codes, with the k-th output predicting ck. At
+inference, the ground-truth codes are not available. The multi-codebook AR head therefore predicts
+the codes of a position in K sequential steps: at step k, it samples ck and, when k < K, appends its
+embedding ek + sk+1 to the depth sequence for step k + 1. Different masked positions are processed
+in parallel throughout. Section 6 details this sampling procedure and its caching strategy.
+3.5. Unified Data Format with Data Packing
+Having specified the representation of a single visual position, we now describe the organization of
+complete samples into training sequences. All tasks, from text-only dialogue to image generation
+and editing, share a unified packed sequence format. Moreover, to determine the attention mask and
+calculate loss, each token in this format is annotated with five metadata fields: type (text condition,
+visual condition, structural token, text answer, or visual answer), turn index, noise state (clean or
+noisy), block index, and position ID.
+Dialogue structure and sequence layout.
+Every sample is first formatted as a dialogue between
+a user and an assistant, in which each turn consists of a user message and the assistant’s reply to it.
+10
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Figure 5: Training and inference of the multi-codebook AR head: one teacher-forced causal pass yields all K
+logits at training; at inference the prefix grows for K steps, each sampled code ˆck is embedded into ek and
+appended. Positions are processed in parallel, codebooks autoregressively.
+The conditions, provided by the user, consist of a text prompt, an image, a video, a 3D asset, or any
+combination of them. The answers, provided by the assistant, are partly masked during training and
+serve as the prediction targets. Text answers and visual answers follow different layouts, which we
+describe in the following.
+Text answers.
+A text answer consists of <BOA>, the answer tokens, and <EOA>, and its final
+block is padded to a multiple of the block length B with additional <EOA> tokens before corruption.
+End-of-answer padding thus becomes an ordinary supervised target, and every block contains exactly
+B maskable tokens.
+When a sample is packed into a sequence, its conditions and noisy answers are placed in dialogue
+order, followed by a clean copy of each text answer:
+[ clean context + noisy answer
+|
+{z
+}
+dialogue stream
+| clean copy
+|
+{z
+}
+clean stream
+].
+The clean copies serve as unmasked context for later blocks and turns. In multi-turn understanding,
+for example, later turns condition on earlier text answers by attending to their clean copies (Figure 6d).
+The clean copy is trimmed to the natural answer length, so padding appears only in the noisy answer,
+and it shares the position IDs of its noisy counterpart.
+Visual answers.
+A visual answer has a similar structure: it starts with <BOA> <BOI>, followed by
+the grid of visual tokens with row separators, and ends with <EOI> <EOA>. Its tokens are denoised
+simultaneously rather than block by block, and no later turn conditions on it, so it needs no clean
+copy. A generation sample therefore takes the form [ C | ˜V ]: the clean context C followed by the
+noisy visual answer ˜V .
+Task-aware attention mask.
+The attention mask follows from the role of each token. At a high level,
+a noisy answer is visible only to tokens of the same answer, visual answers attend bidirectionally, and
+text answers follow block diffusion. More precisely, for each query–key pair in a packed sequence, the
+mask applies the four rules below. Figure 6 illustrates these rules.
+1. Conditions are visible to their own and later turns; answers are invisible to conditions.
+11
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Any query may attend to the condition of its own turn and to clean keys from earlier turns; a
+clean query never attends to a noisy key.
+2. Text answers use turn-level block diffusion. A noisy text query attends bidirectionally within
+its own block (MBD), reads the clean copy of earlier blocks of the same turn (MOBC), and cannot
+see later blocks. The clean copy is itself block-causal (MBC).
+3. Visual answers use spatial masked diffusion. A noisy visual query attends to every noisy key
+of its own answer, to the condition of its own turn, to the clean copies of preceding answers such
+as the thinking text before an image, and to the clean context of earlier turns; there is no clean
+copy.
+4. Packed samples do not see each other. Several samples are packed into one training sequence,
+and a query may attend to a key only if the two tokens belong to the same sample and neither
+is padding. The three rules above apply only to pairs that pass this check.
+(a) Image
+C
+C
+keys
+queries
+V
+V
+(b) Text
+C
+C
+b1
+b1
+b2
+b2
+b3
+b3
+b1
+b1
+b2
+b2
+b3
+b3
+keys
+queries
+noisy answer
+clean copy
+(c) Text + image
+C
+C
+b1
+b1
+b2
+b2
+b1
+b1
+b2
+b2
+keys
+queries
+noisy text
+V
+V
+clean copy
+(d) Multi-turn
+C1
+C1
+x1
+x1
+C2
+C2
+x2
+x2
+x1
+x1
+x2
+x2
+keys
+queries
+turn 1
+turn 2
+clean copy
+clean context
+noisy answer
+clean copy
+attended
+blocked
+bidirectional (M_BD / image)
+clean copy of earlier blocks (M_OBC)
+clean copy, block-causal (M_BC)
+Figure 6: Task-aware attention mask at block level. (a) Image answer: one noisy visual answer ˜V after the
+clean context C, bidirectional over all positions. (b) Text answer: block diffusion over the noisy blocks ˜b1,˜b2,˜b3
+and their clean copies b1, b2, b3, with MBD, MOBC, and MBC. (c) A text answer followed by an image answer,
+as in thinking before generation: the image reads the clean copy of the preceding text blocks. (d) Multi-turn
+text with conditions C1, C2, noisy answers ˜x1, ˜x2, and clean copies x1, x2: a later turn reads the clean copies of
+earlier answers.
+3.6. Mask Schedule and Training Objective
+With the above data format and the task-specific mask mechanism, all tasks can be optimized with
+the same masked-diffusion cross-entropy objective. In this section, we discuss the mask schedule and
+training objective of our Intern Lumina U2.
+Mask Schedule for Text Modality
+Since the target text is generated through block diffusion at
+inference time, we design a block-wise mask schedule for training text generation to align this pro-
+cess.
+Specifically, each target text is split into blocks of B=32 tokens, the block length used for
+all checkpoints in this report. The mask ratio of each block is sampled independently: with prob-
+ability pfull=0.03, the block is fully masked; otherwise, we draw u ∼U(0, 1) and mask a fraction
+ρ = cos( π
+2 u) of its maskable tokens, selected uniformly at random. Special tokens are never masked,
+except <EOA> and </think>, which the model must learn to generate.
+Mask Schedule for Visual Modality
+In contrast, all positions of the visual target share a single mask
+ratio: we randomly mask a fraction ρ = cos( π
+2 u) of its positions. All K codes at a masked position are
+12
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+supervised, and the loss of a masked position j is the average of the K per-codebook cross-entropy
+produced by the multi-codebook AR head:
+ℓvis(j) =
+1
+K
+K
+X
+k=1
+−log p
+
+cgt
+k
+ h, cgt
+<k
+
+,
+(4)
+where h and cgt are the hidden state and the ground-truth codes at position j, so that ℓvis(j) equals
+−1
+K log p(cgt | h) under Eq. (2). In other words, it is the negative log-likelihood of all K codes,
+divided by K so that a visual position carries the same weight as a text token. In addition, to enable
+classifier-free guidance (Ho and Salimans, 2022) at inference time, the condition of each text-to-image
+or editing sample is replaced by the <uncondition> token with probability 0.1.
+MoE load balancing.
+Because the backbone (Bie et al., 2025) routes each token to 8 of its 256
+experts, maintaining a balanced load across experts is also essential during training, and we combine
+two mechanisms for this purpose. The first is a differentiable load-balancing loss Lbalance, which
+is included in the total loss below. The second follows the auxiliary-loss-free scheme of DeepSeek-
+V3 (DeepSeek-AI, 2024): each MoE layer keeps one bias value per expert, which is added to the
+router scores only when the experts are chosen. After each optimizer step, experts that received more
+tokens than the average have their bias decreased by 0.001, and all other experts have it increased by
+0.001, so that overloaded experts are chosen less often in the following steps and underused experts
+more often.
+Total loss.
+Text and visual losses share a single normalization. Let T be the set of masked text-
+answer tokens and V be the set of masked visual positions in the micro-batches that one data-parallel
+rank processes in a training step. Only these positions carry targets. T includes every masked <EOA>
+and </think>. Condition tokens, clean copies, the remaining special tokens, the boundary tokens of
+visual answers, and sequence padding carry no target. The total loss averages the per-token losses
+over T ∪V and adds the load-balancing loss with weight 10−3:
+L =
+P
+i∈T ℓtxt(i) + P
+j∈V ℓvis(j)
+|T | + |V|
++ 10−3 Lbalance,
+(5)
+where ℓtxt(i) is the cross-entropy between the prediction at text position i and its ground-truth token,
+and ℓvis(j) is given by Eq. (4). Each rank computes this loss over its own tokens, and the gradients
+are then averaged across data-parallel ranks.
+4. Data Construction
+To train Intern Lumina U2, we construct a comprehensive and diverse training corpus and organize
+it in a consistent format. For diversity, our training data span six categories: image understanding,
+video understanding, 3D understanding, text-to-image generation, image editing, and text-only data.
+Each category is built from dedicated sources and filtered with category-specific quality checks. For
+consistency, we convert all samples into a common dialogue format. The converted samples are then
+mixed in stage-specific proportions for the training stages described in Section 5.
+4.1. Data Taxonomy and Unified Protocol
+Although the training data differ in content, they share a common structure: each sample consists
+of conditions and targets. In understanding data, the conditions include an image, a video, or a
+13
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+3D asset, and the target is a text response; in generation data, the target is an image, generated
+either from a text prompt or by editing a source image according to an instruction. To include both
+formats uniformly, we store every sample as a dialogue format labeled with a task type, such as image
+understanding, text-to-image generation, or multi-turn understanding. The task type determines the
+ordering of conditions, noisy targets, and clean copies within a packed sequence, as described in
+Section 3.5. As a result, a new data source can be incorporated simply by assigning it an existing task
+type, without modifying the sequence construction.
+Capability pools
+Image understanding
+LLaVA-OneVision
+InternVL
+document / chart / OCR
+image + text
+text
+Video understanding
+WebVid · Kinetics
+NExT-QA
+PerceptionTest
+video + text
+text
+3D understanding
+Objaverse
+GAPartNet
+Sketchfab
+3D + text
+text
+Text-to-image
+web pairs
+photos EN/ZH
+FLUX · Ideogram synth.
+text
+image
+Image editing
+OmniEdit · ImgEdit
+SEED-Edit
+internal sets
+image + instr.
+image
+Text & reasoning
+Nemotron · OpenMath-2
+Dolci-SFT
+InternVL text
+text
+text
+Construction
+unified records
+Construction engines
+Validate & dedup
+decode · size
+all
+Recaption
+long + short
+Quality judge
+aesthetic · following
+Edit check
+change / preserve
+Reasoning trace
+<think> … </think>
+Re-weight
+domain · density
+all
+Unified record: turns + metadata
+understanding
+BOI
+EOI BOA
+EOA
+condition
+answer · noisy
+clean copy
+generation
+BOA BOI
+EOI EOA
+condition
+answer · noisy · no copy
+editing
+BOI
+EOI
+BOA BOI
+EOI EOA
+source + instruction
+answer · noisy
+image
+text
+mask
+special
+Frozen AToken + text tokenizer
+8 codes / pos.
+token store
+annot. cache
+Stage mixtures
+Vision–language alignment
+30
+50
+20
+256² · position share (%)
+Perception pretraining
+30
+50
+20
+512² · position share (%)
+Omni-visual mid-training, Stage 1
+30
+60
+10
+1024² · position share (%)
+Omni-visual mid-training, Stage 2
+40
+40
+10
+1024² · position share (%)
+Instruction SFT
+25
+50
+10
+1024² · position share (%)
+Image understanding
+Video understanding
+3D understanding
+Text-to-image
+Image editing
+Text & reasoning
+Figure 7: Data construction pipeline. Six data categories are built with category-specific rules, converted to one
+record format, encoded offline, and re-weighted at each training stage. Bars show backbone-position shares
+(Table 2).
+The data mixture follows the five-stage curriculum described in Section 5: Vision–Language Align-
+ment, Perception Pretraining, two stages of Omni-Visual Mid-Training, and Instruction SFT. Editing,
+video, and 3D data are introduced in Omni-Visual Mid-Training Stage 2. The final Instruction SFT
+stage uses a high-quality instruction-tuning mixture curated from earlier data sources, covering text-
+to-image tasks, image editing, omni-visual understanding across images, videos, and 3D assets, and
+text-only question answering. Table 2 summarizes the position-level shares across these stages, while
+the corresponding stage configurations, sampling ratios, consumed tokens, and training lineage are
+reported in Section 5.
+4.2. Text and Reasoning Data
+Since our backbone is initialized from a language model, we include text-only data in every training
+stage to preserve its language and reasoning capabilities during multimodal training. The text-only
+14
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Table 2: Data mixture at each training stage. Shares are fractions of estimated backbone positions per pass over
+the mixture; the corresponding resolution and optimization settings are given in Table 3.
+Stage
+Position share (%)
+Und.
+T2I
+Text
+Edit
+Video
+3D
+Vision–Language alignment
+30
+50
+20
+–
+–
+–
+Perception pretraining
+30
+50
+20
+–
+–
+–
+Omni-visual mid-training, Stage 1
+30
+60
+10
+–
+–
+–
+Omni-visual mid-training, Stage 2
+40
+40
+10
+5
+4
+1
+Instruction SFT
+25
+50
+5
+10
+8
+2
+data contains three components: (i) public post-training corpora, namely the Nemotron post-training
+collections (Bercovich et al., 2025) (covering chat, code, mathematics, and general instructions),
+OpenMathInstruct-2 (Toshniwal et al., 2025), and Dolci-SFT (Ettinger et al., 2025); (ii) reasoning
+datasets with and without explicit chains of thought; and (iii) the text-only portion of the private
+InternVL instruction data (Wang et al., 2025a). We remove duplicate (user, assistant) pairs across
+all sources and reweight the sources by domain and by supervision density, i.e., the number of su-
+pervised tokens per sample. The latter prevents short-response sources from dominating the mixture
+while contributing little to the loss. Reasoning samples use the same format in the text, image under-
+standing, and text-to-image data. The reasoning trace is enclosed between <think> and </think>
+tags and followed by the final text response or image.
+4.3. Multimodal Understanding Data
+Image understanding is the largest of the three understanding categories. Its data are drawn mainly
+from the public instruction-tuning collection LLaVA-OneVision (Li et al., 2025) and the private instruc-
+tion data of InternVL (Wang et al., 2025a), which includes image captioning, document understand-
+ing, and chart data. To balance the mixture across skills, we organize these data by capability rather
+than by source dataset. This yields three capability groups: perception (image captioning, general vi-
+sual question answering, grounding, and counting), text-rich image understanding (OCR, documents,
+charts, and GUI or web screenshots), and knowledge-intensive reasoning (science questions and math-
+ematics).
+The video and 3D understanding data are limited in scale, but are constructed in the same man-
+ner as the image understanding data. The video data comprise captioning and question-answering
+datasets built on public video corpora, together with temporal reasoning datasets covering event or-
+dering, counting, and temporal localization tasks (see Appendix C for the full list of sources). The 3D
+data consist of object-centric assets paired with captions and question-answering annotations, drawn
+from Objaverse (Deitke et al., 2023) (with Cap3D captions (Luo et al., 2023)), GAPartNet (Geng et al.,
+2023), and Sketchfab (Sketchfab, 2026).
+4.4. Text-to-Image Data
+Text-to-image generation requires training images that span a broad range of concepts and domains,
+contain rich details, exhibit high aesthetic quality, and are accurately described by their captions.
+These requirements fall into three aspects: concept coverage, caption quality, and image quality. We
+therefore organize the construction of the text-to-image corpus into three steps, each addressing one
+aspect: (i) source coverage and domain-specific expansion, which broaden the range of concepts and
+15
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+domains; (ii) caption reconstruction and prompt expansion, which improve caption quality; and (iii)
+filtering, deduplication, and balancing, which raise image quality and reduce redundancy.
+Source coverage and domain-specific expansion.
+To cover a broad range of concepts, we draw
+on three types of sources: (i) web-crawled image–text pairs for the 2562 training stage; (ii) curated
+real-world photographs with captions in both English and Chinese; and (iii) synthetic images gener-
+ated by existing text-to-image models, with the corresponding generation prompts used as captions.
+Nevertheless, general-purpose sources alone cannot ensure comprehensive coverage: an analysis of
+generated samples revealed three weak areas, namely Chinese text rendering, scientific illustrations
+(including physics diagrams), and text-heavy graphic designs. Rather than scaling up all sources, we
+construct a small dedicated dataset for each weak area and upweight it individually.
+Caption reconstruction and prompt expansion.
+Because the prompt is the only conditioning
+signal in text-to-image generation, the quality of training prompts is critical. We construct three types
+of prompts: original prompts, recaptioned prompts, and reasoning-augmented prompts. Original
+prompts and alt-texts are retained only when they describe the image adequately.
+In addition,
+InternVL3.5-30B-A3B (Wang et al., 2025a) generates both a long-form and a short-form recaptioned
+prompt for images whose original captions are missing, mismatched, or too generic. Both recaptioned
+prompts describe the subjects, attributes, relations, composition, style, and visible text of the image
+at different descriptive granularity. During training, the prompt of each sample is randomly drawn
+from its original prompt and two recaptioned prompts. Finally, for a subset of samples, we construct
+reasoning-augmented prompts by inserting a reasoning trace, enclosed in <think> tags, before the
+target image. Within this trace, the prompt is expanded into an explicit description of the intended
+image. These samples are used to train the thinking mode for image generation.
+Filtering, deduplication, and balancing.
+This step consists of three stages: rule-based filtering and
+deduplication, model-based quality filtering, and data balancing. In the first stage, every sample must
+pass validity checks that require a decodable image, a minimum side length, and a non-empty prompt
+with the length limit. In the second stage, every sample is scored by a vision-language judge (Qwen3-
+VL-30B-A3B-Instruct (Bai et al., 2025a)) for aesthetics, image quality, structural richness, and prompt
+following under the UniPercep protocol. Filtering then applies three rules in order, discarding samples
+with illegible or missing required text, samples below the prompt-following threshold, and samples
+outside the top range of aesthetic scores; the thresholds and filtering statistics are given in Appendix C.
+In the final stage, we balance the remaining data by adjusting the sampling multiplicity of each subset
+according to its content domain, language, and caption complexity.
+4.5. Image Editing Data
+Image editing is an image-to-image (I2I) task in which the model generates a target image conditioned
+on one or more source images with an editing instruction. A valid editing sample must therefore
+satisfy two requirements: the target image reflects the requested change, while leaving unmentioned
+subjects, identities, layouts, and backgrounds unchanged. Our editing data consist of two parts: public
+datasets, namely OmniEdit (Wei et al., 2025), ImgEdit (Ye et al., 2025b), SEED-Data-Edit (Ge et al.,
+2024), X2Edit (Ma et al., 2026a), and additional in-house synthetic data. The resulting editing corpus
+covers ten edit types: addition, removal, replacement, adjustment, extraction, background change,
+style transfer, hybrid editing, action editing, and in-image text rendering. Quality control follows
+directly from this definition, supplemented by a check on image quality. Specifically, for each sample
+16
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+we verify that (i) the target differs visibly from the source; (ii) the observed change matches the
+instruction; (iii) regions not referenced by the instruction remain consistent between the source and
+target images; and (iv) the target image is of adequate visual quality.
+5. Training Strategy
+The Intern Lumina U2 training pipeline contains five stages that progressively increase the length
+of the visual context, broaden the distribution of tasks, and expand the range of supported visual
+modalities. At the start of training, the MoE backbone, text embedding table, and text prediction
+head are initialized from LLaDA2.0-mini (Bie et al., 2025). The visual embedding tables, visual input
+projection, and multi-codebook AR head are trained from scratch, while the AToken tokenizer remains
+frozen. Each stage is initialized from the preceding checkpoint, and all stages use the unified objective
+of Section 3.6. The same training strategy is applied on two hardware platforms: the Huawei Ascend
+NPU run as the primary model, while the NVIDIA GPU run as a cross-platform recipe reference.
+5.1. Training Stages
+Stage 1: Vision–Language Alignment.
+Stage 1 aligns the random initialized visual modules (the
+visual embedding tables, visual input projection, and multi-codebook AR head) with the pretrained
+language backbone. The model is trained at 256 × 256 resolution on a mixture of text-only, image
+captioning, and text-to-image data. Image captioning and text-to-image data provide supervision for
+image-to-text and text-to-image generation, respectively, while text-only data preserve the language
+capabilities of the backbone. Through these two complementary pathways, the model establishes
+an initial vision-language alignment and acquires preliminary image understanding and generation
+capabilities, which are further developed in the subsequent stages.
+Stage 2: Perception Pretraining.
+Stage 2 increases the training resolution to 512 × 512 and broad-
+ens the image understanding data to cover more demanding tasks, including OCR, grounding, doc-
+ument understanding, and chart understanding. The higher resolution provides the spatial detail
+required for fine-grained recognition and localization, particularly in text-rich documents and charts.
+Consequently, the model acquires fine-grained perception capabilities, which are essential for the
+more complex visual tasks introduced in later stages.
+Stage 3: Omni-Visual Mid-Training I.
+Stages 1 and 2 establish the basic vision–language align-
+ment and the fundamental visual capabilities. The next two stages bring all visual modalities and
+capabilities from understanding to generation and editing into training. The first of them increases
+the training resolution to 1024 × 1024 without introducing new modalities or tasks. Empirically, we
+find that expanding modality coverage simultaneously with the resolution increase leads to severe
+degradation of previously acquired capabilities. We therefore use this stage to isolate the resolution
+transition: no new modalities or tasks are introduced while the model adapts its existing perception
+and generation capabilities to 1024 × 1024, allowing training to stabilize before modality coverage is
+expanded.
+Stage 4: Omni-Visual Mid-Training II.
+Once training at 1024×1024 has stabilized, the second stage
+of omni-visual mid-training broadens the training recipe by incorporating data for image editing, video
+understanding, and 3D understanding. The model learns these new tasks through the same visual
+interface and unified objective as in earlier stages. Image and text data from the preceding stages
+17
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+remain in the mixture so that the model retains its existing capabilities. The two stages of omni-visual
+mid-training share a combined token budget, which amounts to 500B tokens on the Ascend run and
+200B tokens on the NVIDIA run, as reported in Table 3.
+Stage 5: Supervised Fine-Tuning for Instruction Following.
+This stage fine-tunes the model at
+1024 × 1024 on a high-quality instruction-tuning dataset curated from the previous data sources and
+reformatted for instruction following. The dataset covers text-to-image generation, image editing,
+omni-visual understanding (images, videos, and 3D assets), and text-only question answering. Fine-
+tuning on these data aligns the capabilities acquired in earlier stages with instruction-following be-
+havior, enabling the model to understand task instructions and produce the corresponding outputs.
+The quality-filtered data further improve the overall performance of the model. We also use a lower
+learning rate than in previous stages, so that the model gradually adapts to the instruction-following
+distribution while retaining the knowledge and generation quality it has already developed.
+5.2. Training Configurations
+Table 3 summarizes the stage-wise training configurations of the Ascend and NVIDIA, including the
+generation resolution, sequence length limits, batch sizes, token budgets, learning-rate and regular-
+ization schedules. The proportions of the data mixture for each stage are provided in Table 2. On the
+Ascend platform, we use 1,024 Ascend 910B NPUs in all stages; on the NVIDIA platform, we use 192
+GPUs in all stages. On both platforms, the global batch size equals the number of devices, and Stages
+1 and 2 process 50B and 200B tokens, respectively. In the subsequent stages, the token budgets on
+the Ascend platform are 500B for omni-visual mid-training (Stages 3 and 4 combined) and 300B for
+SFT, compared with 200B for each on the NVIDIA platform.
+5.3. Optimization and Parallel Training
+Optimizer.
+We optimize the trainable 2D and 3D weight matrices, including the attention, feed-
+forward, expert, and projection weights, with Muon (Jordan et al., 2024), which has been shown to
+match AdamW with substantially fewer training tokens (Liu et al., 2025a) and to remain stable on
+trillion-parameter MoE models (Kimi Team, 2025, 2026). For the query, key, and value projections, we
+use the per-head variant of Kimi K3 (Kimi Team, 2026), which orthogonalizes the update of each atten-
+tion head separately. All other trainable parameters, namely the embedding layers, one-dimensional
+parameters such as norms and biases, and the text output head and the per-codebook output classifiers,
+are optimized with AdamW (Loshchilov and Hutter, 2019) using fixed betas (0.9, 0.999) and ϵ = 10−8.
+Stage-specific learning rates, weight decay, warm-up, gradient clipping, and Muon hyperparameters
+are reported in Table 3.
+Sequence packing and distributed training.
+We apply dynamic sequence packing in all training
+stages. The data collator concatenates training samples until a predefined packing length limit is
+reached. This removes only the padding inserted between samples, while retaining the padding within
+a single sample. The data collator also records the cumulative sequence lengths of the packed samples,
+which mark the sample boundaries to confine attention and loss computation to each sample. There-
+fore, this packing strategy reduces sequence-level padding overhead while retaining sample-internal
+padding, without altering the objective for any individual sample. On both platforms, we use FSDP2
+with full parameter sharding in a hybrid sharded data parallel (HSDP) layout. Gradient checkpoint-
+ing is enabled, while parameter and activation offloading are disabled. This configuration keeps long
+18
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Configuration
+Vision-
+Language
+alignment
+Perception
+pretraining
+Omni-visual
+mid-training
+Instruction
+SFT
+Stage 1
+Stage 2
+Training setup
+Generation resolution
+256
+512
+1024
+1024
+1024
+Sequence length
+8,192
+8,192
+16,384
+16,384
+16,384
+Text length limit
+2,048
+2,048
+2,048
+2,048
+2,048
+Text block length
+32
+32
+32
+32
+32
+Global batch size (Ascend)
+1,024
+1,024
+1,024
+1,024
+1,024
+Global batch size (NVIDIA)
+192
+192
+192
+192
+192
+Training tokens (Ascend)
+50B
+200B
+500B (combined)
+300B
+Training tokens (NVIDIA)
+50B
+200B
+200B (combined)
+200B
+Learning rates and regularization
+Backbone peak LR
+2×10−4
+1×10−4
+1×10−4
+1×10−4
+1×10−5
+Text embedding/head LR
+1×10−4
+5×10−5
+5×10−5
+5×10−5
+5×10−6
+LR schedule
+Cosine
+Cosine
+Cosine
+Cosine
+Constant
+Minimum backbone LR
+10−7
+10−7
+10−7
+10−7
+10−7
+Warmup (% of steps)
+3
+3
+3
+3
+1
+Weight decay
+0.1
+0.1
+0.1
+0.1
+0.1
+Norm/bias weight decay
+0
+0
+0
+0
+0
+Gradient norm clip
+4.0
+2.0
+1.0
+1.0
+1.0
+Optimizer
+Matrix optimizer
+Muon
+Muon
+Muon
+Muon
+Muon
+Fallback optimizerc
+AdamW
+AdamW
+AdamW
+AdamW
+AdamW
+AdamW betas
+(0.9, 0.999)
+(0.9, 0.999)
+(0.9, 0.999)
+(0.9, 0.999)
+(0.9, 0.999)
+AdamW epsilon
+10−8
+10−8
+10−8
+10−8
+10−8
+Muon momentum
+0.95
+0.95
+0.95
+0.95
+0.95
+Newton–Schulz steps
+5
+5
+5
+5
+5
+Muon RMS scale
+0.2
+0.2
+0.2
+0.2
+0.2
+Nesterov / per-head QKV
+Yes / Yes
+Yes / Yes
+Yes / Yes
+Yes / Yes
+Yes / Yes
+c Muon is used for trainable two- and three-dimensional matrix parameters; AdamW handles embeddings, one-dimensional
+normalization and bias parameters, and the text output head and per-codebook output classifiers. Stage-wise learning rates
+and weight-decay settings are listed above.
+Table 3: Training configurations for the primary Ascend run and the NVIDIA reference line.
+packed sequences within the per-device memory budget, while preserving identical model and loss
+definitions across hardware platforms.
+Ascend and NVIDIA implementations.
+We train Intern Lumina U2 on both Huawei Ascend and
+NVIDIA platforms to evaluate the cross-platform effectiveness of our model. The Ascend implementa-
+tion is built on the CANN runtime, the VeOmni distributed training framework (Ma et al., 2026b), and
+HCCL for collective communication. The attention and MoE layers are implemented with platform-
+native fused kernels; the Ascend-specific operator adaptations and memory constraints are detailed
+in Appendix D. Both implementations follow the same five-stage schedule, unified training objective,
+19
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+and data proportions, while differing in hardware-specific settings, including device counts, paral-
+lelization meshes, and token budgets. Because Ascend training uses a larger cluster and a larger
+token budget, we use the resulting checkpoint as the primary model for evaluation and deployment.
+The model trained on NVIDIA GPUs serves as a cross-platform reference for the same training recipe.
+6. Inference
+6.1. Inference Procedure
+Text decoding.
+We generate text with block diffusion (Arriola et al., 2025; Bie et al., 2025), which
+extends a fully decoded prefix from left to right while denoising the tokens within each appended block
+in parallel. This design offers two practical advantages: (i) the generation process can be terminated
+at the <EOA> token, enabling variable-length outputs; and (ii) the key–value cache of the completed
+prefix can be reused when decoding the next block.
+Given a prefix x≤p of length p and a block length B, decoding proceeds block by block, with B mask
+tokens appended at a time. Let j denote the appended blocks, s ∈{1, . . . , S} denote the denoising
+steps within a block, and i denote the positions within a block. At step s, the model samples a token
+at each masked position and assigns it a confidence σ(j,s)
+i
+, the predicted probability of the sampled
+token. Following an unmask schedule {νs}S
+s=1 with PS
+s=1 νs = B, the νs most confident positions are
+unmasked at step s, and the remaining positions keep masked:
+y(j,0) = [x≤p; ˆx<j; MASKB],
+Aj,s = Topνs
+
+{σ(j,s)
+i
+: i ∈Mj,s}
+
+,
+(6)
+where y(j,0) is the input sequence at the start of block j, ˆx<j denotes the blocks decoded before block j,
+Mj,s is the set of positions of block j that are still masked at the start of step s, with Mj,1 containing
+all B positions, Aj,s is the set of positions unmasked at step s, so that Mj,s+1 = Mj,s \ Aj,s, and
+Topνs returns the indices of the νs highest-confidence positions. Unmasked tokens remain visible in
+subsequent steps, so the remaining masked tokens are predicted with bidirectional context within
+the block, while the blocks themselves are generated from left to right. Once all positions in a block
+are generated, decoding stops if the block contains the <EOA> token, and all tokens after it are
+discarded; otherwise, another all-mask block is appended for generation. Algorithm 1 summarizes
+the complete procedure, and Appendix A specifies the sequence format and termination conventions.
+Algorithm 1 Text inference (block diffusion)
+Require: prefix x≤p (condition and <BOA>); generation length G; block length B; steps per block S; unmask
+counts ν1, . . . , νS with P
+s νs = B; temperature τ
+1: ˆx<0 ←[ ]
+2: for j = 0, . . . , ⌈G/B⌉−1 do
+3:
+y(j,0) ←x≤p ∥ˆx<j (is_clean=1) ∥<|mask|>B (is_clean=0, block j)
+4:
+build the attention mask from the token metadata
+5:
+for s = 1, . . . , S do
+6:
+logits ←text head(backbone(current sequence)) at the masked positions Mj,s
+7:
+ˆxi ←arg max(logits + Gumbel noise · τ); σ(j,s)
+i
+←softmax(logits)[ˆxi]
+8:
+unmask the νs most confident positions of block j (Aj,s); keep the rest masked
+9:
+end for
+10:
+ˆx<j+1 ←ˆx<j ∥block j; stop if block j contains <EOA> (truncate there)
+11: end for
+12: return the decoded blocks ˆx
+20
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Visual decoding.
+Images are generated with full spatial diffusion: instead of proceeding block by
+block, all positions on the canvas are decoded jointly through iterative parallel refinement (Chang
+et al., 2022). In each step, the backbone processes all masked positions in parallel using the global
+context of the canvas, and the multi-codebook AR head samples the K = 8 codes at each position
+sequentially along the codebook index. This preserves within-position code dependencies while al-
+lowing unresolved positions to be revised throughout generation.
+Specifically, the canvas is initialized with all N spatial positions masked. Let t ∈{1, . . . , T} denote
+the outer refinement steps, i ∈{1, . . . , N} denote the spatial positions, and k ∈{1, . . . , K} index
+the codebooks. At step t, the backbone computes hidden states for the currently masked set Mt in
+parallel. For each position i ∈Mt, conditioned on its head condition vector qt,i = Wq ht,i +bq and the
+previously sampled codes ˆct,i,<k, the multi-codebook AR head produces logits zt,i,k(a) over the codes
+of codebook k. These logits define a categorical distribution over the candidate codes, from which the
+K codes are sampled sequentially:
+πt,i,k(a) = softmax(zt,i,k/τ)a ,
+ˆct,i,k = arg max
+a
+[zt,i,k(a) + τγt,i,k,a] ,
+σt,i = 1
+K
+K
+X
+k=1
+πt,i,k(ˆct,i,k),
+(7)
+where τ > 0 is the sampling temperature, γt,i,k,a is standard Gumbel noise, πt,i,k(a) denotes the prob-
+ability assigned to code a by the codebook-k categorical distribution, and σt,i is the mean probability
+of the sampled codes across the K codebooks. We utilize a cosine schedule, nt = ⌊N cos(πt/(2T))⌋,
+to determine the number of positions kept masked after step t. Under the baseline remasking rule,
+the nt positions with the lowest Gumbel-perturbed confidence scores remain masked, while the sam-
+pled codes at all other positions are committed and remain fixed. This process is repeated until no
+masked positions remain, after which the AToken decoder reconstructs the image. Algorithm 2 gives
+the complete sampling procedure.
+Algorithm 2 Image inference (spatial masked diffusion with multi-codebook AR decoding)
+Require: condition C (prompt, plus the source image for editing) and unconditional condition C∅; grid of
+N positions; refinement steps T; CFG scale w; temperature τ; head condition projection Wq, bq; position
+embeddings sk, uk and code embeddings Ek; output classifiers W out
+k
+1: V ←all N positions set to the mask entry (5000) in all K codebooks (row delimiters and boundary tokens
+fixed)
+2: for t = 1, . . . , T do
+3:
+Mt ←currently masked positions; nt ←⌊N cos( π
+2
+t
+T )⌋(0 at t=T)
+4:
+h ←(1 + w) backbone([C | V ]) −w backbone([C∅| V ])
+▷guidance on hidden states
+5:
+qt,i ←Wqht,i + bq at positions i ∈Mt; prefix ←[qt,i]
+6:
+for k = 1, . . . , K do
+▷multi-codebook AR head, all positions in Mt in parallel
+7:
+gt,i,k ←head(prefix with s1, . . . , sk added, adaLN from qt,i + uk); zt,i,k(a) ←W out
+k
+gt,i,k
+8:
+ˆct,i,k ←arg maxa(zt,i,k(a) + τγt,i,k,a); πt,i,k(ˆct,i,k) ←softmax(zt,i,k/τ)[ˆct,i,k]
+9:
+if k < K: prefix ←prefix ∥Ek(ˆct,i,k)
+10:
+end for
+11:
+write ˆct,i,1:K into V at i ∈Mt; σt,i ←1
+K
+P
+k πt,i,k(ˆct,i,k)
+12:
+re-mask min(nt, |Mt|) least confident positions of Mt (Gumbel-perturbed confidence with temperature
+τ)
+13: end for
+14: return AToken decoder(V without delimiters)
+21
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+6.2. Inference Acceleration
+Since image sampling is computationally expensive, we apply training-free acceleration at two levels
+of the sampler: (i) reducing the cost of each step by reusing cached intermediate states whose inputs
+remain stable, and (ii) adapting the remasking decisions when a position reaches a temporal plateau.
+The following subsections describe these mechanisms and evaluate their quality–latency trade-off.
+6.2.1. Batching and Cache-Aware Reuse
+Recent masked-diffusion decoders reduce the repeated computation across refinement steps by
+reusing the intermediate hidden representations or key-value caches. Fast-dLLM (Wu et al., 2026a)
+and dKV-Cache (Ma et al., 2025b) introduce approximate cache reuse for bidirectional diffusion
+decoders, and dLLM-Cache (Liu et al., 2026) selectively refreshes cached response positions based
+on the V-verify score. To reduce redundant computation, our inference implementation combines
+three complementary mechanisms for batch sharing and cache reuse.
+First, the conditional and
+unconditional branches of classifier-free guidance (CFG) are evaluated together in one batch, which
+shares the backbone computation between the two branches. Second, the multi-codebook AR head
+caches key-value states as it predicts the K codes at each visual position, avoiding recomputation of
+the previously generated code prefix. Third, the backbone reuses cached hidden states at positions
+with unchanged codes.
+Together, these mechanisms reduce repeated computation in the CFG
+branches, the AR head’s code prefix, and backbone processing at positions where codes remain
+unchanged, while preserving the full K-step sequential prediction within each visual position.
+Reusing cached backbone states requires a criterion for detecting stale cache entries. For this
+purpose, we use a drift test adapted from the V-verify score of dLLM-Cache (Liu et al., 2026), to
+decide when the backbone cache must be refreshed. At step t, let St denote the set of positions
+recomputed due to the change of input codes or the selection by the refresh schedule. Let ht,i,r denote
+the conditional hidden-state component r ∈{1, . . . , d} at position i, where d is the hidden-state width.
+We measure the normalized drift between the recomputed and cached states:
+Dt =
+meani∈St, r |hnew
+t,i,r −hcache
+t,i,r |
+max
+ meani∈St, r |hcache
+t,i,r |, εv
+,
+(8)
+where εv > 0 ensures numerical stability. If Dt exceeds a threshold δv, the entire backbone cache
+is refreshed at the next step; warm-up and fixed-interval refreshes remain in effect regardless of Dt.
+Table 4 reports the resulting number of backbone forward passes and the cache hit ratios. Cache
+warm-up is included in the reported latency, so the initial forwards that build the cache are timed as
+part of each request. Only the one-time kernel preheat used to initialize the kernels before timing is
+discarded.
+6.2.2. Plateau-Halton Sampling with V-verify (PHV)
+Confidence calibration.
+As shown in Figure 8, visual confidence exhibits both low magnitude and
+slow evolution: over 96 refinement steps, its per-prompt median increases only from 0.046 to 0.127,
+and its aggregate 90th percentile stays below 0.32. A fixed confidence threshold is therefore ill-suited
+to this decoder. We therefore propose Plateau-Halton sampling with V-verify (PHV), which uses confi-
+dence as a temporal signal for token commitment and pairs the sampler with the drift-triggered cache
+refresh of Section 6.2.1. For each masked position i and codebook k, let πt,i,k(a) denote the categor-
+ical probability assigned to code a by the predictive logits at refinement step t. We define the visual
+22
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Table 4: Inference acceleration under a matched 1024 × 1024 text-to-image protocol with the same checkpoint,
+553 GenEval prompts, one image per prompt, CFG scale 4.0, temperature 0.9, and seed 42. “Steps” is the
+realized number of outer diffusion steps, prompt-dependent for the plateau rows and fixed elsewhere. “BB
+fwd” counts conditional plus unconditional backbone forwards, with the cache-hit ratio in parentheses where
+a cache is active. Latency is wall-clock per image after a discarded kernel preheat and includes cache warm-up.
+The selected PHV setting is δp = 0.18, fp = 0.005, with the remaining cache and V-verify controls fixed across
+rows. GenEval uses one image per prompt and is therefore not comparable to the four-seed protocol of Table 7;
+no configuration scores below the production path.
+Method
+Steps
+BB fwd
+Lat. (s)
+Speedup
+GenEval
+Cumulative system optimizations (fixed 96-step schedule)
+Production path
+96.0
+192
+159.9
+1.00×
+86.6
++ CFG batching
+96.0
+192
+117.2
+1.36×
+89.0
++ AR-head KV cache
+96.0
+192
+84.2
+1.90×
+88.6
++ hidden-state cache
+96.0
+192 (65%)
+64.1
+2.49×
+89.2
++ V-verify refresh
+96.0
+192 (63%)
+64.5
+2.48×
+89.3
++ Halton selection (HVV)
+96.0
+192 (64%)
+66.5
+2.40×
+88.2
+Reduced and adaptive step budgets
+HVV, fixed 60 steps
+60.0
+120 (63%)
+42.6
+3.75×
+89.7
+Plateau only (no cache, no Halton)
+56.9
+114
+46.5
+3.44×
+87.2
+Plateau + V-verify
+56.2
+112 (35%)
+34.8
+4.59×
+87.2
+PHV
+60.4
+121 (41%)
+35.9
+4.45×
+89.3
+confidence at position i as
+κt,i = 1
+K
+K
+X
+k=1
+max
+a
+πt,i,k(a),
+πt,i,k(a) = softmax(zt,i,k/τ)a ,
+(9)
+where κt,i is the average maximum code probability across the K codebooks. For remasking, PHV
+uses σt,i, the mean probability assigned to the sampled codes across the K codebooks.
+Plateau-Halton remasking.
+The sampler combines a temporal plateau test with a low-discrepancy
+Halton ordering (Besnier et al., 2025), which evenly spreads the remaining uncertainty across the im-
+age. For each position i, it maintains an exponential moving average (EMA) of the sampled confidence.
+With β ∈[0, 1) and numerical stabilizer εm > 0,
+mt,i = βmt−1,i + (1 −β)σt,i,
+∆t,i = |mt,i −mt−1,i|
+max(mt−1,i, εm),
+(10)
+where mt,i is the EMA-smoothed confidence estimate at position i after refinement step t, initialized
+to σt,i at the first step in which position i is sampled. A position becomes plateau-eligible once, after
+its first nmin samples, ∆t,i has stayed below a threshold δp for P consecutive steps and mt,i exceeds
+a floor fp. The floor fp prevents a flat but low-confidence trajectory from being treated as stable. We
+use P = 5, nmin = 4, and β = 0.7 throughout, and select δp and fp by the sweep in Section 7.
+At each step t, let Mt be the masked positions and let Ut ⊆Mt be those that are not plateau-
+eligible. Plateau-eligible positions are committed immediately, and the cosine budget nt bounds how
+many of the remaining positions stay masked: the sampler retains the rt = min(nt, |Ut|) positions Rt
+of Ut that come latest in a fixed Halton order of the grid and commits all other positions of Mt, so
+23
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+k
+Figure 8: Confidence calibration for masked visual positions under the fixed 96-step, 1024 × 1024 protocol.
+The visual confidence remains below the text-scale commit threshold, and its trajectory provides a more useful
+signal for adaptive sampling than its absolute level.
+that positions are committed in Halton order and spread evenly over the image. The baseline sampler
+has no plateau test and keeps the nt positions with the lowest Gumbel-noised confidence masked, so
+the plateau-Halton sampler changes the eligibility criterion and the commit order while keeping the
+same budget and cache policy. Algorithm 3 gives the sampling procedure.
+Temporal stability of PHV.
+PHV uses the plateau criterion online, while we assess its stability signal
+with an offline holdout experiment. For a position that remains masked over H consecutive refinement
+transitions, we define the flip rate as the fraction of codebook-wise top-1 predictions that change
+between adjacent steps:
+FlipRate(H)
+t,i
+=
+1
+HK
+H
+X
+h=1
+K
+X
+k=1
+1
+h
+arg max
+a
+πt+h,i,k(a)̸ = arg max
+a
+πt+h−1,i,k(a)
+i
+.
+(11)
+Here πt+h,i,k(a) is the predictive probability of candidate code a for position i in codebook k at re-
+finement step t + h; t is the initial step of the measurement window, H is the number of consecutive
+transitions, and K is the number of codebooks. The arg max term selects the top-1 predicted code,
+and the indicator contributes one exactly when this code changes between two adjacent steps. Lower
+values therefore indicate that the predictive distribution changes less across refinement steps. To test
+whether the plateau criterion identifies such positions, we pair each plateau-eligible position with a
+still-masked position from the same image that does not satisfy the plateau criterion while exhibiting
+comparable instantaneous confidence and EMA values at the same step. We refer to the latter as a
+matched-control token. Both tokens are then kept masked for H ∈{2, 4, 8} additional steps, so the
+comparison controls for their confidence level while measuring subsequent temporal change. Across
+200 prompts, the plateau tokens have lower flip rates than their matched-control tokens. Figure 9(a)
+reports the mean difference in flip rate, computed as plateau minus matched control: it changes from
+−0.012 at H = 2 to −0.048 at H = 8 (95% bootstrap CI [−0.057, −0.040] at H = 8). Figure 9(b)
+gives the per-prompt comparison at H = 8: the plateau token is steadier than its matched-control
+token for 157 of the 200 prompts. Figure 9(c) provides qualitative examples of the corresponding
+24
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+steps
+Figure 9: Offline temporal-stability test for PHV on 200 prompts. Each plateau-eligible position is paired with
+a still-masked matched-control token from the same image that does not satisfy the plateau criterion while
+exhibiting comparable confidence and EMA values. Both are held masked for 2, 4, or 8 additional refinement
+steps. (a) The difference in top-1 flip rate between the plateau token and its matched-control token grows with
+the hold duration. (b) Per-prompt flip rates at H = 8; 157 of 200 prompts fall below the diagonal. (c) Posterior
+max-probability trajectories for three representative plateau–matched-control pairs.
+maximum-probability trajectories for three representative pairs. Together, these results support an
+aggregate stability pattern rather than a deterministic indicator of PHV convergence.
+Algorithm 3 PHV sampling for one visual answer
+Require: refinement steps T; temperature τ; cosine budget nt; plateau controls (δp, fp, P, nmin, β);
+stabilizer εm
+1: Mask all visual positions; initialize the plateau counters
+2: for t = 1, . . . , T do
+3:
+Mt ←still-masked positions; if Mt = ∅then break
+4:
+Obtain backbone states using the cache policy in Sec. 6.2.1
+5:
+Sample a visual token (K codes) for every i ∈Mt with the multi-codebook AR head
+6:
+Update mt,i, ∆t,i and plateau counters for i ∈Mt
+7:
+Ut ←{i ∈Mt : i not plateau-eligible}
+8:
+rt ←min(nt, |Ut|)
+▷cosine budget is a ceiling on what stays masked
+9:
+Rt ←the rt positions of Ut latest in the Halton order (PHV) or with the lowest Gumbel-noised
+confidence (baseline)
+10:
+Keep Rt masked; commit the sampled visual tokens at Mt \ Rt
+11: end for
+12: Decode the completed grid of visual tokens with AToken
+Efficiency Protocol and Results.
+We evaluate the contribution of the cache policy, V-verify, and the
+plateau-Halton sampler under the same protocol specified in Table 4. The selected PHV configuration
+reduces latency from 159.9 to 35.9 seconds per image (4.45×), while reducing the mean number of
+refinement steps from 96 to 60.4 and improving GenEval from 86.6 to 89.3. The gain over the plateau
+sampler with V-verify but without Halton ordering, which runs at a comparable latency, comes from
+the Halton reveal order: at the same step budget it improves which positions commit, raising GenEval
+by over two points. The sweep over the sampling parameters is reported in Section 7.
+25
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+7. Evaluation
+We evaluate Intern Lumina U2 on image understanding and reasoning, video and 3D understanding,
+text-to-image generation, scientific-diagram generation, and image editing. We report results for two
+models with the same architecture, tokenizer, and five-stage training schedule: the primary model,
+trained on 1,024 Huawei Ascend 910B NPUs (Appendix D), and a reference model trained on NVIDIA
+GPUs. We then present ablations of the visual input interface, the multi-codebook AR head, and the
+inference-sampling configuration.
+Setup.
+All benchmarks use the official evaluation sets and scoring protocols. Understanding bench-
+marks use 1024-pixel inputs, with chain-of-thought prompting on reasoning-heavy benchmarks such
+as MMMU (Yue et al., 2024), MathVista (Lu et al., 2024), and MathVision (Wang et al., 2024a);
+video benchmarks (Fu et al., 2025b; Zhou et al., 2025b; Li et al., 2024) use 64 frames selected
+by segment-based random sampling. Generation and editing benchmarks follow their official multi-
+sample protocols and judges, namely GenEval (Ghosh et al., 2023), DPG-Bench (Hu et al., 2024),
+UniGenBench (Wang et al., 2025b), TIIF-Bench (Wei et al., 2026), WISE (Niu et al., 2026), OneIG-
+Bench (Chang et al., 2025), ImgEdit (Ye et al., 2025b), and GEdit-Bench (Liu et al., 2025b). Baselines
+include understanding-only models (Qwen2.5-VL (Bai et al., 2025b) and LLaDA-V (You et al., 2026a))
+and unified models (Janus-Pro (Chen et al., 2025), Show-o2 (Xie et al., 2025b), BAGEL (Deng et al.,
+2025), InternVL-U (Tian et al., 2026), OmniGen2 (Wu et al., 2026b), MMaDA (Yang et al., 2025),
+Lumina-DiMOO (Xin et al., 2025), LLaDA-o (You et al., 2026b), and LLaDA2.0-Uni (Bie et al., 2026));
+their numbers are taken from the sources listed in each table caption.
+Table 5: Image understanding and reasoning, grouped into document and chart understanding, perception
+and hallucination, and knowledge and mathematical reasoning. Benchmarks: ChartQA (Masry et al., 2022),
+CharXiv (Wang et al., 2024b), HallusionBench (Guan et al., 2024), MME (Fu et al., 2025a), RealWorldQA (xAI,
+2024), MMMU (Yue et al., 2024), MMMU-Pro (Yue et al., 2025), MathVista (Lu et al., 2024), MathVision (Wang
+et al., 2024a), and DynaMath (Zou et al., 2025). Baseline numbers are taken from Bie et al. (2026). Bold marks
+the best score in each row.
+Understanding-only
+Unified
+Intern Lumina U2
+Benchmark
+Qwen2.5-
+VL
+LLaDA-V
+BAGEL
+Intern
+VL-U
+Lumina-
+DiMOO
+LLaDA-o
+LLaDA
+2.0-Uni
+Ascend
+NVIDIA
+#Params
+7B
+8B
+7B+7B
+2B+1.7B
+8B
+8B
+16B-A1.4B
+16.9B-A1.4B
+Documents and charts
+ChartQA
+84.1
+78.3
+74.3
+76.6
+8.3
+87.9
+80.1
+86.2
+81.2
+CharXiv (DQ)
+73.9
+47.0
+70.6
+53.3
+27.8
+69.8
+68.4
+85.9
+84.0
+Perception and hallucination
+HallusionBench
+51.9
+39.2
+52.5
+44.8
+32.9
+47.4
+50.2
+64.6
+56.5
+MME-C
+624
+491
+667
+279
+352
+527
+587
+667
+606
+RealWorldQA
+68.5
+63.2
+73.9
+56.4
+52.4
+60.8
+66.7
+62.9
+59.9
+Knowledge and mathematical reasoning
+MMMU
+51.3
+48.6
+55.3
+54.7
+58.6
+44.9
+50.1
+52.2
+55.5
+MMMU-Pro
+38.3
+35.2
+37.1
+20.8
+20.6
+28.3
+34.0
+38.5
+37.4
+MathVista
+68.2
+59.7
+73.1
+55.8
+10.3
+66.1
+68.1
+68.0
+70.4
+MathVision
+22.4
+21.2
+24.1
+22.1
+13.1
+15.7
+26.7
+36.5
+30.6
+DynaMath
+–
+–
+–
+46.97
+–
+40.58
+46.89
+63.6
+55.8
+Image understanding and reasoning.
+Table 5 reports the quantitative results on image under-
+standing and reasoning benchmarks. Despite having only 1.4B activated parameters, Intern Lumina
+26
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+U2 achieves the best score on six of the ten benchmarks (tied with BAGEL on MME-C), with the clear-
+est leads on CharXiv, HallusionBench, MathVision, and DynaMath. The comparison with LLaDA2.0-
+Uni is particularly informative because the two models share the same language backbone, whereas
+LLaDA2.0-Uni uses a semantic-only visual interface. Intern Lumina U2 outperforms it on eight of
+the ten benchmarks, with the largest gains on benchmarks requiring fine-grained visual detail. This
+pattern is consistent with the enhanced representational capacity of multi-codebook visual tokens.
+Table 6: Video and 3D understanding from the same checkpoint. Left: video benchmarks (Video-MME (Fu et al.,
+2025b) without subtitles, MLVU (Zhou et al., 2025b) m-avg, MVBench (Li et al., 2024)); baseline numbers are
+taken from Lin et al. (2024); Zhang et al. (2025); Cheng et al. (2024); You et al. (2026a); Fu et al. (2025b).
+Right: 3D MM-Vet (Qi et al., 2024), with baseline numbers for ShapeLLM and PointLLM (Xu et al., 2024) taken
+from Qi et al. (2024). Bold marks the best score in each column.
+Model
+Video-MME MLVU MVBench
+Video-LLaVA-7B
+39.9
+–
+43.1
+LLaVA-Mini
+–
+42.8
+44.5
+VideoLLaMA2-7B
+46.6
+–
+54.6
+LLaDA-V
+56.1
+59.5
+–
+Ours (Ascend)
+52.6
+62.1
+61.8
+Ours (NVIDIA)
+56.7
+64.9
+57.2
+Model
+Rec
+Know
+Gen
+Spat Emb Total
+PointLLM-7B
+40.6
+49.5
+34.3 29.1 48.7
+41.2
+ShapeLLM-7B
+45.7
+42.7
+43.4 39.9 64.5 47.4
+Ours (Ascend)
+34.6
+57.2
+48.2 60.1 56.8 50.5
+Ours (NVIDIA) 32.0
+49.9
+43.2 37.9 57.9
+43.8
+Video and 3D understanding.
+Table 6 reports the quantitative results on video and 3D understand-
+ing benchmarks. Notably, unlike Intern Lumina U2, none of the other unified baselines supports video
+and 3D understanding alongside image generation within a single checkpoint. For video understand-
+ing, Intern Lumina U2 achieves the best score on all three benchmarks, ahead of the diffusion-based
+LLaDA-V and the dedicated video models such as VideoLLaMA2. On 3D MM-Vet, the Ascend-trained
+primary model also outperforms the 3D-specialist models ShapeLLM and PointLLM. These results
+show that a single set of visual interfaces can support image, video, and 3D understanding at a level
+competitive with specialist models.
+Image generation and editing.
+Tables 7–10 report the results on text-to-image generation bench-
+marks. Among unified models, Intern Lumina U2 achieves the best scores on DPG-Bench, UniGen-
+Bench, and TIIF-Bench, and matches the best score on GenEval. It also outperforms the generation-
+only model FLUX.1 (Black Forest Labs, 2024) and approaches the performance of Qwen-Image (Wu
+et al., 2025a), which activates about 14× more parameters per token than our Intern Lumina U2. In
+UniGenBench, its advantage is most pronounced in the dimensions of logical reasoning and gram-
+mar. On TIIF-Bench, its performance remains stable across short and long instructions. Without
+reasoning-augmented prompting, Intern Lumina U2 ranks second among unified models on WISE. In
+OneIG-Bench, its overall score is comparable to the best unified model; it achieves the highest style
+score, but exhibits lower sample diversity than the baselines. Table 14 reports image editing. On
+ImgEdit and English GEdit-Bench, Intern Lumina U2 is close to the best unified models and ahead of
+BAGEL and OmniGen2.
+Scientific-diagram generation.
+Table 11 reports the results on two benchmarks assessing the phys-
+ical correctness of generated physics diagrams. GenExam Physics (Wang et al., 2026b) scores each
+diagram against fine-grained scoring points, whereas VeriphyT2IBench (Zhang et al., 2026) verifies
+each diagram with item-specific binary questions at both the local and global levels. On GenExam,
+Intern Lumina U2 obtains the highest relaxed score among general-purpose unified models, substan-
+tially outperforming SenseNova-U1 and BAGEL. On VeriphyT2IBench, it attains the best Local score
+27
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Table 7: Text-to-image generation. GenEval (Ghosh et al., 2023), DPG-Bench (Hu et al., 2024), TIIF-Bench (Wei
+et al., 2026), and WISE (Niu et al., 2026) overall scores (GenEval on a 0–100 scale); higher is better. Baseline
+numbers are taken from Bie et al. (2026), Tian et al. (2026), and Xie et al. (2025b); TIIF reports the overall
+score on long prompts. UniGenBench results are reported per dimension in Table 8. Bold marks the best
+unified-model score in each column
+Model
+#Params
+GenEval
+DPG-Bench
+TIIF
+WISE
+Generation-only models
+FLUX.1 [Dev]
+12B
+66
+83.84
+71.8
+0.50
+Qwen-Image
+20B
+87
+88.32
+86.8
+0.62
+Unified understanding-and-generation models
+Janus-Pro
+7B
+80
+84.19
+65.0
+0.35
+Show-o2
+7B
+76
+86.14
+–
+0.39
+BAGEL
+7B+7B
+82
+85.07
+71.7
+0.52
+OmniGen2
+3B+4B
+80
+83.57
+–
+–
+InternVL-U
+2B+1.7B
+85
+85.18
+73.9
+0.46
+MMaDA
+8B
+63
+69.97
+–
+–
+Lumina-DiMOO
+8B
+88
+86.04
+68.8
+0.40
+LLaDA-o
+8B
+86
+87.04
+–
+–
+LLaDA2.0-Uni
+16B-A1.4B
+89
+87.76
+–
+0.68
+Ours (Ascend)
+16.9B-A1.4B
+89
+87.79
+87.1
+0.56
+Ours (NVIDIA)
+16.9B-A1.4B
+89
+87.99
+84.8
+0.59
+Table 8: UniGenBench (Wang et al., 2025b) (EN) results on the ten first-level dimensions; Overall is their
+mean. Baseline numbers are taken from Bie et al. (2026); bold marks the best unified-model score in each
+column. Dimensions: Sty(le), Wor(ld knowledge), Att(ribute), Act(ion), Rel(ationship), Log(ical reasoning),
+Gra(mmar), Com(pound), Lay(out), Txt (text generation).
+Model
+Sty
+Wor
+Att
+Act
+Rel
+Log
+Gra
+Com
+Lay
+Txt
+Overall
+Generation-only models
+FLUX.1 [Dev]
+83.90
+88.92
+67.84
+62.17
+67.26
+30.91
+60.96
+47.04
+71.83
+32.18
+61.30
+Qwen-Image
+94.70
+94.15
+87.93
+82.60
+80.08
+51.59
+60.96
+72.94
+86.57
+72.13
+78.36
+Unified understanding-and-generation models
+Janus-Pro
+90.80
+86.71
+67.74
+64.26
+68.40
+37.05
+64.44
+62.11
+72.01
+2.59
+61.61
+BAGEL
+90.20
+85.60
+67.74
+61.98
+70.69
+30.23
+66.44
+58.12
+76.49
+7.76
+61.53
+OmniGen2
+91.90
+86.39
+72.12
+62.83
+68.27
+32.50
+59.89
+56.31
+71.64
+29.02
+63.09
+MMaDA
+82.40
+56.65
+48.39
+37.83
+50.25
+17.95
+55.75
+32.35
+30.22
+1.15
+41.35
+Lumina-DiMOO
+89.70
+90.03
+81.62
+71.12
+78.43
+45.45
+70.45
+73.32
+82.84
+25.57
+71.12
+LLaDA2.0-Uni
+95.30
+93.67
+91.77
+85.65
+86.42
+63.99
+72.19
+85.82
+90.30
+31.23
+79.63
+Ours (Ascend)
+99.40
+98.73 91.99
+91.92 93.53
+84.17 91.18
+92.65 97.39
+20.11
+86.11
+Ours (NVIDIA)
+97.10
+96.99
+88.88
+88.27
+89.34
+71.72
+81.53
+89.56
+93.07
+11.56
+80.80
+and the second-best Global score. The per-domain breakdown in Table 12 shows that this advantage is
+not driven by a single domain: Intern Lumina U2 ranks first in Local E&M and Global mechanics, and
+performs comparably to the strongest physics-specialized model in the remaining domains. Table 13
+further shows that its largest margin occurs on hard E&M prompts, where it scores 81.30.
+Input-interface ablation.
+Table 15 and Figure 10 compare the three input designs illustrated in
+Figure 4: (D1) a single embedding table shared by text tokens and visual codes; (D2) a single visual
+embedding table with codebook-specific index offsets; and (D3, ours) a separate embedding table
+28
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Table 9: TIIF-Bench (Wei et al., 2026) results by instruction category for short and long prompts. Basic and
+Advanced are the average of their sub-categories; Real World is the Designer real-world score. Baseline numbers
+are taken from Tian et al. (2026); bold marks the best unified-model score in each column.
+Model
+Short prompts
+Long prompts
+Basic
+Adv.
+Real
+Overall
+Basic
+Adv.
+Real
+Overall
+Generation-only models
+FLUX.1 [Dev]
+83.1
+65.8
+70.7
+71.1
+78.7
+68.5
+71.5
+71.8
+Qwen-Image
+86.2
+79.3
+90.3
+86.1
+87.2
+80.9
+91.4
+86.8
+Unified understanding-and-generation models
+Janus-Pro
+79.3
+59.7
+65.8
+65.5
+78.3
+58.8
+60.3
+65.0
+BAGEL
+81.8
+70.2
+68.3
+71.5
+80.1
+72.2
+67.9
+71.7
+Lumina-DiMOO
+84.9
+72.8
+75.0
+74.7
+78.0
+68.5
+72.0
+68.8
+InternVL-U
+82.3
+73.5
+65.3
+74.9
+81.5
+72.7
+66.8
+73.9
+Ours (Ascend)
+92.53
+86.03
+94.40
+88.57
+92.94
+85.02
+93.28
+87.08
+Ours (NVIDIA)
+86.71
+81.68
+92.54
+84.59
+90.32
+83.97
+88.43
+84.77
+Table 10: OneIG-Bench (Chang et al., 2025) (EN). Baseline numbers are taken from Bie et al. (2026); Overall
+is the mean of the five dimensions. Bold marks the best unified-model score in each column.
+Model
+Alignment
+Text
+Reasoning
+Style
+Diversity
+Overall
+Generation-only models
+FLUX.1 [Dev]
+0.786
+0.523
+0.253
+0.368
+0.238
+0.434
+Qwen-Image
+0.882
+0.891
+0.306
+0.418
+0.197
+0.539
+Unified understanding-and-generation models
+Janus-Pro
+0.553
+0.001
+0.139
+0.276
+0.365
+0.267
+BAGEL
+0.769
+0.244
+0.173
+0.367
+0.251
+0.361
+OmniGen2
+0.804
+0.680
+0.271
+0.377
+0.242
+0.475
+InternVL-U
+0.820
+0.740
+0.270
+0.400
+0.250
+0.496
+Lumina-DiMOO
+0.820
+0.550
+0.280
+0.400
+0.230
+0.456
+LLaDA2.0-Uni
+0.882
+0.661
+0.323
+0.400
+0.259
+0.505
+Ours (Ascend)
+0.879
+0.701
+0.306
+0.435
+0.150
+0.494
+Ours (NVIDIA)
+0.882
+0.565
+0.252
+0.413
+0.130
+0.448
+for each codebook, followed by concatenation and linear projection. Because each input design also
+determines the width of the corresponding output classifier, the comparison covers complete interface
+designs rather than input embeddings alone. All other settings are kept identical.
+D3 achieves the highest next-code accuracy, exceeding both D1 and D2 by more than ten standard
+errors, and the gap widens for later codebooks (Figure 10a). The image-loss curves exhibit the same
+ordering after the first 2,000 training steps (Figure 10b). D3 is also cost-effective: the large shared
+classifier of D1 requires 2.35× the memory of D3 and leads to slower convergence during training,
+whereas D3 matches the memory of D2 with only 1.9% more interface parameters. D3 is therefore
+the preferred design in terms of both accuracy and efficiency.
+Output-head ablation.
+Table 16 compares the multi-codebook AR head with two alternative ap-
+proaches under comparable training budgets at 512 × 512 resolution. The first is the independent
+parallel prediction head. The second is a Q-Former-style prediction head (Li et al., 2023), which pre-
+dicts all K codes in a single pass from learned queries; like the parallel head, it treats the codes as
+29
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Table 11: Physics-faithful scientific-diagram generation on the physics subset of GenExam and on Veri-
+phyT2IBench. GenExam reports aggregate strict and relaxed MLLM-judge scores; VeriphyT2IBench reports
+question-level accuracy on its local attribute bank and global whole-diagram bank. Baseline values and protocol
+definitions follow Zhang et al. (2026); Princigram uses physics-specific structured supervision and prompting,
+whereas the other rows are general-purpose generators. Bold marks the best score in each column.
+Model
+GenExam Physics
+VeriphyT2IBench
+Strict
+Relaxed
+Local
+Global
+Reference and generation-only models
+Seedream 4.0
+3.5
+49.0
+64.80
+65.07
+FLUX.1 Kontext max
+0.0
+25.6
+–
+–
+Gemini 2.5 Flash Image
+–
+–
+69.98
+66.14
+GPT-Image-1
+–
+–
+68.32
+68.56
+Qwen-Image
+0.0
+26.3
+51.79
+60.20
+HiDream-I1-Full
+0.0
+17.7
+46.48
+57.96
+FLUX.1 dev
+0.0
+14.4
+45.18
+56.32
+SD 3.5 Large
+0.0
+13.2
+51.65
+59.58
+Unified understanding-and-generation models
+BAGEL
+0.0
+13.8
+46.38
+62.15
+Lumina-DiMOO
+–
+–
+37.01
+55.95
+Show-o2-7B
+0.0
+11.9
+42.88
+58.44
+BLIP3o-NEXT-GRPO-Text-3B
+0.0
+10.5
+37.65
+56.35
+SenseNova-U1
+0.0
+23.2
+61.90
+64.84
+Physics-specialized variants
+Princigram-DiMOO
+8.0
+50.4
+72.05
+77.25
+Princigram-BAGEL
+5.3
+54.8
+75.69
+82.54
+Intern Lumina U2
+2.7
+44.8
+76.58
+81.22
+Table 12: VeriphyT2IBench domain-level breakdown for representative models. Each panel reports question-
+level accuracy (percent; higher is better) for the local attribute bank or the global whole-diagram bank. The
+overall rows are omitted because the corresponding aggregate scores are already reported in Table 11.
+Local scoring
+Seedream Gemini GPT-Image SenseNova Princigram-D Princigram-B Intern Lumina U2
+E&M
+65.55
+67.75
+69.58
+53.46
+76.00
+78.59
+83.30
+Mechanics
+56.19
+61.63
+60.25
+52.16
+68.24
+71.59
+71.34
+Optics
+77.81
+82.33
+79.54
+80.96
+75.64
+78.92
+79.23
+Quantum mechanics
+69.67
+73.27
+71.35
+68.93
+73.41
+77.59
+76.32
+Thermodynamics
+42.91
+58.90
+49.24
+46.24
+60.40
+66.95
+63.73
+Acoustics
+62.42
+68.44
+66.88
+65.26
+68.39
+73.01
+72.17
+Global scoring
+Seedream Gemini GPT-Image SenseNova Princigram-D Princigram-B Intern Lumina U2
+E&M
+59.94
+61.13
+64.69
+59.06
+76.18
+80.56
+79.38
+Mechanics
+66.00
+65.48
+68.83
+62.74
+80.47
+83.40
+84.80
+Optics
+75.83
+77.14
+77.38
+79.17
+79.64
+83.93
+79.76
+Quantum mechanics
+58.99
+60.75
+61.76
+60.63
+71.07
+83.77
+79.50
+Thermodynamics
+66.82
+67.63
+72.60
+67.86
+77.46
+83.47
+81.62
+Acoustics
+66.38
+69.45
+68.96
+66.13
+76.81
+81.23
+80.98
+conditionally independent. Among the three designs of Section 3.4, flattening the codes into separate
+tokens is not included, because it multiplies the visual sequence length by K, which makes its train-
+ing and inference cost impractical. In its place, we include a Q-Former-style head as a competitive
+alternative.
+The multi-codebook AR head achieves the best results on all four benchmarks. The parallel head
+matches it on DPG-Bench but trails it by 14 points on GenEval, with the largest drops in counting,
+position, and attribute binding, which require a single precise configuration of objects and attributes.
+30
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Table 13: VeriphyT2IBench breakdown by prompt difficulty. Scores are percentages and higher is better. The
+panels report the six physics domains at easy, medium, and hard difficulty for the same representative models
+as Table 12.
+Easy prompts
+Seedream Gemini GPT-Image SenseNova Princigram-D Princigram-B Intern Lumina U2
+E&M
+75.32
+80.56
+80.41
+75.45
+82.11
+84.74
+83.78
+Mechanics
+66.08
+67.84
+68.19
+64.96
+74.41
+76.77
+75.40
+Optics
+80.81
+83.21
+81.79
+82.98
+78.05
+79.01
+81.37
+Quantum mechanics
+70.97
+74.13
+75.41
+73.39
+75.58
+81.34
+81.47
+Thermodynamics
+64.75
+66.77
+67.66
+64.61
+68.93
+72.13
+69.30
+Acoustics
+64.88
+69.86
+69.19
+69.72
+67.84
+71.13
+71.94
+Medium prompts
+Seedream Gemini GPT-Image SenseNova Princigram-D Princigram-B Intern Lumina U2
+E&M
+68.70
+71.33
+72.64
+53.65
+79.35
+83.28
+84.20
+Mechanics
+58.97
+61.79
+62.82
+54.07
+72.28
+75.93
+75.47
+Optics
+76.11
+80.51
+79.34
+81.03
+75.60
+77.80
+75.62
+Quantum mechanics
+70.16
+74.05
+70.04
+69.88
+73.46
+78.37
+74.47
+Thermodynamics
+53.32
+67.12
+58.44
+53.18
+64.79
+73.57
+69.59
+Acoustics
+65.36
+72.93
+69.32
+68.38
+70.50
+73.33
+74.55
+Hard prompts
+Seedream Gemini GPT-Image SenseNova Princigram-D Princigram-B Intern Lumina U2
+E&M
+53.89
+54.34
+57.29
+38.23
+69.09
+69.97
+81.30
+Mechanics
+50.67
+58.73
+55.70
+45.68
+64.74
+68.34
+69.46
+Optics
+76.36
+82.32
+77.48
+78.94
+74.17
+80.44
+80.39
+Quantum mechanics
+64.42
+67.52
+65.79
+60.99
+70.53
+75.28
+74.49
+Thermodynamics
+34.29
+53.13
+42.48
+40.44
+58.68
+64.99
+62.41
+Acoustics
+58.43
+63.33
+62.90
+57.96
+69.85
+77.39
+73.15
+Table 14: Instruction-based image editing. ImgEdit (Ye et al., 2025b) overall score (1–5) and GEdit-Bench (Liu
+et al., 2025b) overall score GO (0–10) for English and Chinese prompts. Baseline numbers are taken from Bie
+et al. (2026) and Tian et al. (2026). Bold marks the best unified-model score in each column.
+Model
+#Params
+ImgEdit
+GEdit-EN
+GEdit-CN
+Editing-specialist models
+Step1X-Edit
+12B
+3.06
+6.97
+6.86
+Qwen-Image-Edit
+20B
+4.35
+7.56
+7.52
+Unified understanding-and-generation models
+BAGEL
+7B+7B
+3.20
+6.52
+6.50
+OmniGen2
+3B+4B
+3.44
+6.41
+–
+InternVL-U
+2B+1.7B
+3.67
+6.66
+–
+Lumina-DiMOO
+8B
+2.77
+3.91
+–
+LLaDA2.0-Uni
+16B-A1.4B
+3.92
+6.61
+6.66
+Intern Lumina U2 (Ascend)
+16.9B-A1.4B
+3.82
+6.06
+5.95
+Intern Lumina U2 (NVIDIA)
+16.9B-A1.4B
+3.82
+6.54
+6.01
+Table 15: Ablation of the visual input interface. Each design determines both the lookup-table organization
+and the corresponding classifier width. Accuracy is next-code top-1 on held-out supervised codes at the final
+checkpoint (≈5M codes per arm; ± one standard error). Memory and step time are measured at sequence
+length 4608 on identical hardware. Bold marks the best value in each column.
+Design
+Table organization Softmax
+width
+Params
+Peak memory
+(GB)
+Step time
+(s)
+Next-code
+accuracy
+D1 universal
+1 × 189,968
+189,968 778.11M
+43.79
+7.1
+0.0426 ± 0.0002
+D2 offset-shared
+1 × 32,784
+32,784
+778.11M
+18.68
+6.2
+0.0415 ± 0.0002
+D3 independent (ours) 8 × 4,096
+4,096
+793.02M
+18.62
+6.6
+0.0459 ± 0.0002
+This is consistent with the analysis in Section 3.4: since the K codes are not conditionally independent
+given h, ignoring their dependencies will degrade generation quality. Despite its more expressive
+conditioning, the Q-Former head performs no better than the parallel head on GenEval and worse on
+31
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+c0
+c1
+c2
+c3
+c4
+c5
+c6
+c7
+VQ level
+0.90
+0.92
+0.94
+0.96
+0.98
+1.00
+accuracy relative to D3
+-8.3%
+-9.7%
+0.023
+0.072
+(a) Per-level visual token accuracy
+0
+2000
+4000
+6000
+8000
+training step
+6.0
+6.5
+7.0
+7.5
+8.0
+8.5
+9.0
+image loss (nats/code)
+(b) Image loss over training
+6000
+8000
+6.1
+6.2
+6.3
+D1  universal codebook
+D2  offset-shared visual table
+D3  independent level tables (ours)
+Figure 10: Input-interface ablation. (a) Final next-code top-1 accuracy for each of the eight codebooks, nor-
+malized by D3; the blue annotations give D3’s absolute accuracy at the first and last codebooks. (b) Image loss
+over the two training epochs, shown as a rolling median with an inset for the converged tail. Higher is better
+in (a), whereas lower is better in (b).
+the other three benchmarks. This result indicates that the advantage of the multi-codebook AR head
+stems from modeling inter-code dependencies rather than from more expressive conditioning.
+Table 16: Ablation of the visual output head: three training runs at 512-pixel generation resolution with compa-
+rable token budgets (about 197B–220B tokens each). All scores are on a 0–100 scale; TIIF is the mean accuracy
+and UniGenBench the EN ten-dimension average. Bold marks the best score in each column.
+Output head
+Codebook
+dependence
+GenEval
+DPG-Bench
+TIIF
+UniGenBench
+Independent parallel
+no
+68.94
+83.22
+70.1
+59.6
+Q-Former
+no
+69.67
+78.92
+63.9
+56.7
+Multi-codebook AR (ours)
+yes
+82.78
+83.27
+73.2
+62.1
+Inference-sampling ablation.
+We ablate the two plateau controls of PHV (Section 6.2.2), the
+change threshold δp and the confidence floor fp, on a 6×6 grid with 553 prompts per cell (Figure 11);
+the remaining controls are fixed at their default values. The two parameters act as a serial gate rather
+than as independent controls: δp determines which positions become eligible for early commitment,
+and fp only limits how many of the eligible positions commit. As a result, the influence of fp on
+the number of refinement steps increases by 17.6× from the strictest to the loosest δp, since at small
+δp the flatness test rarely fires and fp has little effect. The selected quality-first setting (δp=0.18,
+fp=0.005) lies on the speed–quality frontier, reaching GenEval 89.3 at 35.9 s per image.
+32
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Figure 11: Inference-sampling ablation over the plateau change threshold δp and confidence floor fp, 553
+prompts per cell. (a) GenEval over the 6 × 6 grid; the black box marks the selected quality-first setting δp=0.18,
+fp=0.005. (b) Speed–quality frontier over all 36 cells, i.e. the configurations not improved on in both latency
+and quality by any other cell; the selected setting (red) reaches GenEval 89.3 at 35.9 s per image (4.45×).
+8. Conclusion
+We have presented Intern Lumina U2, to our knowledge the first unified understanding-and-
+generation diffusion language model that models multi-codebook visual states in a fully discrete
+space and extends visual understanding across images, videos, and 3D assets.
+Its visual input
+interface preserves codebook identity by assigning each codebook an independent embedding
+table and merging the resulting embeddings into a single backbone token through concatenation
+and projection. Its visual output interface uses a multi-codebook AR head to predict the codes at
+each visual position autoregressively along the codebook dimension, while masked diffusion refines
+all spatial positions in parallel.
+Ablation studies confirm the contribution of both design choices.
+Codebook-specific input embeddings improve next-code top-1 accuracy, with the largest gains on
+later codebooks. The multi-codebook AR head captures inter-code dependencies and achieves the
+best results on all four generation benchmarks, with the most pronounced gains in counting, position,
+and attribute binding.
+At the system level, the primary model is trained on 1,024 Huawei Ascend 910B NPUs and provides
+the main reported results. A reference model, trained independently on NVIDIA GPUs with the same
+architecture and optimization recipe but a smaller training budget, is used to assess cross-platform
+consistency. In addition, our proposed temporal-stability-guided sampling strategy reduces image
+generation latency by 4.45× under the same evaluation protocol without degrading generation quality.
+Overall, the results on omni-visual understanding, image generation, image editing, and physically
+grounded scientific-diagram generation demonstrate the potential of fully discrete diffusion language
+modeling to unify broad visual understanding and high-quality generation within a single framework.
+Despite these advances, several limitations remain. First, the multi-codebook autoregressive head
+introduces additional decoding overhead, and high-resolution generation produces long visual se-
+quences. Second, the current system covers image generation and editing, but has not yet been
+extended to video or 3D generation. In future work, we plan to extend generation to videos and
+3D assets, explore more tightly interleaved multimodal generation, investigate post-training with re-
+inforcement learning, and scale up the backbone.
+33
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+References
+Xiang An, Yin Xie, Kaicheng Yang, et al. LLaVA-OneVision-1.5: Fully open framework for democratized
+multimodal training, 2025. arXiv:2509.23661.
+Marianne Arriola, Aaron Gokaslan, Justin T. Chiu, Zhihan Yang, Zhixuan Qi, Jiaqi Han, Sub-
+ham Sekhar Sahoo, and Volodymyr Kuleshov. Block diffusion: Interpolating between autoregres-
+sive and diffusion language models. In International Conference on Learning Representations (ICLR),
+2025.
+Shuai Bai, Yuxuan Cai, Ruizhe Chen, et al. Qwen3-VL technical report, 2025a. arXiv:2511.21631.
+Shuai Bai, Keqin Chen, et al. Qwen2.5-VL technical report, 2025b. arXiv:2502.13923.
+Max Bain, Arsha Nagrani, Gül Varol, et al. Frozen in time: A joint video and image encoder for end-
+to-end retrieval. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV),
+2021. doi: 10.1109/iccv48922.2021.00175.
+Akhiad Bercovich, Itay Levy, Izik Golan, et al. Llama-Nemotron: Efficient reasoning models, 2025.
+arXiv:2505.00949.
+Victor Besnier, Mickael Chen, David Hurych, et al. Halton scheduler for masked generative image
+transformer. In International Conference on Learning Representations (ICLR), 2025.
+Tiwei Bie, Maosong Cao, Kun Chen, et al. LLaDA2.0: Scaling up diffusion language models to 100B,
+2025. arXiv:2512.15745.
+Tiwei Bie et al. LLaDA2.0-Uni: Unifying multimodal understanding and generation with diffusion
+large language model, 2026. arXiv:2604.20796.
+Black Forest Labs. FLUX.1, 2024. https://github.com/black-forest-labs/flux.
+Fabian Caba Heilbron, Victor Escorcia, Bernard Ghanem, and Juan Carlos Niebles. ActivityNet: A large-
+scale video benchmark for human activity understanding. In Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition (CVPR), pages 961–970, 2015. doi: 10.1109/cvpr.2015.
+7298698.
+Joao Carreira, Eric Noland, Andras Banki-Horvath, et al.
+A short note about Kinetics-600, 2018.
+arXiv:1808.01340.
+Joao Carreira, Eric Noland, Chloe Hillier, et al. A short note on the Kinetics-700 human action dataset,
+2019. arXiv:1907.06987.
+Chameleon
+Team.
+Chameleon:
+Mixed-modal
+early-fusion
+foundation
+models,
+2024.
+arXiv:2405.09818.
+Huiwen Chang, Han Zhang, Lu Jiang, et al. MaskGIT: Masked generative image transformer. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2022.
+doi: 10.1109/cvpr52688.2022.01103.
+Jingjing Chang, Yixiao Fang, Peng Xing, et al. OneIG-Bench: Omni-dimensional nuanced evaluation
+for image generation. In Advances in Neural Information Processing Systems (NeurIPS), 2025. doi:
+10.52202/085713-5330.
+Xiaokang Chen, Zhiyu Wu, et al. Janus-Pro: Unified multimodal understanding and generation with
+data and model scaling, 2025. arXiv:2501.17811.
+34
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Zesen Cheng, Sicong Leng, et al. VideoLLaMA 2: Advancing spatial-temporal modeling and audio
+understanding in video-LLMs, 2024. arXiv:2406.07476.
+Yufeng Cui et al. Emu3.5: Native multimodal models are world learners, 2025. arXiv:2510.26583.
+DeepSeek-AI. DeepSeek-V3 technical report, 2024. arXiv:2412.19437.
+Matt Deitke, Dustin Schwenk, Jordi Salvador, et al. Objaverse: A universe of annotated 3D objects.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2023.
+doi: 10.1109/cvpr52729.2023.01263.
+Chaorui Deng, Deyao Zhu, Kunchang Li, Chenhui Gou, Feng Li, Zeyu Wang, Shu Zhong, Weihao Yu,
+Xiaonan Nie, Ziang Song, Guang Shi, and Haoqi Fan. Emerging properties in unified multimodal
+pretraining, 2025. arXiv:2505.14683.
+Patrick Esser, Robin Rombach, and Björn Ommer. Taming transformers for high-resolution image
+synthesis. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), 2021. doi: 10.1109/cvpr46437.2021.01268.
+Allyson Ettinger, Amanda Bertsch, Bailey Kuehl, et al. Olmo 3, 2025. arXiv:2512.13961.
+Lijie Fan, Luming Tang, Siyang Qin, et al. Unified autoregressive visual generation and understanding
+with continuous tokens, 2025. arXiv:2503.13436.
+Chaoyou Fu, Peixian Chen, et al. MME: A comprehensive evaluation benchmark for multimodal large
+language models. In Advances in Neural Information Processing Systems (NeurIPS), Datasets and
+Benchmarks Track, 2025a. doi: 10.52202/085713-4899.
+Chaoyou Fu, Yuhan Dai, et al. Video-MME: The first-ever comprehensive evaluation benchmark of
+multi-modal LLMs in video analysis. In Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR), 2025b. doi: 10.1109/cvpr52734.2025.02245.
+Yuying Ge, Sijie Zhao, Chen Li, et al. SEED-Data-Edit technical report: A hybrid dataset for instruc-
+tional image editing, 2024. arXiv:2405.04007.
+Haoran Geng, Helin Xu, Chengyang Zhao, et al. GAPartNet: Cross-category domain-generalizable
+object perception and manipulation via generalizable and actionable parts. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2023.
+doi: 10.1109/
+cvpr52729.2023.00684.
+Dhruba Ghosh, Hanna Hajishirzi, and Ludwig Schmidt. GenEval: An object-focused framework for
+evaluating text-to-image alignment. In Advances in Neural Information Processing Systems (NeurIPS),
+2023. doi: 10.52202/075280-2270.
+Shansan Gong, Shivam Agarwal, Yizhe Zhang, et al. Scaling diffusion language models via adaptation
+from autoregressive models. In International Conference on Learning Representations (ICLR), 2025.
+Tianrui Guan, Fuxiao Liu, et al. HallusionBench: An advanced diagnostic suite for entangled language
+hallucination and visual illusion in large vision-language models. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition (CVPR), 2024. doi: 10.1109/cvpr52733.
+2024.01363.
+Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance, 2022. arXiv:2207.12598.
+Xiwei Hu, Rui Wang, et al. ELLA: Equip diffusion models with LLM for enhanced semantic alignment,
+2024. arXiv:2403.05135; introduces DPG-Bench.
+35
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Keller Jordan, Yuchen Jin, Vlado Boza, Jiacheng You, Franz Cesista, Laker Newhouse, and Jeremy
+Bernstein. Muon: An optimizer for hidden layers in neural networks. https://kellerjordan.github.
+io/posts/muon/, 2024. Blog post.
+Will Kay, Joao Carreira, Karen Simonyan, et al.
+The Kinetics human action video dataset, 2017.
+arXiv:1705.06950.
+Kimi Team. Kimi K2: Open agentic intelligence, 2025. arXiv:2507.20534.
+Kimi Team. Kimi K3: Open frontier intelligence, 2026. arXiv:2607.24653.
+Doyup Lee, Chiheon Kim, Saehoon Kim, et al. Autoregressive image generation using residual quan-
+tization.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), 2022. doi: 10.1109/cvpr52688.2022.01123.
+Bo Li, Yuanhan Zhang, Dong Guo, et al. LLaVA-OneVision: Easy visual task transfer. Transactions on
+Machine Learning Research, 2025.
+Han Li, Xinyu Peng, Yaoming Wang, et al. OneCAT: Decoder-only auto-regressive model for unified
+understanding and generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), 2026a.
+Junnan Li, Dongxu Li, Silvio Savarese, et al. BLIP-2: Bootstrapping language-image pre-training with
+frozen image encoders and large language models. In International Conference on Machine Learning
+(ICML), 2023.
+Kunchang Li, Yali Wang, et al. MVBench: A comprehensive multi-modal video understanding bench-
+mark. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR),
+2024. doi: 10.1109/cvpr52733.2024.02095.
+Shufan Li, Jiuxiang Gu, Kangning Liu, Zhe Lin, Zijun Wei, Aditya Grover, and Jason Kuen. Lavida-O:
+Elastic large masked diffusion models for unified multimodal understanding and generation. In
+International Conference on Learning Representations (ICLR), 2026b.
+Bin Lin, Yang Ye, et al. Video-LLaVA: Learning united visual representation by alignment before pro-
+jection. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing
+(EMNLP), 2024. doi: 10.18653/v1/2024.emnlp-main.342.
+Ling Team. Every activation boosted: Scaling general reasoner to 1 trillion open language foundation,
+2025. arXiv:2510.22115.
+Jingyuan Liu, Jianlin Su, Xingcheng Yao, et al.
+Muon is scalable for LLM training, 2025a.
+arXiv:2502.16982.
+Shiyu Liu, Yucheng Han, et al. Step1X-Edit: A practical framework for general image editing, 2025b.
+arXiv:2504.17761; introduces GEdit-Bench.
+Zhiyuan Liu, Yicun Yang, Yaojie Zhang, Junjie Chen, Chang Zou, Qingyan Wei, Shaobo Wang, Yichen
+Zhu, and Linfeng Zhang. dLLM-Cache: Accelerating diffusion large language models with adaptive
+caching. In International Conference on Machine Learning (ICML), 2026.
+Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International Conference
+on Learning Representations (ICLR), 2019.
+Jiasen Lu, Liangchen Song, Mingze Xu, et al. AToken: A unified tokenizer for vision. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2026.
+36
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Pan Lu, Hritik Bansal, et al. MathVista: Evaluating mathematical reasoning of foundation models in
+visual contexts. In International Conference on Learning Representations (ICLR), 2024.
+Tiange Luo, Chris Rockwell, Honglak Lee, and Justin Johnson. Scalable 3D captioning with pretrained
+models. In Advances in Neural Information Processing Systems (NeurIPS), 2023. doi: 10.52202/
+075280-3291.
+Chuofan Ma, Yi Jiang, Junfeng Wu, et al. UniTok: A unified tokenizer for visual generation and
+understanding. In Advances in Neural Information Processing Systems (NeurIPS), 2025a. doi: 10.
+52202/085713-4306.
+Jian Ma, Xujie Zhu, Zihao Pan, et al. X2Edit: Revisiting arbitrary-instruction image editing through
+self-constructed data and task-aware representation learning. In Proceedings of the AAAI Conference
+on Artificial Intelligence, 2026a. doi: 10.1609/aaai.v40i10.37719.
+Qianli Ma, Yaowei Zheng, Zhelun Shi, et al. VeOmni: Scaling any modality model training with
+model-centric distributed recipe zoo. In Proceedings of the AAAI Conference on Artificial Intelligence,
+2026b. doi: 10.1609/aaai.v40i29.39607.
+Xinyin Ma, Runpeng Yu, Gongfan Fang, and Xinchao Wang. dKV-Cache: The cache for diffusion
+language models. In Advances in Neural Information Processing Systems (NeurIPS), 2025b. doi:
+10.52202/085713-4984.
+Karttikeya Mangalam, Raiymbek Akshulakov, and Jitendra Malik. EgoSchema: A diagnostic bench-
+mark for very long-form video language understanding. In Advances in Neural Information Processing
+Systems (NeurIPS), Datasets and Benchmarks Track, 2023. doi: 10.52202/075280-2004.
+Ahmed Masry, Do Xuan Long, et al. ChartQA: A benchmark for question answering about charts with
+visual and logical reasoning. In Findings of the Association for Computational Linguistics: ACL 2022,
+2022. doi: 10.18653/v1/2022.findings-acl.177.
+Fabian Mentzer, David Minnen, Eirikur Agustsson, and Michael Tschannen. Finite scalar quantization:
+VQ-VAE made simple. In International Conference on Learning Representations (ICLR), 2024.
+Shen Nie, Fengqi Zhu, Zebin You, Xiaolu Zhang, Jingyang Ou, Jun Hu, Jun Zhou, Yankai Lin, Ji-
+Rong Wen, and Chongxuan Li. Large language diffusion models. In Advances in Neural Information
+Processing Systems (NeurIPS), 2025. doi: 10.52202/085713-1689.
+Yuwei Niu, Munan Ning, et al. WISE: World knowledge-informed semantic evaluation for text-to-
+image generation. In International Conference on Machine Learning (ICML), 2026.
+Viorica Pătrăucean, Lucas Smaira, Ankush Gupta, et al. Perception test: A diagnostic benchmark for
+multimodal video models. In Advances in Neural Information Processing Systems (NeurIPS), Datasets
+and Benchmarks Track, 2023. doi: 10.52202/075280-1852.
+William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision (ICCV), 2023. doi: 10.1109/iccv51070.2023.
+00387.
+Zekun Qi, Runpei Dong, et al. ShapeLLM: Universal 3D object understanding for embodied interaction.
+In European Conference on Computer Vision (ECCV), 2024. doi: 10.1007/978-3-031-72775-7_13.
+Zongyang Qiu, Yihan Wu, Kaixuan Fan, Bo Li, and Hui Xiong. Where a new concept must enter: Entry
+point gates cross-task usability in unified multimodal models, 2026. arXiv:2608.17564.
+37
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Anna Rohrbach, Atousa Torabi, Marcus Rohrbach, et al. Movie description. International Journal of
+Computer Vision, 123:94–120, 2017. doi: 10.1007/s11263-016-0987-1.
+SenseNova Team. SenseNova-U1: Unifying multimodal understanding and generation with NEO-
+unify architecture, 2026. arXiv:2605.12500.
+Amir Shahroudy, Jun Liu, Tian-Tsong Ng, et al. NTU RGB+D: A large scale dataset for 3D human
+activity analysis. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition
+(CVPR), 2016. doi: 10.1109/cvpr.2016.115.
+Sketchfab. Sketchfab: Publish and find 3D models online, 2026. https://sketchfab.com, accessed
+2026.
+Enxin Song, Wenhao Chai, Guanhong Wang, et al. MovieChat: From dense token to sparse memory
+for long video understanding. In Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), 2024. doi: 10.1109/cvpr52733.2024.01725.
+Jianlin Su, Murtadha Ahmed, Yu Lu, Shengfeng Pan, Wen Bo, and Yunfeng Liu. RoFormer: Enhanced
+transformer with rotary position embedding. Neurocomputing, 568:127063, 2024. doi: 10.1016/j.
+neucom.2023.127063.
+Changyao Tian et al. InternVL-U: Democratizing unified multimodal models for understanding, rea-
+soning, generation and editing, 2026. arXiv:2603.09877.
+Keyu Tian, Yi Jiang, Zehuan Yuan, Bingyue Peng, and Liwei Wang. Visual autoregressive modeling:
+Scalable image generation via next-scale prediction. In Advances in Neural Information Processing
+Systems (NeurIPS), 2024. doi: 10.52202/079017-2694.
+Shubham Toshniwal, Wei Du, Ivan Moshkov, et al. OpenMathInstruct-2: Accelerating AI for math
+with massive open-source instruction data. In International Conference on Learning Representations
+(ICLR), 2025.
+Michael Tschannen,
+Alexey Gritsenko,
+Xiao Wang,
+et al.
+SigLIP 2:
+Multilingual vision-
+language encoders with improved semantic understanding, localization, and dense features, 2025.
+arXiv:2502.14786.
+Ke Wang, Junting Pan, et al.
+Measuring multimodal mathematical reasoning with MATH-Vision
+dataset. In Advances in Neural Information Processing Systems (NeurIPS), 2024a. doi: 10.52202/
+079017-3014.
+Limin Wang, Yuanjun Xiong, Zhe Wang, et al. Temporal segment networks: Towards good practices
+for deep action recognition. In European Conference on Computer Vision (ECCV), 2016. doi: 10.
+1007/978-3-319-46484-8_2.
+Weiyun Wang, Zhangwei Gao, Lixin Gu, et al. InternVL3.5: Advancing open-source multimodal mod-
+els in versatility, reasoning, and efficiency, 2025a. arXiv:2508.18265.
+Xinlong Wang, Yufeng Cui, Jinsheng Wang, et al. Multimodal learning with next-token prediction for
+large multimodal models. Nature, 650:327–333, 2026a. doi: 10.1038/s41586-025-10041-x.
+Yibin Wang, Zhimin Li, et al. Pref-GRPO: Pairwise preference reward-based GRPO for stable text-to-
+image reinforcement learning, 2025b. arXiv:2508.20751; introduces UniGenBench.
+Yuqing Wang, Zhijie Lin, Yao Teng, et al. Bridging continuous and discrete tokens for autoregressive
+visual generation. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV),
+2025c. doi: 10.1109/iccv51701.2025.01728.
+38
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Zhaokai Wang, Penghao Yin, Xiangyu Zhao, Changyao Tian, Yu Qiao, Wenhai Wang, Jifeng Dai, and
+Gen Luo. GenExam: A multidisciplinary text-to-image exam. In International Conference on Machine
+Learning (ICML), 2026b.
+Zirui Wang, Mengzhou Xia, et al. CharXiv: Charting gaps in realistic chart understanding in mul-
+timodal LLMs.
+In Advances in Neural Information Processing Systems (NeurIPS), 2024b.
+doi:
+10.52202/079017-3609.
+Cong Wei, Zheyang Xiong, Weiming Ren, et al. OmniEdit: Building image editing generalist models
+through specialist supervision. In International Conference on Learning Representations (ICLR), 2025.
+Xinyu Wei, Jinrui Zhang, Zeqing Wang, et al.
+TIIF-Bench:
+How does your T2I model follow
+your instructions?
+In European Conference on Computer Vision (ECCV), 2026.
+doi: 10.1007/
+978-3-032-37138-6_13.
+Bo Wu, Shoubin Yu, Zhenfang Chen, et al. STAR: A benchmark for situated reasoning in real-world
+videos. In Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks
+Track, 2021.
+Chenfei Wu, Jiahao Li, et al. Qwen-Image technical report, 2025a. arXiv:2508.02324.
+Chengyue Wu, Xiaokang Chen, Zhiyu Wu, et al. Janus: Decoupling visual encoding for unified multi-
+modal understanding and generation. In Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR), 2025b. doi: 10.1109/cvpr52734.2025.01210.
+Chengyue Wu, Hao Zhang, Shuchen Xue, et al. Fast-dLLM: Training-free acceleration of diffusion LLM
+by enabling KV cache and parallel decoding. In International Conference on Learning Representations
+(ICLR), 2026a.
+Chenyuan Wu, Jiahao Wang, Pengfei Zheng, et al.
+OmniGen2: Towards instruction-aligned mul-
+timodal generation.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), 2026b.
+Weijia Wu, Yuzhong Zhao, Zhuang Li, et al. A large cross-modal video retrieval dataset with reading
+comprehension. Pattern Recognition, 157:110818, 2025c. doi: 10.1016/j.patcog.2024.110818.
+Yecheng Wu, Zhuoyang Zhang, Junyu Chen, et al. VILA-U: A unified foundation model integrating
+visual understanding and generation. In International Conference on Learning Representations (ICLR),
+2025d.
+xAI. RealWorldQA, 2024. https://huggingface.co/datasets/xai-org/RealworldQA.
+Junbin Xiao, Xindi Shang, Angela Yao, et al. NExT-QA: Next phase of question-answering to explain-
+ing temporal actions. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), 2021. doi: 10.1109/cvpr46437.2021.00965.
+Jinheng Xie, Weijia Mao, Zechen Bai, et al. Show-o: One single transformer to unify multimodal un-
+derstanding and generation. In International Conference on Learning Representations (ICLR), 2025a.
+Jinheng Xie, Zhenheng Yang, and Mike Zheng Shou. Show-o2: Improved native unified multimodal
+models. In Advances in Neural Information Processing Systems (NeurIPS), 2025b. doi: 10.52202/
+085713-1584.
+Yi Xin, Qi Qin, Siqi Luo, et al. Lumina-DiMOO: An omni diffusion large language model for multi-
+modal generation and understanding, 2025. arXiv:2510.06308.
+39
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Runsen Xu, Xiaolong Wang, et al.
+PointLLM: Empowering large language models to under-
+stand point clouds.
+In European Conference on Computer Vision (ECCV), 2024.
+doi: 10.1007/
+978-3-031-72698-9_8.
+Ling Yang, Ye Tian, Bowen Li, et al. MMaDA: Multimodal large diffusion language models. In Advances
+in Neural Information Processing Systems (NeurIPS), 2025. doi: 10.52202/085713-4636.
+Jiacheng Ye, Zhihui Xie, Lin Zheng, et al.
+Dream 7B: Diffusion large language models, 2025a.
+arXiv:2508.15487.
+Yang Ye, Xianyi He, et al. ImgEdit: A unified image editing dataset and benchmark. In Advances in
+Neural Information Processing Systems (NeurIPS), 2025b. doi: 10.52202/085713-4387.
+Kexin Yi, Chuang Gan, Yunzhu Li, et al. CLEVRER: Collision events for video representation and
+reasoning. In International Conference on Learning Representations (ICLR), 2020.
+Zebin You, Shen Nie, et al. LLaDA-V: Large language diffusion models with visual instruction tuning.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2026a.
+Zebin You, Xiaolu Zhang, et al. LLaDA-o: An effective and length-adaptive omni diffusion model,
+2026b. arXiv:2603.01068.
+Xiang Yue, Yuansheng Ni, et al. MMMU: A massive multi-discipline multimodal understanding and
+reasoning benchmark for expert AGI. In Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR), 2024. doi: 10.1109/cvpr52733.2024.00913.
+Xiang Yue, Tianyu Zheng, et al. MMMU-Pro: A more robust multi-discipline multimodal understand-
+ing benchmark.
+In Proceedings of the 63rd Annual Meeting of the Association for Computational
+Linguistics (ACL), 2025. doi: 10.18653/v1/2025.acl-long.736.
+Xiaohua Zhai, Basil Mustafa, Alexander Kolesnikov, and Lucas Beyer. Sigmoid loss for language image
+pre-training. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV),
+2023. doi: 10.1109/iccv51070.2023.01100.
+Minghui Zhang, Jinxin Shi, Yifan Chang, Liangliang Zhao, Yuandong Pu, Qian Yu, Ming Hu, Hanxiao
+Zhang, Yun Gu, Yirong Chen, Yu Qiao, Bo Zhang, Xiangchao Yan, Bin Fu, and Yihao Liu.
+To-
+wards physics-faithful generation of scientific diagrams, 2026. arXiv:2608.13112; introduces Veri-
+phyT2IBench and Princigram.
+Shaolei Zhang, Qingkai Fang, et al. LLaVA-Mini: Efficient image and video large multimodal models
+with one vision token. In International Conference on Learning Representations (ICLR), 2025.
+Chunting Zhou, Lili Yu, Arun Babu, et al. Transfusion: Predict the next token and diffuse images with
+one multi-modal model. In International Conference on Learning Representations (ICLR), 2025a.
+Junjie Zhou, Yan Shu, et al. MLVU: Benchmarking multi-task long video understanding. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2025b. doi: 10.
+1109/cvpr52734.2025.01278.
+Luowei Zhou, Chenliang Xu, and Jason J. Corso. Towards automatic learning of procedures from
+web instructional videos. In Proceedings of the AAAI Conference on Artificial Intelligence, 2018. doi:
+10.1609/aaai.v32i1.12342.
+Kaiwen Zhu, Quansheng Zeng, Yuandong Pu, Shuo Cao, Xiaohui Li, Yi Xin, Qi Qin, Jiayang Li,
+Juncheng Yan, Yu Qiao, Jinjin Gu, and Yihao Liu. Accelerating masked image generation by learning
+controlled latent dynamics, 2026. URL https://arxiv.org/abs/2602.23996. arXiv:2602.23996.
+40
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Chengke Zou, Xingang Guo, Rui Yang, Junyu Zhang, Bin Hu, and Huan Zhang. DynaMath: A dynamic
+visual benchmark for evaluating mathematical reasoning robustness of vision language models. In
+International Conference on Learning Representations (ICLR), 2025.
+41
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+A. Special Tokens and Sequence Format Examples
+A.1. Full model configuration
+Table 17 lists the complete configuration of Intern Lumina U2 as stored in the checkpoint, together
+with the visual interface modules added in this work.
+Table 17: Complete model configuration. Upper part: backbone settings. Lower part: visual interface modules.
+Field
+Value
+Field
+Value
+Transformer layers
+20
+First dense layers
+1
+Hidden size
+2048
+FFN size (dense)
+5120
+Attention heads
+16
+KV heads
+4
+Head dimension
+128
+RoPE dimension / fraction
+64 / 0.5
+RoPE base
+600000
+Max position embeddings
+16384
+RMSNorm / eps
+yes / 10−6
+Activation
+silu
+QKV bias / linear bias
+no / no
+QK norm
+per-head RMSNorm
+Experts
+256
+Shared experts
+1
+Expert FFN size
+512
+Experts per token
+8
+Router score
+sigmoid
+Expert groups / selected
+8 / 4
+Normalize top-k probs
+yes
+Routed scaling factor
+2.5
+Router dtype
+fp32
+Expert selection bias
+yes
+MoE implementation
+fused
+Attention implementation
+sdpa / NPU fusion attn
+Vocabulary size
+157184
+Tied input/output embed.
+no
+Padding token id
+156892
+Text mask token id
+156895
+Parameter dtype
+bfloat16
+Codebooks
+8
+Visual input tables Ek
+8 × (5010 × 2048)
+Input projection Win
+16384→2048
+Head condition projection Wq, bq 2048 →2048
+Position embeddings sk / uk 8 × 2048 each
+Head depth / heads / MLP ratio
+6 / 8 / 4
+Head norm / activation
+LayerNorm (10−6) / GELU
+Head QK norm / adaLN
+LN / 6-way per block Output classifiers
+8 × (2048→4096)
+Visual mask entry
+5000
+Text head
+2048→157184
+Total / activated parameters
+16.9B / ≈1.4B
+A.2. Special tokens
+Table 18 lists the corresponding special tokens. Text-related tokens contains 157,184 tokens from
+LLaDA2.0 vocabulary and are embedded with the corresponding text embedding table. Visual-related
+tokens are stored in each of the K visual embedding tables, which have 5010 entries each: the first
+4096 entries hold the codebook codes, and the entries after them hold the visual mask token and the
+delimiter tokens that mark the end of an image row, a video row or frame, and a 3D row or layer.
+Since a packed sequence is stored as an [L, K] tensor with one column per codebook, each text or
+structural token is written into all K columns, and the model reads it from the first column only.
+A.3. A complete packed sequence
+Table 19 shows a complete image-understanding sample as an example for our constructed sequence.
+The sample contains a three-token question and a three-token answer; for readability, the visual input
+is shown as a 2 × 2 grid instead of the 16 × 16 grid of an actual 256 × 256 image. Before masking, the
+answer is padded with <EOA> tokens to the block length B=32. The clean copy of the answer, by
+contrast, contains only the unpadded answer and reuses the position IDs of the corresponding noisy
+tokens. Each position is also assigned a token type: type 1 denotes text conditions and structural
+tokens, type 2 media conditions, type 3 text answers, and type 4 visual answers.
+42
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Table 18: Special tokens. Ids in the lower block index the per-codebook visual embedding tables; all other ids
+index the text vocabulary.
+Role
+Token
+Id
+Text mask (corruption target)
+<|mask|>
+156895
+Padding
+<|pad|>
+156892
+Answer boundary
+<BOA> / <EOA>
+157165 / 157166
+Image boundary
+<BOI> / <EOI>
+157167 / 157168
+3D boundary
+<BO3D> / <EO3D>
+157169 / 157170
+Video boundary
+<BOV> / <EOV>
+157171 / 157172
+Media placeholders in text
+image / 3D / video context
+157160 / 157158 / 157161
+Unconditional condition (CFG)
+<uncondition>
+157156
+Reasoning span
+<think> / </think>
+157175 / 157176
+User message wrapper (SFT only)
+user start / end
+157155 / 157157
+System wrapper (SFT only)
+system start / end
+157153 / 157154
+Visual mask entry
+all K codebooks
+5000
+Image row delimiter
+all K codebooks
+5001
+3D row / layer delimiter
+all K codebooks
+5002 / 5003
+Video row / frame delimiter
+all K codebooks
+5004 / 5005
+Table 19: A packed image-understanding sample with per-position metadata. In this example, type 1 denotes
+text or structural tokens, type 2 a media-condition token, type 3 a text-answer token, and type 4 a visual-answer
+token. The clean user-provided condition and the assistant answer form one turn, and the clean copy of the
+answer belongs to the same turn. The is_clean flag is 1 for clean tokens and 0 for noisy tokens, the block id is
+−1 for conditions and 0 for this answer block, and a clean copy reuses the position ids of its noisy counterpart.
+Here vij is the visual token (K codes) at grid row i, column j; ⌟is the image-row delimiter (code 5001); qi and
+ai are question and answer tokens; and M is <|mask|>. Labels are −100 at all positions that do not participate
+in supervision; only masked answer positions contribute to the loss.
+idx token
+type turn is_clean block position id
+Turn 0: clean condition (media + question)
+0 <BOI>
+1
+0
+1
+−1
+0
+1–2 v00 v01
+2
+0
+1
+−1
+1–2
+3 ⌟
+2
+0
+1
+−1
+3
+4–5 v10 v11
+2
+0
+1
+−1
+4–5
+6 ⌟
+2
+0
+1
+−1
+6
+7 <EOI>
+1
+0
+1
+−1
+7
+8–10 q1 q2 q3
+1
+0
+1
+−1
+8–10
+Turn 0: noisy text answer (one block of B=32)
+11 <BOA>
+1
+0
+0
+0
+11
+12–14 a1 M a3 (label at idx 13 = a2)
+3
+0
+0
+0
+12–14
+15 <EOA> or M
+3
+0
+0
+0
+15
+16–43 28 × (<EOA> or M); label <EOA> if masked
+3
+0
+0
+0
+16–43
+Turn 0: clean copy of the answer (natural length, no padding)
+44 <BOA>
+1
+0
+1
+0
+11
+45–47 a1 a2 a3
+3
+0
+1
+0
+12–14
+48 <EOA>
+3
+0
+1
+0
+15
+43
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Samples of the other tasks use the same format and differ only in the content of their turns. In a
+text-to-image sample, the single turn holds the prompt tokens (type 1, block −1), which are replaced
+by <uncondition> with probability 0.1, followed by <BOA> <BOI> grid <EOI> <EOA>, where
+the grid positions have type 4, the four boundary tokens have type 1, all answer tokens belong to
+block 0, and no clean copy is added. An edit sample likewise forms a single turn, in which the source
+image (type 2) and the instruction (type 1) are followed by the target image. A plain-text sample is
+a single turn that contains only an answer and its clean copy.
+B. Visual Token Layouts and Positions
+For each visual modality, Table 20 lists the token grid produced by AToken, the order used to flatten
+the grid into a 1D sequence, and the delimiter tokens inserted into the sequence. AToken applies its
+own 4D rotary position embedding within the tokenizer. The backbone, in contrast, receives only the
+1D sequence and applies partial RoPE (64 of 128 head dimensions, θ = 6×105) to sequential position
+IDs. Position IDs increase by one per token across the conditions and noisy answers in dialogue order;
+each clean copy reuses the position IDs of its noisy counterpart.
+Table 20: Visual token layouts. Patch size is (t, h, w) = (4, 16, 16); every grid position carries K=8 codes.
+Modality
+Grid
+Flattening order
+Delimiter tokens
+Image H × W
+(H/16) × (W/16)
+row-major (y, x)
+5001 per row
+Video T × H × W
+⌈T/4⌉× (H/16) × (W/16)
+frame-major (t, y, x) 5004 per row, 5005 per frame
+3D asset
+sparse voxels, coords (x, y, z) (z, y, x)
+5002 per row, 5003 per layer
+For images, a row delimiter is appended after each row of visual tokens. Excluding the boundary
+tokens, a 256×256 image therefore occupies 16×(16+1) = 272 positions, a 512×512 image 32×33 =
+1,056 positions, and a 1024 × 1024 image 64 × 65 = 4,160 positions. For videos and 3D assets, AToken
+returns the coordinates (b, t, x, y, z) of non-empty positions only, and only these positions are included
+in the sequence. A row delimiter is appended after each row containing at least one non-empty
+position, and a frame delimiter (for videos) or a layer delimiter (for 3D assets) is appended after each
+such frame or layer. At the end of a frame or layer, the row delimiter precedes the frame or layer
+delimiter.
+C. Data Construction, Sources, and Audit Details
+This section provides the source categories, materialization rules, and validation steps of the training
+data.
+Data sources by category.
+Table 21 lists the public and private sources of each data category, to-
+gether with their encoding resolution and the training stages in which they are used.
+Encoding of visual inputs.
+All visual inputs are encoded by the frozen AToken. An image is con-
+verted to RGB with values scaled to [−1, 1] and resized with its aspect ratio preserved so that its long
+side equals the target resolution, after which both sides are rounded to multiples of 16 pixels with a
+minimum of 32 pixels. A video is represented by 64 frames chosen by segment-based sampling (Wang
+et al., 2016), which draws one random frame from each of 64 equal-length segments, while clips with
+fewer frames keep all of their frames; the frames are resized so that their area fits a budget of 4482
+44
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Table 21: Sources by data category, with the public and private sources of each category listed separately.
+Encoding resolution is the long side (images and editing) or the frame area budget (video); “native” means the
+original resolution clamped to a [256, 1024] long side. Stages are numbered 1–5 as in Section 5.
+Category
+Type
+Sources
+Encoding
+resolution
+Stages
+Image
+understanding
+Public
+LLaVA-OneVision (Li et al., 2025) and
+LLaVA-OneVision-1.5 (An et al., 2025) instruction sets
+256 / 512 /
+native
+1–5
+Private
+Image subsets of the InternVL (Wang et al., 2025a) instruction
+data, covering captioning; document, chart, table, and
+equation data; OCR data built from web image–text pairs;
+grounding, counting, and GUI or web screenshot data; and
+structured-reasoning data and samples with <think>
+reasoning traces
+Video
+understanding
+Public
+Caption and QA sets over WebVid (Bain et al., 2021),
+Kinetics-400/600/700 (Kay et al., 2017; Carreira et al., 2018,
+2019), ActivityNet (Caba Heilbron et al., 2015),
+YouCook2 (Zhou et al., 2018), LSMDC (Rohrbach et al.,
+2017), TextVR (Wu et al., 2025c), NTU RGB+D (Shahroudy
+et al., 2016), NExT-QA (Xiao et al., 2021), CLEVRER (Yi et al.,
+2020), STAR (Wu et al., 2021), Perception Test (Pătrăucean
+et al., 2023), EgoSchema (Mangalam et al., 2023), and
+MovieChat (Song et al., 2024)
+64 frames,
+4482 area
+4–5
+Private
+Video subsets of the InternVL instruction data;
+temporal-reasoning and counting sets
+3D
+understanding
+Public
+Objaverse (Deitke et al., 2023) assets with Cap3D-style
+captions (Luo et al., 2023); GAPartNet (Geng et al., 2023)
+part-level annotations; Sketchfab (Sketchfab, 2026) assets
+sparse voxels
+4–5
+Private
+–
+Text-to-image
+Public
+Web image–text pairs (CC-style, 2562 only)
+256 / 512 /
+1024
+1–5
+Private
+Curated real photographs with English and Chinese captions;
+synthetic images from FLUX, Ideogram, Recraft, Seedream,
+Dreamina, and Nano Banana; Chinese text-rendering,
+scientific-illustration, and design/typography sets;
+reasoning-prefixed (t2i_think) subset
+Image editing
+Public
+OmniEdit (Wei et al., 2025), ImgEdit (Ye et al., 2025b),
+SEED-Data-Edit (Ge et al., 2024), and X2Edit (Ma et al.,
+2026a)
+512 (some
+1024)
+4–5
+Private
+Single-turn attribute/color/material/style set;
+global-transformation set; precise compositional edits;
+multi-input samples; in-image text rendering including
+Chinese; GPT-4o-derived pairs
+Text and
+reasoning
+Public
+Nemotron post-training collections (Bercovich et al., 2025)
+(chat, code, math, general); OpenMathInstruct-2 (Toshniwal
+et al., 2025); Dolci-SFT (Ettinger et al., 2025)
+≤2,048
+tokens
+1–5
+Private
+The text-only portion of the InternVL instruction data;
+reasoning data with and without <think> traces
+pixels, and the frame count is padded to a multiple of the temporal patch size of 4. A 3D asset is vox-
+elized at a resolution of 483 and encoded into sparse voxels by the 3D branch of AToken, and assets
+without any occupied voxel are discarded. Most editing sources are encoded with a long side of 512
+pixels, so that samples with two or three images fit within the packed sequence length, and part of
+45
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+the understanding data of the 10242 stage is encoded at native resolution with the long side clamped
+to [256, 1024].
+Data validation.
+Before training, the annotations and sequence lengths of each data mixture are
+precomputed offline, and sources unchanged from a previous mixture are reused after their first sam-
+ple is checked for consistency, while changed or new sources are processed again. The precomputed
+data pass four checks before use: (i) the numbers of sources and samples match the mixture def-
+inition; (ii) randomly drawn samples are non-empty and can be parsed; (iii) on a random subset,
+recomputed sequence lengths equal the stored ones; and (iv) a random subset can be converted into
+packed training sequences without error.
+Text-to-image quality filtering.
+As described in Section 4, the vision-language judge Qwen3-VL-
+30B-A3B-Instruct scores every image under the UniPercep protocol on four axes, each ranging from 0
+to 100: aesthetics (composition, color and lighting, and artistic expression), image quality (sharpness,
+artifacts, and anatomical errors), structural richness, and prompt following (subject, count, attributes,
+scene, style, and text requirements). Under this protocol, the judge answers each axis with a two-
+letter code for one of four score bands (0–25, 26–50, 51–75, and 76–100), which avoids its bias
+toward particular digits, and the continuous score is the expectation over the bands weighted by
+the predicted code probabilities. Filtering then applies three rules in order: images with illegible or
+missing required text are discarded, images with a prompt-following score below 60 are discarded,
+and among the remaining images only those in the global top 70% by aesthetic score, a threshold of
+about 74, are kept. Table 22 reports the number of images removed by each rule for the two curated
+photograph sources.
+Table 22: Quality filtering of the curated text-to-image sources (counts in millions).
+Source
+Scored
+Text rule
+Following < 60
+Aesthetic top 70%
+Kept
+English
+22.69
+−4.33
+−4.75
+−3.09
+10.51 (46%)
+Chinese
+31.35
+−6.92
+−6.26
+−4.15
+14.02 (45%)
+Weighted sourcing.
+Each source is weighted in a training mixture by its sampling multiplicity (Sec-
+tion 4), and the mixtures of the different stages in Table 2 assign different weights to the same source.
+Under-represented or harder capabilities receive higher weights, so that their share of training is not
+reduced by the larger sources.
+D. Ascend Adaptation Details
+Intern Lumina U2 is trained, evaluated, and served entirely on Ascend NPUs. Porting the code from
+GPUs requires changes in three respects, since the available operators, the interface semantics of the
+fused kernels, and the memory capacity of each NPU all differ from those of the GPU software stack,
+and the following paragraphs describe how each difference is handled.
+Execution path.
+Every entry point imports torch_npu.contrib.transfer_to_npu before any model
+code. This remaps torch.cuda onto the NPU runtime, so no ’cuda’ literal in the model files has to be
+rewritten. Each rank is given its own HF_MODULES_CACHE directory; otherwise the ranks shar-
+ing a node write the same dynamically imported module files at the same time. The AToken decoder
+46
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+ships with a flash_attn dependency that does not exist on this platform, so its attention modules are
+rebuilt on the native kernels. That rebuild covers the image-decoding path; the understanding and
+text paths never reach that code.
+Fused mixture-of-experts.
+We rebuild the fused MoE path on torch_npu.npu_grouped_matmul,
+since the fused path of the GPU stack is a Triton kernel. The forward pass permutes tokens into ex-
+pert order with npu_moe_token_permute, then runs one grouped matrix multiplication against the
+merged first projection, npu_swiglu, and a second grouped matrix multiplication against the second
+projection. The routing weights are applied as the result is unpermuted. The kernel provides no
+backward pass, so we write one as an explicit autograd function. It uses two further grouped ma-
+trix multiplications: one against the transposed weights for the input gradient, and one against the
+transposed activations, under a different grouping mode, for the weight gradient. An expert-parallel
+variant wraps the same kernel in all-to-all dispatch and combine.
+Attention kernel semantics.
+Attention uses torch_npu.npu_fusion_attention in the BNSD layout,
+with the TND layout and actual_seq_qlen available for variable-length batches. Two interface details
+change results silently, and both are handled explicitly. First, the mask polarity is inverted relative
+to the SDPA convention: the kernel reads True as masked, so the additive 4D mask is converted and
+negated rather than passed through. Second, the variable-length interface ignores atten_mask and
+behaves as if no mask had been supplied, so it can express only full bidirectional attention or one
+template shared by every segment. The task-aware mask of Section 3.5 gives each packed segment
+its own pattern, so packed training uses the dense path, where the mask reaches the kernel exactly as
+specified.
+Memory.
+Per-NPU memory is the binding constraint of the training configuration,
+which
+makes activation allocation a first-order target rather than a detail absorbed by spare capacity.
+The
+allocator
+runs
+with
+PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
+and
+MULTI_STREAM_MEMORY_REUSE=2.
+Three further settings determine the usable ceiling.
+The data-parallel shard group size is 24 or 32 depending on the size of the job, which trades
+parameter and optimizer residency against communication volume.
+Gradient checkpointing is
+enabled on the backbone blocks. The cache-release interval is 20 steps rather than 100, which keeps
+fragmentation from accumulating across the long tail of packed sequence lengths. Together they
+lower peak memory and raise the longest sequence one NPU can hold, which is the quantity that sets
+training efficiency at fixed hardware.
+Inference.
+A trained checkpoint stores the 256 experts of a layer as one stacked tensor. The platform
+provides a grouped matrix-multiplication kernel, so Ascend inference loads that layout directly and
+serves the training-time weights unchanged. The GPU path has no such kernel: it must first split the
+stacked tensor into per-expert weights, which costs a conversion pass and a second copy of the expert
+parameters.
+E. Additional Examples
+Figures 12 and 13 provide qualitative examples for the generation, omni-visual understanding, and
+editing tasks.
+47
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Figure 12: Qualitative examples for text-to-image generation and omni-visual understanding.
+48
+
+
+Intern Lumina U2: A Multi-Codebook Diffusion Large Language Model for Omni-Visual Understanding and Image Generation
+Figure 13: Qualitative examples for image editing.
+49

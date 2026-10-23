@@ -1,0 +1,2400 @@
+WaFIR: Wavelet-Fourier Mixture-of-Experts with Subband-Adaptive
+Routing for Blind All-in-One Image Restoration
+Trong Nhan Nguyen1
+Vu Hoang Minh Doan1
+Thanh Dat Le1
+Truong Tien Vo1
+Thi Thu Ha Vu1
+Tan Hung Vo1
+Jaeyeop Choi1
+Junghwan Oh1,∗
+Truong-Son Hy2,∗
+1Pukyong National University, Busan, Republic of Korea
+2University of Alabama at Birmingham, Birmingham, AL, USA
+∗Corresponding authors: Junghwan Oh (jungoh@pknu.ac.kr), Truong-Son Hy (thy@uab.edu)
+Abstract
+Blind all-in-one image restoration must adapt a shared model
+to heterogeneous and sometimes mixed degradations with-
+out a task label at test time. We introduce WaFIR, a de-
+coder module that decomposes features into Haar subbands,
+summarizes each subband with a compact Fourier descrip-
+tor, and routes it to prompt-conditioned spectral modu-
+lation experts. Unlike image-level frequency conditioning,
+WaFIR makes routing decisions at the subband level, en-
+abling frequency-specific processing while retaining the task
+context learned by the backbone. Under a unified training
+and evaluation protocol for denoising, deraining, and dehaz-
+ing, WaFIR improves average PSNR over the three tasks by
+0.48 dB over the PromptIR baseline and by 0.38 dB over
+the recent Up-Restorer. Matched-capacity and routing con-
+trols show that the gain is not explained by additional pa-
+rameters alone. On unseen noise intensities, descriptor-based
+routing is more robust than a discrete label-conditioned al-
+ternative and remains on par under compound degradations,
+while routing analyses show stable subband-dependent expert
+use across degradation types. These results support subband
+frequency structure as an interpretable complement to prompt-
+based conditioning for blind image restoration. Code is
+available at https://anonymous.4open.science/
+r/WaFIR/README.md.
+1
+Introduction
+Real-world images suffer from diverse degradations such as
+sensor noise, haze and rain streak. Classical restoration han-
+dles these with separate task-specific models Zhang et al.
+(2017); Zamir et al. (2021); Wei et al. (2018), an approach
+that scales poorly as the number of tasks grows. All-in-one
+restoration instead recovers multiple degradations with a sin-
+gle model Li et al. (2022); Valanarasu, Yasarla, and Patel
+(2022); Potlapalli et al. (2023); Cui et al. (2025); Zamfir et al.
+(2025), where the central question is how to adapt computa-
+tion to each input. Existing methods answer this with different
+conditioning signals, including contrastive degradation em-
+beddings Li et al. (2022), learnable prompts Potlapalli et al.
+(2023), physics-inspired latent variables Liu et al. (2025), and
+uncertainty-based task weighting Wu et al. (2025). Despite
+architectural differences, all of them condition adaptation on
+a representation that summarizes the feature map without re-
+solving its spectral organization. Such signals identify the
+overall restoration context but carry little information about
+how degradation energy is distributed across frequency sub-
+bands, so feature regions with distinct spectral characteristics
+may receive similar routing decisions. This limitation mat-
+ters most when models must generalize beyond their training
+conditions. Degradations that produce similar global repre-
+sentations often differ sharply in spectral distribution. Haze
+alters low-frequency components, rain streaks concentrate di-
+rectional energy in middle-to-high-frequency subbands, and
+additive noise, though approximately uniform across the spec-
+trum, dominates high frequencies because natural-image spec-
+tra decay with frequency. These characteristics are more nat-
+urally distinguished in frequency subspaces than by global
+summaries, and because they are computable directly from
+intermediate features (Supplementary Figure S1), they remain
+available even when degradation types or intensities are un-
+seen at test time. We therefore ask whether subband-level
+spectral structure provides a more informative routing sig-
+nal than spectrally unresolved representations, with prompt
+features supplying complementary task context. Building on
+this, we propose WaFIR (Wavelet–Fourier Image Restora-
+tion), which augments PromptIR Potlapalli et al. (2023) with
+a Spectral Mixture-of-Experts (SPMoE) module at each
+decoder stage. SPMoE decomposes each decoder feature into
+four Haar subbands (LL, LH, HL, HH), extracts a compact six-
+dimensional Fourier descriptor per subband, and routes each
+subband through a sparse top-𝑘gate to specialized Fourier
+experts that perform prompt-conditioned magnitude modula-
+tion. Routing is conditioned jointly on the descriptor and the
+pooled prompt embedding. Wavelets localize where and at
+what scale spectral information sits, whereas Fourier modula-
+tion adapts which frequencies are corrected. Analyses support
+this principle. Routing weights organize primarily by wavelet
+subband while carrying only chance-level linearly decodable
+degradation information, indicating that experts self-organize
+1
+arXiv:2610.29108v1  [cs.CV]  21 Oct 2026
+
+
+Figure 1: Overall architecture of WaFIR. A PromptIR-style U-Net is augmented at each decoder level by three modules. (1)
+SPMoE decomposes the feature via Haar DWT into directional subbands (LL/LH/HL/HH) for multi-resolution spatial–scale
+localization, describes each with a 6-D Fourier descriptor (SD), routes it to top-𝑘Fourier Experts (SR) that modulate magnitude
+and phase in the global frequency domain, and reconstructs via cross-subband interaction (CSI) and Haar IDWT. Wavelet and
+FFT are complementary: the wavelet gives spatial locality a global FFT lacks; the FFT gives frequency (magnitude+phase)
+selectivity a wavelet subband lacks. (2) PGM generates a degradation-adaptive prompt 𝑃; (3) DIM fuses 𝑃with the spectral
+output 𝑆and the skip connection for the next decoder.
+by frequency subspace rather than degradation identity. Under
+unseen noise intensities, descriptor and prompt routing gener-
+alizes more robustly than discrete label-conditioned routing,
+and it remains on par or better under compound degradations.
+Our contributions are:
+1. Subband-level spectral routing. We introduce per-
+subband Fourier descriptors as an input-derived routing
+signal for unified restoration, jointly conditioning sparse
+expert routing with pooled prompt features.
+2. Wavelet-Fourier expert design. We propose the SP-
+MoE module, pairing Haar decomposition with prompt-
+conditioned Fourier spectral-modulation experts, stabi-
+lized by a zero-initialized residual gate and a per-subband
+load-balancing loss.
+3. Comprehensive evaluation and interpretable routing.
+We show that WaFIR improves the PromptIR backbone
+on denoising and deraining, is competitive with the state
+of the art overall, and generalizes without fine-tuning
+to unseen datasets and an industrial domain. We further
+show that its experts self-organize by frequency subband,
+and that descriptor-based routing is more robust than a
+label-conditioned alternative under unseen noise inten-
+sities.
+2
+Related Work
+Blind All-in-One Image Restoration: Unified restoration
+methods recover multiple degradation types with a single net-
+work by learning adaptive conditioning signals from the input.
+PromptIR Potlapalli et al. (2023) extracts learnable prompts
+from decoder features, AdaIR Cui et al. (2025) mines and
+modulates low- and high-frequency feature components, and
+more recent methods such as OneRestore Guo et al. (2024b)
+and FAPE-IR Liu et al. (2026) strengthen feature adaptation
+for harder degradation scenarios. Despite these differences,
+adaptation is applied at a coarse granularity—a global condi-
+tioning signal or a two-way low/high-frequency split—so fine-
+grained frequency regions within the same feature map are
+not resolved into separately specialized computations. WaFIR
+instead conditions after resolving the feature into wavelet sub-
+bands, letting different spectral regions receive different expert
+assignments while remaining jointly conditioned by prompt
+context.
+Mixture-of-Experts for Adaptive Restoration: MoE en-
+ables adaptive computation by activating a sparse subset of
+experts per input Shazeer et al. (2017). Restoration models
+such as MoCE-IR Zamfir et al. (2025) and MOERL Wang
+et al. (2025) route experts by degradation-aware embeddings,
+restoration complexity, or global feature representations, orga-
+2
+
+
+Figure 2: Qualitative comparison and frequency-domain
+error analysis. Rows 1–2: derain and denoise (𝜎=50) exam-
+ples; columns are degraded input, PromptIR, AdaIR, WaFIR
+(ours), and reference, with PSNR / SSIM below each patch.
+On derain (row 1) WaFIR improves +1.61 dB over AdaIR
+(ICLR’25) and +4.62 dB over PromptIR (NeurIPS’23); on
+denoise (row 2), beyond the higher scores, the zoom crops
+show WaFIR better preserves fine texture that the baselines
+over-smooth. Row 3: 1D intensity profile (𝑦=160); WaFIR
+(red) tracks the reference (black dashed) most closely at edges.
+Rows 4–5: residual maps | ˆ𝑥−𝑥gt| and their Fourier spectra.
+Rain leaves a directional high-frequency band in the residual;
+WaFIR suppresses it most, with the steepest spectral energy
+decay, confirming removal of degradation-specific frequency
+structure.
+nizing specialization at the feature level. WaFIR instead asks
+whether the frequency organization of the feature provides a
+better basis for specialization: rather than assigning one expert
+to an entire feature, each wavelet subband is routed indepen-
+dently by its own spectral descriptor, so experts specialize on
+complementary frequency structures within the same image.
+Frequency-aware Image Restoration: Frequency represen-
+tations are widely used in restoration. MWCNN Liu et al.
+(2018) applies wavelet decomposition for multi-scale repre-
+sentation, and FFC Suvorov et al. (2022) introduces Fourier
+convolutions to enlarge the receptive field. Among unified
+methods, AdaIR Cui et al. (2025) is closest to our work: it
+likewise operates in the frequency domain, mining low- and
+high-frequency components from the features (guided by the
+degraded image’s spectra) and modulating them through a
+bidirectional operator. We take a different approach to pro-
+cessing the frequency domain: WaFIR extracts per-subband
+Fourier descriptors over four Haar subbands and uses them
+directly for sparse top-𝑘routing, so different spectral regions
+activate different experts. This is a frequency-resolved routing
+mechanism rather than a global frequency-modulation stage.
+Prompt conditioning, frequency representations, and sparse
+expert routing each improve unified restoration independently.
+WaFIR connects them through a different question: can fre-
+quency subbands themselves serve as an interpretable ba-
+sis for expert specialization? Rather than combining existing
+modules, WaFIR shows that routing self-organizes by wavelet
+subband rather than degradation category, giving a frequency-
+grounded routing principle that generalizes more robustly to
+unseen degradations.
+3
+Method
+3.1
+Overview
+WaFIR builds on PromptIR Potlapalli et al. (2023), a hierar-
+chical encoder–decoder whose decoder levels are conditioned
+on learnable degradation prompts. We insert a SpectralMoE-
+Block Sℓimmediately after the prompt generation step at each
+of the three decoder levels ℓ∈{3, 2, 1}:
+f′
+ℓ= Sℓ(fℓ, pℓ),
+(1)
+where fℓ∈R𝐵×𝐶ℓ×𝐻ℓ×𝑊ℓis the decoder feature, pℓis the
+prompt, and 𝐶ℓ∈{384, 192, 96}. The enriched feature f′
+ℓis
+then concatenated with pℓand fed to the standard PromptIR
+transformer block. All other backbone components are un-
+changed. Setting Sℓto identity recovers vanilla PromptIR ex-
+actly, making SPMoE fully plug-and-play. Figure 1 illustrates
+the overall pipeline, while the complete forward pseudocode
+of the proposed SpectralMoEBlock is given in Supplementary
+Algorithm S1–Supplementary Algorithm S2.
+3.2
+Haar Wavelet Decomposition
+Given a feature map x ∈R𝐵×𝐶×𝐻×𝑊, a single-level 2-D Haar
+DWT Mallat (2009) decomposes it into four subbands by
+applying separable averaging (L) and differencing (H) filters
+along both spatial axes:
+DWT(x) = [LL; LH; HL; HH] ∈R𝐵×4𝐶×𝐻/2×𝑊/2.
+(2)
+The normalization of
+1
+√
+2 at each stage makes the transform
+unitary (∥DWT(x)∥2 = ∥x∥2), so the inverse IDWT recon-
+structs x exactly without loss of information. The Haar DWT
+does not require trainable parameters and runs in 𝑂(𝑁) time.
+According to Supplementary Figure S1, each subband car-
+ries a physically interpretable frequency signature that natu-
+rally aligns with a specific degradation type, as summarized
+in Supplementary Table S1.
+3.3
+Spectral Descriptor
+For each subband s ∈R𝐵×𝐶×𝐻𝑠×𝑊𝑠, a parameter-free Spec-
+tralDescriptor computes a 6-dimensional summary of its
+3
+
+
+2-D magnitude spectrum. Let M(𝑢, 𝑣) = |RFFT2(s)| ∈
+R𝐵×𝐶×𝐻𝑠×(𝑊𝑠/2+1) be the orthonormal real-FFT magnitude,
+and define the low-frequency boundary 𝑙𝐻= ⌊𝐻𝑠· 0.25⌋,
+𝑙𝑊= ⌊𝑊𝑠/2 · 0.25⌋. The descriptor d ∈R𝐵×6 is:
+𝑑0 = 𝑀𝑢,𝑣,𝑐
+(global energy)
+(3)
+𝑑1 = Var𝑢,𝑣,𝑐[𝑀]
+(spectral spread)
+(4)
+𝑑2 = 𝑀𝑢<𝑙𝐻, 𝑣<𝑙𝑊
+(DC / low-freq)
+(5)
+𝑑3 = 𝑀𝑢≥𝑙𝐻, 𝑣≥𝑙𝑊
+(high-freq)
+(6)
+𝑑4 = 𝑀𝑙𝐻≤𝑢< 𝐻𝑠/2
+(horiz. band)
+(7)
+𝑑5 = 𝑀𝑙𝑊≤𝑣≤𝑊𝑠/2
+(vert. band)
+(8)
+Each dimension captures a degradation-discriminative spec-
+tral property: 𝑑0 is elevated by haze; 𝑑1 is high for noise (flat
+spectrum); 𝑑2 responds to haze; 𝑑3 to noise and sharp edges;
+𝑑4–𝑑5 to rain streaks and directional blur. The descriptor is
+computed independently for all four subbands, resulting in
+dLL, dLH, dHL, dHH ∈R𝐵×6.
+3.4
+Spectral Router and Sparse Top-𝑘Gating
+The router for each subband fuses the spectral descriptor with
+a pooled prompt vector:
+r = [d; ¯p],
+¯p = AvgPool(p) ∈R𝐵×𝐶𝑝.
+(9)
+A two-layer MLP maps r to 𝐸=4 expert logits:
+g = 𝑊2 GELU(𝑊1r) ∈R𝐵×𝐸,
+(10)
+followed by sparse top-𝑘selection (𝑘=2) and softmax normal-
+ization:
+𝑤𝑖=
+(
+softmax(g)𝑖
+if 𝑔𝑖≥𝑔(𝑘),
+0
+otherwise,
+(11)
+where 𝑔(𝑘) is the 𝑘-th largest logit. Only the 𝑘selected ex-
+perts contribute to the output, keeping the per-sample, per-
+subband expert computation fixed as 𝐸grows. The descriptor
+d provides subband-intrinsic spectral statistics; the prompt ¯p
+encodes task context. No degradation type label is required at
+inference.
+Roles of the two conditioning signals: The gate is jointly
+conditioned on d and ¯p; the architecture itself therefore does
+not enforce a separation of roles, and we characterize the roles
+empirically instead. Ablations (Table 3; expanded discussion
+in Supplementary Section S3) show that a descriptor-only
+gate (A14, −0.15 dB) retains more of the full model’s perfor-
+mance than a prompt-only gate (A12, −0.26 dB), indicating
+that the intrinsic physical characteristics reflected in the sub-
+band spectrum already contain useful routing information,
+while the prompt provides complementary task-context in-
+formation. Consistently, the quantitative routing analysis in
+Supplementary Section S2.2 and Supplementary Table S2
+finds that the trained routing weights organize by wavelet sub-
+band (NMI 0.243 vs. 0.001 for random routing) while carry-
+ing chance-level linearly decodable degradation information.
+Within each expert, the prompt-conditioned MLP (Eq. 12)
+Figure 3: Line-structure recovery on Urban100. WaFIR re-
+stores thin, repeated lines coherently, without the ringing or
+block artifacts of spatial baselines, a direct benefit of subband-
+wise global Fourier modulation.
+produces channel-specific scale and bias that vary by task, so
+the same expert applies different magnitude modulation to a
+rainy versus a noisy input. Empirically, routing organizes by
+what a subband looks like spectrally, while correction adapts
+to the task context encoded in the prompt.
+3.5
+Fourier Expert
+Each Fourier expert receives a subband s and the pooled
+prompt ¯p. We compute the 2-D real FFT, obtaining mag-
+nitude 𝑚= |F| and phase 𝜑= ∠F. A lightweight MLP
+𝑔𝑚: 𝐶𝑝→2𝐶predicts per-channel scale 𝑎and bias 𝑏,
+and applies magnitude modulation:
+𝑚′ = max 𝑚·  1 + tanh(𝑎) + 𝑏, 0.
+(12)
+The tanh-gated scale bounds the multiplicative factor to (0, 2);
+the outer max(·, 0) clamp ensures 𝑚′ ≥0 so that polar(𝑚′, 𝜑)
+remains well-defined when the additive bias 𝑏is negative.
+A second, lighter MLP 𝑔𝜑: 𝐶𝑝→𝐶predicts a per-channel
+phase scale 𝑐and applies a bounded additive phase shift:
+𝜑′ = 𝜑+ tanh(𝑐) · Δmax,
+Δmax = 𝜋/4.
+(13)
+The tanh gate bounds the phase perturbation to ±𝜋/4 (45◦),
+preventing the additive shift from destructively overwriting
+the spatial structure encoded in 𝜑. The last layer of 𝑔𝜑is zero-
+initialized, so 𝑐≈0 and 𝜑′ ≈𝜑at the start of training; the
+expert therefore begins as a near-identity map on phase and
+only gradually learns a useful perturbation.
+The
+modulated
+feature
+is
+reconstructed
+as
+ˆs
+=
+irfft2(polar(𝑚′, 𝜑′)). A lightweight spatial refinement (depth-
+wise 3×3 + pointwise conv) is applied after reconstruction.
+Ablation A4 (Table 3) shows that removing phase modulation
+(fixing 𝜑′ = 𝜑) performs on par with the full design (+0.04 dB
+on average), indicating the zero-initialized phase projector re-
+mains near identity throughout training. All reported WaFIR
+results use the full configuration with phase modulation (A3),
+consistently across text, figures, tables, and released code;
+magnitude-only (A4) is an equally strong simplification.
+4
+
+
+3.6
+Cross-Subband Interaction and Residual
+Gate
+After all four subbands are independently processed by their
+routed experts, a grouped 1×1 convolution with 𝑔=𝐶groups
+enables cross-subband interaction:
+˜S = Conv𝑔=𝐶
+1×1 ([ˆsLL; ˆsLH; ˆsHL; ˆsHH]),
+(14)
+allowing, for example, the recovered illumination in LL to
+modulate texture in HH. This costs only 4𝐶parameters. The
+spatial feature is reconstructed via IDWT: r = IDWT( ˜S).
+The final block output uses a per-channel residual gate 𝜸∈
+R𝐶initialized to zero, ensuring WaFIR behaves identically to
+vanilla PromptIR at the start of training:
+x′ = x + 𝜸⊙Conv1×1(r).
+(15)
+3.7
+Training Objective
+The total training loss combines pixel-wise ℓ1 reconstruction
+with an auxiliary load-balance term:
+L = Lrec + 𝜆Llb,
+𝜆= 0.01,
+(16)
+Llb = 1
+𝑆
+𝑆
+∑︁
+𝑠=1
+𝐸
+∑︁
+𝑒=1
+
+¯𝑤𝑠,𝑒−1
+𝐸
+2
+,
+(17)
+where 𝑆=4, 𝐸=4, and ¯𝑤𝑠,𝑒=
+1
+𝐵
+Í
+𝑏𝑤(𝑏)
+𝑠,𝑒is the mean rout-
+ing weight for expert 𝑒on subband 𝑠over the batch. The
+per-subband formulation discourages expert starvation within
+each subband and stabilizes sparse routing. Its design ra-
+tionale, comparison with alternative balancing objectives,
+and sensitivity analysis are provided in Supplementary Sec-
+tion S1.3 and Supplementary Table S5.
+4
+Experiments
+4.1
+Implementation Details
+WaFIR is implemented in PyTorch and is trained end-to-end
+on all degradation types simultaneously. All experiments use
+the AdamW optimizer Loshchilov and Hutter (2017) with an
+initial learning rate of 2 × 10−4, 𝛽1 = 0.9, 𝛽2 = 0.999, and
+weight decay 10−2. The learning rate follows a linear warm-up
+over 15 epochs, then decays to zero via cosine annealing over
+the remaining epochs. We train for 150 epochs with a batch
+size of 32 and an input patch size of 128×128 pixels, randomly
+cropped from training images. Data augmentation consists of
+random horizontal and vertical flips. Training uses BFloat16
+mixed precision Kalamkar et al. (2019) on 2 NVIDIA A100
+GPUs.
+The total loss combines pixel-wise ℓ1 reconstruction with
+the auxiliary per-subband load-balance term (Eq. 16), with
+𝜆=0.01 fixed throughout all experiments. WaFIR contains
+42.15M parameters in total, of which 35.59M belong to the
+PromptIR backbone and +6.56M are introduced by the three
+SPMoE levels (+18.4%). Inference is evaluated at full image
+resolution on a single GPU with no test-time augmentation.
+4.2
+Datasets and Evaluation Metrics
+We follow the standard all-in-one protocol of AirNet Li et al.
+(2022) and PromptIR Potlapalli et al. (2023) across three
+degradation types. For denoising, we train on BSD400 Martin
+et al. (2001) and WED Ma et al. (2016) (5,144 images) and
+test on BSD68 Roth and Black (2005) and Urban100 Huang,
+Singh, and Ahuja (2015) at 𝜎∈{15, 25, 50}. Urban100
+serves as a cross-dataset generalization test: the AWGN pro-
+cess matches training, but the urban-texture image domain
+is unseen. For deraining, we train on Rain100L Yang et al.
+(2017) (200 pairs, repeat factor 120 for multi-task balance Li
+et al. (2022)) and test on the Rain100L test set (100 pairs).
+For dehazing, we train on the full RESIDE dataset Li et al.
+(2019) (72,135 training hazy images) and evaluate on the
+500-image Synthetic Objective Testing Set (SOTS), follow-
+ing the same standard protocol as the baselines. Quantitative
+results are reported using PSNR, SSIM Wang et al. (2004), and
+LPIPS Zhang et al. (2018) on full RGB images without task-
+specific post-processing. We further provide qualitative and
+interpretability analyses using residual maps, Fourier spec-
+tral maps, and Local Attribution Maps (LAM) Gu and Dong
+(2021) to evaluate reconstruction fidelity, frequency restora-
+tion, and the model’s spatial attribution behavior.
+4.3
+Results
+Comparisons with SOTA models:
+Table 1 compares WaFIR with 20 blind unified restoration
+methods under the same three-degradation protocol. WaFIR
+achieves the best PSNR on deraining (Rain100L, 38.99 dB)
+and on denoising at 𝜎∈{15, 25} (and essentially ties the best
+at 𝜎=50), together with the highest average SSIM (0.919). As
+illustrated in Figure 2, Figure 3 and Supplementary Figure S4,
+these improvements are most pronounced for structured degra-
+dations such as rain and noise, whose directional or station-
+ary spectral signatures can be effectively exploited by the
+proposed subband routing mechanism. Beyond the standard
+benchmark protocol, we further evaluate WaFIR under both
+single- and multiple-degradation settings. Detailed quantita-
+tive and qualitative analyses are provided in Supplementary
+Section S4.
+Generalization under Distribution Shift:
+Without fine-tuning, we evaluate the same model on the CDD-
+11 rain test subset, Urban100 with both in-range and out-
+of-range noise levels (𝜎= 60), and a synthetic denoising
+benchmark constructed from Scanning Acoustic Microscopy
+(SAM) images. These experiments evaluate dataset/domain
+shift and noise-intensity shift rather than an unseen degrada-
+tion type. Table 2 reports PSNR, SSIM, and LPIPS on the
+in-range settings, where WaFIR leads on all three metrics; at
+the out-of-range 𝜎=60 no single method dominates across all
+metrics (Supplementary Table S7). Qualitative cross-domain
+examples are shown in Supplementary Figure S11.
+5
+
+
+Table 1: Quantitative comparison with state-of-the-art methods organized by architectural group. WaFIR uses the same stan-
+dard training data as the baselines (PromptIR) on all three tasks, including the full RESIDE set for dehazing. Each cell:
+PSNR (dB) / SSIM. Red = best across the table for that task; Blue = second best. “–” = not publicly available.
+Arch.
+Group
+Method
+Venue
+Dehazing
+SOTS Li et al. (2019)
+Deraining
+Rain100L Yang et al. (2017)
+Denoising (BSD68 Roth and Black (2005))
+Average
+𝜎=15
+𝜎=25
+𝜎=50
+CNN-
+based
+LPNLiu et al. (2019)
+CVPR
+20.84/0.828
+24.88/0.784
+26.47/0.778
+24.77/0.748
+21.26/0.552
+23.64/0.738
+MPRNetZamir et al. (2021)
+CVPR
+28.00/0.958
+33.86/0.958
+33.27/0.920 30.67/0.871
+27.29/0.761
+30.63/0.894
+ADFNetTu et al. (2023)
+AAAI
+28.13/0.961
+34.24/0.965
+33.76/0.929
+30.83/0.871
+27.75/0.793
+30.94/0.904
+FSNetCui et al. (2023)
+TPAMI
+29.14/0.969
+35.61/0.969
+33.81/0.874 30.84/0.872
+27.69/0.762
+31.42/0.906
+Trans-
+former-
+based
+DehazeFormerSong et al. (2023)
+TIP
+29.58/0.970
+35.37/0.969
+33.91/0.914 30.14/0.858
+27.37/0.779
+31.09/0.898
+DRSformerChen et al. (2023)
+CVPR
+29.02/0.968
+35.89/0.970
+33.28/0.921 30.55/0.862
+27.58/0.786
+31.26/0.902
+RestormerZamir et al. (2022)
+CVPR
+27.78/0.958
+33.78/0.958
+33.72/0.865 30.67/0.865
+27.63/0.792
+30.75/0.901
+AirNetLi et al. (2022)
+CVPR
+27.94/0.962
+34.90/0.967
+33.92/0.933 31.26/0.888
+28.00/0.797
+31.20/0.910
+IDRZhang et al. (2023)
+CVPR
+29.87/0.970
+36.03/0.971
+33.82/0.931
+31.32/0.884
+28.04/0.798
+31.83/0.911
+GridformerWang et al. (2023)
+IJCV
+30.37/0.970
+37.15/0.972
+33.93/0.931
+31.37/0.887
+28.11/0.801
+32.19/0.912
+NDRZhang et al. (2024)
+TIP
+28.64/0.962
+35.42/0.969
+34.04/0.931 31.36/0.887
+28.10/0.798
+31.51/0.910
+Visual
+Prompt-
+based
+PromptIRPotlapalli et al. (2023)
+NeurIPS
+30.58/0.974
+36.37/0.972
+33.98/0.933
+31.31/0.888
+28.06/0.799
+32.06/0.913
+ProResMa et al. (2024)
+arXiv
+28.38/0.938
+33.68/0.954
+32.10/0.907
+30.18/0.863
+27.58/0.779
+30.38/0.888
+Up-RestorerLiu et al. (2025)
+AAAI
+30.68/0.977
+36.74/0.978
+33.99/0.933
+31.33/0.888
+28.07/0.799
+32.16/0.915
+MoE
+LoRA-IRJiang et al. (2024)
+arXiv
+30.68/0.961
+37.75/0.979
+34.06/0.935
+31.42/0.891
+28.18/0.803
+32.42/0.914
+SSM-based
+MambaIRGuo et al. (2024a)
+ECCV
+29.57/0.970
+35.42/0.969
+33.88/0.917 30.95/0.874
+27.74/0.793
+31.51/0.907
+Freq. domain
+FDGANLi et al. (2020)
+AAAI
+24.71/0.929
+29.89/0.933
+30.25/0.910
+28.81/0.868
+26.43/0.776
+28.02/0.883
+AdaIRCui et al. (2025)
+ICLR
+31.06/0.980
+38.64/0.983
+34.12/0.935 31.45/0.892
+28.19/0.802
+32.69/0.918
+VLM /
+Foundation
+InstructIR-3DConde, Geigle, and Timofte (2024)
+ECCV
+30.22/0.959
+37.98/0.978
+34.15/0.933
+31.52/0.891
+28.30/0.804
+32.43/0.913
+DA-CLIP-SDELuo et al. (2024)
+ICLR
+26.83/0.962
+35.85/0.972
+31.43/0.889
+25.05/0.605
+18.33/0.308
+27.50/0.747
+WaFIR (Ours)
+–
+29.70/0.970
+38.99/0.985
+34.20/0.937
+31.54/0.894
+28.29/0.807
+32.54/0.919
+Table 2: Out-of-distribution generalization. The all-in-one
+model (trained on noise, haze, and rain) is tested directly
+(no fine-tuning) on: an unseen rain dataset (CDD-11), un-
+seen natural-image denoising (Urban100), and an industrial
+domain, SAM, for electronic semiconductor inspection (syn-
+thetic AWGN). Out-of-range 𝜎=60 results are reported in
+Supplementary Table S7. Metrics: PSNR↑/SSIM↑/LPIPS↓;
+best per block in bold.
+Setting
+Method
+PSNR↑
+SSIM↑
+LPIPS↓
+CDD-11
+(rain)
+PromptIR
+24.44
+0.8638
+0.1734
+AdaIR
+24.73
+0.8625
+0.1691
+AirNet
+23.07
+0.8263
+0.2198
+WaFIR
+24.94
+0.8746
+0.1577
+Urban100
+avg
+(𝜎∈15-50)
+PromptIR
+30.77
+0.9121
+0.0612
+AdaIR
+31.23
+0.9193
+0.0569
+AirNet
+30.77
+0.9135
+0.0592
+WaFIR
+31.51
+0.9249
+0.0513
+SAM
+avg
+(𝜎∈25-50)
+PromptIR
+31.42
+0.8108
+0.2859
+AdaIR
+31.52
+0.8128
+0.2936
+AirNet
+31.32
+0.8049
+0.3243
+WaFIR
+31.63
+0.8152
+0.2718
+4.4
+Ablation Study
+Table 3 summarizes the principal ablations; Supplementary
+Section S3 provides the full interpretation and additional
+routing and regularization controls. All ablations use reduced
+training subsets (1,200 denoising, 200 deraining, 391 dehaz-
+ing images) under the final model’s protocol (architecture, op-
+timizer, schedule, evaluation), so differences are attributable
+to the ablated component alone. Deltas are mean PSNR rela-
+tive to the full model (A3).
+Decoder placement and three-level design (A1, A2, A15):
+Table 3: Ablation study. FULL = mean PSNR (dB) over 8 con-
+ditions (BSD68 and Urban100 at 𝜎∈{15, 25, 50}, Rain100L,
+SOTS); Δ relative to A3. Green = gain, red = drop. Full per-
+task breakdown in Supplementary Table S3.
+ID
+Component
+FULL
+Δ
+A3
+Full WaFIR (reference)
+30.35
+—
+Baseline
+A0
+No SPMoE (PromptIR)
+29.87
+−0.48
+SPMoE insertion depth
+A1
+SPMoE at L3 only
+30.21
+−0.14
+A2
+SPMoE at L2+L3
+30.15
+−0.20
+A15
+Encoder + decoder SPMoE
+29.94
+−0.41
+Routing quality
+A5
+Random routing
+30.12
+−0.23
+A6
+Top-𝑘=1 routing
+30.00
+−0.35
+Routing signal
+A12
+Prompt-only router
+30.09
+−0.26
+A14
+Descriptor-only router
+30.20
+−0.15
+Frequency decomposition and interaction
+A7
+No cross-subband
+30.19
+−0.16
+A9
+Avg-pool DWT
+30.26
+−0.10
+Expert design
+A4
+No phase (magnitude only)
+30.39
++0.04
+Restricting SPMoE to L3 (A1, −0.14 dB) or L2+L3 (A2,
+−0.20 dB) underperforms the three-level design, and extend-
+ing it to encoder levels degrades further (A15, −0.41 dB).
+Spectral modulation helps specifically at decoder levels, where
+prompt context is injected and reconstruction occurs.
+Learned, soft routing (A5, A6): Random subband-to-expert
+assignment (A5, −0.23 dB) confirms the router learns mean-
+ingful frequency-specialized patterns rather than arbitrary
+ones. Top-𝑘=1 routing (A6, −0.35 dB) gives the largest drop,
+6
+
+
+showing that soft interpolation between experts lets each sub-
+band adapt to intermediate frequency characteristics (Supple-
+mentary Figure S2).
+Descriptor and prompt are complementary (A12–A14):
+Prompt-only routing (A12, −0.26 dB) degrades performance
+and reorganizes routing around task identity rather than fre-
+quency. Descriptor-only routing (A14, −0.15 dB) retains more
+performance than prompt-only routing in this controlled set-
+ting, showing that intrinsic spectral characteristics provide
+informative routing cues. The residual gap to joint condition-
+ing reflects complementary prompt context, most visibly on
+deraining - degradation spectra overlap.
+Decomposition and cross-subband interaction (A7, A9):
+Removing the grouped 1×1 cross-subband convolution (A7,
+−0.16 dB) shows inter-frequency interaction before IDWT
+aids coherent reconstruction, and replacing Haar DWT with
+average pooling (A9, −0.10 dB) shows structured decomposi-
+tion is needed for subband-specific descriptors.
+Phase modulation (A4): The bounded, zero-initialized phase
+branch converges near identity: removing it changes mean
+PSNR by only +0.04 dB (within run-to-run variance), so mag-
+nitude modulation carries the restoration-relevant informa-
+tion. We keep the full expert for consistency with the released
+code; the magnitude-only variant is equivalent.
+Seed robustness: To confirm the ablation margins are not
+seed artifacts, we retrain both the full model (A3) and the no-
+SPMoE baseline (A0) with two random seeds (best-validation
+checkpoints; Supplementary Table S6). A3 attains FULL =
+30.29±0.02 dB versus A0 29.83±0.04 dB, and the +0.46 dB
+SPMoE gain holds on both seeds (+0.45 and +0.47 dB), far
+exceeding the seed spread. Because A3’s seed deviation on
+FULL is only 0.02 dB, the component deltas of ≥0.14 dB in
+Table 3 all lie well outside seed noise.
+Routing under distribution shift (A3 vs. A13): The com-
+parisons above are in-distribution, where a label-conditioned
+router (A13) receiving the ground-truth degradation label is
+marginally stronger (+0.06 dB on average on BSD68). This
+edge inverts off-distribution (Table 4; full results in Sup-
+plementary Table S4): A3 exceeds A13 by +0.45 dB PSNR
+(+0.046 SSIM) at extrapolated 𝜎=70 and by +0.67 dB on
+rain+noise. On haze+noise the two are indistinguishable
+(15.755 vs. 15.739 dB), and both degrade sharply (roughly
+12–18 dB below single-degradation performance), a shared
+failure mode rather than an advantage for either. In short,
+when the ground-truth label is unavailable or ill-defined, A3’s
+continuous descriptor stays well-defined while A13 has no
+fallback, making label-free frequency routing the more robust
+choice off-distribution.
+4.5
+Analysis: Routing Self-Organization
+The main manuscript summarizes the central findings; the
+complete routing quantification, oracle-label control, and
+amplitude-invariance test are provided in Supplementary Sec-
+tion S2.
+Routing self-organizes by frequency subspace: Projecting
+A3’s routing weights with t-SNE and coloring by degrada-
+Table 4: Learned (A3) vs. label-conditioned (A13) routing,
+PSNR (dB). Δ=A3−A13. A13’s small in-distribution edge in-
+verts off-distribution. Full results in Supplementary Table S4.
+Condition
+A3
+A13
+Δ
+BSD68 𝜎=25 (in-dist.)
+30.96
+31.02
+−0.06
+𝜎=35 (interp.)
+29.31
+29.27
++0.04
+𝜎=70 (extrap.)
+24.85
+24.41
++0.45
+Rain+noise
+25.14
+24.47
++0.67
+Haze+noise
+15.76
+15.74
++0.02
+Figure 4: Amplitude artifact test. t-SNE of three feature
+spaces, all colored by DWT subband. Left: 6-D descriptor
+(amplitude-sensitive)—subbands separate but with scatter.
+Center: D1 amplitude-invariant descriptor—four subbands
+form tighter, cleaner clusters, ruling out the amplitude-
+artifact hypothesis. Right: Actual routing weight vectors of
+the trained router—four arcs consistent with D1 structure,
+confirming genuine frequency-band specialization.
+tion type collapses all five conditions (Denoise15/25/50, De-
+rain, Dehaze) onto a single mixed manifold, whereas color-
+ing the same vectors by DWT subband yields four distinct
+arcs without any subband-level supervision (Supplementary
+Figure S2). The organization is by frequency subspace, not
+degradation semantics: the LL subband of a rain image and of
+a haze image activate the same expert pair. Quantitatively
+(𝑁=250), 𝑘-means NMI against the true subband label is
+0.243 for WaFIR, versus 0.001 for random routing and 0.024
+for degradation labels; a linear degradation-class probe on
+routing weights reaches 35.1%±1.9% balanced accuracy, in-
+distinguishable from the 33.3% chance level (Supplementary
+Table S2).
+An apparent inductive bias toward structured degrada-
+tions: The observed routing behavior is consistent with an
+inductive bias toward degradations that have a consistent,
+structured spectral signature, such as the directional streaks
+of rain and the stationary statistics of noise, where WaFIR’s
+gains concentrate. Qualitatively, the same tendency appears in
+two representative cases, the artifact-free recovery of noise-
+corrupted line structure (Figure 3; Supplementary Figure S6)
+and of out-of-distribution rain streaks (Supplementary Fig-
+ure S10), together with the wider attribution field of its Local
+Attribution Maps (Supplementary Figure S7).
+Ruling out amplitude artifacts: The four clusters could re-
+flect amplitude differences intrinsic to the Haar DWT (LL
+carries more energy than HH) rather than learned behavior.
+We test this with an amplitude-normalized descriptor D1 built
+7
+
+
+from energy ratios and the coefficient of variation:
+dD1 =
+h
+log ¯𝐸,
+𝜎𝐸
+¯𝐸,
+𝐸low
+𝐸tot ,
+𝐸high
+𝐸tot ,
+𝐸ℎ
+𝐸tot ,
+𝐸𝑣
+𝐸tot ,
+𝐸low
+𝐸high
+i
+,
+(18)
+where every dimension except log ¯𝐸correlates weakly with
+image amplitude (|𝑟|<0.15, versus 𝑟=0.80 for the strongest
+6-D dimension). If the clusters were an amplitude artifact, re-
+moving amplitude should dissolve them; instead, the subbands
+form tighter clusters under D1 than under the 6-D descriptor
+(Figure 4). Subband structure is therefore genuinely distinct
+beyond amplitude, and the router exploits true frequency-
+spatial structure, consistent with the −0.23 dB drop under
+random routing (A5).
+5
+Conclusion
+We presented WaFIR, which inserts a Spectral Mixture-of-
+Experts (SPMoE) module into each PromptIR decoder level
+to decompose features into Haar subbands, summarize each
+with a compact 6-D Fourier descriptor, and route it through
+a learned sparse gate to specialized Fourier experts. Under
+a unified all-in-one protocol, WaFIR improves over Promp-
+tIR by +0.48 dB on average, and its routing self-organizes
+primarily by frequency subspace rather than by degradation
+identity, as supported by t-SNE, NMI/probe analysis, and an
+amplitude-invariance control. The novelty lies in the granular-
+ity and input-derived nature of the routing signal, which com-
+plements the task context a prompt-based blind restorer infers
+from the input. Moreover, our findings suggest that input-
+derived frequency priors and generalization across datasets
+and restoration tasks provide a promising foundation for med-
+ical and scientific imaging, and vision-language restoration
+with large language models; further limitations are discussed
+in Supplementary Section S6.
+Acknowledgments
+This work was supported by the National Research Founda-
+tion of Korea (NRF) funded by the Korea government (MSIT)
+under Grant 2022R1A5A8023404. The authors gratefully ac-
+knowledge the resources provided by the University of Al-
+abama at Birmingham IT-Research Computing group for high
+performance computing (HPC) support and GPU time on the
+Cheaha supercomputer. The authors also acknowledge support
+from the NSF ACCESS Award number CIS260853.
+References
+Chen, X.; et al. 2023. Learning a Sparse Transformer Network
+for Effective Image Deraining. In IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR).
+Conde, M. V.; Geigle, G.; and Timofte, R. 2024. High-Quality
+Image Restoration Following Human Instructions. In Eu-
+ropean Conference on Computer Vision (ECCV).
+Cooley, J. W.; and Tukey, J. W. 1965. An Algorithm for the
+Machine Calculation of Complex Fourier Series. Mathe-
+matics of Computation, 19(90): 297–301.
+Cui, Y.; Zamir, S. W.; Khan, S.; Knoll, A.; Shah, M.; and Khan,
+F. 2025. AdaIR: Adaptive All-in-One Image Restoration
+via Frequency Mining and Modulation. In International
+Conference on Learning Representations (ICLR), volume
+2025, 101306–101327.
+Cui, Y.; et al. 2023. FSNet: Frequency-Spatial Fusion Net-
+work for Unified Image Restoration. IEEE Transactions on
+Pattern Analysis and Machine Intelligence.
+Fedus, W.; Zoph, B.; and Shazeer, N. 2022. Switch Transform-
+ers: Scaling to Trillion Parameter Models with Simple and
+Efficient Sparsity. Journal of Machine Learning Research,
+23(120): 1–39.
+Gu, J.; and Dong, C. 2021. Interpreting Super-Resolution
+Networks with Local Attribution Maps. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), 9199–9208.
+Guo, H.; et al. 2024a.
+MambaIR: A Simple Baseline for
+Image Restoration with State-Space Model. In European
+Conference on Computer Vision (ECCV).
+Guo, Y.; Gao, Y.; Lu, Y.; Liu, R. W.; and He, S. 2024b. OneRe-
+store: A Universal Restoration Framework for Composite
+Degradation. In European Conference on Computer Vision.
+He, K.; Sun, J.; and Tang, X. 2009. Single Image Haze Re-
+moval Using Dark Channel Prior. In IEEE Conference on
+Computer Vision and Pattern Recognition (CVPR), 1956–
+1963.
+Huang, J.-B.; Singh, A.; and Ahuja, N. 2015. Single Image
+Super-Resolution from Transformed Self-Exemplars.
+In
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), 5197–5206.
+Jiang, S.; et al. 2024. LoRA-IR: Leveraging Low-Rank Adap-
+tation for Universal Image Restoration. arXiv preprint.
+Kalamkar, D.; Mudigere, D.; Mellempudi, N.; Das, D.; Baner-
+jee, K.; Avancha, S.; Vooturi, D. T.; Jammalamadaka, N.;
+Huang, J.; Yuen, H.; et al. 2019. A study of BFLOAT16 for
+deep learning training. arXiv preprint arXiv:1905.12322.
+Lepikhin, D.; Lee, H.; Xu, Y.; Chen, D.; Firat, O.; Huang,
+Y.; Krikun, M.; Shazeer, N.; and Chen, Z. 2020. GShard:
+Scaling Giant Models with Conditional Computation and
+Automatic Sharding. arXiv preprint arXiv:2006.16668.
+Li, B.; Liu, X.; Hu, P.; Wu, Z.; Lv, J.; and Peng, X. 2022.
+All-in-One Image Restoration for Unknown Corruption. In
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), 17452–17462.
+8
+
+
+Li, B.; Ren, W.; Fu, D.; Tao, D.; Feng, D.; Zeng, W.; and
+Wang, Z. 2019. RESIDE: A Benchmark for Single Image
+Dehazing. IEEE Transactions on Image Processing, 28(3):
+1143–1156.
+Li, L.; Pan, J.; Yang, W.-S.; Ren, W.; Yang, W.; Chen, J.; and
+Tang, J. 2020. All in One Bad Weather Removal Using Ar-
+chitectural Search. In IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR).
+Liu, J.; Xu, S.; Yang, Q.; Wang, Y.; Chen, X.; and Ji, Z.
+2026. FAPE-IR: Frequency-Aware Planning and Execution
+Framework for All-in-One Image Restoration. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition.
+Liu, M.; Yang, W.; Luo, J.; and Liu, J. 2025. UP-Restorer:
+When Unrolling Meets Prompts for Unified Image Restora-
+tion. In AAAI Conference on Artificial Intelligence (AAAI),
+volume 39, 5513–5522.
+Liu, P.; Zhang, H.; Zhang, K.; Lin, L.; and Zuo, W. 2018.
+Multi-Level Wavelet-CNN for Image Restoration.
+In
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition Workshops (CVPRW).
+Liu, Y.; et al. 2019. Learning Parallel Networks for High-
+Quality Image Restoration. In IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR).
+Loshchilov, I.; and Hutter, F. 2017. Decoupled weight decay
+regularization. arXiv preprint arXiv:1711.05101.
+Luo, X.; et al. 2024.
+DA-CLIP: Degradation-Aware Con-
+trastive Language-Image Pre-Training.
+In International
+Conference on Learning Representations (ICLR).
+Ma, C.; et al. 2024. ProRes: Exploring Degradation-aware
+Visual Prompt for Universal Image Restoration.
+arXiv
+preprint.
+Ma, K.; Duanmu, Z.; Wu, Q.; Wang, Z.; Yong, H.; Li, H.; and
+Zhang, L. 2016. Waterloo exploration database: New chal-
+lenges for image quality assessment models. IEEE Trans-
+actions on Image Processing, 26(2): 1004–1016.
+Mallat, S. 2009. A Wavelet Tour of Signal Processing: The
+Sparse Way. Academic Press, 3 edition.
+Martin, D.; Fowlkes, C.; Tal, D.; and Malik, J. 2001.
+A
+Database of Human Segmented Natural Images and Its
+Application to Evaluating Segmentation Algorithms and
+Measuring Ecological Statistics.
+Potlapalli, V.; Zamir, S. W.; Khan, S.; and Khan, F. S. 2023.
+PromptIR: Prompting for All-in-One Blind Image Restora-
+tion. In Advances in Neural Information Processing Systems
+(NeurIPS).
+Ren, B.; Zamfir, E.; Wu, Z.; Li, Y.; Li, Y.; Paudel, D. P.; Timo-
+fte, R.; Yang, M.-H.; Van Gool, L.; and Sebe, N. 2026. Any
+Image Restoration via Efficient Spatial-Frequency Degra-
+dation Adaptation. Transactions on Machine Learning Re-
+search (TMLR).
+Roth, S.; and Black, M. J. 2005. Fields of Experts: A Frame-
+work for Learning Image Priors.
+Shazeer, N.; Mirhoseini, A.; Maziarz, K.; Davis, A.; Le, Q. V.;
+Hinton, G. E.; and Dean, J. 2017.
+Outrageously Large
+Neural Networks: The Sparsely-Gated Mixture-of-Experts
+Layer. In International Conference on Learning Represen-
+tations (ICLR).
+Song, Y.; He, Z.; Qian, H.; and Du, X. 2023. Vision Trans-
+formers for Single Image Dehazing. IEEE Transactions on
+Image Processing.
+Suvorov, R.; Logacheva, E.; Mashikhin, A.; Remizova, A.;
+Ashukha, A.; Silvestrov, A.; Kong, N.; Goka, H.; Park, K.;
+and Lempitsky, V. 2022. Resolution-Robust Large Mask
+Inpainting with Fourier Convolutions. In IEEE/CVF Winter
+Conference on Applications of Computer Vision (WACV),
+2149–2159.
+Tu, Z.; et al. 2023. ADFNet: Adaptive Dual-Feature Fusion
+Network for Image Restoration. In AAAI Conference on
+Artificial Intelligence (AAAI).
+Valanarasu, J. M. J.; Yasarla, R.; and Patel, V. M. 2022. Tran-
+sWeather: Transformer-based Restoration of Images De-
+graded by Adverse Weather Conditions.
+In IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), 2353–2363.
+Wang, T.; Xia, P.; Li, B.; Jiang, P.-T.; Kong, Z.; Zhang, K.; Lu,
+T.; and Luo, W. 2025. MOERL: When Mixture-of-Experts
+Meet Reinforcement Learning for Adverse Weather Image
+Restoration. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, 13673–13683.
+Wang, T.; et al. 2023. GridFormer: Residual Dense Trans-
+former with Grid Structure. International Journal of Com-
+puter Vision.
+Wang, Z.; Bovik, A. C.; Sheikh, H. R.; and Simoncelli, E. P.
+2004. Image quality assessment: from error visibility to
+structural similarity. IEEE transactions on image process-
+ing, 13(4): 600–612.
+Wei, C.; Wang, W.; Yang, W.; and Liu, J. 2018. Deep Retinex
+Decomposition for Low-Light Enhancement.
+In British
+Machine Vision Conference (BMVC).
+Wu, G.; Jiang, J.; Wang, Y.; Jiang, K.; and Liu, X. 2025.
+Debiased All-in-One Image Restoration with Task Uncer-
+tainty Regularization. In AAAI Conference on Artificial
+Intelligence (AAAI), volume 39, 8386–8394.
+Yang, W.; Tan, R. T.; Feng, J.; Liu, J.; Guo, Z.; and Yan,
+S. 2017. Deep Joint Rain Detection and Removal from
+a Single Image. In IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR), 1357–1366.
+9
+
+
+Zamfir, E.; Wu, Z.; Mehta, N.; Tan, Y.; Paudel, D. P.; Zhang,
+Y.; and Timofte, R. 2025. Complexity Experts are Task-
+Discriminative Learners for Any Image Restoration.
+In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR), 12753–12763.
+Zamir, S. W.; Arora, A.; Khan, S.; Hayat, M.; Khan, F. S.; and
+Yang, M.-H. 2022. Restormer: Efficient Transformer for
+High-Resolution Image Restoration. In IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+5728–5739.
+Zamir, S. W.; Arora, A.; Khan, S.; Hayat, M.; Khan, F. S.;
+Yang, M.-H.; and Shao, L. 2021. MPRNet: Multi-Stage Pro-
+gressive Image Restoration. In IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), 14821–
+14831.
+Zhang, K.; Zuo, W.; Chen, Y.; Meng, D.; and Zhang, L. 2017.
+Beyond a Gaussian Denoiser: Residual Learning of Deep
+CNN for Image Denoising. IEEE Transactions on Image
+Processing, 26(7): 3142–3155.
+Zhang, K.; et al. 2024. NDR: Neural Degradation Representa-
+tion for All-in-One Image Restoration. IEEE Transactions
+on Image Processing.
+Zhang, R.; Isola, P.; Efros, A. A.; Shechtman, E.; and Wang,
+O. 2018. The Unreasonable Effectiveness of Deep Features
+as a Perceptual Metric. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), 586–595.
+Zhang, Y.; He, J.; Qian, J.; Fang, K.; and Mei, J. 2023.
+Ingredient-Oriented Multi-Degradation Learning for Im-
+age Restoration. In IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR), 5825–5835.
+10
+
+
+Supplementary Material
+The central thesis of WaFIR is that its contribution lies in the
+granularity and nature of the routing signal frequency-aware
+expert routing performed at the level of individual wavelet
+subbands, which complements the task context inferred by a
+prompt-based blind restorer rather than merely in operating
+without an explicit degradation label at test time. Label-free
+inference is a consequence of this design, not its novelty;
+the novelty is that routing decisions are resolved per subband
+from an input-derived spectral descriptor. This supplementary
+material substantiates that thesis and expands the method,
+analysis, and experimental claims summarized in the main
+manuscript. It is intended to be read together with the main
+paper: Section S1 expands the Method section, Section S2
+supports the routing claims in the Introduction and Analy-
+sis section, Section S3 expands the main ablation table, and
+Sections S4–S5 provide the additional results and complexity
+evidence referenced from the Experiments section. The orga-
+nization follows the evaluation logic of the study. Section S1
+gives the complete SPMoE forward pass and the per-subband
+load-balance formulation. Section S2 examines how routing
+self-organizes and includes matched identity-conditioned con-
+trols. Section S3 reports component, routing, and regulariza-
+tion ablations. Section S4 provides additional qualitative, and
+out-of-distribution evaluations. Section S5 analyzes param-
+eter and computational overhead, and Section S6 discusses
+limitations and future work.
+S1
+Additional Method Details
+S1.1
+Subband Frequency Signatures
+Table S1 summarizes the frequency content of each Haar
+subband and the degradation type it primarily captures, as
+referenced from the Method section of the main paper.
+Table S1: Frequency content and primary degradation signal
+per Haar subband.
+Subband
+Frequency content
+Primary degradation
+LL
+Low-low (approximation)
+Haze (DC↑)
+LH
+Low-high (horiz. edges)
+Rain streaks (vert. spatial →horiz. freq.)
+HL
+High-low (vert. edges)
+Directional patterns, vertical streaks
+HH
+High-high (diagonal)
+Additive noise (flat high-freq. spectrum)
+S1.2
+Complete SPMoE Forward Pass
+Algorithms S1–S2 give the complete SPMoE block, in-
+cluding the spectral descriptor, router, and Fourier spectral-
+modulation expert.
+Algorithm S1 SpectralMoE Block (SPMoEBlock) — full for-
+ward pass
+Require: Feature map x
+∈
+R𝐵×𝐶×𝐻×𝑊, prompt p
+∈
+R𝐵×𝐶𝑝×𝐻𝑝×𝑊𝑝, 𝐸= 4 experts per subband, top-𝑘= 2
+routing
+Ensure: Refined feature ˆx ∈R𝐵×𝐶×𝐻×𝑊
+— Wavelet decomposition —
+1: ¯x ←ReflectPad(x)
+⊲pad 𝐻, 𝑊to even dimensions
+2: s𝐿𝐿, s𝐿𝐻, s𝐻𝐿, s𝐻𝐻←HaarDWT(¯x)
+⊲each
+∈R𝐵×𝐶×𝐻/2×𝑊/2
+— Per-subband routing and aggregation —
+3: for s ∈{s𝐿𝐿, s𝐿𝐻, s𝐻𝐿, s𝐻𝐻} do
+4:
+d ←SpectralDescriptor(s)
+⊲d ∈R𝐵×6
+5:
+w ←SpectralRouter(d, p)
+⊲w ∈R𝐵×𝐸
+6:
+ˆs ←Í𝐸
+𝑒=1 𝑤𝑒FourierExpert𝑒(s, p)
+7: end for
+— Cross-subband interaction —
+8: Z ←[ˆs𝐿𝐿; ˆs𝐿𝐻; ˆs𝐻𝐿; ˆs𝐻𝐻]
+⊲Z ∈R𝐵×4𝐶×𝐻/2×𝑊/2
+9: Z ←GroupedConv1×1(Z)
+— Reconstruction and residual connection —
+10: r ←HaarIDWT(Z):,:,:𝐻,:𝑊
+11: ˆx ←x + 𝜸⊙Conv1×1(r)
+⊲𝜸∈R𝐶, zero-initialized
+12: return ˆx
+S1.3
+Per-Subband Load-Balance Regulariza-
+tion
+Sparse spectral routing is only useful if the four experts remain
+distinct. This section explains why a load-balance term is
+required, why we apply it per subband, and quantifies its
+effect.
+Why Regularization Is Required
+Sparse top-𝑘routing is prone to expert collapse: without reg-
+ularization the router quickly favors one or two experts for all
+inputs, so the rest receive no gradient and remain uninitialized
+(Fedus, Zoph, and Shazeer, 2022; Lepikhin et al., 2020). In
+WaFIR this is fatal, because the entire rationale for four ex-
+perts is that each specializes in a distinct frequency subband.
+Under collapse, all subbands route to the same pair and SP-
+MoE reduces to a dense layer with extra parameters and no
+specialization.
+Formulation
+We use the same mean-squared imbalance penalty introduced
+in the main manuscript, with an explicit uniform reference
+11
+
+
+Algorithm S2 Sub-procedures used in Algorithm S1
+1: function SpectralDescriptor(s)
+2:
+M ←|rFFT2(s)|
+3:
+𝐸low ←𝜇(M:,:,0:𝑙𝐻,0:𝑙𝑊)
+4:
+𝐸high ←𝜇(M:,:,𝑙𝐻:,𝑙𝑊:)
+5:
+𝐸ℎ←𝜇(M:,:,𝐻′/4:𝐻′/2,:)
+6:
+𝐸𝑣←𝜇(M:,:,:,𝑊′/4:)
+7:
+return [𝜇(M), Var(M), 𝐸low, 𝐸high, 𝐸ℎ, 𝐸𝑣]
+8: end function
+9: function SpectralRouter(d, p)
+10:
+¯p ←AvgPool(p).flatten()
+11:
+g ←𝑊2 GELU(𝑊1[d; ¯p])/𝜏
+12:
+Keep only top-𝑘entries of g and set others to −∞
+13:
+return softmax(g)
+14: end function
+15: function FourierExpert𝑒(s, p)
+16:
+¯p ←AvgPool(p).flatten()
+17:
+[𝑎, 𝑏] ←split(MLPmag( ¯p), 𝐶)
+18:
+s𝜑←MLPphase( ¯p)
+19:
+F ←rFFT2(s)
+20:
+𝑀←|F |,
+𝜑←∠F
+21:
+𝑀′ ←max 𝑀(1 + tanh(𝑎)) + 𝑏, 0
+22:
+𝜑′ ←𝜑+ tanh(s𝜑) · 𝜋
+4
+23:
+r ←irFFT2(polar(𝑀′, 𝜑′))
+24:
+return r + PWConv(DWConv(r))
+25: end function
+target:
+Llb = 1
+𝑆
+𝑆
+∑︁
+𝑠=1
+𝐸
+∑︁
+𝑒=1
+
+¯𝑤𝑠,𝑒−1
+𝐸
+2
+.
+(S1)
+Relative to the Switch auxiliary loss 𝛼Í
+𝑒𝑓𝑒𝑃𝑒(Fedus, Zoph,
+and Shazeer, 2022), which multiplies two router-dependent
+quantities and sets no explicit target, and to entropy maximiza-
+tion −Í
+𝑒¯𝑤𝑒log ¯𝑤𝑒, whose gradient vanishes near uniformity
+precisely when regularization is most needed, Llb has three
+practical properties: it encodes an explicit target (1/𝐸= 0.25);
+its quadratic penalty grows with the severity of imbalance and
+relaxes as balance is restored; and it is differentiable and nu-
+merically stable everywhere.
+Why Per-Subband, Not Global
+A global penalty Í
+𝑒( ¯𝑤𝑒−1/𝐸)2, with ¯𝑤𝑒averaged over all
+subbands, admits a degenerate optimum: the router can send
+LL →{𝐸1, 𝐸2} and LH →{𝐸3, 𝐸4} exclusively routing each
+subband to a fixed pair while appearing globally balanced.
+More generally, any permutation assigning a fixed subset of
+subbands to a fixed pair satisfies a global constraint while pro-
+viding no per-subband specialization. The per-subband form
+removes this global loophole by penalizing persistent expert
+starvation separately within each subband. It does not force
+the final router to remain uniform; rather, it keeps all ex-
+perts trainable early in optimization while allowing nonuni-
+form, subband-dependent specialization to emerge as the re-
+construction objective becomes dominant.
+S2
+Routing Analysis
+S2.1
+Frequency-Domain Motivation and Rout-
+ing Self-Organization
+We first recall the qualitative evidence (Figures S1–S2), then
+test the claim with matched controls (Table S2), and finally re-
+port a controlled oracle-routing experiment (A13) that isolates
+the effect of the organizing principle itself.
+S2.2
+Quantitative Routing Organization
+The t-SNE plots are suggestive but qualitative. We test the
+claim by asking two separate questions about the trained
+router’s per-subband weight vectors, evaluated on a held-out
+set spanning all degradation types (𝑁=250; 50 per degra-
+dation, 5 conditions): (i) do the vectors cluster by wavelet
+subband? and (ii) do they encode degradation identity? Every
+quantity is reported against a matched control, since an ab-
+solute value is otherwise uninterpretable; permutation floors
+(≈0.01 for all MI values) are estimated by shuffling labels
+100×.
+Routing clusters by wavelet subband.
+𝑘-means (𝑘=4) on
+the routing-weight vectors, scored by Normalized Mutual In-
+formation (NMI) against the true subband label, gives a clear
+ordering (Table S2). Random routing yields NMI = 0.001
+(at the floor). The 6-D spectral descriptor before the router
+MLP attains NMI = 0.166; some subband structure is ex-
+pected here by construction, since the descriptor is derived
+from per-subband Fourier statistics. The trained router reaches
+NMI = 0.243, a clear increment over the descriptor-only base-
+line (0.166 →0.243), indicating that the MLP amplifies
+subband-aligned structure rather than merely inheriting it.
+Degradation
+information
+concentrates
+in
+physically
+grounded subbands.
+We compute the mutual information
+between routing weights and the degradation label per sub-
+band (mutual_info_classif, 𝑘-NN based). Mean Deg-
+MI is 0.091 (floor ≈0.01) and is unevenly distributed: it
+concentrates in LL (0.20) and HL (0.09), while LH (0.04)
+and HH (0.03) sit near the floor. At LL, all three degrada-
+tion pairs are comparably separable (0.14–0.17), consistent
+with LL retaining global low-frequency statistics that every
+degradation modifies. At HL, separability is driven specif-
+ically by rain (noise–rain 0.09, rain–haze 0.13; noise–haze
+0.017), consistent with the directional signature of rain streaks
+in the vertical-edge subband. Degradation therefore surfaces
+in routing precisely where the corresponding wavelet subband
+physically encodes degradation-discriminative information—
+a stronger statement than “routing ignores degradation.”
+12
+
+
+Figure S1: Frequency-domain motivation for WaFIR. Left: log-magnitude FFT spectra (log(1+|F |)) for three representative
+degradations. Haze concentrates energy in the DC component with attenuated high frequencies; rain produces directional stripe
+patterns aligned with streak orientation; Gaussian noise (𝜎=50) spreads energy across all bands. Middle: relative subband
+energy change (%) versus clean images across Haar subbands (LL, LH, HL, HH), clipped at ±100% for display (Noise-HH
+actual: +2,214%). Each degradation corrupts a distinct subband: noise inflates all high-frequency bands; haze raises LL by
++23% while suppressing LH/HL/HH by ≈48%; rain concentrates energy in HL (+69%). Right: most frequent top-𝑘expert
+pair selected per (degradation, subband), averaged over 50 test images. Each subband is routed to a distinct pair (LL→E3+E4;
+LH→E2+E4; HL→E1+E4; HH→E1+E2) with 82–100% consistency regardless of degradation type, indicating that routing
+self-organizes by frequency subspace without degradation-label or subband-level supervision.
+Routing weights carry little linearly-decodable degra-
+dation information.
+A logistic-regression probe (5-fold
+CV, balanced accuracy) on the spectral descriptor recov-
+ers degradation type at 40.5%, above the 33.3% three-class
+chance level. On the routing weights the same probe yields
+35.1%±1.9%, statistically indistinguishable from chance. The
+MLP transforms away most linearly-accessible degradation
+structure; the residual Deg-MI in LL and HL reflects nonlin-
+ear dependence.
+S2.3
+Controlled Identity-vs-Frequency Test
+Oracle label-conditioned control (A13).
+The analyses
+above characterize what WaFIR does; A13 tests whether the
+frequency-based principle is preferable to an identity-based
+one under matched capacity. A13 is architecturally identical
+to WaFIR (A3) but replaces the spectral descriptor with a
+routing signal derived from the oracle degradation label: ev-
+ery subband of an image is routed by the same one-hot label.
+As expected, A13’s routing weights carry far stronger degra-
+dation information (Deg-MI = 0.519 vs. 0.091), uniformly
+distributed across subbands (LL/LH/HL/HH ≈0.50–0.57),
+and subband organization collapses (Sub-NMI = 0.024 vs.
+0.243). The two models thus operate under genuinely differ-
+ent principles.
+Crucially, oracle labels do not translate into uniformly bet-
+ter restoration. Under the controlled reduced-budget evalua-
+tion (Table S4), A13’s in-distribution advantage is marginal
+(+0.06 dB on average on BSD68) and reverses under distribu-
+tion shift, where A3’s continuous descriptor stays well-defined
+while a one-hot label has no fallback. WaFIR attains this with-
+out any degradation classifier, whereas A13 requires ground-
+truth labels that are unavailable in deployment. The mech-
+anism is that the descriptor encodes noise energy continu-
+ously (var_mag ∝𝜎2), enabling per-image adaptation within
+a noise level that a one-hot label cannot represent.
+S2.4
+Amplitude-Invariance Control
+To test whether the observed subband clusters are a trivial
+consequence of absolute amplitude differences, we compare
+the original descriptor with an amplitude-invariant ratio de-
+scriptor (D1) and with the trained routing weights.
+S3
+Ablation Studies
+This section expands the ablation table reported in the main
+manuscript. For completeness, we reproduce the controlled
+component table and then report analyses that do not fit in the
+main paper, including the label-conditioned routing test and
+the load-balance sensitivity study.
+S3.1
+Component-Level Ablation
+Table S3 reports the component-level ablation. Each row re-
+places or removes a single element of the full model (A3)
+while holding the architecture, optimizer, schedule, and eval-
+uation fixed, so the resulting change in the FULL metric—the
+mean PSNR over the eight test conditions (BSD68 and Ur-
+ban100 at 𝜎∈{15, 25, 50}, Rain100L, and SOTS)—isolates
+that element’s contribution. The variants are grouped by the
+design question they probe: the no-SPMoE baseline (A0); SP-
+MoE insertion depth (A1, A2, A15); routing quality (random
+and top-1 routing, A5, A6); the routing signal that conditions
+the gate (A12, A14); frequency decomposition and interac-
+tion (A7, A9); and expert design (A4). The Δ column is the
+FULL difference relative to A3 (green = gain, red = drop). All
+13
+
+
+Table S2: Routing quantification (𝑁=250 images, 5 degradation conditions, 3 decoder levels, 4 subbands). Sub-NMI: NMI
+between 𝑘-means clusters of routing weights and the true subband label (higher = more subband-organized). Deg-MI: MI
+between routing weights and degradation label, mean over subbands with per-subband breakdown (lower = less degradation-
+organized). Probe: balanced accuracy of a linear degradation classifier (three-class chance = 33.3%). Permutation floor ≈0.01
+for all MI values. WaFIR (A3) is strongly subband-organized and weakly degradation-organized; the oracle (A13) is the reverse.
+Variant
+Sub-NMI
+Deg-MI
+LL
+HL
+LH
+HH
+Probe
+Random (A5)
+0.001
+0.006
+0.00
+0.01
+0.01
+0.00
+—
+Descriptor (pre-MLP)
+0.166
+—
+—
+—
+—
+—
+40.5%
+WaFIR (A3)
+0.243
+0.091
+0.20
+0.09
+0.04
+0.03
+35.1%±1.9%
+A13 (oracle)
+0.024
+0.519
+0.50
+0.49
+0.57
+0.52
+65.0%±2.1%
+variants are trained on the reduced subsets described below,
+so their absolute PSNR values are comparable to one another
+but not to the full-data results in the main paper (Table 1);
+the seed-stability analysis (Table S6) confirms that deltas of
+≥0.14 dB exceed run-to-run variation. Each group is inter-
+preted in Section S3.2.
+S3.2
+Interpretation of Component Ablations
+In this section, we conduct controlled ablation studies to evalu-
+ate the contribution of each component in WaFIR. All ablation
+variants are trained on reduced subsets of the original datasets
+(1,200 images for denoising, 200 images for deraining, and
+391 images for dehazing) while preserving the network archi-
+tecture outside the modified component, optimization settings,
+training schedule, and evaluation protocol. This matched set-
+ting is designed to attribute performance differences to the
+ablated component rather than to changes in data or optimiza-
+tion.
+Both decoder placement and three-level design are critical
+(A1, A2, A15). Adding SPMoE at L3 only (A1, Δ=−0.14) or
+at L2+L3 (A2, Δ=−0.20 dB) falls significantly short of the full
+three-level configuration. We attribute this to the complemen-
+tary nature of multi-scale frequency correction: the coarsest
+block (L3, 𝐶=384) modulates global spectral shape, while
+shallower blocks (L2, L1) address scale-specific textures. Ex-
+tending SPMoE to encoder levels as well (A15, Δ=−0.41 dB)
+actively degrades performance, indicating that spectral expert
+modulation is beneficial specifically at decoder levels—where
+prompt context is injected and reconstruction occurs—rather
+than throughout the network.
+Learned routing and soft interpolation are both essen-
+tial (A5, A6). Random subband-to-expert assignment (A5,
+Δ = −0.23 dB) demonstrates that the learned router captures
+meaningful frequency-specialized routing patterns rather than
+arbitrary assignments. Restricting the router to top-𝑘= 1 (A6,
+Δ = −0.35 dB) results in the largest performance drop, high-
+lighting the importance of soft interpolation between multi-
+ple experts. As illustrated by the arc geometry in Figure S2,
+weighted combinations of two experts allow each subband to
+adapt continuously to intermediate frequency characteristics.
+In contrast, winner-take-all routing forces each subband to rely
+on a single expert, reducing routing flexibility and limiting the
+representation of mixed spectral patterns.
+The spectral descriptor and prompt play complementary
+roles (A12–A14). Prompt-only routing (A12, Δ=−0.26 dB)
+both degrades performance and reorganizes routing around
+task identity rather than frequency subspace. Descriptor-only
+routing (A14, −0.15 dB) retains more of the full model’s per-
+formance than prompt-only routing in this controlled setting,
+showing that intrinsic spectral characteristics provide informa-
+tive routing cues. The remaining gap to the jointly conditioned
+gate indicates that prompt-derived task context is complemen-
+tary, particularly on deraining, where degradation spectra can
+overlap. A label-conditioned router that receives the ground-
+truth degradation label (A13) is slightly stronger in distribu-
+tion (+0.06 dB on average on BSD68; Table S4), confirming
+that frequency-based routing is a competitive input-derived
+proxy for a signal WaFIR never accesses at inference.
+Haar DWT and cross-subband interaction both contribute
+(A7, A9). Removing the grouped 1×1 cross-subband convo-
+lution (A7, −0.16 dB) confirms that inter-frequency interac-
+tion before IDWT is necessary for coherent multi-scale re-
+construction. Replacing Haar DWT with average pooling (A9,
+−0.10 dB) shows that structured, lossless frequency decompo-
+sition is needed for the spectral descriptor to access subband-
+specific statistics.
+Phase modulation is optional; magnitude modulation
+alone is already sufficient (A4). Disabling phase modula-
+tion (𝜑′=𝜑) yields a marginal improvement (+0.04 dB aver-
+age on the FULL metric), confirming that the zero-initialized
+phase projector remains near-identity throughout training and
+that the reported gains stem primarily from subband-resolved
+magnitude modulation. All WaFIR numbers reported in the
+main paper use the full configuration with phase modulation
+(A3) for consistency; the magnitude-only variant (A4) is an
+equally strong and slightly lighter simplification.
+Load-balance regularization is essential (A8, A10–A11).
+Removing the load-balance loss (A8, 𝜆=0) causes expert col-
+lapse: expert utilization approaches 1.0 and PSNR drops by
+−2.66 dB relative to the adopted 𝜆=0.01 (A3) at a matched
+epoch 105 on the fast-subset run (Table S5). The sweep over
+𝜆establishes 𝜆∈[0.001, 0.01] as the effective operating range;
+the full convergence analysis and formulation rationale (com-
+parison with Switch Transformer and entropy losses) are given
+in Section S1.3.
+Learned routing generalizes better than label-conditioned
+routing under distribution shift (A3 vs. A13). The in-
+14
+
+
+Table S3: Ablation study. FULL = mean PSNR (dB) over 8 test conditions: BSD68 𝜎∈{15, 25, 50}, Urban100 𝜎∈{15, 25, 50},
+Rain100L, SOTS. Δ relative to A3. Green Δ = gain, red = drop.
+ID
+Component
+BSD68 (PSNR)
+Urban100 (PSNR)
+Rain
+100L SOTS FULL
+Δ
+𝜎=15 𝜎=25 𝜎=50 𝜎=15 𝜎=25 𝜎=50
+A3
+Full WaFIR (reference)
+33.60
+31.00
+27.78
+32.71
+30.28
+26.75 33.14 27.56
+30.35
+—
+Baseline
+A0
+No SPMoE (PromptIR)
+33.45
+30.87
+27.63
+32.31
+29.77
+26.34 31.57 27.06
+29.87 −0.48
+SPMoE insertion depth
+A1
+SPMoE at L3 only
+33.59
+30.99
+27.73
+32.81
+30.19
+26.63 32.33 27.42
+30.21 −0.14
+A2
+SPMoE at L2+L3
+33.51
+30.94
+27.71
+32.80
+30.17
+26.59 32.11 27.39
+30.15 −0.20
+A15 Encoder + decoder SPMoE
+33.49
+30.87
+27.60
+32.53
+29.95
+26.42 31.56 27.12
+29.94 −0.41
+Routing quality
+A5
+Random routing
+33.58
+30.95
+27.68
+32.78
+30.17
+26.62 32.28 26.93
+30.12 −0.23
+A6
+Top-𝑘=1 routing
+33.49
+30.90
+27.65
+32.70
+30.09
+26.52 32.05 26.60
+30.00 −0.35
+Routing signal
+A12 Prompt-only router (no spectral descriptor) 33.47
+30.91
+27.68
+32.51
+29.95
+26.47 32.16 27.55
+30.09 −0.26
+A14 Descriptor-only router
+33.54
+30.95
+27.73
+32.44
+29.93
+26.53 32.73 27.73
+30.20 −0.15
+Frequency decomposition and interaction
+A7
+No cross-subband interaction
+33.54
+30.94
+27.69
+32.70
+30.16
+26.61 32.63 27.26
+30.19 −0.16
+A9
+Avg-pool DWT (no Haar wavelet)
+33.62
+31.03
+27.78
+32.71
+30.19
+26.75 32.55 27.41
+30.26 −0.10
+Expert design
+A4
+No phase modulation (magnitude only)
+33.59
+31.02
+27.78
+32.85
+30.25
+26.72 33.26 27.65
+30.39 +0.04
+distribution comparison above assumes the evaluation con-
+dition matches one of the five degradation labels seen at train-
+ing time—an assumption A13 depends on structurally, since
+its router selects experts conditioned on a one-hot ground-
+truth label (A13 is thus not a true oracle outside its label set).
+Table S4 stress-tests this assumption under three regimes: in-
+distribution (standard BSD68 noise levels), unseen intensity
+(interpolated 𝜎=35 between trained 𝜎∈{25, 50}, and extrap-
+olated 𝜎=70 beyond the trained range), and zero-shot com-
+pound degradation (two degradation types applied to the same
+image - e.g. rain+noise or haze+noise - never presented as
+a single label to either model during training). A13’s edge
+is confined to in-distribution conditions (+0.06 dB on aver-
+age on BSD68); it inverts once the input falls outside the
+five trained labels: A3 outperforms A13 by +0.45 dB PSNR
+(+0.046 SSIM) at extrapolated 𝜎=70, and by +0.67 dB on
+rain+noise. On haze+noise the two are statistically indistin-
+guishable (15.755 vs. 15.739 dB) notably, both models de-
+grade sharply on this condition (≈12–18 dB below single-
+degradation haze or noise performance), indicating compound
+haze+noise is a shared failure mode rather than an advantage
+for either routing strategy. The pattern that does hold is di-
+rectional: whenever the ground-truth label is unavailable or
+ill-defined for the input, A13 has no fallback beyond its five
+discrete classes, while A3’s continuous frequency-domain de-
+scriptor remains a well-defined signal regardless of the degra-
+dation’s identity or composition, making label-free frequency
+routing the more robust choice when the deployed degradation
+distribution cannot be fully anticipated at training time.
+Table S4: Out-of-distribution generalization, A3 (learned
+routing) vs. A13 (label-conditioned routing with the ground-
+truth degradation label). Unseen intensity and compound
+degradation conditions are not seen as a single label by either
+model during training. Δ = A3 −A13; green favours A3, red
+favours A13.
+Regime
+Condition
+A3
+A13
+Δ (PSNR)
+In-distribution
+BSD68 𝜎=15
+33.562/0.928 33.620/0.930
+−0.058
+BSD68 𝜎=25
+30.956/0.882 31.020/0.885
+−0.064
+BSD68 𝜎=50
+27.729/0.784 27.790/0.790
+−0.061
+Unseen intensity 𝜎=35 (interp.)
+29.308/0.841 29.265/0.840
++0.043
+𝜎=70 (extrap.) 24.851/0.657 24.405/0.611
++0.446
+Compound
+degradation
+Rain+noise25
+25.143/0.769 24.472/0.737
++0.671
+Haze+noise25
+15.755/0.706 15.739/0.707 +0.016 (n.s.)
+S3.3
+Load-Balance Ablation
+Table S5 isolates the effect of Llb. To avoid confounding reg-
+ularization strength with training length, all four settings (A8,
+A11, A10, A3; 𝜆∈{0, 10−4, 10−3, 10−2}) are evaluated at a
+matched epoch 105 on the fast-subset run, so any difference
+reflects the regularization strength alone rather than training
+length.
+At matched epoch 105, removing the loss (A8, 𝜆=0) drops
+PSNR to 25.81 dB versus 28.47 dB at the adopted 𝜆=0.01
+(A3) - a −2.66 dB gap attributable to regularization alone -
+with expert utilization approaching 1.0, confirming collapse
+onto a single pair. The loss is thus not a minor regularizer but
+15
+
+
+Figure S2: t-SNE of bottleneck features and routing
+weights. Top: bottleneck features of A0 (PromptIR, left)
+and A3 (WaFIR, right), colored by degradation type;
+WaFIR yields clearer inter-class separation, notably between
+Denoise15/Denoise25 and Derain/Dehaze. Bottom-left: A3
+routing-weight vectors colored by degradation type - all types
+lie on one mixed manifold, so routing does not organize by
+degradation identity. Bottom-right: the same vectors colored
+by DWT subband - four distinct arcs emerge without sub-
+band supervision, so routing organizes by frequency subspace.
+Routing is thus governed by which subband a feature belongs
+to, not which degradation produced it.
+a precondition for the architecture to function. It is also insen-
+sitive within a wide range: at epoch 105, the working values
+𝜆=0.0001 (A11) and 𝜆=0.001 (A10) lie within 0.11–0.21 dB
+of the adopted 𝜆=0.01, so any 𝜆∈[10−4, 10−2] prevents col-
+lapse while 𝜆=0 does not. We adopt 𝜆=0.01 for the full model,
+which attains the best PSNR of the four settings at epoch 105
+(28.471 dB, A3); this fast-subset, epoch-105 value is not di-
+rectly comparable to the 8-condition FULL score (30.35 dB)
+reported for A3 in Table S3.
+S3.4
+Seed Robustness
+To confirm that the component margins in Table S3 exceed
+random-initialization noise, we retrain the full model (A3)
+and the no-SPMoE baseline (A0), each with two random
+seeds, and evaluate the best-validation checkpoints (Table S6).
+Across seeds, A3 attains FULL = 30.29 ± 0.02 dB and A0
+= 29.83 ± 0.04 dB; the +0.46 dB SPMoE improvement is
+consistent on both seeds (+0.45 and +0.47 dB) and far ex-
+ceeds the per-model seed spread, confirming that the gain
+is architectural rather than an initialization artifact. Because
+A3’s seed deviation on FULL is only 0.02 dB, the compo-
+Table
+S5:
+Load-balance
+ablation.
+All
+four
+settings
+(A8/A11/A10/A3, i.e. 𝜆∈{0, 10−4, 10−3, 10−2}) are eval-
+uated at a matched epoch 105 on the fast subset. ΔPSNR is
+taken against A3, the adopted 𝜆=0.01 configuration. Expert
+utilization = max𝑒¯𝑤𝑠,𝑒averaged over test images and sub-
+bands; values near 1.0 indicate collapse.
+ID
+𝜆
+PSNR
+SSIM
+Δ PSNR
+Expert util.
+Matched epoch 105 (fast subset)
+A8
+0 (no lb)
+25.812
+0.8078
+−2.659
+≈1.0
+A11
+0.0001
+28.358
+0.8695
+−0.113
+–
+A10
+0.001
+28.259
+0.8620
+−0.212
+–
+A3
+0.010
+28.471
+0.8720
+— (ref.)
+–
+nent deltas of ≥0.14 dB in Table S3 all lie well outside
+seed noise. Frequency-structured tasks are highly stable for
+A3 (BSD68 and Rain100L both ±0.02 dB), whereas dehazing
+(SOTS) shows the largest seed spread (±0.67 dB), matching
+the training-schedule instability discussed in Section S6.
+S4
+Additional Experimental Results
+This section provides the complete qualitative and quantitative
+evaluations summarized in the Experiments section of the
+main paper. Unless stated otherwise, all models are evaluated
+without task-specific fine-tuning.
+S4.1
+Additional Qualitative Comparisons
+We provide qualitative comparisons grouped by task and by
+analysis type, so that each figure can be read on its own; unless
+stated otherwise all models are evaluated without task-specific
+fine-tuning, and panels with a reference image are annotated
+with PSNR↑/SSIM↑/LPIPS↓.
+Denoising. Figure S4 compares methods on BSD68 across
+noise levels 𝜎∈{15, 25, 50, 60}, and Figure S5 on cross-
+dataset Urban100 including the out-of-range 𝜎=60; in both,
+WaFIR removes noise while preserving fine texture and edge
+contrast, with the advantage most visible at high 𝜎.
+Deraining. Figure S8 shows in-distribution Rain100L, and
+Figure S9 the unseen CDD-11 rain evaluated without fine-
+tuning, where WaFIR removes residual streaks more com-
+pletely while keeping the underlying scene structure.
+Structure preservation and interpretability. Figures S6,
+S7, and S10 zoom into thin, repeated structures—line and
+lattice recovery on Urban100, Local Attribution Maps with
+the Diffusion Index (DI), and out-of-distribution rain-streak
+removal, respectively—and motivate the quantitative structure
+analysis in Section S4.2. Taken together, the figures show
+that WaFIR’s subband-resolved frequency modulation yields
+spatially coherent corrections along extended structures rather
+than piecewise local filtering.
+16
+
+
+Figure S3: Amplitude artifact test. t-SNE of three feature spaces, all colored by DWT subband. Left: 6-D descriptor (amplitude-
+sensitive)—subbands separate but with scatter. Center: D1 amplitude-invariant descriptor—four subbands form tighter, cleaner
+clusters, ruling out the amplitude-artifact hypothesis. Right: Actual routing weight vectors of the trained router—four arcs
+consistent with D1 structure, confirming genuine frequency-band specialization.
+Table S6: Seed stability of the full model (A3) and the no-SPMoE baseline (A0), PSNR (dB). Two random seeds, best-validation
+checkpoints. BSD68 and Urban100 are averaged over 𝜎∈{15, 25, 50}; FULL is the mean over the eight conditions of Table S3.
+The +0.46 dB A3−A0 gap on FULL is consistent across both seeds and exceeds the per-model seed spread.
+Model
+Seed
+BSD68
+Urban100
+Rain100L
+SOTS
+FULL
+A3
+1
+30.78
+29.72
+33.01
+27.98
+30.31
+2
+30.75
+29.97
+33.05
+27.03
+30.28
+mean±std
+30.76 ±.02
+29.84 ±.17
+33.03 ±.02
+27.50 ±.67
+30.29 ±.02
+A0
+1
+30.63
+29.46
+31.66
+26.92
+29.86
+2
+30.62
+29.41
+31.32
+27.03
+29.81
+mean±std
+30.62 ±.01
+29.43 ±.04
+31.49 ±.24
+26.98 ±.08
+29.83 ±.04
+S4.2
+Effectiveness on Line Artifacts and Rain
+Structures
+A recurring failure mode of purely spatial restorers is that
+they process each pixel from a local window, so on long, thin,
+repeated structures they either leave residual artifacts or over-
+smooth the structure. WaFIR modulates the global Fourier
+magnitude within each subband, so its correction is spatially
+coherent along an entire structure rather than filtered piece-
+wise. We examine the two structure-dominated cases directly.
+Line structures (Urban100).
+On the repeated line and lat-
+tice patterns of Urban100 (Figure S6), the spatial baselines
+introduce localized ringing or block artifacts along thin edges,
+whereas WaFIR restores the full line coherently without such
+artifacts. Because a periodic line structure maps to a compact,
+oriented signature in the frequency domain, subband-wise
+magnitude modulation corrects the whole structure at once in-
+stead of reconstructing it segment by segment precisely where
+local-window models break the line into artifacts.
+Rain streaks (out-of-distribution CDD-11).
+Rain streaks
+concentrate directional energy in the LH/HL subbands.
+Evaluated without fine-tuning on the unseen CDD-11 rain
+(Figure S10), WaFIR removes residual streaks more com-
+pletely while preserving the underlying texture, showing that
+subband-resolved routing transfers to rain statistics not seen
+during training.
+Attribution analysis (LAM / Diffusion Index).
+We quan-
+tify why using Local Attribution Maps (LAM) (Gu and Dong,
+2021) and their Diffusion Index (DI), which measures how
+widely the contributing input pixels are spread (Figure S7).
+WaFIR shows a substantially broader attribution footprint and
+the highest DI on both examples (43.0 and 36.5, versus 18.1–
+25.1 for the prompt/frequency baselines and ≤3.5 for AirNet):
+each output pixel draws on long-range, structure-consistent
+frequency evidence rather than a local window. This wide,
+frequency-coherent attribution field is the mechanistic expla-
+nation for the artifact-free line and rain recovery above, and
+directly reflects the design thesis, subband-wise global Fourier
+modulation trades the local receptive field of purely spatial
+models for a wide, structure-aware one.
+17
+
+
+Table S7: Out-of-distribution generalization. The all-in-one
+model (trained on Noise–Haze–Rain) is tested directly (no
+fine-tuning) on: an unseen rain dataset (CDD-11), unseen
+natural-image denoising (Urban100), and an industrial do-
+main—Scanning Acoustic Microscopy (SAM) for electronic
+semiconductor inspection (synthetic AWGN). Each setting in-
+cludes an out-of-range noise level 𝜎=60 beyond the training
+regime. Metrics: PSNR↑/SSIM↑/LPIPS↓; best per block in
+bold.
+Setting
+Method
+PSNR↑
+SSIM↑
+LPIPS↓
+CDD-11
+(rain)
+PromptIR
+24.44
+0.8638
+0.1734
+AdaIR
+24.73
+0.8625
+0.1691
+AirNet
+23.07
+0.8263
+0.2198
+WaFIR
+24.94
+0.8746
+0.1577
+Urban100
+avg
+(𝜎∈15-50)
+PromptIR
+30.77
+0.9121
+0.0612
+AdaIR
+31.23
+0.9193
+0.0569
+AirNet
+30.77
+0.9135
+0.0592
+WaFIR
+31.51
+0.9249
+0.0513
+Urban100
+𝜎=60
+(OOD)
+PromptIR
+26.36
+0.8219
+0.1137
+AdaIR
+26.65
+0.8229
+0.1046
+AirNet
+24.95
+0.7411
+0.1826
+WaFIR
+26.78
+0.8148
+0.1061
+SAM
+avg
+(𝜎∈25-50)
+PromptIR
+31.42
+0.8108
+0.2859
+AdaIR
+31.52
+0.8128
+0.2936
+AirNet
+31.32
+0.8049
+0.3243
+WaFIR
+31.63
+0.8152
+0.2718
+SAM
+𝜎=60
+(OOD)
+PromptIR
+29.15
+0.7320
+0.3100
+AdaIR
+29.20
+0.7317
+0.2492
+AirNet
+27.09
+0.6509
+0.3798
+WaFIR
+29.16
+0.7264
+0.1904
+S4.3
+Out-of-Distribution Evaluation
+For out-of-distribution evaluation:
+Figures S9 and S10 to-
+gether with Table S7 present representative results comparing
+WaFIR against state-of-the-art all-in-one methods.
+S5
+Computational Complexity
+Table S8 summarizes the parameter overhead of the three
+SPMoE levels. The deepest level (spmoe3, 𝐶=384) dominates
+due to the wider channel dimension. The total overhead is
++6.56M parameters (+18.4%) over the PromptIR baseline.
+Table S8: Parameter breakdown by SPMoE level.
+Component
+Channels 𝐶ℓ
+Params
+PromptIR baseline
+–
+35.59M
+SPMoE-L1 (spmoe1)
+96
++0.32M
+SPMoE-L2 (spmoe2)
+192
++1.22M
+SPMoE-L3 (spmoe3)
+384
++5.02M
+WaFIR (full)
+–
+42.15M
+We further compare WaFIR against representative all-in-
+one restoration baselines in terms of parameter count, com-
+putational cost, and wall-clock inference latency. Table S9
+reports results measured on the CDD dataset test set (200 rain
+images), on a single RTX 3060 GPU. AirNet has the fewest
+parameters (8.93M), but the highest FLOPs (602.55G) and the
+slowest inference, since its contrastive encoder processes the
+input twice and its deformable convolutions are computation-
+ally expensive. AdaIR is the most parameter- and compute-
+efficient baseline (28.79M params, 294.36G FLOPs). WaFIR
+adds approximately 6M parameters over PromptIR for the
+spectral mixture-of-experts decoder, with only a modest in-
+crease in FLOPs and inference latency, while achieving the
+best restoration quality.
+Time and space complexity.
+With 𝑁=𝐻𝑊spatial positions
+and 𝐶channels, each SPMoE block is dominated by the per-
+subband FFT/iFFT at O(𝑁𝐶log 𝑁) Cooley and Tukey (1965)
+and the 1×1 channel mixing at O(𝑁𝐶2), giving O(𝑁𝐶log 𝑁+
+𝑁𝐶2) time, i.e. near-linear in 𝑁and free of the O(𝑁2𝐶)
+cost of spatial self-attention. Activation memory is O(𝑁𝐶)
+(linear in 𝑁), and the added parameters are O(𝐶2) per level,
+independent of resolution (6.56M total, Table S8).
+Table S9: Computational complexity and restoration quality
+comparison, measured on the CDD dataset test set (200 rain
+images) on a single RTX 3060 GPU. Inference time is reported
+as mean ± std (ms); PSNR/SSIM are averaged over the same
+200 images.
+Model
+Params (M)
+GFLOPs
+Inference (ms)
+PSNR / SSIM
+PromptIR
+35.59
+316.28
+180.87 ± 0.37
+24.4413 / 0.8638
+AdaIR
+28.79
+294.36
+190.44 ± 2.96
+24.7290 / 0.8625
+AirNet
+8.93
+602.55
+320.97 ± 2.69
+23.0681 / 0.8263
+WaFIR
+42.15
+321.11
+199.52 ± 1.63
+24.9357 / 0.8746
+S6
+Limitations and Future Work
+Our model has several limitations that should be acknowl-
+edged.
+• Parameter overhead. The +18.4% parameter overhead
+(42.15M total) places WaFIR above lightweight competi-
+tors (AnyIR Ren et al. (2026): 6M, MoCE-IR Zamfir et al.
+(2025): 25M). Two directions could reduce this cost. The
+first is knowledge distillation from WaFIR to a compact
+student. The second exploits the interpolation properties
+of the spectral (Fourier) domain: since the per-frequency
+magnitude and phase modulations produced by the ex-
+perts vary smoothly across frequency, they could be pre-
+dicted on a coarse frequency grid and interpolated back
+to full resolution, so that the spectral experts operate
+on a reduced set of frequency coefficients and cut both
+parameters and compute.
+• Dehazing. WaFIR trails its PromptIR reference on de-
+hazing (29.70 vs. 30.58 dB on SOTS), despite iden-
+tical full-RESIDE training. We attribute this to the
+degradation and the training schedule, not the SP-
+MoE module. Under the atmospheric scattering model
+18
+
+
+𝐼=𝐽𝑡+𝐴(1−𝑡) He, Sun, and Tang (2009), haze is a
+smooth, orientation-free, low-frequency degradation that
+lacks the fixed directional signature rain and noise pro-
+vide, so the subband router has little structure to key
+on. Empirically, the shared schedule also under-serves
+dehazing (repeat factor one, versus heavily up-sampled
+rain and noise), yet under a matched budget SPMoE still
+improves SOTS over PromptIR (27.56 vs. 27.06 dB), in-
+dicating an optimization-balance effect rather than an ar-
+chitectural limit. Two directions could close the gap: task-
+balanced scheduling (e.g., uncertainty-based weighting),
+and adaptively up-weighting the prompt context when
+the spectral descriptor is uninformative, as for haze.
+• Degradation scope and compound cases. WaFIR cur-
+rently covers noise, rain, and haze; extending to deblur-
+ring and real-world images is a natural direction. Com-
+pound degradations further remain a shared failure mode:
+on haze+noise, both learned and label-conditioned rout-
+ing collapse to ≈15.7 dB (Table S4), and at 𝜎=60 WaFIR
+does not lead on every metric (Table S7); robust mixed-
+degradation handling remains open.
+• Spectral descriptor. The amplitude-invariance control
+in Section S2.4 suggests that ratio-based spectral de-
+scriptors (D1) may outperform the current absolute-
+magnitude descriptor. Substituting D1 and measuring the
+impact on PSNR is a concrete future experiment.
+19
+
+
+Figure S4: Qualitative denoising on BSD68. Rows correspond to noise levels 𝜎∈{15, 25, 50, 60}. Columns show the noisy
+input, PromptIR, AdaIR, WaFIR (ours), and the reference image. WaFIR suppresses noise while preserving finer structures,
+with the differences becoming most visible at 𝜎∈{50, 60}. Zoomed crops highlight regions in which competing methods
+over-smooth texture or weaken edge contrast.
+20
+
+
+Figure S5: Cross-dataset denoising on Urban100. The all-in-one models are evaluated directly on Urban100, including the
+out-of-range noise level 𝜎=60, without fine-tuning. The comparison emphasizes preservation of repeated edges, line patterns,
+and high-frequency architectural details under dataset and noise-intensity shift.
+Figure S6: Zoomed line-structure recovery on Urban100. Close-up crops of repeated line and lattice patterns under denoising.
+Because WaFIR modulates the global Fourier magnitude within each subband, its correction is spatially coherent across the
+whole line structure; it therefore restores long, thin edges without the localized block or ringing artifacts that purely spatial
+(local-window) models tend to introduce along such structures. This behavior—coherent global frequency correction rather than
+piecewise local filtering—is a distinctive strength of WaFIR on periodic, high-frequency content.
+21
+
+
+Figure S7: Local Attribution Maps (LAM) and Diffusion Index (DI) on Urban100. For a fixed target region (red box),
+LAM (Gu and Dong, 2021) highlights the input pixels that contribute to reconstructing that region; the Diffusion Index (DI)
+summarizes the spatial extent of this attribution (higher DI = information aggregated from a wider area). The DI value is
+annotated below each panel. WaFIR attains the highest DI on both examples (row 1: 43.0 vs. AdaIR 18.1, PromptIR 23.1,
+AirNet 3.5; row 2: 36.5 vs. AdaIR 24.3, PromptIR 25.1, AirNet 1.6), exhibiting a markedly broader attribution footprint,
+whereas the spatial baselines concentrate attribution in a narrower neighborhood. This is the direct interpretability signature
+of WaFIR’s design: subband-wise global Fourier modulation lets every output pixel draw on long-range, structure-consistent
+frequency evidence, which explains both the artifact-free line recovery in Figure S6 and the sharper edges reported quantitatively
+in Table S7.
+Figure S8: Qualitative deraining on Rain100L. Columns show the rainy input, PromptIR, AdaIR, WaFIR (ours), and the
+reference image. WaFIR removes residual streaks while retaining fine scene structure and avoiding excessive smoothing.
+22
+
+
+Figure S9: Qualitative deraining on the unseen CDD-11 dataset. Models are trained on the source datasets and evaluated
+on CDD-11 without fine-tuning to test cross-dataset generalization. Columns show the rainy input, PromptIR, AdaIR, AirNet,
+WaFIR (ours), and the reference; displayed metrics are PSNR↑/SSIM↑/LPIPS↓. WaFIR removes rain streaks more thoroughly
+and attains the best PSNR/SSIM across the illustrated examples.
+Figure S10: Zoomed deraining on the unseen CDD-11 dataset (out-of-distribution). Close-up crops for a rain pattern outside
+the training distribution. Evaluated without fine-tuning, WaFIR removes residual streaks more completely while preserving
+underlying texture, illustrating that subband-resolved frequency routing generalizes to rain statistics never seen during training.
+23
+
+
+Figure S11: Qualitative cross-domain generalization. One example per domain: unseen rain (CDD-11), natural-image de-
+noising (Urban100, 𝜎=50), and an industrial domain—Scanning Acoustic Microscopy of an electronic semiconductor package
+(SAM, 𝜎=50). Columns: degraded input, PromptIR, AdaIR, AirNet, WaFIR (ours), reference; PSNR↑/SSIM↑/LPIPS↓below
+each panel. Trained only on noise–haze–rain and applied without fine-tuning, WaFIR attains the best metrics on the examples
+shown; per-metric outcomes at 𝜎=60 vary across methods (Table S7).
+24
