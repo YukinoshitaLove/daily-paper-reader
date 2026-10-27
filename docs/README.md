@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-14 ~ 2026-10-23</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-27</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 21 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 17 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>10</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>6</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-23 04:16:39 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-27 23:21:38 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-14至10-23共筛出21篇图像生成与编辑论文，精读10篇、速读11篇。最值得看的是《Look Before You Restore》提出的“先预测后行动”式图像修复，以及《PreciseEdit》面向单步图像编辑的稳定语义迁移，两者均获9.0分。普通读者可先读这两篇的精读笔记，再按需浏览BluePixel、UltraDiff等速读工作。</p>
+<p>10月27日日报收录17篇，精读6篇、速读11篇，重点聚焦图像去摩尔纹与可控图像编辑。最值得看的是两个9.0分方向：真实场景图像去摩尔纹的鲁棒编辑，以及用连续程序学习图像生成与编辑；速读中多轮图像编辑也较集中。普通读者可先读这两篇9.0分精读，再按需浏览ACEdit、MTEdit等多轮编辑速读。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -78,12 +78,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">10 篇</strong>
+    <strong class="dpr-home-dashboard-count">6 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Look Before You Restore: Learning to Predict Before Acting for Agentic Image Restoration">Look Before You Restore: Learning to Predict Before Acting for Agentic Image Restoration</span></li><li><span class="dpr-home-dashboard-paper-title" title="PreciseEdit: Strong Yet Stable Semantic Transport for One-Step Image Editing">PreciseEdit: Strong Yet Stable Semantic Transport for One-Step Image Editing</span></li><li><span class="dpr-home-dashboard-paper-title" title="MT Forcing: Towards Stable and Consistent Multi-Turn Image Editing with Autoregressive Diffusion">MT Forcing: Towards Stable and Consistent Multi-Turn Image Editing with Autoregressive Diffusion</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Dual-Scale Condition-Shift Editing for Robust Real-World Image Demoiréing">Dual-Scale Condition-Shift Editing for Robust Real-World Image Demoiréing</span></li><li><span class="dpr-home-dashboard-paper-title" title="Dancing Diffusion: Learning Continuous Programs for Image Generation and Editing">Dancing Diffusion: Learning Continuous Programs for Image Generation and Editing</span></li><li><span class="dpr-home-dashboard-paper-title" title="One Evaluation Is Enough: Inversion-Free Image Editing with Trajectory Correction">One Evaluation Is Enough: Inversion-Free Image Editing with Trajectory Correction</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>10</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>6</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -94,7 +94,7 @@
     <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="BluePixel: Toward Native 4K Agentic Image Editing">BluePixel: Toward Native 4K Agentic Image Editing</span></li><li><span class="dpr-home-dashboard-paper-title" title="UltraDiff: Transferring High-Fidelity Priors to Compressed Latent Spaces for High-Resolution Image Generation">UltraDiff: Transferring High-Fidelity Priors to Compressed Latent Spaces for High-Resolution Image Generation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Rethinking Classifier-Free Guidance for TI2I Flow Matching">Rethinking Classifier-Free Guidance for TI2I Flow Matching</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="ACEdit: Stable Multi-Turn Image Editing via Asymmetric Conditioning">ACEdit: Stable Multi-Turn Image Editing via Asymmetric Conditioning</span></li><li><span class="dpr-home-dashboard-paper-title" title="FlashControl: One-Step Controllable Generator via Distillation-Friendly Single-Stream Teachers">FlashControl: One-Step Controllable Generator via Distillation-Friendly Single-Stream Teachers</span></li><li><span class="dpr-home-dashboard-paper-title" title="MTEdit: Packed Trajectories Beat Rollouts for Multi-Turn Image Editing">MTEdit: Packed Trajectories Beat Rollouts for Multi-Turn Image Editing</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>11</strong></span></div>
 </section>
