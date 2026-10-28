@@ -1,0 +1,567 @@
+Title: Training-free Acceleration for Blind Compressed Image Restoration via Activation-Calibrated Singular Value Decomposition
+
+URL Source: https://arxiv.org/pdf/2610.29959v2
+
+Published Time: Fri, 23 Oct 2026 01:29:49 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Training-free Acceleration for Blind Compressed Image Restoration via Activation-Calibrated Singular Value Decomposition 
+
+Suhang Yao, Xin Li, Xijun Wang, Yufei Wang, Yeying Jin, and Zhibo Chen 
+
+Abstract —Transformer-based models achieve strong perfor-mance on blind compressed image restoration (CIR) under unknown compression settings, but their densely stacked projec-tion operators make deployment costly. We study training-free acceleration for such models through an empirical, operator-level analysis. Specifically, we profile where computation is concentrated, characterize channel-wise activation distributions under compressed inputs, and examine the singular-value decay of representative projection weights. These measurements identify the recurring projections in the attention, feed-forward, convolu-tional, and prompt-conditioning pathways as effective low-rank replacement targets that preserve the original inference graph. They further establish truncated SVD (TSVD) as a principled training-free baseline for blind CIR and reveal why a uniform low-rank objective is mismatched to the channel-imbalanced feature distributions of compressed images. Accordingly, we formulate Activation-Calibrated Singular Value Decomposition (ASVD) for this restoration setting, deriving low-rank factors 
+
+entirely offline from pretrained weights and lightweight activation statistics gathered from only a few compressed calibration images. By weighting the decomposition with channel-wise activation magnitudes, our ASVD assigns larger penalties to errors on more active channels, requiring neither retraining nor online calibration and leaving the restoration pipeline intact. When instantiated on PromptCIR at rank 64, ASVD consistently improves PSNR-B over TSVD across four standard benchmarks under identical parameter and MAC budgets. At this operating point, the factorized model cuts parameters by 59% (34 .75 M → 14 .34 M) and computation by 
+
+16 .1% (258 .79 → 217 .16 GMACs for a 256 × 256 input), enabling acceleration without retraining. 
+
+Index Terms —Singular value decomposition, activation cali-bration, low-rank approximation, model compression, inference acceleration, blind compressed image restoration 
+
+I. I NTRODUCTION 
+
+Lossy image compression is indispensable for large-scale visual storage and transmission. JPEG remains one of the most widely deployed standards thanks to its simplicity and 
+
+(Corresponding authors: Xin Li and Zhibo Chen.) 
+
+Suhang Yao, Xin Li, Xijun Wang, and Zhibo Chen are with the University of Science and Technology of China, Hefei, China (e-mail: yshustc@mail.ustc.edu.cn; xin.li@ustc.edu.cn; xijunwang00@gmail.com; chen-zhibo@ustc.edu.cn). Yufei Wang is with SparcAI Inc. (e-mail: yufei.wang@sparclab.ai). Yeying Jin is with the National University of Singapore, Singapore (e-mail: jinyeying@u.nus.edu). 
+
+broad compatibility, yet aggressive compression inevitably introduces blocking, ringing, and texture loss. Blind compressed image restoration (CIR) targets this problem by recovering faithful images from compressed inputs without access to the compression quality factor or other degradation parameters. Deep restoration models have substantially advanced blind CIR. Transformer-based architectures are particularly effective, since self-attention and hybrid attention blocks capture the long-range dependencies that purely local models struggle to represent [1]. Representative backbones such as Uformer [2], Restormer [3], and HAT [4] have performed well across a range of low-level vision tasks. For blind CIR, PromptCIR [5] shows that prompt-based conditioning improves robustness when compression artifacts are unknown and spatially varying. The architectural choices that raise restoration quality also complicate deployment. Modern transformer-based CIR models repeatedly apply high-dimensional projection operators in their attention, feed-forward, convolutional-projection, and prompt-conditioning pathways. Because these operators recur across many scales and layers, they dominate both parameters and computation. Our profiling of PromptCIR shows that the attention, feed-forward, and convolutional-projection operators alone account for 99 .43% of parameters and 99 .89% of con-volutional and linear MACs in the 128 × 128 profiling setting, which makes them the primary targets for acceleration. For resource-constrained or latency-sensitive pipelines, reducing these projections directly improves efficiency while keeping the surrounding restoration process intact. We approach acceleration from this operator-level evidence rather than from a fixed compression recipe. An effective method should target the repeatedly used projections, pre-serve the pretrained restoration pipeline, avoid task-specific retraining, and account for channel-dependent behavior under compressed inputs. We therefore examine activation statistics and singular-value spectra before deciding how to replace these operators. The spectral analysis points to truncated singular value decomposition (TSVD) as a natural training-free baseline: linear projections and reshaped convolutional projections are written as matrices, decomposed offline, and replaced by two sequential low-rank projections. Direct TSVD, however, treats all channels uniformly under an unweighted 
+
+© 2026 IEEE. Personal use of this material is permitted. Permission from IEEE must be obtained for all other uses, in any current or future media, including reprinting/republishing this material for advertising or promotional purposes, creating new collective works, for resale or redistribution to servers or lists, or reuse of any copyrighted component of this work in other works. DOI: https://doi.org/10.1109/JETCAS.2026.3745896 
+
+1arXiv:2610.29959v2 [cs.CV] 22 Oct 2026 matrix objective. This assumption is restrictive for restoration, since compressed-image features exhibit markedly nonuniform channel magnitudes tied to artifacts, textures, and prompt-conditioned information. Guided by these observations, we design Activation-Calibrated Singular Value Decomposition (ASVD) as a projection-level acceleration method for transformer-based blind CIR. The method first expresses the selected linear and convolutional projections in a unified matrix form. TSVD then provides a closed-form, training-free low-rank baseline grounded in the Eckart–Young theorem [6]. Building on this baseline, our ASVD uses lightweight input and output activation statistics collected from a small set of compressed calibration images to weight the decomposition. The resulting low-rank factors are produced entirely offline and inserted back into the pretrained network, requiring no ground-truth restored images, no retraining, no prompt redesign, and no online calibration. We instantiate the framework on PromptCIR, a representative prompt-based blind CIR model, and evaluate it on standard blind CIR benchmarks. At rank 64, ASVD improves PSNR-B over TSVD across all four benchmarks while maintaining comparable PSNR and SSIM under identical parameter and MAC budgets. The main contributions are summarized as follows:  
+
+> •
+
+We present a training-free, projection-level low-rank acceleration formulation for transformer-based blind CIR. Operator profiling and singular-value analysis identify the dominant replacement targets and establish TSVD as an architecture-preserving baseline.  
+
+> •
+
+We design ASVD to address the channel imbalance observed in compressed-image feature activations. Our decomposition draws on lightweight statistics from com-pressed calibration inputs to emphasize activation-sensitive channels, without paired targets or retraining.  
+
+> •
+
+We instantiate the method on PromptCIR and evaluate it against the original backbone and TSVD. The results show consistent PSNR-B improvements over TSVD at rank 64 under the same parameter and MAC budgets, while leaving the surrounding restoration pipeline unchanged. II. R ELATED WORK 
+
+A. Compressed Image Restoration 
+
+Compressed image restoration (CIR) targets artifacts caused by quantization and transform loss. Early approaches relied on transform-domain priors or dual-domain modeling [7], using handcrafted assumptions to recover information lost to compression. CNN-based methods later pushed CIR performance further. ARCNN [8] demonstrated the effectiveness of convolutional networks for artifact reduction, while dual-domain designs such as D3 [9] and DMCNN [10] exploited complementary representations in the pixel and transform domains, following the residual learning paradigm [11]–[14]. Attention-enhanced CNN restorers further improved representation capacity through channel and non-local modeling [15], [16], while quantization-guided designs injected JPEG side information [17]. More recently, transformer-based architectures have become popular restoration backbones, owing to the global modeling capability of self-attention [18]. Representative models such as SwinIR [19], Uformer [2], Restormer [3], and HAT [4], [20] handle long-range dependencies and complex artifact patterns effectively, while Stripformer [21] and NAFNet [22] improve efficiency through structured attention or simplified operators. State-space restoration backbones such as MambaIR [23] offer another route to efficient long-range modeling. This progression has been evaluated across diverse restoration benchmarks and datasets [1], [24]–[27]. However, the gains of these backbones come largely from stacking high-dimensional projection and attention operators, whose cost grows rapidly with feature width and token length, making efficient deployment a recurring concern. The blind CIR setting poses additional challenges, because the compression artifacts are unknown and spatially varying. To improve robustness, prior work incorporates auxiliary cues or representation learning strategies, including quality-factor-aware modeling [28] and contrastive representation learning [29]. More recently, prompt-based conditioning has emerged as an effective way to handle diverse degradations, with prompt-conditioned transformers proving effective in both all-in-one and blind CIR settings, including Promp-tIR [30], PromptCIR [5], ProRes [31], PromptRR [32], Prompt-in-Prompt [33], DA-CLIP [34], and visual or multimodal prompt learning methods [35]–[37]. Related compressed-image restoration and super-resolution efforts, including UCIP [38], MambaCSR [39], and CODiff [40], further show the importance of compression-aware conditioning. Such prompt conditioning introduces additional projection pathways that interact with the backbone, further enlarging the operator budget that any acceleration method must address. 
+
+B. Model Compression and Acceleration 
+
+Model efficiency has been studied extensively through pruning, quantization, and low-rank approximation [41]–[44]. Among these, low-rank approximation offers a principled and training-free route to reducing computation, grounded in the classical Eckart–Young theorem [6]. Classical CNN acceleration methods showed that convolutional redundancy can be exploited through low-rank or tensor factorization [45]–[47]. Recent works revisit truncated SVD for large neural networks and propose truncation-aware [48] or importance-weighted and Fisher-weighted variants [49] to improve approximation fidelity. A shared insight is that raw weight-reconstruction error is an incomplete objective, since channels contribute unequally to the layer output; this motivates activation- or importance-aware reweighting of the decomposition objective. In parallel, training-free acceleration techniques for iterative generative models exploit feature reuse and operator-level ap-proximation. Representative examples include DeepCache [50], block-wise caching [51], and channel-aware SVD acceleration for diffusion transformers [52]. Other cache-based or training-free variants further explore layer caching, token-wise feature reuse, fast-forward caching, and delta updates [53]–[57]. Although developed mainly for diffusion models, these ap-2Attention projections FFN projections Conv. projections Prompt conditioning Others 0% 10% 20% 30% 40% 50% 60%            
+
+> Share of baseline
+> Projection operators: 99.43% parameters 99.89% MACs
+> (a) Operator-level cost concentration
+> Parameters MACs
+> 0% 20% 40% 60% 80% 100%
+> Channels required
+> Window QKV Window output Overlap QKV Overlap output MDTA QKV MDTA output GDFN expand GDFN reduce Prompt linear
+> (b) Activation-energy concentration
+> 50% activation energy 90% activation energy
+> 0% 20% 40% 60% 80% 100%
+> Rank / max rank
+> Window QKV Window output Overlap QKV Overlap output MDTA QKV MDTA output GDFN expand GDFN reduce Prompt linear
+> (c) Rank for 95% spectral energy across representative layers
+
+Fig. 1. Empirical motivation for projection-level ASVD. (a) Parameter distribution and convolutional and linear MAC distribution across operator groups in PromptCIR, evaluated at an input resolution of 128 × 128 . (b) Output activations are channel-imbalanced: a relatively small fraction of channels often accounts for 50% of activation energy, while the fraction required for 90% energy varies by operator family. (c) The rank required to preserve 95% spectral energy also varies across operators; bars show the mean over representative layers and error bars show the min–max range. 
+
+proaches reinforce calibration and operator-level approximation as practical tools for training-free acceleration. We develop a training-free acceleration scheme for PromptCIR-based blind CIR that calibrates projection factoriza-tion using activation magnitudes from compressed images. The resulting diagonal scaling provides a lightweight alternative to truncation-aware whitening [48] and Fisher-weighted objec-tives [49]. Whereas channel-aware decomposition for diffusion transformers supports cache correction [52], our factors directly replace spatial and prompt-conditioning projections, preserving the restoration pipeline without retraining. III. M OTIVATION AND DESIGN RATIONALE 
+
+We derive the projection-level SVD design from an empirical analysis of transformer-based blind CIR. The analysis is organized around three questions: which operators dominate the cost, whether their weights admit a compact low-rank approximation, and whether compressed-image activations justify channel-aware weighting. The answers determine our method design: projection operators define the replacement unit, TSVD supplies the training-free baseline, and ASVD supplies activation-aware weighting. 
+
+A. Projection Operators as the Replacement Unit 
+
+Prompt-based transformer restoration models contain many projection operators, including query-key-value projections, output projections, feed-forward expansions and reductions, point-wise convolutional projections, and prompt-conditioning projections. These modules are invoked repeatedly across the encoder, bottleneck, and decoder stages. They share a unified matrix representation: a linear layer is already a matrix, and a convolution kernel can be reshaped into a two-dimensional operator. This common representation localizes the replacement while preserving the architecture. The cost profile in Fig. 1(a) shows that this choice is not merely convenient algebraically but also meaningful for effi-ciency. In the profiled PromptCIR model, attention projections, feed-forward projections, and convolutional-projection layers together account for 99 .43% of parameters and 99 .89% of convolutional and linear MACs at 128 ×128 , so replacement can concentrate on these operators rather than on the non-dominant modules. Prompt-conditioning operators are far smaller in aggregate, yet we retain them within the unified formulation be-cause they govern degradation-conditioned feature modulation. Replacing selected projections is also far less intrusive than redesigning attention blocks. The surrounding normalization, nonlinearity, skip-connection, and prompt-conditioning logic can remain unchanged, while each dense projection is realized by two low-rank factors. This locality is essential in an offline replacement setting, where the compressed model must reproduce the pretrained restoration mapping as closely as possible. 
+
+B. Spectral Evidence for SVD-Based Replacement 
+
+After identifying the replacement unit, we examine whether SVD is a reasonable low-rank mechanism for these operators. SVD satisfies the deployment constraints imposed by the pretrained restoration model: it can be computed offline from pretrained weights, yields the optimal rank-r approximation under the standard Frobenius objective, and applies uniformly to linear projections and reshaped convolution kernels. It preserves the surrounding inference graph, since each original projection 3is replaced by two sequential low-rank projections with the same tensor interface. The singular-value analysis in Fig. 1(c) shows why SVD is an appropriate starting point but not a complete design. Representative projection operators exhibit measurable spectral concentration, but its degree varies across operator families: the mean rank needed to preserve 95% of the spectral energy, defined as the sum of squared singular values, ranges from 
+
+47 .93% for prompt linear projections to 86 .47% for GDFN projections. This evidence supports SVD-based replacement while indicating that rank must be analyzed explicitly. First, TSVD is a principled baseline because it tests how much of the pretrained projection behavior a bounded-rank subspace can capture. Second, because uniform low-rank replacement is not equally effective for all projections, rank and operator selection should be evaluated explicitly rather than fixed globally. 
+
+C. Channel Statistics Under Compressed Inputs 
+
+TSVD provides the low-rank baseline, but its objective is uniform over channels. For blind CIR, this assumption deserves scrutiny because the network must preserve spatially precise structures while suppressing compression artifacts. As compressed images pass through a restoration transformer, different channels carry different amounts of artifact, texture, and prompt-conditioned information. We therefore inspect the activation statistics of high-cost projections using a small compressed calibration set. The observed activation distributions are markedly nonuni-form. For several window-attention, multi-Dconv head trans-posed attention (MDTA), gated-Dconv feed-forward network (GDFN), and output-projection families, 50% of the output activation energy, defined as the sum of squared per-channel activation magnitudes, concentrates in only 17 .39% –23 .76% 
+
+of the channels, whereas prompt-related and some overlap-attention projections are less concentrated. Such heterogeneity means that a single unweighted objective treats all channels alike even when their activation magnitudes differ sharply under compressed inputs, which makes uniform channel treatment restrictive. If a high-activation channel is poorly approximated, the resulting error can propagate through the restoration features far more strongly than an error on a weakly activated channel. Our ASVD uses this observation as calibration information rather than as a training signal. The collected statistics neither optimize a restoration loss, nor rely on ground-truth restored images, nor modify the model online. Instead, they define diagonal scaling factors that give activation-dominant input and output channels greater influence within a deterministic offline replacement procedure. 
+
+D. From Analysis to ASVD 
+
+These observations define a two-step replacement strategy. Projection-level replacement targets the dominant cost centers while keeping the pretrained restoration pipeline intact. The spectral results support TSVD as a closed-form low-rank baseline for these matrix-representable operators. The activation results then motivate ASVD, our factor-generation refinement that introduces activation-derived channel weights so that channels more active under compressed inputs gain greater influence in the weighted approximation objective. At a fixed rank, TSVD and ASVD share the same inference-time structure, parameter count, and MACs; comparing them therefore isolates the effect of activation-calibrated factor generation under an identical deployment budget. IV. M ETHODOLOGY 
+
+A. Overview 
+
+The analysis in Sec. III leads to an operator-replacement formulation: selected projections are replaced by two low-rank factors generated offline from pretrained weights and, in our ASVD variant, lightweight activation statistics. The surrounding restoration pipeline is left unchanged, and no retraining, prompt redesign, or online updating is introduced. As illustrated in Fig. 2, TSVD directly decomposes the pre-trained projection weights as a closed-form baseline, whereas our ASVD first applies channel-wise scaling, decomposes the scaled weights, and then maps the factors back to the original operator space. At a fixed rank, the two variants share the same inference-time structure and complexity; only factor generation differs. 
+
+B. Unified Projection Representation 
+
+Transformer-based CIR models use heterogeneous projection operators. A linear layer is parameterized by W ∈ Ro×i, where 
+
+i and o denote the input and output channel dimensions. For a convolution kernel K ∈ Ro×i×kh×kw , we use the matrix form 
+
+W = reshape( K) ∈ Ro×(ik hkw ). (1) Eq. (1) lets linear layers and convolutional projections share the same decomposition procedure; after factorization, each operator is restored to its original layer type. 
+
+C. Problem Formulation 
+
+Let f (·) denote a pretrained transformer-based blind CIR model. Guided by the cost profile in Sec. III-A, we select a set of projection operators S from the attention, feed-forward, convolutional projection, and prompt-conditioning pathways. Each operator m ∈ S is represented by a weight matrix W (m).Given a rank budget r, the goal is to construct 
+
+W (m) ≈ ˆW (m) = ˆW (m) 
+
+> a
+
+ˆW (m) 
+
+> b
+
+, rank( ˆW (m)) ≤ r, (2) while leaving all non-selected modules unchanged. The effec-tive rank is bounded by the operator shape, 
+
+reff = min( r, r max ), (3) where rmax = min( o, i ) for a linear projection, and rmax =min( o, ik hkw) for a matricized convolution. Thus, a shared r is an upper bound rather than a common retained-rank fraction. It provides a controlled comparison of TSVD and ASVD without layer-wise rank optimization. 4Layer 1 
+
+Layer 2 
+
+Layer N 
+
+# ...  
+
+> Original
+> Weights 𝐖
+> Original
+> Model
+
+Layer 1 
+
+Layer 2 
+
+Layer N 
+
+# ...  
+
+> Compressed
+> Weights 𝐖’
+> Compressed
+> Model Calibration Images
+> Channel Activation
+> Magnitude Acc.
+
+𝑾 𝒂  𝑾 𝒃 𝑾 
+
+𝑾 = 𝑫 𝒍 𝑾𝑫 𝒓  
+
+> Scaling Factor 𝐃
+> SVD
+> Trunc.
+
+𝑾 𝒂 ’
+
+𝑾 𝒃 ’ 
+
+> Diagonal Scaling
+> Inverse
+> Scaling Fig. 2. Overview of our ASVD. We select high-cost projection operators in a transformer-based blind CIR model, collect lightweight per-channel activation statistics on a small calibration set, and form diagonal scaling factors. Truncated SVD is applied to the scaled weights, and the low-rank factors are mapped back via inverse scaling, yielding factorized replacements that preserve the original inference flow.
+
+D. Complexity of Low-rank Replacement 
+
+The weight and MAC counts follow directly from the matrix shape; the expressions below exclude unchanged bias terms. For a dense projection W ∈ Ro×i, the original parameter count is oi . Replacing it with two factors Wa ∈ Ro×reff and 
+
+Wb ∈ Rreff ×i changes the count to 
+
+Plr = reff (o + i). (4) The same expression gives the per-location multiply-accumulate cost of a linear projection. For a convolution kernel reshaped as W ∈ Ro×(ik hkw ), the low-rank parameter count becomes 
+
+Plr = reff (o + ik hkw). (5) Low-rank replacement reduces computation when the rank is small enough to offset the factorization overhead. The ablation study reports the resulting parameter and MAC counts. 
+
+E. Implementation of Factorized Operators 
+
+The low-rank factors are inserted as ordinary projection layers without intermediate nonlinearity or normalization. For a linear projection, Wb first maps the input feature from i
+
+channels to reff channels, and Wa then maps the intermediate feature from reff channels to o channels. If the original projection has a bias term, it is retained after the second factor to preserve the affine form. For a convolutional projection, the reshaped factor Wb ∈
+
+Rreff ×(ik hkw ) is implemented as a convolution from i channels to reff channels with kernel size kh × kw, and the second factor 
+
+Wa ∈ Ro×reff as a 1 × 1 convolution from reff channels to o
+
+channels. The original spatial stride, padding, and dilation are attached to the first factor, while the second factor mixes the intermediate channels. This preserves the input-output tensor shape and leaves residual connections, attention reshaping, prompt fusion, and output heads unchanged. Because TSVD and ASVD produce the same two-factor graph at the same rank, their difference is attributable to factor generation rather than runtime architecture. 
+
+F. TSVD as the Training-free Low-rank Baseline 
+
+For a selected weight matrix W , the singular value decom-position is 
+
+W = U ΣV ⊤, (6) where the singular values are sorted in descending order. Here and below, the subscript r denotes truncation to the effective rank reff in Eq. (3). TSVD retains these leading components: 
+
+W ≈ Wr = Ur Σr V ⊤ 
+
+> r
+
+. (7) We form the two factors as 
+
+Wa = Ur Σr , Wb = V ⊤ 
+
+> r
+
+, (8) so that Wr = WaWb, and the original dense projection is replaced by two sequential low-rank projections. This baseline is closed-form, deterministic, and training-free; however, its weight-centric objective ignores the channel magnitudes that compressed inputs induce. 
+
+G. Proposed Activation-Calibrated SVD 1) Activation-calibrated objective: Our ASVD reshapes the decomposition objective using the channel-wise activation magnitudes observed in Sec. III-C. For a projection matrix 
+
+W , we define diagonal scaling matrices 
+
+Dl = diag( dl), Dr = diag( dr ). (9) The scaling vectors dl and dr are derived from the output and input activation statistics, respectively, with dimensions matching the rows and columns of W . For E = W − ˆW and input x, the expected squared output perturbation is 
+
+E∥Ex ∥22
+
+ = tr( EC xE⊤),
+
+where Cx = E[xx ⊤]. Input activation magnitudes approximate input-channel importance, while output magnitudes weight errors in active output channels. Using these lightweight diagonal weights, ASVD minimizes 
+
+min  
+
+> rank( ˆW)≤r
+
+Dl(W − ˆW )Dr
+
+> 2
+> F
+
+. (10) 5Algorithm 1 Offline ASVD factor generation 
+
+Require: Pretrained CIR model f , selected projection set S,compressed calibration set C, rank budget r 
+
+> 1:
+
+Run f on C and collect input and output channel magni-tudes for each m ∈ S  
+
+> 2:
+
+for each selected projection m ∈ S do  
+
+> 3:
+
+Convert its weight to matrix form W (m) 
+
+> 4:
+
+Form diagonal scaling matrices D(m) 
+
+> l
+
+and D(m) 
+
+> r
+
+from the collected channel magnitudes  
+
+> 5:
+
+Compute ˜W (m) = D(m) 
+
+> l
+
+W (m)D(m) 
+
+> r
+> 6:
+
+Retain the largest reff singular values of ˜W (m) and their singular vectors  
+
+> 7:
+
+Map the factors back according to Eq. (12)  
+
+> 8:
+
+Replace the original dense projection with the two low-rank factors  
+
+> 9:
+
+end for  
+
+> 10:
+
+return Compressed model with all other modules un-changed Let ˜W = DlW D r and Z = Dl ˆW D r. Invertible scaling preserves rank, so Eq. (10) is equivalent to 
+
+min  
+
+> rank( Z)≤r
+
+∥ ˜W − Z∥2 
+
+> F
+
+.
+
+Its truncated-SVD minimizer is 
+
+˜Wr = ˜Ur ˜Σr ˜V ⊤ 
+
+> r
+
+, (11) and mapping the factors back gives 
+
+ˆWa = D−1 
+
+> l
+
+˜Ur ˜Σr ,
+
+ˆWb = ˜V ⊤ 
+
+> r
+
+D−1 
+
+> r
+
+. (12) The product ˆW = ˆWa ˆWb minimizes the weighted projection error in Eq. (10) and replaces the original projection with two sequential factors. The scaling is absorbed during offline factor generation. We examine the contribution of each weighting side in Sec. V-D. After factor generation, ASVD executes in the same form as TSVD and adds no inference-time computation at a fixed rank. In Algorithm 1, rank-reff SVD means the truncated product 
+
+˜Ureff 
+
+˜Σreff 
+
+˜V ⊤ 
+
+> reff
+
+. For an o × i matrix, the two mapped factors have sizes o × reff and reff × i, respectively. 
+
+2) Offline calibration: The scaling vectors (dl, d r ) are estimated by forwarding a small compressed calibration set through the pretrained model and accumulating per-channel mean absolute activation magnitudes at selected projection inputs and outputs. For an input activation tensor X(m) and output activation tensor Y (m) of projection m, we compute the per-channel statistics 
+
+a(m) 
+
+> r,c
+
+= EC,h,w 
+
+h
+
+|X(m)
+
+> c,h,w
+
+|
+
+i
+
+,a(m) 
+
+> l,c
+
+= EC,h,w 
+
+h
+
+|Y (m)
+
+> c,h,w
+
+|
+
+i
+
+.
+
+(13) where the expectation is taken over the calibration set C and the spatial dimensions. For each side s ∈ { l, r }, we form strictly positive scaling entries as 
+
+d(m) 
+
+> s,c
+
+= max 
+
+
+
+a(m) 
+
+> s,c
+
+, η max  
+
+> j
+
+a(m)
+
+> s,j
+
+
+
++ ϵ, (14) where η = 10 −3 and ϵ = 10 −6. The relative floor limits inverse amplification on weak channels, and the additive term keeps the scaling invertible even when all channel statistics are zero. Statistics and factor generation use FP32. Channels with larger activation magnitudes retain larger weights in Eq. (10). For convolutional projections, each input-channel statistic is repeated across the corresponding khkw entries of the matricized operator. Calibration requires no ground-truth restored images, since it estimates feature magnitudes rather than a restoration loss. By default, ASVD uses 16 randomly sampled compressed images (all 14 images for ICB), and its sensitivity to the calibration sample size is evaluated in Table III. 
+
+H. Instantiation on PromptCIR 
+
+We instantiate both variants on PromptCIR [5], whose residual hybrid attention groups and transformer-style feed-forward blocks contain extensive projections across the en-coder, bottleneck, decoder, and prompt-conditioning pathways. Selected operators are replaced offline, while surrounding modules, prompts, normalization layers, nonlinearities, and inference procedures remain unchanged. V. E XPERIMENTS 
+
+A. Experimental Setup 
+
+We evaluate the framework on four blind compressed image restoration benchmarks: LIVE1 [58], BSDS500 [59], ICB [26], and DIV2K [25]. Low-quality inputs are generated by JPEG compression with quality factors uniformly sampled from 
+
+[10 , 70] , which spans mild to severe degradation. We compare against JPEG, FBCNN [28], Contrastive JPEG [29], and prompt-based transformer frameworks including PromptIR [30] and PromptCIR [5]. All PromptCIR variants use identical ensemble inference and evaluation settings. ASVD uses 16 calibration images by default (all 14 images for ICB). Calibration inputs are 128 × 128 JPEG images generated from the corresponding benchmark with QFs sampled uniformly from 10 to 70. Only compressed-input activations are used for factor generation; no retraining is required. PSNR, SSIM, and PSNR-B are evaluated on RGB images and averaged over each dataset. PSNR uses the overall RGB mean squared error, whereas PSNR-B follows the channel-wise decibel averaging in SwinIR [19]. Parameter counts and MACs are reported per model for a 
+
+256 × 256 input, including convolution, linear projections, and attention matrix multiplication. 
+
+B. Comparison with Representative Methods 
+
+Table I reports quantitative comparisons on the four bench-marks. Both TSVD and ASVD substantially reduce the parameter count, with restoration fidelity increasing as the rank budget grows. At rank 64, ASVD improves PSNR-B over TSVD by 0.12 –
+
+0.24 dB across all four benchmarks, with comparable PSNR and SSIM at identical parameter and MAC budgets. The PSNR differences between the two methods are below 0.10 dB. At 6TABLE I QUANTITATIVE COMPARISON ON COMPRESSED IMAGE RESTORATION BENCHMARKS . R ESULTS ARE PSNR / SSIM / PSNR-B ( ↑). B EST AND SECOND -BEST VALUES AT THE DISPLAYED PRECISION ARE BOLD AND UNDERLINED . P ARAMETER COUNTS ARE PER MODEL ; P ROMPT CIR AND ITS FACTORIZED VARIANTS USE THE SAME ENSEMBLE INFERENCE PROTOCOL .
+
+Method Rank Params. (M) LIVE1 BSDS500 ICB DIV2K 
+
+JPEG – – 30.02/0.872/28.18 30.58/0.876/28.29 33.87/0.842/33.05 31.71/0.885/30.02 FBCNN [28] – 71.92 32.08/0.904/31.44 32.41/0.903/31.45 35.90/0.865/36.33 33.96/0.918/33.41 Contrastive JPEG [29] – 11.11 32.26/0.907/31.70 32.75 /0.908 /31.78 35.93/0.865/36.35 34.13/0.919/33.62 PromptIR [30] – 36.54 32.34/0.907/31.75 32.67/0.907/31.67 36.35/ 0.868 /36.75 34.38 /0.922 /33.81 
+
+PromptCIR [5] – 34.75 32.50 /0.909 /31.91 32.23/0.906/31.35 36.49 /0.866/ 36.88 34.25/0.919/33.71 PromptCIR-TSVD 64 14.34 31.75/0.898/30.89 31.71/0.896/30.62 34.91/0.850/35.03 33.19/0.907/32.44 96 18.44 32.42/0.908/ 31.92 32.24/0.905/31.47 36.36/0.864/36.78 34.15/0.918/33.64 128 21.80 32.47/ 0.909 /31.90 32.25/0.906/31.38 36.44/0.865/36.84 34.22/0.918/33.69 PromptCIR-ASVD 64 14.34 31.67/0.899/31.04 31.74/0.898/30.84 34.96/0.853/35.27 33.10/0.907/32.56 96 18.44 32.43/0.908/31.88 32.26/0.906/31.48 36.36/0.864/36.76 34.15/0.918/33.69 128 21.80 32.48/ 0.909 /31.89 32.26/0.906/31.40 36.45/0.865/36.83 34.22/0.918/33.67 
+
+ranks 96 and 128, both methods approach the restoration performance of the original model. ASVD reduces the parameter count by 59% at rank 64. At rank 96, it retains a 47% parameter reduction while keeping PSNR within 0.13 dB of PromptCIR across all four benchmarks. On BSDS500, ranks 96 and 128 yield a small PSNR improvement of approximately 0.03 dB. Such improvements are possible because minimizing projection error does not impose a fixed ordering on the final restoration error. The corresponding computational savings and measured latency are reported in Table VII. 
+
+C. Qualitative and Feature-level Analysis 
+
+Fig. 3 compares the low-quality input, the ASVD output, the PromptCIR output, and the ground-truth reference. In the zoomed region, ASVD suppresses blocking artifacts while preserving object boundaries and local edge transitions. Fig. 4 visualizes the absolute activation differences between the original PromptCIR backbone and the factorized models at encoder level 1 and decoder level 1. Under rank 64 , ASVD yields lower-magnitude and more spatially coherent feature errors on the high-activation channels, consistent with the proposed activation-weighted factor generation. 
+
+D. Ablation Study a) Effect of rank: Table II reports the rank ablation on DIV2K. Increasing the rank generally improves restoration fidelity. ASVD achieves its largest PSNR gain over TSVD at rank 32 ( 0.87 dB). At ranks 16 and 64, it improves PSNR-B with PSNR differences below 0.12 dB; the two methods approach one another at higher ranks. 
+
+b) Effect of calibration sample size: Table III evaluates DIV2K at rank 64 over five random calibration samplings, with nested subsets and fixed test inputs. Results are reported as mean ± sample standard deviation. The PSNR standard deviation falls from 0.192 dB with one image to 0.032 dB with 
+
+16 images. Performance approximately plateaus around 8–16 
+
+images; increasing the sample count further does not produce a monotonic gain. These results support lightweight calibration and the default choice of 16 images.    
+
+> Fig. 3. Visual comparison among the low-quality input (LQ), the ASVD output, the PromptCIR output, and the ground-truth reference (GT). Red boxes mark the zoomed region. TABLE II EFFECT OF RANK ON DIV2K. R ESULTS ARE PSNR / SSIM / PSNR-B ( ↑).
+
+Rank TSVD ASVD 
+
+8 28.26/0.854/28.21 28.34/0.846/28.39 16 30.35/0.879/30.05 30.23/0.874/30.11 32 30.82/0.889/30.61 31.69/0.892/31.36 64 33.19/0.907/32.44 33.10/0.907/32.56 96 34.15/0.918/33.64 34.15/0.918/33.69 128 34.22/0.918/33.69 34.22/0.918/33.67 
+
+c) Sensitivity to calibration quality range: We vary the calibration QF range among [10 , 30] , [40 , 70] , and [10 , 70] ,holding the sampled image identities fixed across the three ranges within each seed. Each model uses 16 calibration images at rank 64 and is evaluated at fixed test QFs over three random samplings. Table IV shows that the spread of mean PSNR across calibration ranges is at most 0.015 dB on LIVE1 and 
+
+0.045 dB on DIV2K for test QFs 10 –70 . At the out-of-range test QF of 90 , the corresponding spreads remain 0.036 and 
+
+0.053 dB. The small changes indicate low sensitivity to the 7enc1 base vs svd (act) (a) enc1: base vs TSVD enc1 base vs casvd (act) (b) enc1: base vs ASVD dec1 base vs svd (act) 
+
+(c) dec1: base vs TSVD dec1 base vs casvd (act) (d) dec1: base vs ASVD Fig. 4. Feature difference visualization on DIV2K at rank 64 , using our ASVD instantiated on the PromptCIR backbone. Top row: encoder stage ( enc1 ). Bottom row: decoder stage ( dec1 ). Left: absolute feature error between the base model and TSVD. Right: absolute feature error between the base model and ASVD. Errors are computed on high-activation channels only. ASVD exhibits lower-magnitude and more spatially coherent error responses. TABLE III CALIBRATION SAMPLE SIZE ON DIV2K (ASVD, RANK 64). M EAN ±
+
+> SAMPLE STANDARD DEVIATION OVER FIVE SEEDS
+
+.
+
+Images PSNR SSIM PSNR-B 
+
+1 32 .861 ±0.192 0.9053 ±0.0019 32 .314 ±0.157 
+
+2 33 .006 ±0.069 0.9058 ±0.0008 32 .429 ±0.090 
+
+4 33 .064 ±0.059 0.9065 ±0.0008 32 .495 ±0.044 
+
+8 33 .073 ±0.032 0.9067 ±0.0006 32 .518 ±0.026 
+
+16 33 .062 ±0.032 0.9070 ±0.0004 32 .518 ±0.028 
+
+32 33 .041 ±0.043 0.9070 ±0.0003 32 .511 ±0.034 
+
+tested calibration quality distributions. 
+
+d) Contribution of the weighting sides: Table V com-pares unweighted TSVD, input-only, output-only, and bilateral weighting on DIV2K at ranks 32 and 64. An input-only variant using the square root of the mean absolute magnitude is also included. All calibrated variants use 16 images and three seeds. Common-reference output NMSE is evaluated on a common set of 16 low-quality images, excluding the calibration identities and resized to 128 × 128 .At rank 32, bilateral weighting has the highest mean PSNR, SSIM, and PSNR-B among the tested variants. At rank 64, input-only weighting performs better, with the square-root variant attaining the highest restoration metrics and the lowest output NMSE. Thus, the output-side proxy is useful under the tighter rank budget but does not uniformly improve upon input-only scaling. The output NMSE and final restoration metrics need not induce the same ordering, because the former measures local projection errors rather than the nonlinear network output. 
+
+e) Uniform versus spectrum-based rank allocation: 
+
+A shared rank cap isolates the effect of calibrated factor generation, but does not imply equal compressibility of different operators. We therefore compare uniform rank 64 with non-uniform ranks selected by a common cumulative squared-
+
+TABLE IV SENSITIVITY TO THE CALIBRATION QF RANGE (RANK 64, 16 IMAGES ). PSNR MEAN ± SAMPLE STANDARD DEVIATION OVER THREE SEEDS . QF 90 
+
+> IS OUTSIDE ALL CALIBRATION RANGES
+
+.
+
+Dataset Test QF [10 , 30] [40 , 70] [10 , 70] 
+
+LIVE1 10 27 .490 ±0.004 27 .487 ±0.006 27 .490 ±0.004 
+
+30 31 .280 ±0.008 31 .284 ±0.012 31 .284 ±0.013 
+
+50 32 .927 ±0.014 32 .935 ±0.012 32 .934 ±0.016 
+
+70 34 .447 ±0.031 34 .459 ±0.025 34 .453 ±0.035 
+
+90 36 .595 ±0.070 36 .630 ±0.051 36 .605 ±0.077 
+
+DIV2K 10 29 .130 ±0.005 29 .128 ±0.005 29 .135 ±0.007 
+
+30 32 .908 ±0.021 32 .908 ±0.021 32 .922 ±0.019 
+
+50 34 .289 ±0.045 34 .297 ±0.042 34 .316 ±0.033 
+
+70 35 .558 ±0.061 35 .589 ±0.047 35 .602 ±0.049 
+
+90 37 .221 ±0.150 37 .249 ±0.100 37 .274 ±0.114 
+
+singular-value energy threshold under a matched MAC budget. The search uses pretrained weights, not test restoration scores. Both allocations use the same DIV2K calibration set for all four benchmarks, so this controlled comparison differs from the dataset-specific calibration in Table I. Table VI shows PSNR gains of 0.008 –0.409 dB from spectrum-based allocation, with mixed SSIM and PSNR-B changes. The combined MAC budgets of the two models are 
+
+434 .3195 G and 434 .3178 G, respectively, but the parameter totals increase from 28 .67 M to 42 .37 M. Non-uniform allocation can therefore improve fidelity at matched arithmetic cost, while uniform ranks offer a smaller model. Neither allocation is claimed to be globally optimal. 
+
+f) Sensitivity to the scaling floor: On DIV2K at rank 64, varying the relative floor coefficient in Eq. (14) by 0.1×, 1×,and 10 × changes PSNR by at most 0.00016 dB, SSIM by 
+
+0.000025 , and PSNR-B by 0.00267 dB relative to the default. All resulting factors are finite. Restoration performance is therefore insensitive to these tested floor variations. 
+
+g) Efficiency analysis: Table VII reports model complex-ity and measured forward latency. At rank 64, the parameter count decreases from 34 .75 M to 14 .34 M and MACs from 
+
+258 .79 G to 217 .16 G. TSVD and ASVD have the same arithmetic cost at a fixed rank. Forward latency is measured on an NVIDIA GeForce RTX 3090 in FP32 with batch size one and 256 × 256 inputs. We average three runs of 200 synchronized forward passes after 50 warm-up passes. Timing covers a single model without tiling or ensemble inference. Rank-64 ASVD reduces latency from 292 .28 to 238 .42 ms, yielding a 1.23 × speedup. VI. D ISCUSSION 
+
+The empirical results support the analysis-driven acceleration scheme. The profiling and spectral evidence in Fig. 1 identify projection operators as the dominant source of cost and show that their weights contain exploitable low-rank structure. Table I demonstrates the effectiveness of activation-calibrated factor generation. At rank 64, ASVD improves PSNR-B over TSVD on all four benchmarks under identical parameter and MAC budgets. This connects the motivation to evaluation: TSVD tests compact projection approximations, while the channel imbalance in Fig. 1(b) motivates activation-calibrated factor selection. 8TABLE V WEIGHTING -SIDE ABLATION ON DIV2K. C ALIBRATED RESULTS ARE MEAN ± SAMPLE STANDARD DEVIATION OVER THREE SEEDS ; TSVD IS DETERMINISTIC . O UTPUT NMSE ( ↓) IS MEASURED ON COMMON REFERENCE INPUTS .
+
+Rank Weighting PSNR SSIM PSNR-B Output NMSE 
+
+32 TSVD 30 .821 ±0.000 0.8891 ±0.0000 30 .611 ±0.000 0.0802 ±0.0000 
+
+Input only 31 .453 ±0.165 0.8893 ±0.0004 31 .135 ±0.160 0.0721 ±0.0003 
+
+Output only 30 .282 ±0.178 0.8825 ±0.0002 30 .350 ±0.090 0.0774 ±0.0001 
+
+Bilateral (ASVD) 31 .661 ±0.135 0.8919 ±0.0013 31 .310 ±0.101 0.0737 ±0.0004 
+
+Input only ( α = 0 .5) 31 .523 ±0.075 0.8916 ±0.0009 31 .222 ±0.048 0.0693 ±0.0001 
+
+64 TSVD 33 .194 ±0.000 0.9072 ±0.0000 32 .437 ±0.000 0.0271 ±0.0000 
+
+Input only 33 .307 ±0.008 0.9096 ±0.0004 32 .647 ±0.021 0.0232 ±0.0001 
+
+Output only 32 .707 ±0.084 0.9028 ±0.0002 32 .150 ±0.072 0.0267 ±0.0000 
+
+Bilateral (ASVD) 33 .080 ±0.030 0.9068 ±0.0005 32 .527 ±0.030 0.0243 ±0.0001 
+
+Input only ( α = 0 .5) 33 .411 ±0.003 0.9100 ±0.0000 32 .676 ±0.025 0.0224 ±0.0000     
+
+> TABLE VI RANK ALLOCATION AT MATCHED MAC S. R ESULTS ARE PSNR / SSIM / PSNR-B ( ↑). B OTH METHODS USE THE SAME FIXED DIV2K CALIBRATION SET .
+
+Dataset Uniform 64 Spectrum-based 
+
+LIVE1 31.69/0.899/31.03 31.74/0.899/30.97 BSDS500 31.71/0.898/30.81 31.72/0.898/30.69 ICB 34.79/0.847/35.12 35.20/0.853/35.40 DIV2K 33.10/0.907/32.56 33.28/0.908/32.61        
+
+> TABLE VII COMPLEXITY AND 256 ×256 FORWARD LATENCY . P ARAMETERS AND
+> MAC S ARE PER MODEL ; MAC S INCLUDE ATTENTION MATRIX PRODUCTS .LATENCIES ARE IN MS ;SPEEDUP IS ASVD RELATIVE TO THE ORIGINAL .
+
+Rank Params. MACs TSVD ASVD Speedup 
+
+(M) (G) (ms) (ms) (×)32 9.79 164.15 208.26 213.19 1.37 64 14.34 217.16 215.72 238.42 1.23 96 18.44 254.38 228.53 240.56 1.21 128 21.80 263.19 244.83 246.16 1.19 
+
+The rank ablation in Table II further clarifies the role of activation calibration. At very small ranks, the factorized operators have limited capacity, and the choice of retained subspace determines most of the restoration error. The weighted objective favors preservation of active channels. ASVD achieves its largest DIV2K PSNR gain over TSVD at rank 32 and consistently improves PSNR-B at rank 64, with comparable PSNR and SSIM. As the rank grows, both decompositions recover a larger fraction of the pretrained operator, and the gap between TSVD and ASVD naturally narrows. This trend distinguishes ASVD from runtime augmentation: it improves the offline factor selection under the same rank and complexity budget. The feature visualizations in Fig. 4 provide representation-level evidence, with ASVD producing lower and more coherent errors on high-activation channels. The calibration-size study in Table III supports the use of a small compressed calibration set. The statistics used by our ASVD are per-channel activation magnitudes rather than task-loss gradients or reconstructed-image supervision; they simply measure which input and output channels respond more strongly when the pretrained model processes compressed images. The multi-seed results indicate that a small set can stabilize these coarse channel weights, with performance approximately plateauing around 8–16 images. The quality-range study also shows low sensitivity to the tested calibration distributions. This stability supports blind CIR, where the model restores compressed inputs without receiving their JPEG quality factors. The operator-level formulation in Fig. 2 keeps the accelerated model close to the original restoration backbone. Each selected projection is replaced locally by two factors, while attention re-shaping, prompt interaction, normalization, nonlinear activation, skip connections, and output reconstruction remain unchanged. This locality avoids conflating low-rank replacement with architectural redesign and enables a controlled comparison: at a fixed rank, TSVD and ASVD share the same parameter count, MACs, tensor interfaces, and inference graph. Consequently, their observed difference is attributable to activation-calibrated factor generation rather than topology or runtime computation. The choice of the rank-64 operating point follows the same evidence in Tables II and VII. It reduces parameters by 58 .75% 
+
+and MACs by 16 .09% relative to the original PromptCIR backbone. Rank 96 reduces parameters by 46 .93% but MACs by only 1.70% ; rank 128 exceeds the original MAC count by 1.70% . Higher ranks are useful for demonstrating the convergence of TSVD and ASVD and for retaining restoration fidelity, but offer less arithmetic reduction. Rank 64 provides a compact model with measurable PSNR-B improvements over TSVD, while rank 96 offers restoration performance close to the original backbone. At rank 96, the PSNR difference from the original model ranges from −0.13 to +0 .03 dB, illustrating the complementary higher-fidelity operating regime. The method also offers a favorable deployment profile. All factor generation is performed offline, and the compressed model retains the original PromptCIR topology, prompts, normalization layers, and restoration head. ASVD is therefore complementary to pruning and quantization: it reduces the algebraic cost of dense projections while leaving precision reduction and sparsity-based acceleration available for deploy-ment. 9VII. C ONCLUSION 
+
+We presented a training-free framework for accelerating transformer-based blind compressed image restoration. An empirical analysis of prompt-based restoration transformers shows that projection operators dominate the parameter and MAC cost, that their singular-value spectra exhibit operator-dependent low-rank structure, and that their compressed-image activations are strongly channel-imbalanced. These observations support TSVD as a principled training-free baseline and explain why a uniform low-rank approximation can fall short under aggressive rank budgets. Building on this rationale, we formulated projection-level replacement with TSVD as the closed-form baseline and designed ASVD as our activation-calibrated refinement that incorporates lightweight activation statistics into the decomposition objective. The resulting factors are generated entirely offline from compressed calibration inputs while preserving the original restoration architecture and inference flow. Experiments on four standard blind CIR benchmarks show that ASVD consistently improves PSNR-B over TSVD at rank 64 under identical parameter and MAC budgets, while maintaining comparable PSNR and SSIM. These results indicate that activation-aware factor generation can compress restoration transformers without retraining data, task-specific supervision, or online adaptation. The main evaluation uses a shared rank cap and one prompt-based backbone; a spectrum-based allocation study additionally examines non-uniform ranks under a matched MAC budget. Promising future directions include further optimization of operator-wise or layer-wise rank allocation guided by spectral and activation profiles, combining ASVD with quantization and pruning for further compression, and extending it to other transformer-based restoration tasks. REFERENCES [1] Anas M Ali, Bilel Benjdira, Anis Koubaa, Walid El-Shafai, Zahid Khan, and Wadii Boulila, “Vision transformers in image restoration: A survey,” 
+
+Sensors , vol. 23, no. 5, pp. 2385, 2023. [2] Zhendong Wang, Xiaodong Cun, Jianmin Bao, Wengang Zhou, Jianzhuang Liu, and Houqiang Li, “Uformer: A general u-shaped transformer for image restoration,” in CVPR , 2022, pp. 17683–17693. [3] Syed Waqas Zamir, Aditya Arora, Salman Khan, Munawar Hayat, Fahad Shahbaz Khan, and Ming-Hsuan Yang, “Restormer: Efficient transformer for high-resolution image restoration,” in CVPR , 2022, pp. 5728–5739. [4] Xiangyu Chen, Xintao Wang, Wenlong Zhang, Xiangtao Kong, Yu Qiao, Jiantao Zhou, and Chao Dong, “Hat: Hybrid attention transformer for image restoration,” arXiv preprint arXiv:2309.05239 , 2023. [5] Bingchen Li, Xin Li, Yiting Lu, Ruoyu Feng, Mengxi Guo, Shijie Zhao, Li Zhang, and Zhibo Chen, “Promptcir: Blind compressed image restoration with prompt learning,” in CVPR , 2024, pp. 6442–6452. [6] Carl Eckart and Gale Young, “The approximation of one matrix by another of lower rank,” Psychometrika , vol. 1, no. 3, pp. 211–218, 1936. [7] Xianming Liu, Xiaolin Wu, Jiantao Zhou, and Debin Zhao, “Data-driven sparsity-based restoration of jpeg-compressed images in dual transform-pixel domain,” in CVPR , 2015, pp. 5171–5178. [8] Chao Dong, Yubin Deng, Chen Change Loy, and Xiaoou Tang, “Com-pression artifacts reduction by a deep convolutional network,” in ICCV ,2015, pp. 576–584. [9] Zhangyang Wang, Ding Liu, Shiyu Chang, Qing Ling, Yingzhen Yang, and Thomas S Huang, “D3: Deep dual-domain based fast restoration of jpeg-compressed images,” in CVPR , 2016, pp. 2764–2772. [10] Xiaoshuai Zhang, Wenhan Yang, Yueyu Hu, and Jiaying Liu, “Dmcnn: Dual-domain multi-scale convolutional neural network for compression artifacts removal,” in ICIP . IEEE, 2018, pp. 390–394. [11] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun, “Deep residual learning for image recognition,” in CVPR , 2016, pp. 770–778. [12] Kai Zhang, Wangmeng Zuo, Yunjin Chen, Deyu Meng, and Lei Zhang, “Beyond a gaussian denoiser: Residual learning of deep cnn for image denoising,” IEEE transactions on image processing , vol. 26, no. 7, pp. 3142–3155, 2017. [13] Xiaojiao Mao, Chunhua Shen, and Yu-Bin Yang, “Image restoration using very deep convolutional encoder-decoder networks with symmetric skip connections,” NeurIPS , vol. 29, 2016. [14] Ying Tai, Jian Yang, Xiaoming Liu, and Chunyan Xu, “Memnet: A persistent memory network for image restoration,” in ICCV , 2017, pp. 4539–4547. [15] Yulun Zhang, Kunpeng Li, Kai Li, Lichen Wang, Bineng Zhong, and Yun Fu, “Image super-resolution using very deep residual channel attention networks,” in ECCV , 2018, pp. 286–301. [16] Yulun Zhang, Kunpeng Li, Kai Li, Bineng Zhong, and Yun Fu, “Residual non-local attention networks for image restoration,” arXiv preprint arXiv:1903.10082 , 2019. [17] Max Ehrlich, Larry Davis, Ser-Nam Lim, and Abhinav Shrivastava, “Quantization guided jpeg artifact correction,” in ECCV . Springer, 2020, pp. 293–309. [18] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin, “Attention is all you need,” NIPS , vol. 30, 2017. [19] Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, and Radu Timofte, “Swinir: Image restoration using swin transformer,” in ICCV , 2021, pp. 1833–1844. [20] Xiangyu Chen, Xintao Wang, Jiantao Zhou, Yu Qiao, and Chao Dong, “Activating more pixels in image super-resolution transformer,” in CVPR ,2023, pp. 22367–22377. [21] Fu-Jen Tsai, Yan-Tsung Peng, Yen-Yu Lin, Chung-Chi Tsai, and Chia-Wen Lin, “Stripformer: Strip transformer for fast image deblurring,” in 
+
+ECCV . Springer, 2022, pp. 146–162. [22] Liangyu Chen, Xiaojie Chu, Xiangyu Zhang, and Jian Sun, “Simple baselines for image restoration,” in ECCV . Springer, 2022, pp. 17–33. [23] Hang Guo, Jinmin Li, Tao Dai, Zhihao Ouyang, Xudong Ren, and Shu-Tao Xia, “Mambair: A simple baseline for image restoration with state-space model,” in ECCV . Springer, 2024, pp. 222–241. [24] Yawei Li, Kai Zhang, Jingyun Liang, Jiezhang Cao, Ce Liu, Rui Gong, Yulun Zhang, Hao Tang, Yun Liu, Denis Demandolx, et al., “Lsdir: A large scale dataset for image restoration,” in CVPR , 2023, pp. 1775–1787. [25] Eirikur Agustsson and Radu Timofte, “Ntire 2017 challenge on single image super-resolution: Dataset and study,” in CVPR workshops , 2017, pp. 126–135. [26] Rawzor, “Image compression benchmark,” [Online]. Available: http: //imagecompression.info/. [27] Ren Yang, Radu Timofte, Xin Li, Qi Zhang, Lin Zhang, Fanglong Liu, Dongliang He, Fu Li, He Zheng, Weihang Yuan, et al., “Aim 2022 challenge on super-resolution of compressed image and video: Dataset, methods and results,” in ECCV . Springer, 2022, pp. 174–202. [28] Jiaxi Jiang, Kai Zhang, and Radu Timofte, “Towards flexible blind jpeg artifacts removal,” in ICCV , 2021, pp. 4997–5006. [29] Xi Wang, Xueyang Fu, Yurui Zhu, and Zheng-Jun Zha, “Jpeg artifacts removal via contrastive representation learning,” in ECCV . Springer, 2022, pp. 615–631. [30] Vaishnav Potlapalli, Syed Waqas Zamir, Salman H Khan, and Fahad Shahbaz Khan, “Promptir: Prompting for all-in-one image restoration,” 
+
+NeurIPS , vol. 36, pp. 71275–71293, 2023. [31] Jiaqi Ma, Tianheng Cheng, Guoli Wang, Qian Zhang, Xinggang Wang, and Lefei Zhang, “Prores: Exploring degradation-aware visual prompt for universal image restoration,” arXiv preprint arXiv:2306.13653 , 2023. [32] Tao Wang, Wanglong Lu, Kaihao Zhang, Wenhan Luo, Tae-Kyun Kim, Tong Lu, Hongdong Li, and Ming-Hsuan Yang, “Promptrr: Diffusion models as prompt generators for single image reflection removal,” arXiv preprint arXiv:2402.02374 , 2024. [33] Zilong Li, Yiming Lei, Chenglong Ma, Junping Zhang, and Hongming Shan, “Prompt-in-prompt learning for universal image restoration,” arXiv preprint arXiv:2312.05038 , 2023. [34] Ziwei Luo, Fredrik K Gustafsson, Zheng Zhao, Jens Sj¨ olund, and Thomas B Sch¨ on, “Controlling vision-language models for universal image restoration,” arXiv preprint arXiv:2310.01018 , 2023. [35] Menglin Jia, Luming Tang, Bor-Chun Chen, Claire Cardie, Serge Belongie, Bharath Hariharan, and Ser-Nam Lim, “Visual prompt tuning,” in ECCV . Springer, 2022, pp. 709–727. [36] Muhammad Uzair Khattak, Hanoona Rasheed, Muhammad Maaz, Salman Khan, and Fahad Shahbaz Khan, “Maple: Multi-modal prompt learning,” in CVPR , 2023, pp. 19113–19122. 
+
+10 [37] Kihyuk Sohn, Huiwen Chang, Jos´ e Lezama, Luisa Polania, Han Zhang, Yuan Hao, Irfan Essa, and Lu Jiang, “Visual prompt tuning for generative transfer learning,” in CVPR , 2023, pp. 19840–19851. [38] Xin Li, Bingchen Li, Yeying Jin, Cuiling Lan, Hanxin Zhu, Yulin Ren, and Zhibo Chen, “Ucip: A universal framework for compressed image super-resolution using dynamic prompt,” in ECCV . Springer, 2024, pp. 107–125. [39] Yulin Ren, Xin Li, Mengxi Guo, Bingchen Li, Shijie Zhao, and Zhibo Chen, “Mambacsr: Dual-interleaved scanning for compressed image super-resolution with ssms,” arXiv preprint arXiv:2408.11758 , 2024. [40] Jinpei Guo, Zheng Chen, Wenbo Li, Yong Guo, and Yulun Zhang, “Compression-aware one-step diffusion model for jpeg artifact removal,” in ICCV , 2025, pp. 14930–14939. [41] Tailin Liang, John Glossner, Lei Wang, Shaobo Shi, and Xiaotong Zhang, “Pruning and quantization for deep neural network acceleration: A survey,” 
+
+Neurocomputing , vol. 461, pp. 370–403, 2021. [42] Song Han, Jeff Pool, John Tran, and William Dally, “Learning both weights and connections for efficient neural network,” NeurIPS , vol. 28, 2015. [43] Song Han, Huizi Mao, and William J Dally, “Deep compression: Compressing deep neural networks with pruning, trained quantization and huffman coding,” arXiv preprint arXiv:1510.00149 , 2015. [44] Zhuang Liu, Jianguo Li, Zhiqiang Shen, Gao Huang, Shoumeng Yan, and Changshui Zhang, “Learning efficient convolutional networks through network slimming,” in ICCV , 2017, pp. 2736–2744. [45] Emily L Denton, Wojciech Zaremba, Joan Bruna, Yann LeCun, and Rob Fergus, “Exploiting linear structure within convolutional networks for efficient evaluation,” NeurIPS , vol. 27, 2014. [46] Max Jaderberg, Andrea Vedaldi, and Andrew Zisserman, “Speeding up convolutional neural networks with low rank expansions,” arXiv preprint arXiv:1405.3866 , 2014. [47] Vadim Lebedev, Yaroslav Ganin, Maksim Rakhuba, Ivan Oseledets, and Victor Lempitsky, “Speeding-up convolutional neural networks using fine-tuned cp-decomposition,” arXiv preprint arXiv:1412.6553 , 2014. [48] Xin Wang, Yu Zheng, Zhongwei Wan, and Mi Zhang, “Svd-llm: Truncation-aware singular value decomposition for large language model compression,” arXiv preprint arXiv:2403.07378 , 2024. [49] Viktoriia Chekalina, Daniil Moskovskiy, Daria Cherniuk, Maxim Kurkin, Andrey Kuznetsov, and Evgeny Frolov, “Generalized fisher-weighted svd: Scalable kronecker-factored fisher approximation for compressing large language models,” arXiv preprint arXiv:2505.17974 , 2025. [50] Xinyin Ma, Gongfan Fang, and Xinchao Wang, “Deepcache: Accelerating diffusion models for free,” in CVPR , 2024, pp. 15762–15772. [51] Felix Wimbauer, Bichen Wu, Edgar Schoenfeld, Xiaoliang Dai, Ji Hou, Zijian He, Artsiom Sanakoyeu, Peizhao Zhang, Sam Tsai, Jonas Kohler, et al., “Cache me if you can: Accelerating diffusion models through block caching,” in CVPR , 2024, pp. 6211–6220. [52] Zhiyuan Chen, Keyi Li, Yifan Jia, Le Ye, and Yufei Ma, “Accelerating diffusion transformer via increment-calibrated caching with channel-aware singular value decomposition,” in CVPR , 2025, pp. 18011–18020. [53] Pratheba Selvaraju, Tianyu Ding, Tianyi Chen, Ilya Zharkov, and Luming Liang, “Fora: Fast-forward caching in diffusion transformer acceleration,” 
+
+arXiv preprint arXiv:2407.01425 , 2024. [54] Xinyin Ma, Gongfan Fang, Michael Bi Mi, and Xinchao Wang, “Learning-to-cache: Accelerating diffusion transformer via layer caching,” NeurIPS ,vol. 37, pp. 133282–133304, 2024. [55] Yushi Huang, Zining Wang, Ruihao Gong, Jing Liu, Xinjie Zhang, Jinyang Guo, Xianglong Liu, and Jun Zhang, “Harmonica: Harmonizing training and inference for better feature caching in diffusion transformer acceleration,” arXiv preprint arXiv:2410.01723 , 2024. [56] Pengtao Chen, Mingzhu Shen, Peng Ye, Jianjian Cao, Chongjun Tu, Christos-Savvas Bouganis, Yiren Zhao, and Tao Chen, “∆-DiT: A training-free acceleration method tailored for diffusion transformers,” 
+
+arXiv preprint arXiv:2406.01125 , 2024. [57] Chang Zou, Xuyang Liu, Ting Liu, Siteng Huang, and Linfeng Zhang, “Accelerating diffusion transformers with token-wise feature caching,” 
+
+arXiv preprint arXiv:2410.05317 , 2024. [58] H. R. Sheikh, Z. Wang, L. Cormack, and A. C. Bovik, “LIVE image quality assessment database release 2,” [Online]. Available: https://live. ece.utexas.edu/research/quality/, 2005. [59] David Martin, Charless Fowlkes, Doron Tal, and Jitendra Malik, “A database of human segmented natural images and its application to evaluating segmentation algorithms and measuring ecological statistics,” in ICCV . IEEE, 2001, vol. 2, pp. 416–423. 
+
+11

@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-27</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-28</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 17 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>6</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-27 23:21:38 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-28 23:30:55 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>10月27日日报收录17篇，精读6篇、速读11篇，重点聚焦图像去摩尔纹与可控图像编辑。最值得看的是两个9.0分方向：真实场景图像去摩尔纹的鲁棒编辑，以及用连续程序学习图像生成与编辑；速读中多轮图像编辑也较集中。普通读者可先读这两篇9.0分精读，再按需浏览ACEdit、MTEdit等多轮编辑速读。</p>
+<p>今天筛完 17 篇论文，精读 6 篇、速读 11 篇，重点集中在图像复原与增强、扩散模型个性化两条主线。最值得看的是两篇 9.0 分工作：用文本引导的退化课程重新思考水下图像增强，以及用激活校准 SVD 实现盲压缩图像复原的免训练加速，前者强调退化建模要“教得对”，后者证明免训练加速已能落地。普通读者可先读这两篇 9.0 分论文建立判断框架，再按兴趣速读 BiNar 的码流原生复原与可复用图层编辑，后续重点关注“退化感知 + 免训练”组合方向。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -81,7 +81,7 @@
     <strong class="dpr-home-dashboard-count">6 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Dual-Scale Condition-Shift Editing for Robust Real-World Image Demoiréing">Dual-Scale Condition-Shift Editing for Robust Real-World Image Demoiréing</span></li><li><span class="dpr-home-dashboard-paper-title" title="Dancing Diffusion: Learning Continuous Programs for Image Generation and Editing">Dancing Diffusion: Learning Continuous Programs for Image Generation and Editing</span></li><li><span class="dpr-home-dashboard-paper-title" title="One Evaluation Is Enough: Inversion-Free Image Editing with Trajectory Correction">One Evaluation Is Enough: Inversion-Free Image Editing with Trajectory Correction</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Rethinking Underwater Image Enhancement: Learning through Text-Guided Degradation Curriculum">Rethinking Underwater Image Enhancement: Learning through Text-Guided Degradation Curriculum</span></li><li><span class="dpr-home-dashboard-paper-title" title="Training-free Acceleration for Blind Compressed Image Restoration via Activation-Calibrated Singular Value Decomposition">Training-free Acceleration for Blind Compressed Image Restoration via Activation-Calibrated Singular Value Decomposition</span></li><li><span class="dpr-home-dashboard-paper-title" title="GLOW-FM: Efficient Generative Low-Light Image Enhancement with One-Step Latent Flow Matching">GLOW-FM: Efficient Generative Low-Light Image Enhancement with One-Step Latent Flow Matching</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>6</strong></span></div>
 </section>
@@ -94,7 +94,7 @@
     <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="ACEdit: Stable Multi-Turn Image Editing via Asymmetric Conditioning">ACEdit: Stable Multi-Turn Image Editing via Asymmetric Conditioning</span></li><li><span class="dpr-home-dashboard-paper-title" title="FlashControl: One-Step Controllable Generator via Distillation-Friendly Single-Stream Teachers">FlashControl: One-Step Controllable Generator via Distillation-Friendly Single-Stream Teachers</span></li><li><span class="dpr-home-dashboard-paper-title" title="MTEdit: Packed Trajectories Beat Rollouts for Multi-Turn Image Editing">MTEdit: Packed Trajectories Beat Rollouts for Multi-Turn Image Editing</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="BiNar: Bitstream Native Restorer for Bitstream-corrupted Image Restoration">BiNar: Bitstream Native Restorer for Bitstream-corrupted Image Restoration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Editing Images into Reusable Layers via Compositional Edit-Prior Distillation">Editing Images into Reusable Layers via Compositional Edit-Prior Distillation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Continual Concept Personalization in Diffusion Models via Residual-Space Adaptation">Continual Concept Personalization in Diffusion Models via Residual-Space Adaptation</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>11</strong></span></div>
 </section>

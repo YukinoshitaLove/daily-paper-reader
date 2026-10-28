@@ -1,0 +1,3243 @@
+GLOW-FM: Efficient Generative Low-Light Image Enhancement with One-Step
+Latent Flow Matching
+Ariel Lapid*
+Yuval Haitman*
+Reuven Peretz
+Arnon Netzer
+Idit Diamant†
+Arm AI Research (AAIR), Arm Ltd
+Abstract
+Low-light image enhancement (LLIE) aims to recover well-
+exposed and perceptually faithful images from severely de-
+graded observations. Recent diffusion-based generative meth-
+ods achieve strong perceptual quality by leveraging powerful
+image priors, but their iterative sampling incurs substantial com-
+putational cost, limiting practical deployment. Despite recent
+efficiency gains in generative LLIE, high-quality enhancement
+with a single function evaluation and low overall computation
+remains challenging, particularly under diverse real-world low-
+light conditions. We introduce GLOW-FM, a one-step latent
+flow-matching framework for efficient generative LLIE. GLOW-
+FM performs conditional transport in the latent space of a frozen
+Tiny-VAE and leverages Terminal Velocity Matching (TVM) to
+enable enhancement with a single function evaluation. Matched
+comparisons with alternative one-step objectives support TVM
+as an effective design choice, and, to the best of our knowledge,
+this is its first adaptation to image restoration and specifically to
+LLIE. Extensive experiments on challenging real-world bench-
+marks demonstrate that GLOW-FM achieves competitive image
+quality and state-of-the-art cross-dataset generalization while
+requiring only a single function evaluation and 34 GFLOPs
+for the small variant. These findings highlight the potential of
+GLOW-FM to bring generative LLIE closer to practical deploy-
+ment through single-step inference and compact latent model-
+ing. Code is available at https://github.com/arm-
+research/AAIR-GLOW-FM.
+1. Introduction
+Low-light image enhancement (LLIE) aims to recover
+well-exposed and visually pleasing images from observations
+captured under insufficient illumination. Real-world low-light
+images often exhibit a complex combination of degradations,
+including severe underexposure, sensor noise, color distortion,
+reduced contrast, detail loss, and local saturation, which vary sig-
+nificantly across cameras and imaging conditions, making LLIE
+a challenging problem in real-world imaging [6, 8, 28]. Beyond
+*Both authors contributed equally to this work
+†Corresponding author: Idit.Diamant@arm.com
+PSNR
+SSIM
+LPIPS
+MUSIQ
+NIQE
+CLIPIQA
+GFLOPs
+NFEs
+Perception
+Generalization
+PyDiff
+WCDM
+ReDDiT
+GLOW-FM (Ours)
+17.3
+0.544
+0.56
+33.2
+7.38
+0.42
+473
+4
+0.553
+0.59
+25.5
+5.94
+0.27
+10
+6.16
+14.1
+0.488
+128
+2
+7.94
+20.3
+0.48
+36.0
+2.92
+0.62
+48
+1
+4.33
+Figure 1. GLOW-FM Performance. Comparison with efficient gener-
+ative LLIE baselines on LSD-DLL. Metrics are min–max normalized
+across the compared methods, with lower-is-better metrics reversed so
+that farther from the center is always better; axis annotations show the
+corresponding absolute metric values. Full results are reported in Tab. 1,
+while Perception Generalization uses LSD-U NIQE from Tab. 2.
+degrading visual quality, these artifacts also impair downstream
+computer vision tasks such as object detection and recognition,
+whose performance declines substantially on poorly exposed
+inputs [32]. Consequently, LLIE seeks not only to enhance im-
+age appearance but also to restore perceptually faithful content
+that supports reliable high-level vision applications [16, 40].
+Regression-based LLIE methods provide strong distortion
+performance and efficient inference [4, 5, 7, 45, 54, 58, 59, 61,
+62, 68, 69]. These approaches typically optimize distortion-
+oriented objectives and are effective at recovering visibility and
+suppressing noise, but often struggle under severe degradation,
+where substantial information loss makes enhancement inher-
+ently ambiguous. Trained with pixel-wise objectives, they tend
+to produce overly smooth results and suppress fine details [3].
+To address this limitation, generative models [17, 19, 21, 22, 55,
+65, 66] have emerged as a powerful LLIE paradigm, learning
+the distribution of natural images and leveraging strong image
+1
+arXiv:2610.31222v1  [cs.CV]  22 Oct 2026
+
+
+priors to recover realistic textures and structures that are diffi-
+cult to reconstruct with deterministic networks. These methods
+demonstrate substantial improvements in perceptual quality and
+robustness under severe degradations. However, these gains
+come at the cost of iterative sampling, resulting in high computa-
+tional complexity and limiting practical deployment, particularly
+for high-resolution enhancement in resource-constrained appli-
+cations such as smartphone camera image processing.
+To address this limitation, several efficient generative LLIE
+frameworks have recently been proposed [20, 25, 70]. These
+methods significantly reduce the required number of function
+evaluations (NFEs) compared to conventional diffusion models.
+Nevertheless, they still rely on iterative refinement procedures
+and diffusion-inspired architectures whose computational
+complexity remains substantial. For example, WCDM [20]
+requires 10 NFEs and approximately 90 GFLOPs during
+inference, while ReDDiT [25] reduces sampling to 2 NFEs
+but still requires roughly 128 GFLOPs. Consequently, while
+recent generative LLIE approaches have substantially reduced
+sampling cost, achieving high-quality enhancement with a
+single inference step and a low overall computational budget
+remains an active challenge, particularly across diverse and
+demanding real-world low-light conditions.
+In this work, we address this challenge by introducing
+an efficient Generative Low-Light image enhancement with
+one-step latent Flow Matching (GLOW-FM). Our approach
+leverages Terminal Velocity Matching (TVM) [71], which
+enables direct prediction of the normal-light image, eliminating
+the need for iterative sampling during inference. Comparisons
+with standard Flow Matching [30, 31], Consistency Flow
+Matching [63], and MeanFlow [12] establish Terminal Velocity
+Matching (TVM) [71] as a deliberate design choice for
+single-step LLIE. To the best of our knowledge, this is the first
+adaptation of TVM to image restoration, and specifically to
+LLIE. GLOW-FM learns a conditional transport that maps
+degraded low-light representations directly to their well-exposed
+counterparts in the latent space of a frozen Tiny-VAE [49].
+Operating in this compact latent space substantially reduces
+computational cost while preserving the expressive power of
+generative modeling. Moreover, latent representations capture
+semantic image structure while suppressing dataset-specific
+variations, improving restoration and generalization [29, 48, 51].
+Extensive experiments on challenging real-world low-light
+benchmarks [45, 54] demonstrate that GLOW-FM provides
+an effective generative prior for low-light enhancement while
+operating under small inference budgets. Despite requiring
+only a single NFE, our method achieves image quality
+competitive with recent efficient generative LLIE approaches
+and consistently exhibits strong cross-dataset generalization as
+shown in Fig. 1. These results suggest that latent flow matching,
+combined with one-step TVM estimation, offers a promising
+direction toward practical, high-quality, and computationally
+efficient low-light image enhancement.
+Our main contributions are summarized as follows:
+• We introduce GLOW-FM, an efficient generative framework
+for low-light image enhancement (LLIE) based on latent
+flow matching. By performing enhancement in a compact
+latent space with a lightweight Tiny-VAE and a one-step flow
+formulation, GLOW-FM achieves high restoration quality
+at low computational cost.
+• We establish Terminal Velocity Matching (TVM) as the
+strongest overall one-step objective for LLIE through
+matched comparisons with Rectified Flow, Consistency Flow
+Matching, and MeanFlow. To the best of our knowledge,
+this is the first adaptation of TVM to image restoration,
+specifically LLIE.
+• We achieve state-of-the-art cross-dataset generalization
+compared to generative and non-generative baselines,
+while maintaining competitive image quality and improved
+efficiency over existing generative LLIE methods.
+2. Related Work
+2.1. Generative Low-Light Image Enhancement
+A large body of LLIE research focuses on directly regress-
+ing a normal-light image from a low-light input using Retinex
+decomposition [26], illumination estimation, and deep neural
+networks [4, 5, 45, 62]. While these approaches are compu-
+tationally efficient, they often produce overly smooth results
+and struggle to capture the diversity of plausible normal-light
+reconstructions. The recent success of diffusion models [18] in
+image generation has motivated their adoption for high-quality
+low-light image enhancement [17, 19–21, 25, 65, 70]. Diff-
+Retinex [65] formulates enhancement as Retinex decomposition
+followed by conditional diffusion-based reconstruction of re-
+flectance and illumination components. GSAD [19] introduces
+a global structure-aware diffusion framework that combines
+curvature-based regularization with uncertainty-guided optimiza-
+tion to preserve scene structure and focus restoration on chal-
+lenging regions. Subsequent work has largely aimed to reduce
+the high computational cost of diffusion sampling. ReDDiT [25]
+uses trajectory matching distillation in a reflectance-aware resid-
+ual space to reduce the NFEs required at inference. PyDiff [70]
+performs denoising in a coarse-to-fine resolution pyramid and
+employs a global correction module to mitigate brightness and
+color inconsistencies. WCDM [20] accelerates inference by con-
+ducting diffusion in the wavelet domain on low-frequency sub-
+bands while restoring high-frequency details through a dedicated
+branch. Reti-Diff [17] generates compact latent Retinex priors
+to guide a transformer-based restoration network, while Ligh-
+tenDiffusion [21] combines latent Retinex decomposition with
+diffusion for unsupervised LLIE. Related concurrent preprints,
+IllumFlow [57] and Consist-Retinex [60], further explore one-
+step generative LLIE through Retinex-based decomposition.
+2
+
+
+ℰ
+Low-Light 
+Image
+𝑥1
+Normal-Light 
+Image
+𝑥0
+𝑡′ = 1
+𝑡′ = 𝑡
+ǁ𝑧1
+𝑡′ = 𝑠
+𝑡′ = 0
+𝑧𝑡
+𝑧𝑠
+𝑧0
+𝑧𝑡= 1 −𝑡𝑧0 + 𝑡ǁ𝑧1
+𝑧𝑠= 1 −𝑠𝑧0 + 𝑠ǁ𝑧1
+𝑡∼𝒰[0,1]
+𝑠∼𝒰[0, 𝑡]
+Linear Latent Flow Path
+𝑧1
+𝑧0
+ǁ𝑧1
+𝜖∼𝒩(0, 𝜎𝐼)
+HDiT
+𝐹𝜃(𝑧𝑠, 𝑠, 𝑠)
+𝑧𝑠
+𝑠
+Predicted Velocity
+𝑢𝜃𝑧𝑠, 𝑠
+𝑧𝑡
+𝑠
+Predicted 
+Displacement
+𝑓𝜃(𝑧𝑡, 𝑡, 𝑠)
+𝑡
+𝑧𝑡
+Ƹ𝑧𝑠
+Teacher 
+HDiT
+𝐹ഥ𝜃( Ƹ𝑧𝑠, 𝑠, 𝑠)
+𝑢ഥ𝜃( Ƹ𝑧𝑠, 𝑠)
+ℒ𝐹𝑀
+ℒ𝑇𝑉𝑀
+HDiT
+𝐹𝜃(𝑧𝑡, 𝑡, 𝑠)
+Terminal Velocity Matching Loss
+Flow Matching Loss
+𝑧𝑠
+𝑧𝑡
+𝑣= ǁ𝑧1 −𝑧0
+𝜕𝑠𝑓𝜃(𝑧𝑡, 𝑡, 𝑠)
+ℰ
+Pretrained 
+VAE Encoder
+Latent 
+Representation
+on Flow Path 
+Trainable 
+Module
+EMA Module 
+(Teacher)
+Additive 
+Noise
+Element-wise 
+Addition
+Paired Training Data
+2
+Figure 2. Overview of GLOW-FM Training. Paired low-light and normally exposed images are encoded into a frozen autoencoder latent space.
+During training, the model learns both the instantaneous flow-matching velocity and a terminal-velocity displacement map between arbitrary times.
+During inference, the enhanced latent is obtained with a single step and decoded back to image space.
+2.2. Generative Model Acceleration
+Generative diffusion and flow models have achieved remarkable
+success across a wide range of image-generation tasks. Their
+strong priors have also motivated applications to image restora-
+tion, where the goal is to recover a clean image from a degraded
+observation. InDI [11] performs restoration through direct
+iteration, while IR-SDE [35] models the restoration trajectory
+using a mean-reverting stochastic process. Bridge-matching
+methods [46] further formalize transport between degraded and
+clean endpoint distributions, and flow-based approaches such
+as FlowIE [73] and PnP-Flow [37] extend this formulation to
+image restoration. Despite their strong restoration capabilities,
+these methods commonly require iterative sampling, resulting
+in substantial inference cost. Early acceleration approaches em-
+ployed fast post-hoc samplers [23, 34, 47], reducing inference
+from hundreds of steps to tens, often at the expense of quality
+under aggressive acceleration.
+More recently, flow-based
+objectives have been developed specifically for efficient one-
+and few-step generation. Rectified Flow [31] learns straighter
+transport trajectories, while Consistency Flow Matching [63]
+regularizes the velocity field for few-step inference. ELIR [9]
+applies Consistency Flow Matching to image restoration in
+the latent space of a Tiny AutoEncoder. MeanFlow [12] learns
+mean transport trajectories, whereas TVM [71] learns finite
+displacements between arbitrary timesteps for high-fidelity
+one- and few-step generation. Despite these advances, efficient
+flow-based generation remains relatively unexplored for
+LLIE. Building upon TVM, we introduce a single-step latent
+flow-matching framework for efficient low-light enhancement.
+3. Method
+We formulate low-light image enhancement as a conditional
+flow-matching problem [30] between the low-light distribution
+p1(x1) and the normally exposed distribution p0(x0). Given
+a paired sample (x1,x0), where x1 ∼p1(x1) and x0 ∼p0(x0)
+denote the low-light source and normal-light target, respectively,
+we follow the TVM time convention [71]: the source is placed
+at t = 1 and the target at t = 0, opposite to the original Flow
+Matching convention. Enhancement therefore proceeds toward
+earlier terminal times, from t=1 to t=0.
+Rather than learning this transport directly in pixel space,
+we perform it in the latent space of a frozen VAE with encoder
+E and decoder D. We denote the corresponding latents as
+z1 = E(x1) and z0 = E(x0), and define intermediate states zt
+along the flow-path. To enable efficient inference, we train a
+two-time conditioned model Fθ(zt,t,s) with Terminal Velocity
+Matching (TVM) [71], which learns displacements along the
+trajectory rather than relying only on numerical integration of
+an instantaneous velocity field. This allows the same latent
+flow model to support both one-step enhancement and few-step
+refinement. Beyond its reported strong one-step performance,
+we motivate TVM for restoration through theoretical analysis.
+Under the TVM regularity conditions [71, Theorem 1] and
+a Lipschitz assumption on the decoder, we derive a bound
+on the pixel-space Wasserstein-2 distance [41] between the
+restored-image and target normal-light distributions in terms of
+the TVM objectives and autoencoder reconstruction error. This
+links TVM training to pixel-space restoration; the complete
+theorem and proof are provided in Appendix B. We next de-
+3
+
+
+scribe TVM’s adaptation to our restoration setting, training and
+inference, and the design choices enabling efficient generation.
+3.1. Terminal Velocity Matching
+Flow Matching [30] learns an instantaneous velocity field and
+generates samples by numerically integrating this field over time.
+To accelerate this process, TVM directly parameterizes the finite
+transition between two distinct time steps, bypassing the need for
+small integration steps. For an ideal latent velocity field u(zt,t),
+the flow map from time t to an earlier time s≤t is given by:
+zs:=ψ(zt,t,s)=zt+
+Z s
+t
+u(zr,r)dr.
+(1)
+The corresponding net displacement integrates the velocity from
+t to s, while its derivative at the zero-displacement boundary
+recovers the instantaneous velocity:
+f(zt,t,s)=
+R s
+t u(zr,r)dr,
+∂sf(zt,t,s)|s=t=u(zt,t).
+(2)
+Following TVM, we parameterize the displacement with
+a two-time network.
+A scaling is used to enforce zero
+displacement at the boundary s = t, where the instantaneous
+velocity is also recovered:
+fθ(zt,t,s)=(s−t)Fθ(zt,t,s),
+uθ(zt,t):= ∂sfθ(zt,t,s)|s=t=Fθ(zt,t,t).
+(3)
+The boundary relation above recovers standard flow matching
+when the displacement length goes to zero. For finite-step
+inference, however, the desired objective is the full displacement
+from time t to an earlier time s. A direct objective would
+regress this displacement by:
+Ldispl=E
+"fθ(zt,t,s)−
+Z s
+t
+u(zr,r)dr
+
+2
+2
+#
+,
+(4)
+but this target is unavailable because it requires the true velocity
+field along the entire trajectory. TVM avoids this explicit
+integration by using the terminal velocity, defined as the
+derivative of the displacement with respect to the terminal time
+s. In the ideal case, this derivative matches the velocity at the
+terminal point, i.e., ∂sf(zt,t,s)=u(zs,s) for any s≤t.
+Since the true terminal point zs and velocity field are
+unavailable for the predicted displacement, we use the predicted
+terminal latent
+ˆzs=zt+fθ(zt,t,s),
+(5)
+and approximate the terminal velocity with the model velocity,
+∂sfθ(zt,t,s)≈uθ(ˆzs,s)=Fθ(ˆzs,s,s).
+(6)
+This provides a practical proxy for supervising finite displace-
+ments without explicit ODE integration, and it is the basis of
+the TVM loss described in the following section.
+Algorithm 1 Training GLOW-FM
+Require: Paired images (x1,x0), noise scale σ, encoder E,
+weights θ, EMA weights ¯θ
+1: for training step τ do
+2:
+Encode z1=E(x1) and z0=E(x0)
+3:
+Sample ϵ∼N(0,I) and set ˜z1=z1+σϵ
+4:
+Sample t∼U[0,1] and s∼U[0,t]
+5:
+Form zt=(1−t)z0+t˜z1 and zs=(1−s)z0+s˜z1
+6:
+Set target velocity v=˜z1−z0
+7:
+Compute LFM using Eq. (9)
+8:
+Compute ˆzs=zt+fθ(zt,t,s)
+9:
+Compute target proxy u¯θ(ˆzs,s)=F¯θ(sg(ˆzs),s,s)
+10:
+Compute LTVM using Eq. (11)
+11:
+Update θ with LFM+λLTVM
+12:
+Update EMA parameters ¯θ
+13: end for
+Algorithm 2 Inference with GLOW-FM
+Require: Low-light image x1, E,D, weights θ, NFEs M
+1: Initialize z(M)=E(x1); choose grid 1=tM >···>t0=0
+2: for m=M,M−1,...,1 do
+3:
+z(m−1)=z(m)+fθ(z(m),tm,tm−1)
+4: end for
+5: Decode ˆx0=D(z(0))
+6: return enhanced image ˆx0
+3.2. Training
+Fig. 2 illustrates the training procedure, and Algorithm 1
+provides the detailed algorithmic steps. Given paired low-light
+and normally exposed images (x1,x0), we first encode them
+via the frozen VAE encoder as z1 = E(x1) and z0 = E(x0).
+Directly using the low-light latent endpoint can make the source
+distribution overly concentrated around the observed degraded
+embeddings, which may lead the model to learn a sharp and
+less stable transport. To smooth the source distribution and
+make it better supported over the target latent space, we follow
+stochastic-interpolant practice [1, 9] and perturb the source
+latent with small Gaussian noise:
+˜z1=z1+σϵ,
+ϵ∼N(0,I).
+(7)
+The perturbed latent ˜z1 is then used as the source endpoint
+during training.
+Flow-matching loss. We train on the linear latent flow path
+between the normally exposed target z0 and the perturbed
+low-light source ˜z1.
+For sampled times t∼U[0, 1] and
+s∼U[0,t], we define
+zt=(1−t)z0+t˜z1,
+zs=(1−s)z0+s˜z1,
+(8)
+with the conditional flow-matching target: v=˜z1−z0. The FM
+loss supervises the boundary case of the two-time model, where
+s=t and Fθ represents the instantaneous velocity (Eq. (3)):
+LFM=Ez0,z1,s,ϵ
+h
+∥Fθ(zs,s,s)−v∥2
+2
+i
+.
+(9)
+4
+
+
+Figure 3. Qualitative comparison on LSD-DLL. Representative examples from LSD-DLL comparing low-light inputs, outputs from ReDDiT,
+PyDiff, WCDM, and GLOW-FM, and the corresponding ground-truth normal-light images.
+This anchors the model to the standard flow-matching velocity
+and provides the velocity proxy used by TVM at terminal points.
+Terminal-velocity loss. The TVM loss supervises finite
+displacements between two sampled times. For each pair (s,t)
+such that s ≤t, the displacement model fθ(zt,t,s) predicts a
+terminal latent ˆzs as defined in Eq. (5). Following TVM [71],
+we train the displacement by matching its derivative with
+respect to the terminal time s to the velocity at the predicted
+terminal point. Using the parameterization in Eq. (3), this
+couples the derivative of the finite-displacement prediction,
+∂sfθ(zt,t,s), with the boundary velocity branch Fθ(ˆzs,s,s).
+Since the true terminal velocity is unavailable, we use an EMA
+copy of the network as a target proxy:
+u¯θ(ˆzs,s)=F¯θ(sg(ˆzs),s,s),
+(10)
+where ¯θ denotes the EMA parameters (teacher model) and sg(·)
+denotes stop-gradient. The terminal-velocity loss is
+LTVM=Ez0,z1,t,s,ϵ
+h
+∥∂sfθ(zt,t,s)−sg(u¯θ(ˆzs,s))∥2
+2
+i
+.
+(11)
+The derivative ∂sfθ(zt,t,s) is computed with a Jacobian-vector
+product (JVP) with respect to the terminal time s. The EMA tar-
+get and stop-gradient follow the practical biased estimator used
+in TVM: the target velocity is treated as fixed during the current
+update, which prevents gradients from flowing through both the
+predicted terminal point and the target branch. This stabilizes
+the proxy velocity used to supervise finite displacements.
+Total objective. The final objective combines the flow-matching
+and TVM losses from Eqs. (9) and (11):
+L=LFM+λLTVM,
+(12)
+where λ controls the relative contribution of the TVM term. In
+practice, we employ λ as a warm-up schedule, initially training
+the model with the FM objective to establish a stable velocity
+field before gradually introducing the TVM loss. Additional
+schedule details are provided in Appendix C.
+3.3. Inference
+At inference time, we encode the low-light input as the initial
+latent z(M) = E(x1) at the source endpoint tM = 1. We use
+the uniform time grid tm = m/M, m = 0,...,M, traversed in
+decreasing order from tM =1 to t0=0. For each m, the interval
+uses start time t = tm and terminal time s = tm−1, and the
+model predicts the displacement from the current latent at tm
+to the next latent at tm−1. Each interval requires one network
+evaluation; hence, the number of intervals M equals the number
+of NFEs. For one-step enhancement, M =1, so t=1 and s=0,
+and the model directly transports the encoded low-light latent
+to the enhanced endpoint. For few-step enhancement, the same
+displacement model is applied over multiple shorter intervals.
+The full inference procedure is summarized in Algorithm 2.
+3.4. Efficient Latent Architecture
+Compact Latent Representation. Operating in latent space is
+central to the efficiency of GLOW-FM. Instead of applying the
+flow model to full-resolution RGB images, the VAE encoder
+maps the input into a lower-dimensional representation with
+reduced spatial resolution. The learned transport therefore acts
+on a compact latent grid, lowering the cost of each function
+evaluation and making low-NFE inference more practical.
+The latent space also provides a useful restoration prior.
+Since the VAE is pretrained on a broad natural-image distribu-
+tion, its representation captures reusable image structure while
+suppressing some pixel-level noise and dataset-specific degra-
+dation patterns. Prior work has similarly shown that pretrained
+latent representations can support robust image restoration and
+domain generalization [29, 48, 51]. As a result, the flow model
+5
+
+
+Category
+Method
+NFEs↓GFLOPs↓Params (M)↓
+LSD-DLL
+UHD-LOL4K
+PSNR↑SSIM↑LPIPS↓MUSIQ↑NIQE↓PSNR↑SSIM↑LPIPS↓MUSIQ↑NIQE↓
+Non-Generative
+TFFormer [45]
+1
+34
+5.9
+14.1
+0.349
+0.63
+32.7
+4.49
+31.4
+0.987
+0.04
+32.9
+4.65
+Retinexformer [5]
+1
+17
+1.6
+16.9
+0.567
+0.54
+28.1
+4.64
+30.3
+0.983
+0.05
+34.0
+4.47
+HVI-CIDNet [62]
+1
+8
+2.0
+15.2
+0.495
+0.56
+23.5
+4.42
+33.7
+0.989
+0.02
+33.1
+5.03
+Multinex [4]
+1
+3
+0.04
+15.6
+0.501
+0.63
+21.6
+7.73
+24.8
+0.958
+0.09
+32.0
+4.72
+Generative
+PyDiff [70]
+4
+473
+97.9
+17.3
+0.544
+0.56
+33.2
+7.38
+22.5
+0.956
+0.17
+32.4
+4.83
+WCDM [20]
+10
+90
+22.1
+17.1
+0.553
+0.59
+25.5
+5.94
+26.8
+0.957
+0.16
+31.7
+4.08
+ReDDiT [25]
+2
+128
+17.4
+14.1
+0.488
+0.59
+30.9
+7.45
+22.2
+0.924
+0.25
+35.9
+5.24
+Ours
+GLOW-FM-XL
+1
+48
+124.0
+20.3
+0.548
+0.48
+36.0
+2.92
+31.7
+0.969
+0.12
+35.2
+4.59
+GLOW-FM-M
+1
+36
+21.8
+19.5
+0.531
+0.50
+35.5
+2.86
+30.6
+0.961
+0.14
+35.1
+4.63
+GLOW-FM-S
+1
+34
+9.1
+19.7
+0.516
+0.52
+37.1
+2.70
+30.3
+0.962
+0.14
+34.9
+4.62
+Table 1. Results on paired low-light benchmarks. We evaluate on LSD-DLL and UHD-LOL4K benchmarks and report image quality and
+efficiency metrics. Best results are shown in bold and second-best results are underlined.
+learns exposure and appearance corrections in a natural-image
+latent domain rather than relying solely on dataset-specific pixel
+statistics. For the autoencoder, inspired by [9], we use Tiny
+AutoEncoder for Stable Diffusion (TAESD) [49], a lightweight
+distilled alternative to the Stable Diffusion VAE (SD-VAE) [44].
+TAESD preserves an SD-VAE-compatible latent interface while
+substantially reducing the cost of encoding and decoding. In
+our implementation, replacing SD-VAE with TAESD reduces
+encoding/decoding GFLOPs by 15× and parameter count by
+33×, with minimal loss in end-to-end restoration performance.
+This is important for low-NFE generation, where the flow
+model requires only one or a few evaluations and the VAE cost
+becomes a significant part of the total inference budget.
+Category
+Method
+NFEs↓GFLOPs↓Params (M)↓NIQE↓MUSIQ↑
+Non-Generative
+TFFormer [45]
+1
+34
+5.9
+4.42
+24.1
+Retinexformer [5]
+1
+17
+1.6
+7.35
+23.4
+HVI-CIDNet [62]
+1
+8
+2.0
+6.26
+26.5
+Multinex [4]
+1
+3
+0.04
+6.96
+27.2
+Generative
+PyDiff [70]
+4
+473
+97.9
+6.96
+26.3
+WCDM [20]
+10
+90
+22.1
+6.16
+23.7
+ReDDiT [25]
+2
+128
+17.4
+7.94
+26.4
+Ours
+GLOW-FM-XL
+1
+48
+124.0
+4.33
+28.4
+GLOW-FM-M
+1
+36
+21.8
+4.49
+28.3
+GLOW-FM-S
+1
+34
+9.1
+4.99
+27.7
+Table 2. Results on LSD-U. Best results are shown in bold and
+second-best results are underlined.
+HDiT two-time flow model. We implement the two-time
+conditioned flow model Fθ(zt,t,s) with an Hourglass Diffusion
+Transformer (HDiT) backbone. HDiT combines the multi-scale
+efficiency of U-Net-like architectures with the representation
+capacity of diffusion transformers [10].
+Unlike standard
+DiT-style architectures [42], which apply global attention at
+every resolution and incur O(n2) attention cost, HDiT restricts
+global attention to low-resolution stages and uses fixed-window
+neighborhood attention at higher resolutions, yielding linear
+O(n) scaling with the number of latent image tokens. This
+design is useful for GLOW-FM because latent restoration
+requires both global exposure/color correction and preservation
+of spatially aligned local content from the degraded input, while
+keeping the two-time flow model efficient at inference.
+Method
+NFEs↓GFLOPs↓Params (M)↓PSNR↑MUSIQ↑NIQE↓
+PyDiff [70]
+4
+473
+97.9
+21.9
+74.2
+5.40
+WCDM [20]
+10
+90
+22.1
+26.3
+66.9
+4.52
+ReDDiT [25]
+2
+128
+17.4
+20.8
+71.7
+5.38
+GLOW-FM-XL
+1
+48
+124
+21.8
+70.4
+3.71
+GLOW-FM-M
+1
+36
+21.8
+21.3
+71.5
+3.79
+GLOW-FM-S
+1
+34
+9.1
+21.2
+71.3
+3.70
+Table 3. Results on LOL-v1. Best results are shown in bold and
+second-best results are underlined.
+4. Experiments
+4.1. Experimental Setup
+Datasets. We evaluate GLOW-FM on both paired and unpaired
+real-world LLIE benchmarks.
+Our primary benchmark is
+LSD-DLL [45], a large-scale dataset designed to improve the
+realism and diversity of LLIE evaluation. Unlike many earlier
+low-light datasets [7, 15, 64], which are limited by synthetic
+darkening, controlled capture settings, or restricted sensor cov-
+erage, LSD-DLL [45] provides real low and normal-light image
+pairs captured across diverse scenes and devices in the wild
+using dynamic exposure calibration and multi-frame alignment
+to obtain more realistic paired data. As a result, it better captures
+phenomena such as sensor noise, spatially varying illumination,
+and color distortions that are often underrepresented in existing
+LLIE benchmarks. These properties motivated its use as the
+benchmark dataset in [8]. LSD-DLL also provides the LSD-U
+test split, which consists of unpaired low-light images captured
+with unseen devices and enables evaluation of generalization
+beyond the paired training distribution.
+To complement
+LSD-DLL, we additionally evaluate on UHD-LOL4K [54], a
+high-resolution LLIE benchmark, and LOL-v1 [7], one of the
+most widely used datasets in the LLIE literature.
+Following [19, 20, 25], we further evaluate cross-dataset gen-
+eralization by training on LOL-v2-Syn [64] and testing directly
+on five widely used unpaired real-world low-light datasets:
+DICM [27], LIME [14], MEF [36], NPE [53], and VV [50].
+6
+
+
+Category
+Method
+GFLOPs↓
+Params (M)↓
+DICM
+LIME
+MEF
+NPE
+VV
+Mean
+NIQE↓
+BRISQUE↓
+NIQE↓
+BRISQUE↓
+NIQE↓
+BRISQUE↓
+NIQE↓
+BRISQUE↓
+NIQE↓
+BRISQUE↓
+NIQE↓
+BRISQUE↓
+Non-Generative
+SNR-Aware [61]
+24
+39.1
+6.17
+33.2
+5.96
+34.9
+4.33
+27.9
+6.51
+36.9
+11.89
+80.0
+6.97
+42.6
+DCC-Net [69]
+64
+13.2
+3.44
+27.0
+4.26
+25.4
+4.13
+30.2
+3.51
+25.1
+3.55
+26.2
+3.78
+26.8
+Zero-DCE [13]
+5
+0.079
+2.84
+19.3
+3.80
+18.2
+4.02
+26.3
+3.59
+26.4
+3.21
+29.1
+3.49
+23.8
+KinD++ [68]
+371
+8.3
+3.10
+20.5
+4.72
+23.3
+4.20
+34.1
+3.79
+27.6
+2.68
+26.5
+3.70
+26.4
+CPGA-Net [58]
+2
+0.025
+3.62
+28.1
+4.59
+21.5
+4.18
+28.1
+3.73
+26.4
+4.22
+35.3
+4.07
+27.9
+HVI-CIDNet [62]
+8
+2.0
+3.02
+19.0
+3.82
+14.2
+3.82
+14.1
+3.43
+22.5
+3.25
+23.3
+3.47
+18.6
+Retinexformer [5]
+17
+1.6
+3.37
+9.5
+3.86
+12.5
+3.82
+14.9
+3.35
+16.4
+2.73
+14.6
+3.42
+13.6
+TFFormer [45]
+34
+5.9
+4.45
+26.3
+4.72
+22.0
+4.80
+25.7
+4.56
+25.9
+2.91
+9.1
+4.29
+21.8
+Multinex [4]
+3
+0.045
+3.14
+12.0
+3.84
+14.2
+3.72
+16.2
+3.37
+17.6
+2.93
+17.8
+3.40
+15.6
+Generative
+GSAD [19]
+1277
+17.2
+2.93
+18.1
+3.61
+13.3
+3.58
+14.6
+3.37
+21.2
+3.22
+23.9
+3.34
+18.2
+PyDiff [70]
+473
+97.9
+3.86
+13.4
+4.35
+18.7
+5.19
+28.2
+3.68
+20.8
+3.52
+19.0
+4.12
+20.0
+ReDDiT [25]
+128
+17.4
+3.70
+15.5
+3.80
+12.8
+3.88
+11.9
+3.59
+14.6
+2.65
+13.9
+3.53
+13.7
+WCDM [20]
+90
+22.1
+3.36
+15.8
+3.59
+14.4
+3.78
+16.7
+3.37
+18.3
+2.35
+8.0
+3.29
+14.7
+Reti-Diff [17]
+175
+26.1
+3.10
+7.8
+3.66
+12.0
+3.68
+15.33
+3.39
+17.0
+2.88
+16.8
+3.34
+13.8
+LightenDiffusion [21]
+92
+27.8
+3.37
+19.5
+4.02
+17.1
+4.00
+23.8
+3.33
+20.8
+3.43
+27.4
+3.63
+21.7
+Ours
+GLOW-FM-XL
+48
+124.0
+2.61
+7.9
+3.12
+8.9
+3.28
+10.9
+2.94
+12.5
+2.28
+13.7
+2.86
+10.8
+GLOW-FM-M
+36
+21.8
+2.60
+8.2
+3.17
+10.1
+3.19
+10.8
+2.93
+12.6
+2.32
+14.0
+2.84
+11.1
+GLOW-FM-S
+34
+9.1
+2.58
+7.8
+3.16
+9.7
+3.21
+10.7
+2.95
+12.1
+2.30
+14.3
+2.83
+10.9
+Table 4. Cross-dataset generalization benchmark. Results on DICM, LIME, MEF, NPE, and VV. Lower is better. Best results are shown in
+bold and second-best results are underlined.
+Since these datasets do not provide paired reference images,
+they are evaluated using no-reference image quality metrics.
+Evaluation metrics. For paired benchmarks, we evaluate
+both distortion and perceptual quality. Distortion is measured
+using PSNR and SSIM [56], while perceptual similarity is
+assessed using LPIPS [67]. We additionally evaluate perceptual
+image quality using the no-reference metrics NIQE [39] and
+MUSIQ [24]. For unpaired benchmarks, where ground-truth
+reference images are unavailable, we follow [20] and report
+the no-reference perceptual quality metrics NIQE [39] and
+BRISQUE [38]. Results are averaged over five evaluation
+seeds; full mean and STD results are provided in Appendix F.
+Implementation details. GLOW-FM employs a frozen Tiny-
+VAE [49] to obtain 16-channel latent image representations,
+while only the latent flow model is optimized during training.
+Unless otherwise specified, experiments use the GLOW-FM-XL
+configuration with a single NFE. We additionally evaluate
+medium (M) and small (S) configurations, which differ only in
+the capacity of the HDiT backbone. Source latents are perturbed
+with Gaussian noise using σ=0.01. Models are trained for ap-
+proximately 100k optimization steps on 8 NVIDIA H100 GPUs.
+For LSD-DLL and UHD-LOL4K, we trained the baselines on
+the respective training sets, whereas all other results use the au-
+thors’ official code and checkpoints. Appendix D details these
+baseline training protocols together with our implementation,
+hyperparameters, and runtime and memory analyses.
+4.2. Results on Paired Benchmarks
+Tab. 1 compares GLOW-FM with representative non-generative
+and recent efficient generative LLIE methods on the paired LSD-
+DLL and UHD-LOL4K benchmarks. Across both datasets,
+GLOW-FM achieves a favorable quality–efficiency trade-off
+with only a single NFE during inference. On LSD-DLL, it ob-
+tains the strongest overall performance across several distortion
+and perceptual-quality metrics.
+On UHD-LOL4K, non-
+generative methods remain stronger on some distortion-oriented
+metrics, while GLOW-FM maintains competitive image quality
+with substantially lower inference cost than the generative
+baselines.
+The medium and small variants further reduce
+computational cost while preserving strong image quality. Rep-
+resentative qualitative results on LSD-DLL are shown in Fig. 3.
+On LOL-v1, GLOW-FM maintains a strong quality-
+efficiency tradeoff. As shown in Tab. 3, GLOW-FM achieves
+the best NIQE score among the compared methods with
+a single NFE. We hypothesize that its weaker distortion
+performance arises from the limited training data available
+in this benchmark.
+A controlled data-scaling experiment
+supporting this interpretation is presented in Fig. 5. Since paired
+evaluation does not fully capture robustness to unseen devices
+and low-light domains, we separately examine cross-dataset
+and unseen-device generalization in Sec. 4.3.
+4.3. Generalization to Unseen Low-Light Data
+Tab. 4 reports results on five widely used unpaired real-world
+low-light benchmarks:
+DICM, LIME, MEF, NPE, and
+VV. Following the protocol adopted in prior work [19, 25],
+GLOW-FM is trained on LOL-v2-Syn [64] and evaluated
+directly on the target datasets without additional fine-tuning.
+GLOW-FM achieves the best generative NIQE and BRISQUE
+results on nearly all evaluated benchmarks while operating
+at substantially lower computational cost. It also obtains the
+strongest mean performance across both metrics.
+Tab. 2 reports results on the LSD-U subset from [8],
+which evaluates generalization to low-light images captured
+with unseen devices. Among all compared generative and
+non-generative methods,
+GLOW-FM achieves the best
+NIQE and MUSIQ scores with a single NFE. Moreover, all
+GLOW-FM variants achieve competitive no-reference image
+quality despite substantially lower computational cost than
+the competing generative methods. These results demonstrate
+strong generalization beyond the training distribution, indicating
+that the proposed latent flow formulation remains robust under
+real-world distribution shifts. Together with the cross-dataset
+results in Tab. 4, they demonstrate consistent generalization
+across unseen devices and diverse low-light domains.
+7
+
+
+Figure 4. Qualitative generalization comparison. Results on unpaired real-world low-light benchmarks show that GLOW-FM recovers natural
+illumination while preserving scene structure across diverse inputs.
+0.2K
+0.7K
+1.5K
+3.0K
+Train-set size
+16
+17
+18
+19
+20
+21
+PSNR (dB) ↑
+16.8
+19.3
+19.6
+20.3
+PSNR
+MUSIQ
+32
+34
+36
+38
+MUSIQ ↑
+34.5
+34.9
+35.5
+36.0
+Figure 5. Effect of train-set size. Results on LSD-DLL for models
+trained with increasing train-set size.
+Given the perception–distortion trade-off [3], we evaluate
+metrics from both families. Quantitative results and paired
+ground-truth comparisons in Fig. 3 indicate GLOW-FM offers
+a favorable balance among the compared methods, while
+unpaired examples in Fig. 4 show natural illumination and fewer
+artifacts; additional examples are provided in Appendix G.
+4.4. Ablation Study
+Comparison of one-step objectives. Tab. 5 compares TVM
+with MeanFlow [12], ConsistencyFM [63] and No-TVM
+(standard Flow Matching [30, 31]), with all other experimental
+settings held fixed.
+We additionally evaluate No-TVM at
+25 NFEs.
+Among the matched TAESD one-step variants,
+TVM achieves the strongest overall distortion and perceptual
+performance.
+MeanFlow forms its JVP target from the
+initial-time velocity, whose sample-wise approximation can
+destabilize training [71]; this may be particularly problematic
+for LLIE, where the initial state is a degraded low-light image.
+ConsistencyFM enforces a velocity-consistent straight flow,
+which may restrict a single full-interval mapping for spatially
+heterogeneous restoration [9, 63]. TVM instead regularizes the
+displacement at its predicted terminal state, aligning the one-step
+mapping with the velocity near the enhanced endpoint [71].
+Effect of training-set size. Fig. 5 isolates the effect of data
+availability by training GLOW-FM on progressively larger
+LSD-DLL subsets while keeping the architecture and training
+protocol fixed. Increasing the training set from approximately
+0.2K to 3.0K image pairs improves PSNR monotonically from
+16.8 to 20.3dB and MUSIQ from 34.5 to 36.0. This trend
+supports our data-limited interpretation of the LOL-v1 distortion
+results and is consistent with prior observations that flow-based
+models benefit strongly from additional training data [72].
+Effect of latent representation. Tab. 5 further evaluates the
+effect of the latent representation on GLOW-FM performance.
+Variant
+Latent
+GFLOPs↓Params (M)↓PSNR↑SSIM↑LPIPS↓MUSIQ↑NIQE↓
+Pixel Space (TVM)
+None
+1693
+121
+16.0
+0.47
+0.54
+28.2
+4.51
+SD-VAE (TVM)
+SD-VAE
+471
+205
+19.6
+0.50
+0.47
+40.6
+3.37
+No TVM (1 NFE)
+TAESD
+48
+124
+19.7
+0.50
+0.48
+27.7
+6.00
+No TVM (25 NFE) TAESD
+415
+124
+20.1
+0.54
+0.37
+35.6
+3.00
+ConsistencyFM
+TAESD
+48
+124
+19.4
+0.52
+0.50
+32.8
+3.53
+MeanFlow
+TAESD
+48
+124
+19.5
+0.52
+0.49
+31.7
+3.59
+GLOW-FM
+TAESD
+48
+124
+20.3
+0.55
+0.48
+36.0
+2.92
+Table 5. Ablation study. Results on LSD-DLL assessing the latent
+representation and one-step training objective.
+We compare the proposed TAESD latent representation against
+a larger SD-VAE and a direct pixel-space variant while keeping
+the velocity network fixed. TAESD achieves better PSNR,
+SSIM, and NIQE with nearly an order of magnitude less com-
+putation, whereas SD-VAE achieves better LPIPS and MUSIQ
+at substantially higher computational and parameter costs.
+Additional autoencoder-reconstruction analysis is provided in
+Appendix E. We further compare against a pixel-space variant
+that removes the latent representation entirely. Despite requiring
+significantly more computation, direct pixel-space modeling
+produces substantially weaker distortion and perceptual quality.
+These results indicate that the proposed latent-space formulation
+is not only computationally advantageous but also improves
+enhancement quality, suggesting that the compact TAESD
+representation provides an effective latent space for LLIE.
+5. Conclusion
+Low-light image enhancement remains challenging because
+noise, color shifts, and information loss make faithful restoration
+ambiguous. Although recent generative LLIE methods have
+reduced sampling cost, combining single-step inference, low
+overall computation, and robust performance across real-world
+conditions remains challenging.
+In this work, we address this challenge with GLOW-FM,
+an efficient generative LLIE framework based on one-step
+latent flow matching. By combining efficiency-aware latent
+flow matching with Terminal Velocity Matching, GLOW-FM
+enables single-NFE enhancement while preserving generative
+priors for realistic restoration. Experiments show competitive
+quality, improved efficiency, and state-of-the-art cross-dataset
+generalization, suggesting a practical direction for robust and
+efficient generative low-light enhancement.
+8
+
+
+References
+[1] Michael Albergo and Eric Vanden-Eijnden. Building normalizing
+flows with stochastic interpolants. In ICLR 2023 Conference,
+2023. 4
+[2] Arm Editorial Team. Scalable matrix extension (SME) for Armv9
+architecture enables AI innovation on the Arm CPU, 2024. 18
+[3] Yochai Blau and Tomer Michaeli. The perception-distortion
+tradeoff. In Proceedings of the IEEE conference on computer
+vision and pattern recognition, pages 6228–6237, 2018. 1, 8
+[4] Alexandru Brateanu, Tingting Mu, Codruta O Ancuti, and
+Cosmin Ancuti. Multinex: Lightweight low-light image enhance-
+ment via multi-prior retinex. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, pages
+29887–29896, 2026. 1, 2, 6, 7, 19
+[5] Yuanhao Cai, Hao Bian, Jing Lin, Haoqian Wang, Radu Timofte,
+and Yulun Zhang.
+Retinexformer: One-stage retinex-based
+transformer for low-light image enhancement. In Proceedings
+of the IEEE/CVF international conference on computer vision,
+pages 12504–12513, 2023. 1, 2, 6, 7, 19
+[6] Chen Chen, Qifeng Chen, Jia Xu, and Vladlen Koltun. Learning
+to see in the dark. In Proceedings of the IEEE conference on com-
+puter vision and pattern recognition, pages 3291–3300, 2018. 1
+[7] Wei Chen, Wenjing Wang, Wenhan Yang, and Jiaying Liu. Deep
+retinex decomposition for low-light enhancement. In British
+Machine Vision Conference, 2018. 1, 6
+[8] George Ciubotariu, S. M. A. Sharif, Abdur Rehman, Fayaz Ali
+Dharejo, Rizwan Ali Naqvi, Marcos V. Conde, Radu Timofte,
+et al. Low light image enhancement challenge at ntire 2026. In
+Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR) Workshops, pages 1741–1753,
+2026. 1, 6, 7
+[9] Elad Cohen, Idan Achituve, Idit Diamant, Arnon Netzer, and
+Hai Victor Habi. Efficient image restoration via latent consistency
+flow matching. In 36th British Machine Vision Conference 2025,
+BMVC 2025, Sheffield, UK, November 24-27, 2025. BMVA,
+2025. 3, 4, 6, 8, 12, 13
+[10] Katherine Crowson, Stefan Andreas Baumann, Alex Birch,
+Tanishq Mathew Abraham, Daniel Z Kaplan, and Enrico
+Shippole. Scalable high-resolution pixel-space image synthesis
+with hourglass diffusion transformers. In Forty-first International
+Conference on Machine Learning, 2024. 6
+[11] Mauricio Delbracio and Peyman Milanfar. Inversion by direct iter-
+ation: An alternative to denoising diffusion for image restoration.
+Transactions on Machine Learning Research, 2023. 3
+[12] Zhengyang Geng, Mingyang Deng, Xingjian Bai, Zico Kolter,
+and Kaiming He. Mean flows for one-step generative modeling.
+Advances in Neural Information Processing Systems, 38:
+75460–75482, 2026. 2, 3, 8
+[13] Chunle Guo, Chongyi Li, Jichang Guo, Chen Change Loy,
+Junhui Hou, Sam Kwong, and Runmin Cong. Zero-reference
+deep curve estimation for low-light image enhancement. In
+Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 1780–1789, 2020. 7
+[14] Xiaojie Guo, Yu Li, and Haibin Ling.
+Lime: Low-light
+image enhancement via illumination map estimation. IEEE
+Transactions on image processing, 26(2):982–993, 2016. 6
+[15] Jiang Hai, Zhu Xuan, Ren Yang, Yutong Hao, Fengzhu Zou,
+Fang Lin, and Songchen Han. R2rnet: Low-light image enhance-
+ment via real-low to real-normal network. Journal of Visual
+Communication and Image Representation, 90:103712, 2023. 6
+[16] Khurram Azeem Hashmi, Goutham Kallempudi, Didier Stricker,
+and Muhammad Zeshan Afzal. Featenhancer: Enhancing hier-
+archical features for object detection and beyond under low-light
+vision. In Proceedings of the IEEE/CVF International Conference
+on Computer Vision (ICCV), pages 6725–6735, 2023. 1
+[17] Chunming He, Chengyu Fang, Yulun Zhang, Longxiang Tang,
+Jinfa Huang, Kai Li, Xiu Li, Sina Farsiu, et al.
+Reti-diff:
+Illumination degradation image restoration with retinex-based
+latent diffusion model. In International Conference on Learning
+Representations, pages 43332–43352, 2025. 1, 2, 7
+[18] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion
+probabilistic models. Advances in neural information processing
+systems, 33:6840–6851, 2020. 2
+[19] Jinhui Hou, Zhiyu Zhu, Junhui Hou, Hui Liu, Huanqiang Zeng,
+and Hui Yuan. Global structure-aware diffusion process for
+low-light image enhancement. Advances in Neural Information
+Processing Systems, 36:79734–79747, 2023. 1, 2, 6, 7
+[20] Hai Jiang, Ao Luo, Haoqiang Fan, Songchen Han, and
+Shuaicheng Liu. Low-light image enhancement with wavelet-
+based diffusion models. ACM Transactions on Graphics (TOG),
+42(6):1–14, 2023. 2, 6, 7, 19
+[21] Hai Jiang, Ao Luo, Xiaohong Liu, Songchen Han, and
+Shuaicheng Liu. Lightendiffusion: Unsupervised low-light image
+enhancement with latent-retinex diffusion models. In European
+Conference on Computer Vision, pages 161–179, 2024. 1, 2, 7
+[22] Yifan Jiang, Xinyu Gong, Ding Liu, Yu Cheng, Chen Fang, Xiao-
+hui Shen, Jianchao Yang, Pan Zhou, and Zhangyang Wang. En-
+lightengan: Deep light enhancement without paired supervision.
+IEEE Transactions on Image Processing, 30:2340–2349, 2021. 1
+[23] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine.
+Elucidating the design space of diffusion-based generative
+models. Advances in neural information processing systems, 35:
+26565–26577, 2022. 3
+[24] Junjie Ke, Qifei Wang, Yilin Wang, Peyman Milanfar, and
+Feng Yang.
+Musiq: Multi-scale image quality transformer.
+In Proceedings of the IEEE/CVF international conference on
+computer vision, pages 5148–5157, 2021. 7
+[25] Guanzhou Lan, Qianli Ma, Yuqi Yang, Zhigang Wang, Dong
+Wang, Xuelong Li, and Bin Zhao. Efficient diffusion as low light
+enhancer. In Proceedings of the Computer Vision and Pattern
+Recognition Conference (CVPR), pages 21277–21286, 2025. 2,
+6, 7, 19
+[26] Edwin H Land. The retinex theory of color vision. Scientific
+american, 237(6):108–129, 1977. 2
+[27] Chulwoo Lee, Chul Lee, and Chang-Su Kim.
+Contrast
+enhancement based on layered difference representation of 2d
+histograms. IEEE Transactions on Image Processing, 22(12):
+5372–5384, 2013. 6
+[28] Chongyi Li, Chunle Guo, Linghao Han, Jun Jiang, Ming-Ming
+Cheng, Jinwei Gu, and Chen Change Loy. Low-light image
+and video enhancement using deep learning: A survey. IEEE
+transactions on pattern analysis and machine intelligence, 44
+(12):9396–9416, 2021. 1
+9
+
+
+[29] Huaqiu Li, Yong Wang, Tongwen Huang, Hailang Huang,
+Haoqian Wang, and Xiangxiang Chu. Ld-rps: Zero-shot unified
+image restoration via latent diffusion recurrent posterior sampling.
+In Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 13684–13694, 2025. 2, 5
+[30] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian
+Nickel, and Matthew Le.
+Flow matching for generative
+modeling. In The Eleventh International Conference on Learning
+Representations, ICLR 2023, Kigali, Rwanda, May 1-5, 2023.
+OpenReview.net, 2023. 2, 3, 4, 8, 12, 13
+[31] Xingchao Liu, Chengyue Gong, and qiang liu. Flow straight
+and fast: Learning to generate and transfer data with rectified
+flow. In The Eleventh International Conference on Learning
+Representations, 2023. 2, 3, 8
+[32] Yuen Peng Loh and Chee Seng Chan. Getting to know low-light
+images with the exclusively dark dataset. Computer vision and
+image understanding, 178:30–42, 2019. 1
+[33] Ilya Loshchilov and Frank Hutter. Sgdr: Stochastic gradient
+descent with warm restarts. arXiv preprint arXiv:1608.03983,
+2016. 15
+[34] Cheng Lu, Yuhao Zhou, Fan Bao, Jianfei Chen, Chongxuan
+Li, and Jun Zhu. Dpm-solver: A fast ode solver for diffusion
+probabilistic model sampling in around 10 steps. Advances in
+neural information processing systems, 35:5775–5787, 2022. 3
+[35] Ziwei Luo, Fredrik K. Gustafsson, Zheng Zhao, Jens Sj¨olund,
+and Thomas B. Sch¨on. Image restoration with mean-reverting
+stochastic differential equations. In Proceedings of the 40th Inter-
+national Conference on Machine Learning, pages 23045–23066.
+PMLR, 2023. 3
+[36] Kede Ma, Kai Zeng, and Zhou Wang.
+Perceptual quality
+assessment for multi-exposure image fusion. IEEE Transactions
+on Image Processing, 24(11):3345–3356, 2015. 6
+[37] S´egol`ene Martin, Anne Gagneux, Paul Hagemann, and Gabriele
+Steidl.
+Pnp-flow:
+Plug-and-play image restoration with
+flow matching.
+In International Conference on Learning
+Representations, pages 45466–45492, 2025. 3
+[38] Anish Mittal, Anush Krishna Moorthy, and Alan Conrad Bovik.
+No-reference image quality assessment in the spatial domain.
+IEEE Transactions on image processing, 21(12):4695–4708,
+2012. 7
+[39] Anish Mittal, Rajiv Soundararajan, and Alan C Bovik. Making
+a “completely blind” image quality analyzer.
+IEEE Signal
+processing letters, 20(3):209–212, 2012. 7
+[40] Igor Morawski, Yu-An Chen, Yu sheng Lin, and Winston H.
+Hsu. Nod: Taking a closer look at detection under extreme
+low-light conditions with night object detection dataset. In 32nd
+British Machine Vision Conference 2021, BMVC 2021, Online,
+November 22-25, 2021, page 76. BMVA Press, 2021. 1
+[41] Victor M Panaretos and Yoav Zemel.
+Statistical aspects of
+wasserstein distances.
+Annual Review of Statistics and Its
+Application, 6(1):405–431, 2019. 3, 12
+[42] William Peebles and Saining Xie. Scalable diffusion models
+with transformers. In Proceedings of the IEEE/CVF international
+conference on computer vision, pages 4195–4205, 2023. 6
+[43] PyTorch Contributors. ReduceLROnPlateau — PyTorch 2.13
+documentation. https://docs.pytorch.org/docs/
+2.13/generated/torch.optim.lr_scheduler.
+ReduceLROnPlateau.html, 2026. 15
+[44] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick
+Esser, and Bj¨orn Ommer.
+High-resolution image synthesis
+with latent diffusion models. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, pages
+10684–10695, 2022. 6, 14
+[45] SMA Sharif, Abdur Rehman, Zain Ul Abidin, Fayaz Ali
+Dharejo, Radu Timofte, and Rizwan Ali Naqvi. Illuminating
+darkness: Learning to enhance low-light images in-the-wild. In
+Proceedings of the IEEE/CVF Winter Conference on Applications
+of Computer Vision, pages 2263–2272, 2026. 1, 2, 6, 7, 19
+[46] Yuyang Shi, Valentin De Bortoli, Andrew Campbell, and Arnaud
+Doucet. Diffusion schr¨odinger bridge matching. Advances in
+neural information processing systems, 36:62183–62223, 2023. 3
+[47] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising
+diffusion implicit models. In 9th International Conference on
+Learning Representations, ICLR 2021, Virtual Event, Austria,
+May 3-7, 2021. OpenReview.net, 2021. 3
+[48] Xavier Thomas and Deepti Ghadiyaram. What’s in a latent?
+leveraging diffusion latent space for domain generalization. In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision (ICCV), pages 2183–2194, 2025. 2, 5
+[49] Patrick von Platen, Suraj Patil, Anton Lozhkov, Pedro Cuenca,
+Nathan Lambert, Kashif Rasul, Mishig Davaadorj, Dhruv
+Nair, Sayak Paul, William Berman, Yiyi Xu, Steven Liu, and
+Thomas Wolf.
+Diffusers: State-of-the-art diffusion models.
+https://github.com/huggingface/diffusers,
+2022. 2, 6, 7, 14
+[50] Vassilios Vonikakis, Rigas Kouskouridas, and Antonios Gaster-
+atos. On the evaluation of illumination compensation algorithms.
+Multimedia Tools and Applications, 77(8):9211–9231, 2018. 6
+[51] Ziyu Wan, Bo Zhang, Dongdong Chen, Pan Zhang, Dong Chen,
+Jing Liao, and Fang Wen. Bringing old photos back to life. In
+proceedings of the IEEE/CVF conference on computer vision
+and pattern recognition, pages 2747–2757, 2020. 2, 5
+[52] Jianyi Wang, Kelvin CK Chan, and Chen Change Loy. Exploring
+clip for assessing the look and feel of images. In Proceedings of
+the AAAI conference on artificial intelligence, pages 2555–2563,
+2023. 16
+[53] Shuhang Wang, Jin Zheng, Hai-Miao Hu, and Bo Li. Naturalness
+preserved enhancement algorithm for non-uniform illumination
+images.
+IEEE transactions on image processing, 22(9):
+3538–3548, 2013. 6
+[54] Tao Wang, Kaihao Zhang, Tianrun Shen, Wenhan Luo, Bjorn
+Stenger, and Tong Lu. Ultra-high-definition low-light image
+enhancement: A benchmark and transformer-based method. In
+Proceedings of the AAAI Conference on Artificial Intelligence,
+pages 2654–2662, 2023. 1, 2, 6
+[55] Yufei Wang, Yi Yu, Wenhan Yang, Lanqing Guo, Lap-Pui Chau,
+Alex C Kot, and Bihan Wen. Exposurediffusion: Learning to
+expose for low-light image enhancement. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision, pages
+12438–12448, 2023. 1
+[56] Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P
+Simoncelli. Image quality assessment: from error visibility to
+structural similarity. IEEE transactions on image processing, 13
+(4):600–612, 2004. 7
+[57] Wenyang Wei, Yang Yang, Xixi Jia, Xiangchu Feng, Weiwei
+Wang, and Renzhen Wang. Illumflow: Illumination-adaptive
+10
+
+
+low-light enhancement via conditional rectified flow and retinex
+decomposition, 2025. 2
+[58] Shyang-En Weng, Shaou-Gang Miaou, and Ricky Christanto.
+A lightweight low-light image enhancement network via channel
+prior and gamma correction. International Journal of Pattern
+Recognition and Artificial Intelligence, 39(12):2554013, 2025.
+1, 7
+[59] Wenhui Wu, Jian Weng, Pingping Zhang, Xu Wang, Wenhan
+Yang, and Jianmin Jiang. Uretinex-net: Retinex-based deep
+unfolding network for low-light image enhancement.
+In
+Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR), pages 5901–5910, 2022. 1
+[60] Jian Xu, Wei Chen, Shigui Li, Delu Zeng, John Paisley, and Qibin
+Zhao. Consist-retinex: One-step noise-emphasized consistency
+training accelerates high-quality retinex enhancement, 2026. 2
+[61] Xiaogang Xu, Ruixing Wang, Chi-Wing Fu, and Jiaya Jia.
+Snr-aware low-light image enhancement. In CVPR, 2022. 1, 7
+[62] Qingsen Yan, Yixu Feng, Cheng Zhang, Guansong Pang,
+Kangbiao Shi, Peng Wu, Wei Dong, Jinqiu Sun, and Yanning
+Zhang. Hvi: A new color space for low-light image enhancement.
+In Proceedings of the computer vision and pattern recognition
+conference, pages 5678–5687, 2025. 1, 2, 6, 7, 19
+[63] Ling Yang, Zixiang Zhang, Zhilong Zhang, Xingchao Liu,
+Minkai Xu, Wentao Zhang, Chenlin Meng, Stefano Ermon, and
+Bin Cui. Consistency flow matching: Defining straight flows
+with velocity consistency. arXiv preprint arXiv:2407.02398,
+2024. 2, 3, 8
+[64] Wenhan Yang, Wenjing Wang, Haofeng Huang, Shiqi Wang, and
+Jiaying Liu. Sparse gradient regularized deep retinex network
+for robust low-light image enhancement. IEEE Transactions on
+Image Processing, 30:2072–2086, 2021. 6, 7
+[65] Xunpeng Yi, Han Xu, Hao Zhang, Linfeng Tang, and Jiayi
+Ma.
+Diff-retinex: Rethinking low-light image enhancement
+with a generative diffusion model.
+In Proceedings of the
+IEEE/CVF International Conference on Computer Vision, pages
+12302–12311, 2023. 1, 2
+[66] Yuyang Yin, Dejia Xu, Chuangchuang Tan, Ping Liu, Yao Zhao,
+and Yunchao Wei. Cle diffusion: Controllable light enhancement
+diffusion model. In Proceedings of the 31st ACM International
+Conference on Multimedia, pages 8145–8156, 2023. 1
+[67] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and
+Oliver Wang. The unreasonable effectiveness of deep features
+as a perceptual metric. In Proceedings of the IEEE conference on
+computer vision and pattern recognition, pages 586–595, 2018. 7
+[68] Yonghua Zhang, Xiaojie Guo, Jiayi Ma, Wei Liu, and Jiawan
+Zhang. Beyond brightening low-light images. International
+journal of computer vision, 129(4):1013–1037, 2021. 1, 7
+[69] Zhao Zhang, Huan Zheng, Richang Hong, Mingliang Xu,
+Shuicheng Yan, and Meng Wang.
+Deep color consistent
+network for low-light image enhancement. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 1899–1908, 2022. 1, 7
+[70] Dewei Zhou, Zongxin Yang, and Yi Yang. Pyramid diffusion
+models for low-light image enhancement. In Proceedings of
+the Thirty-Second International Joint Conference on Artificial
+Intelligence, 2023. 2, 6, 7, 19
+[71] Linqi Zhou, Mathias Parger, Ayaan Haque, and Jiaming Song.
+Terminal velocity matching. In The Fourteenth International
+Conference on Learning Representations, 2026. 2, 3, 5, 8, 12, 13
+[72] Kaizhen Zhu, Mokai Pan, Zhechuan Yu, Jingya Wang, Jingyi
+Yu, and Ye Shi.
+Diffusion bridge or flow matching?
+a
+unifying framework and comparative analysis. arXiv preprint
+arXiv:2509.24531, 2025. 8
+[73] Yixuan Zhu, Wenliang Zhao, Ao Li, Yansong Tang, Jie Zhou,
+and Jiwen Lu. Flowie: Efficient image enhancement via rectified
+flow. In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 13–22, 2024. 3
+11
+
+
+GLOW-FM: Efficient Generative Low-Light Image Enhancement with One-Step
+Latent Flow Matching
+Supplementary Material
+A. Supplementary Overview
+This supplementary material provides additional details and
+results supporting the main paper and is organized as follows:
+• Appendix B provides the pixel-space Wasserstein bound for
+latent TVM.
+• Appendix C presents additional implementation details.
+• Appendix D describes the training protocols used for the
+baseline methods.
+• Appendix E provides further ablation studies.
+• Appendix F reports additional quantitative results.
+• Appendix G presents additional qualitative comparisons.
+B. Pixel-Space Wasserstein Bound for Latent
+TVM
+Motivation, notation, and definitions.
+In the main paper,
+we motivate TVM not only by its strong one-step generation
+performance, but also through theoretical analysis. We make
+this point precise below by showing that the Wasserstein-2
+distance [41] between the predicted normal-light image distribu-
+tion and the true normal-light image distribution is controlled by
+the latent TVM training objective and the VAE reconstruction
+error. Thus, minimizing our latent TVM objective reduces an
+upper bound on the pixel-space distributional gap.
+Let X and Z denote the image and latent spaces, respectively.
+Let x0∼px0 be a normal-light target image, and let z0=E(x0)
+be its latent representation under the frozen VAE encoder
+E. The decoder is denoted by D : Z →X. The TVM flow
+model has trainable parameters θ and produces an estimated
+normal-light latent ˆz0 ∼pθ
+ˆz0, whose decoded prediction is
+ˆx0 = D(ˆz0). We also define the VAE reconstruction of the
+target image as ˜x0=D(E(x0))=D(z0).
+We use # to denote the pushforward of a distribution. Hence,
+pz0 =E#px0,
+pθ
+ˆx0 =D#pθ
+ˆz0,
+p˜x0 =D#pz0.
+(13)
+The variable zs denotes a latent point at time s, vs denotes
+the corresponding sample-wise conditional velocity, and
+u(zs,s) denotes the marginal latent velocity field. As in Flow
+Matching [30], u(zs,s)=E[vs|zs].
+We denote the terminal-velocity matching loss by Lt,s
+TVM(θ)
+and the conditional flow-matching loss used in our training
+objective by Ls
+FM(θ). For compactness, define the combined
+per-time objective
+Lt,s(θ)=Lt,s
+TVM(θ)+Ls
+FM(θ).
+(14)
+The VAE reconstruction error is
+ϵVAE=Ex0∼px0∥D(E(x0))−x0∥2
+2.
+(15)
+For distributions µ,ν over a space Y, the Wasserstein-2 distance
+is
+W2,Y(µ,ν)=
+s
+inf
+γ∈Π(µ,ν)
+Z
+Y×Y
+∥y−y′∥2
+2dγ(y,y′),
+(16)
+where Π(µ,ν) is the set of couplings with marginals µ and ν.
+We will prove the following result:
+Theorem 1 (Pixel-space Wasserstein bound for latent TVM).
+Assume that the TVM regularity conditions of [71, Theorem 1]
+hold in latent space, and the frozen decoder D is LD-Lipschitz
+on the relevant latent support. Then
+W2,X(pθ
+ˆx0,px0)≤LD
+sZ t
+0
+λ[L](s)Lt,s(θ)ds+√ϵVAE, (17)
+where λ[·] is a functional of the Lipschitz constants L(s).
+Consequently, in the ideal regime where the weighted
+TVM/FM training objective converges to zero and the VAE
+reconstruction error is zero, the Wasserstein-2 bound also
+vanishes. For a fixed pretrained VAE, ϵVAE remains a fixed
+reconstruction residual, while TVM training minimizes the
+trainable part of the bound.
+Lemma 1 (Pixel-Space W2 Bound under a Lipschitz Decoder).
+Let D be LD-Lipschitz on the relevant latent support:
+∥D(z)−D(z′)∥2≤LD∥z−z′∥2.
+(18)
+Then
+W2,X(pθ
+ˆx0,p˜x0)≤LDW2,Z(pθ
+ˆz0,pz0).
+(19)
+Proof. Following the decoder pushforward argument used in [9,
+Eq. (11)], we first write the Wasserstein-2 distance in pixel
+space:
+W2,X(pθ
+ˆx0,p˜x0)
+=
+s
+inf
+γ∈Π(pθ
+ˆx0,p˜x0)
+Z
+X×X
+∥ˆx0−˜x0∥2
+2dγ(ˆx0,˜x0).
+(20)
+Using the pushforward relations induced by the decoder
+D in Eq. (13), together with the expectation form of the
+Wasserstein-2 distance [41] and the law of the unconscious
+statistician (LOTUS), the same distance can be expressed over
+latent-space couplings as
+W2,X(pθ
+ˆx0,p˜x0)
+=
+s
+inf
+π∈Π(pθ
+ˆz0,pz0)
+Z
+Z×Z
+∥D(ˆz0)−D(z0)∥2
+2dπ(ˆz0,z0).
+(21)
+12
+
+
+Using the Lipschitz property of D from Eq. (18) we get:
+W2,X(pθ
+ˆx0,p˜x0)
+≤
+s
+L2
+D
+inf
+π∈Π(pθ
+ˆz0,pz0)
+Z
+Z×Z
+∥ˆz0−z0∥2
+2dπ(ˆz0,z0)
+=LDW2,Z(pθ
+ˆz0,pz0).
+(22)
+Lemma 2 (Constant-Free TVM Bound). Let pθ
+ˆz0 denote the
+latent distribution obtained by the TVM pushforward from
+time t to 0, and let pz0 denote the target normal-light latent
+distribution. Assume that the TVM regularity conditions of [71,
+Theorem 1] hold in latent space, then
+W 2
+2,Z(pθ
+ˆz0,pz0)≤
+Z t
+0
+λ[L](s)
+
+Lt,s
+TVM(θ)+Ls
+FM(θ)
+
+ds, (23)
+where λ[·] is a functional of the Lipschitz constants L(s).
+Proof. The TVM proof [71, Eq. (56)] first obtains the following
+latent-space bound:
+W 2
+2,Z(pθ
+ˆz0,pz0)
+≤
+Z t
+0
+λ[L](s)
+
+Lt,s
+TVM(θ)+Ezs∥uθ(zs,s)−u(zs,s)∥2
+2
+|
+{z
+}
+(a)
+
+ds.
+(24)
+The first term is the terminal-velocity matching loss and the
+second term, denoted by (a), is the marginal flow-matching loss:
+(a)=Ls
+MFM(θ)=Ezs∥uθ(zs,s)−u(zs,s)∥2
+2,
+(25)
+where u(zs,s) is the marginal velocity field.
+To connect (a) to the practical flow-matching objective
+used in our training, we use the Marginal Flow-Matching
+(MFM) / Conditional Flow-Matching (CFM) equivalence of
+Lipman et al. [30, Theorem 2].1 In our notation, the conditional
+flow-matching loss is
+Ls
+FM(θ)=Ezs,vs∥uθ(zs,s)−vs∥2
+2,
+(26)
+where the marginal velocity is the conditional expectation of
+the sample-wise velocity:
+u(zs,s)=E[vs|zs].
+(27)
+Following the standard MFM/CFM relation [30, Theorem 2],
+add and subtract u(zs,s):
+uθ(zs,s)−vs=uθ(zs,s)−u(zs,s)+u(zs,s)−vs.
+(28)
+1Lipman et al. [30] denote the marginal objective by FM and the conditional
+objective by CFM. Here, we denote the marginal objective by MFM and the
+conditional training objective by FM to remain consistent with the notation
+used in the main paper.
+Expanding the squared norm and taking expectation gives
+Ls
+FM(θ)=Ls
+MFM(θ)+Ezs,vs∥u(zs,s)−vs∥2
+2
++2Ezs,vs[⟨uθ(zs,s)−u(zs,s),u(zs,s)−vs⟩]. (29)
+The cross term vanishes because
+E[u(zs,s)−vs|zs]=u(zs,s)−E[vs|zs]=0.
+(30)
+Therefore,
+Ls
+FM(θ)=Ls
+MFM(θ)+Ezs,vs∥u(zs,s)−vs∥2
+2.
+(31)
+Since the second term is nonnegative, we obtain
+(a)=Ls
+MFM(θ)≤Ls
+FM(θ).
+(32)
+Substituting this inequality into Eq. (24), the marginal
+flow-matching term (a) is upper-bounded by the flow-matching
+training objective. Hence,
+W 2
+2,Z(pθ
+ˆz0,pz0)≤
+Z t
+0
+λ[L](s)
+
+Lt,s
+TVM(θ)+Ls
+FM(θ)
+
+ds.
+Lemma 3 (VAE Reconstruction Wasserstein Bound). Let
+˜x0 = D(E(x0)) and let p˜x0 = (D◦E)#px0. Assume the VAE
+reconstruction error is finite:
+ϵVAE=Ex0∼px0∥D(E(x0))−x0∥2
+2.
+(33)
+Then
+W2,X(p˜x0,px0)≤√ϵVAE.
+(34)
+Proof. Following the reconstruction-to-Wasserstein argument
+used in [9, Eq. (10)], we start from the definition of the
+Wasserstein-2 distance:
+W2,X(p˜x0,px0)=
+s
+inf
+γ∈Π(p˜x0,px0)
+Z
+X×X
+∥˜x0−x0∥2
+2dγ(˜x0,x0).
+(35)
+Consider the particular coupling induced by sampling x0∼px0
+and setting
+˜x0=D(E(x0)).
+(36)
+Equivalently, this coupling is
+γVAE=(D◦E,id)#px0,
+(37)
+and it belongs to Π(p˜x0,px0). Since the infimum is no larger
+than the cost of any particular coupling,
+W2,X(p˜x0,px0)≤
+sZ
+X×X
+∥˜x0−x0∥2
+2dγVAE(˜x0,x0).
+(38)
+13
+
+
+Using the definition of γVAE, we can substitute ˜x0=D(E(x0))
+and marginalize over ˜x0:
+Z
+X×X
+∥˜x0−x0∥2
+2dγVAE(˜x0,x0)
+=
+Z
+X
+∥D(E(x0))−x0∥2
+2dpx0(x0)
+=Ex0∼px0
+
+∥D(E(x0))−x0∥2
+2
+
+.
+(39)
+Therefore,
+W2,X(p˜x0,px0)≤
+q
+Ex0∼px0∥D(E(x0))−x0∥2
+2
+=√ϵVAE.
+(40)
+Proof of Theorem 1. By the triangle inequality for the
+Wasserstein-2 metric,
+W2,X(pθ
+ˆx0,px0)≤W2,X(pθ
+ˆx0,p˜x0)+W2,X(p˜x0,px0).
+(41)
+Using Lemma 1,
+W2,X(pθ
+ˆx0,p˜x0)≤LDW2,Z(pθ
+ˆz0,pz0).
+(42)
+Using Lemma 2,
+W2,Z(pθ
+ˆz0,pz0)≤
+sZ t
+0
+λ[L](s)Lt,s(θ)ds.
+(43)
+Thus,
+W2,X(pθ
+ˆx0,p˜x0)≤LD
+sZ t
+0
+λ[L](s)Lt,s(θ)ds.
+(44)
+Using Lemma 3,
+W2,X(p˜x0,px0)≤√ϵVAE.
+(45)
+Substituting both bounds into the triangle inequality gives
+W2,X(pθ
+ˆx0,px0)
+≤LD
+sZ t
+0
+λ[L](s)Lt,s(θ)ds+√ϵVAE.
+(46)
+This proves the theorem.
+C. Additional Implementation Details
+Training and inference.
+Unless otherwise specified, all
+experiments use a frozen Tiny-VAE encoder/decoder while
+optimizing only the latent flow model. Models are trained on 8
+NVIDIA H100 GPUs with a per-GPU batch size of 2 (effective
+batch size 16) for approximately 100k optimization steps.
+Optimization uses AdamW with a learning rate of 10−5, betas
+(0.9,0.95), weight decay 0.01, gradient clipping at norm 1.0,
+and EMA decay 0.9999. The learning rate follows a 5k-step
+warmup with cosine decay to a minimum learning-rate ratio of
+0.01. Training uses random 2048×2048 crops for LSD-DLL
+and UHD-LOL4K, and 384×384 crops for LOL-v1. Validation
+uses a batch size of 1 and is performed at the original image
+resolution. Source latents are perturbed with Gaussian noise
+using σ = 0.01 during training and σ = 0 during evaluation.
+Unless otherwise specified, all reported results use a single NFE.
+HDiT configurations.
+Tab. 6 summarizes the implementation
+details of the HDiT backbone variants used in our experiments.
+Each HDiT backbone has two resolution levels: the first level
+uses 7×7 neighborhood attention (NA), and the second level
+uses global self-attention. In the table, Widths and Depths
+denote the channel width and the number of transformer blocks
+specified at each HDiT level, respectively; Map. width and Map.
+depth denote the width and depth of the conditioning/mapping
+network, and dhead denotes the attention head dimension.
+Tiny-VAE latent representation.
+We use the official made-
+byollin/taesd3 [49] checkpoint as a frozen Tiny-VAE
+image tokenizer. TAESD is a lightweight autoencoder distilled
+from the Stable Diffusion VAE (SD-VAE) [44], providing a com-
+pact alternative for encoding and decoding images. RGB images
+are encoded into 16-channel latent representations, and the flow
+model operates entirely in this latent space. The encoder and
+decoder remain frozen throughout training, and no additional
+latent normalization is applied. During inference, the predicted
+latent representation is decoded using the same frozen Tiny-VAE
+decoder before computing image-space evaluation metrics.
+TVM warmup schedule.
+The TVM loss weight is introduced
+gradually during training according to
+L(k)=LFM+λ(k)LTVM,
+(47)
+where the step-dependent TVM weight is defined as
+λ(k)=
+
+
+
+
+
+
+
+0,
+k<W,
+λmax
+k−W
+R
+,
+W ≤k<W +R,
+λmax,
+k≥W +R.
+(48)
+Here, k denotes the optimizer step, W the warmup duration,
+R the linear ramp length, and λmax the final TVM weight. The
+TVM objective is disabled during warmup, introduced linearly
+over the ramp period, and kept fixed at λmax thereafter. We use
+(W,R,λmax)=(5k,10k,1.0) for LSD-DLL and (10k,20k,1.0)
+for UHD-LOL4K.
+D. Baseline Methods: Training Details
+For LSD-DLL and UHD-LOL4K, we independently retrained
+every baseline on the corresponding training set using the
+14
+
+
+Model
+Input channels
+Widths
+Depths
+Map. width
+Map. depth
+Patch
+dhead
+NA kernel
+GLOW-FM-XL
+16
+(384,768)
+(2,11)
+768
+2
+2×2
+64
+7×7
+GLOW-FM-M
+16
+(192,384)
+(2,6)
+384
+2
+2×2
+64
+7×7
+GLOW-FM-S
+16
+(128,256)
+(2,4)
+256
+2
+2×2
+64
+7×7
+Table 6. HDiT configurations used by GLOW-FM.
+authors’ official code and method-specific training recipe. We
+retained the official architecture, optimization settings, and
+training schedule, modifying only the dataset configuration
+as necessary. For LOL-v1, we used the official pretrained
+weights released by the respective authors whenever available.
+TFFormer was the only exception: because no official LOL-v1
+checkpoint was available, we also trained it from scratch on the
+LOL-v1 training set. Unless otherwise stated, the training details
+below describe our retraining on LSD-DLL and UHD-LOL4K,
+and all models were trained using NVIDIA H100 GPUs.
+TFFormer.
+We trained a separate TFFormer model from
+scratch on each of LSD-DLL, UHD-LOL4K, and LOL-v1.
+TFFormer was optimized using an Adam optimizer with hyper-
+parameters β1 =0.9 and β2 =0.99. We set the initial learning
+rate to 10−4 and adjusted it after 100,000 steps using PyTorch’s
+ReduceLROnPlateau scheduler [43]. We trained each model
+for 300,000 steps on a single GPU using a batch size of 24
+and 128×128 RGB patches. Additionally, we used a low-light
+regularization coefficient of λR = 0.2 for the combined
+reconstruction and luminance–chrominance objective.
+HVI-CIDNet.
+HVI-CIDNet was trained with the Adam
+optimizer (β1 = 0.9, β2 = 0.999) and 256×256 input crops
+using a single GPU for 1,000 epochs with a batch size of 4. The
+initial learning rate was 10−4 and is then steadily decreased to
+1×10−7 using a cosine annealing scheme [33] during training.
+We used the default HVI-CIDNet data augmentation pipeline,
+consisting of random cropping, random horizontal flipping, and
+random vertical flipping.
+Retinexformer.
+We trained Retinexformer using the Adam
+optimizer with β1=0.9 and β2=0.999, an initial learning rate
+of 2×10−4 then steadily decreased to 1×10−6 by the cosine an-
+nealing scheme [33]. Training is set for 2.5×105 iterations. We
+train with batch size 8 on randomly cropped 128×128 patches,
+and apply data augmentation of random rotation and flipping.
+Multinex.
+We trained Multinex using the Adam optimizer
+with a cosine annealing learning-rate schedule [33] that decays
+from 2×10−4 to 1×10−6. Multinex is trained from scratch
+for 150K iterations with a batch size of 8 and patch size of
+256×256. Training data are augmented via random cropping,
+horizontal and vertical flipping, and random rotation.
+PyDiff.
+PyDiff was trained from scratch using random
+192×288 crops, horizontal flipping, and brightness augmenta-
+tion with a factor sampled from [0.5,1.5]. We used Adam with
+an initial learning rate of 10−4 and a batch size of 8 per GPU.
+The learning rate was multiplied by 0.5 after 50k, 75k, 100k,
+150k, and 200k iterations. Training was conducted for 500k
+iterations using the official 2,000-step linear diffusion schedule,
+with variance endpoints of 10−6 and 10−2.
+WCDM.
+WCDM was trained from scratch using random
+256 × 256 crops and a batch size of 12. The model was
+optimized with Adam using a learning rate of 10−4 and zero
+weight decay. The learning rate was multiplied by 0.8 every
+5,000 iterations, and an exponential moving average with a
+decay of 0.999 was maintained during training. Training was
+conducted for 1,000 epochs, following the official training
+schedule.
+We used the official 200-step linear diffusion
+schedule with variance endpoints of 10−4 and 2×10−2.
+ReDDiT.
+For each of LSD-DLL and UHD-LOL4K, we
+followed the ReDDiT progressive-distillation procedure. We
+first trained the required dataset-specific GSAD teacher from
+scratch for 750 epochs in FP32 using random 96×96 crops.
+Training was performed across eight GPUs with a batch size
+of 8 per GPU, yielding an effective batch size of 64. We used
+Adam with a learning rate of 10−4. The teacher objective
+combined the ℓ1 reconstruction loss and the GSAD structural
+loss with weights of 10 and 1, respectively, and employed a
+500-step linear diffusion schedule.
+Starting from the dataset-specific teacher, we first trained
+an eight-step ReDDiT model and then progressively distilled it
+into four-step and two-step students. Each distillation stage was
+trained for 5,000 iterations using random 96×96 crops, a batch
+size of 16, Adam with a learning rate of 10−4, and an exponen-
+tial moving average with a decay of 0.9999. The ReDDiT stages
+used a fine-grained diffusion-time discretization of T =512 with
+a linear β-schedule whose endpoints were 10−4 and 2×10−2.
+E. Additional Ablation Studies
+Extended NFE Ablation.
+Figures 6 and 7 analyze the effect
+of the number of function evaluations (NFEs). Figure 6 reports
+PSNR and NIQE, while Fig. 7 extends the evaluation to SSIM,
+LPIPS-VGG, LPIPS-Alex, MUSIQ, and CLIP-IQA. Across
+15
+
+
+1
+5
+10
+15
+20
+25
+19.0
+19.5
+20.0
+20.5
+PSNR (dB) "
+1
+5
+10
+15
+20
+25
+NFEs
+2
+3
+4
+5
+6
+NIQE #
+GLOW-FM-XL
+GLOW-FM-M
+GLOW-FM-S
+w/o TVM
+Figure 6. NFE ablation. PSNR and NIQE on LSD-DLL as the number
+of function evaluations varies for GLOW-FM with and without TVM.
+1
+5
+10
+15
+20
+25
+0.50
+0.52
+0.54
+SSIM "
+1
+5
+10
+15
+20
+25
+28
+32
+36
+39
+MUSIQ "
+1
+5
+10
+15
+20
+25
+0.30
+0.35
+0.40
+0.45
+LPIPS-Alex #
+1
+5
+10
+15
+20
+25
+0.35
+0.40
+0.45
+0.50
+LPIPS-VGG #
+1
+5
+10
+15
+20
+25
+NFEs
+0.45
+0.50
+0.55
+0.60
+CLIP-IQA "
+GLOW-FM-XL
+GLOW-FM-M
+GLOW-FM-S
+w/o TVM
+Figure 7. Extended NFE ablation. SSIM, LPIPS-VGG, LPIPS-Alex,
+MUSIQ, and CLIP-IQA on the LSD-DLL validation split as the
+number of function evaluations varies.
+these metrics, the TVM-trained variants remain largely stable
+as the number of NFEs increases, whereas No-TVM improves
+substantially from one to 25 NFEs. The largest improvement
+is observed for LPIPS-VGG, for which No-TVM surpasses
+the TVM-trained model after only a few NFEs. The remaining
+metrics, including LPIPS-Alex, converge toward performance
+comparable to that of the TVM-trained model operating with
+a single NFE. As reported in Tab. 7, No-TVM at 25 NFEs
+achieves lower LPIPS; however, one-step TVM retains slightly
+better PSNR and NIQE with an 8.6× reduction in GFLOPs.
+Overall, these results are consistent with the designs of the
+respective objectives and demonstrate that TVM provides a
+favorable quality–efficiency trade-off by achieving competitive
+image quality with a single NFE.
+One-Step Methods across NFEs.
+Fig. 8 extends the
+matched one-step comparison by evaluating TVM, MeanFlow,
+ConsistencyFM, and No-TVM across different inference
+Figure 8. One-Step Methods across NFEs. PSNR and NIQE on
+LSD-DLL for TVM, MeanFlow, ConsistencyFM, and No-TVM as
+the number of NFEs varies.
+budgets.
+At one NFE, TVM provides the strongest joint
+distortion–perception performance.
+Its PSNR and NIQE
+remain stable as the number of NFEs increases, indicating
+that it already captures the enhancement trajectory in a single
+evaluation. No-TVM improves substantially with additional
+NFEs but requires many evaluations to approach one-step
+TVM. MeanFlow and ConsistencyFM improve NIQE with
+additional NFEs but remain lower in PSNR, reflecting a
+different distortion–perception trade-off. Overall, these results
+further support TVM for efficient one-step LLIE.
+Extended Ablation Study Table.
+Tab. 7 extends Tab. 5 from
+the main paper by adding CLIP-IQA [52] on LSD-DLL and
+reporting unseen-device generalization results on LSD-U.
+Autoencoder Reconstruction Analysis.
+The extended
+architecture ablation in Tab. 7 first evaluates the effect of the
+latent autoencoder on end-to-end enhancement. Compared
+with the SD-VAE-based variant, the TAESD-based GLOW-FM
+achieves higher PSNR and SSIM and lower NIQE while
+reducing the computational cost from 471 to 48 GFLOPs and
+the parameter count from 205M to 124M. The SD-VAE variant
+achieves lower LPIPS and higher MUSIQ, reflecting a different
+distortion–perception trade-off.
+To separate transport-model error from the reconstruction
+error introduced by the frozen autoencoder, we additionally eval-
+uate direct target reconstruction, ˜x0 = D(E(x0)), for TAESD
+and SD-VAE across the three paired benchmarks. This setting
+represents the performance obtained when the target encoding is
+recovered exactly and therefore provides a useful reconstruction
+reference, but not a strict bound on the output of GLOW-FM. In
+particular, PSNR, SSIM, and LPIPS measure correspondence
+with the paired target, whereas the no-reference metrics NIQE
+and MUSIQ assess perceptual image statistics and may improve
+even when reconstruction fidelity decreases. We therefore
+report NIQE and MUSIQ only as complementary diagnostics.
+As shown in Tab. 8, direct TAESD reconstruction achieves
+higher PSNR and SSIM and lower LPIPS than SD-VAE recon-
+struction on all three datasets. This differs from the end-to-end
+comparison above, in which the SD-VAE variant achieves
+16
+
+
+Variant
+Latent
+GFLOPs↓Params (M)↓
+LSD-DLL
+LSD-U
+PSNR↑
+SSIM↑
+LPIPS↓
+MUSIQ↑
+NIQE↓
+CLIP-IQA↑
+NIQE↓
+MUSIQ↑
+CLIP-IQA↑
+Pixel Space (TVM)
+None
+1693
+121
+16.0
+0.47
+0.54
+28.2
+4.51
+0.386
+6.15
+25.2
+0.210
+SD-VAE (TVM)
+SD-VAE
+471
+205
+19.6±3×10−2 0.504±3×10−3 0.472±3×10−2 40.58±1×10−1 3.372±1×10−3 0.609±8×10−4 4.35±1×10−3 30.4±6×10−3 0.362±2×10−4
+No TVM (25 NFE)
+TAESD
+415
+124
+20.1
+0.54
+0.37
+35.6
+3.00
+0.626
+4.75
+28.8
+0.341
+ConsistencyFM
+TAESD
+48
+124
+19.46
+0.52
+0.50
+32.8
+3.53
+0.573
+5.17
+27.3
+0.327
+MeanFlow
+TAESD
+48
+124
+19.49
+0.52
+0.49
+31.7
+3.59
+0.567
+5.32
+27.8
+0.344
+GLOW-FM
+TAESD
+48
+124
+20.3
+0.55
+0.48
+36.0
+2.92
+0.625
+4.33
+28.4
+0.367
+Table 7. Extended ablation study. LSD-DLL and LSD-U results assessing the latent representation and flow-matching objective. SD-VAE results
+are reported as the mean ± sample standard deviation across five seeds. All other variants are deterministic and are therefore reported as single
+values. Best mean results are shown in bold.
+Dataset
+Setting
+PSNR↑SSIM↑LPIPS↓NIQE↓MUSIQ↑
+LOL-v1
+SD-VAE Rec.
+28.14
+0.854
+0.048
+4.339
+72.45
+TAESD Rec.
+30.33
+0.909
+0.031
+3.735
+72.70
+GLOW-FM
+21.8
+0.828
+0.29
+3.71
+70.4
+LSD-DLL
+SD-VAE Rec.
+26.40
+0.687
+0.086
+3.719
+37.94
+TAESD Rec.
+29.49
+0.816
+0.069
+3.350
+35.77
+GLOW-FM
+20.3
+0.548
+0.48
+2.92
+36.0
+UHD-LOL4K
+SD-VAE Rec.
+32.89
+0.948
+0.026
+4.745
+34.84
+TAESD Rec.
+36.11
+0.981
+0.019
+4.552
+34.48
+GLOW-FM
+31.7
+0.969
+0.12
+4.59
+35.2
+Table 8.
+Autoencoder reconstruction analysis. Direct target
+reconstructions D(E(x0)) are compared with the corresponding
+GLOW-FM-XL enhancement outputs.
+Autoencoder
+LOL-v1
+LSD-DLL
+UHD-LOL4K
+TAESD
+1.181
+1.792
+0.266
+SD-VAE
+1.963
+4.579
+0.693
+Table 9. Autoencoder reconstruction error. MSE↓is reported in
+units of ×10−3.
+slightly better LPIPS, because direct reconstruction isolates the
+autoencoder from the transport model. On LSD-DLL, direct
+TAESD reconstruction obtains 29.49dB PSNR and 0.069
+LPIPS, compared with 20.3dB and 0.48 for GLOW-FM. This
+substantial gap indicates considerable reconstruction headroom
+and suggests that TAESD reconstruction error is not the
+principal bottleneck in end-to-end enhancement performance.
+Tab. 9 further reports the empirical autoencoder recon-
+struction term, ϵVAE, measured using MSE. TAESD obtains
+MSE values of 1.181, 1.792, and 0.266, compared with 1.963,
+4.579, and 0.693 for SD-VAE on LOL-v1, LSD-DLL, and
+UHD-LOL4K, respectively (all ×10−3). Thus, TAESD yields
+a smaller measurable autoencoder reconstruction term on
+all three benchmarks.
+These values characterize only the
+autoencoder component of the W2 analysis from Theorem 1,
+rather than the complete bound, whose transport weighting and
+decoder-dependent constants are not estimated.
+Although TAESD uses a substantially smaller encoder
+and decoder, parameter count alone does not determine the
+0
+20
+40
+60
+80
+100
+Train step (k)
+10.0
+12.5
+15.0
+17.5
+20.0
+PSNR (dB) "
+w/o TVM warmup
+TVM warmup
+0
+20
+40
+60
+80
+100
+Train step (k)
+3
+4
+5
+6
+NIQE #
+w/o TVM warmup
+TVM warmup
+Figure 9. TVM warmup ablation. PSNR and NIQE on LSD-DLL
+with and without TVM warmup. Curves are smoothed for visualization.
+information retained by the latent representation.
+At each
+latent spatial location, TAESD encodes 16 channels, whereas
+SD-VAE encodes four. Because both use the same spatial
+downsampling factor, TAESD produces four times as many
+latent coefficients for a given input resolution. This higher
+latent dimensionality helps explain its stronger reconstruction
+performance despite its smaller model size.
+TVM Warmup Ablation.
+Fig. 9 studies the effect of
+gradually introducing the TVM objective during training. We
+compare the proposed warmup-ramp schedule against a variant
+trained without TVM warmup.
+Without TVM warmup, the TVM objective is introduced
+before the flow-matching model has learned a meaningful
+low-to-normal-light transport. As a result, the displacement
+objective is optimized with respect to an immature velocity
+field, leading the optimization toward an inferior solution.
+In contrast, the proposed warmup schedule allows the
+flow-matching objective to first establish a reliable transport
+before introducing the TVM objective, resulting in improved
+PSNR and substantially better NIQE at convergence.
+Effect of source-latent perturbation.
+During training, we
+perturb the low-light source latent as ˜z1 = z1 + σϵ, where
+ϵ ∼N(0,I). We evaluate four noise levels using distortion
+17
+
+
+Training σ
+LSD-DLL
+LSD-U Cross-dataset
+PSNR↑LPIPS↓NIQE↓NIQE↓Mean NIQE↓
+0.00
+20.05
+0.49
+2.93
+4.72
+2.87
+0.01
+20.30
+0.48
+2.92
+4.33
+2.86
+0.05
+19.91
+0.50
+2.90
+4.88
+2.90
+0.10
+19.62
+0.51
+2.84
+4.67
+2.98
+Table 10. Effect of source-latent perturbation. LSD-U measures
+unseen-device generalization, while cross-dataset mean NIQE is
+averaged over DICM, LIME, MEF, NPE, and VV. Best results are
+shown in bold.
+and perceptual metrics on the LSD-DLL validation set, unseen-
+device generalization on LSD-U, and cross-dataset mean NIQE
+on DICM, LIME, MEF, NPE, and VV, following the evaluation
+in main-paper Tab. 4. As shown in Tab. 10, σ=0.01 improves
+LSD-DLL PSNR and LPIPS over σ=0 and achieves the best
+generalization results on LSD-U and across the five cross-dataset
+benchmarks. Although σ=0.10 obtains better in-domain NIQE,
+σ=0.01 provides the best overall balance when jointly consid-
+ering distortion, perceptual quality, and generalization.
+F. Additional Quantitative Results
+This section extends the quantitative comparisons presented
+in the main paper. Specifically, we report results over five
+evaluation seeds as mean±std and include CLIP-IQA for all
+benchmarks. For LOL-v1, we additionally report SSIM and
+LPIPS. The extended results for LOL-v1, LSD-DLL, UHD-
+LOL4K, and LSD-U are reported in Tabs. 11 to 14, respectively.
+Runtime and Memory Analysis.
+Tab. 15 reports end-to-end
+inference latency and peak memory usage. All measurements
+use batch size one and report latency averaged over 100
+timed inferences following 20 warm-up iterations.
+GPU
+measurements were obtained on a single NVIDIA H100 at
+resolutions from 256×256 to 4096×4096. We additionally
+evaluate 1024×1024 inference on an Apple M4 Max using
+ONNX with Arm SME/SME2 acceleration.
+SME is an
+Armv9-A instruction-set extension designed to accelerate
+matrix and vector processing [2].
+On the H100, GLOW-FM-S achieves the lowest latency
+and peak allocated memory across all evaluated resolutions. At
+high resolutions, all GLOW-FM variants are substantially faster
+and require less GPU memory than the compared generative
+methods. Under Arm SME/SME2 execution, all GLOW-FM
+variants also achieve lower latency than the competing methods.
+These results demonstrate practical runtime efficiency across
+both server-class GPU acceleration and local, edge-oriented
+Arm execution.
+G. Additional Qualitative Results
+This section presents additional qualitative comparisons across
+several benchmarks, including unseen-device generalization
+on LSD-U (Fig. 10), high-resolution enhancement on UHD-
+LOL4K (Fig. 11) and LSD-DLL (Fig. 13, Fig. 14), and low-
+resolution enhancement on LOL-v1 (Fig. 12). In Fig. 15, we fur-
+ther extend the qualitative generalization comparison shown in
+Fig. 4 of the main paper with magnified crops to enable closer in-
+spection of dark regions and facilitate comparison with compet-
+ing methods. Overall, the results show that GLOW-FM produces
+natural illumination, preserves scene structure and fine details,
+and avoids severe visual artifacts across diverse low-light inputs.
+18
+
+
+Method
+NFEs↓GFLOPs↓Params (M)↓
+PSNR↑
+SSIM↑
+LPIPS↓
+MUSIQ↑
+NIQE↓
+CLIP-IQA↑
+PyDiff [70]
+4
+473
+97.9
+21.9±2×10−1 0.895±2×10−2 0.11±3×10−3 74.2±2×10−1 5.40±1×10−1 0.44±2×10−2
+WCDM [20]
+10
+90
+22.1
+26.3±1×10−2 0.887±2×10−2 0.12±6×10−4 66.9±1×10−2 4.52±1×10−2 0.40±3×10−4
+ReDDiT [25]
+2
+128
+17.4
+20.8±2×10−1 0.883±2×10−3 0.20±2×10−3 71.7±7×10−2 5.38±2×10−2 0.70±4×10−3
+GLOW-FM-XL
+1
+48
+124
+21.8
+0.828
+0.29
+70.4
+3.71
+0.554
+GLOW-FM-M
+1
+36
+21.8
+21.3
+0.826
+0.27
+71.5
+3.79
+0.547
+GLOW-FM-S
+1
+34
+9.1
+21.2
+0.822
+0.27
+71.3
+3.70
+0.549
+Table 11. Five-seed evaluation results on LOL-v1.
+Method
+NFEs↓GFLOPs↓Params (M)↓
+PSNR↑
+SSIM↑
+LPIPS↓
+MUSIQ↑
+NIQE↓
+CLIP-IQA↑
+Retinexformer [5]
+1
+17
+1.6
+16.9
+0.567
+0.54
+28.1
+4.64
+0.32
+HVI-CIDNet [62]
+1
+8
+2.0
+15.2
+0.495
+0.56
+23.5
+4.42
+0.37
+Multinex [4]
+1
+3
+0.04
+15.6
+0.501
+0.63
+21.6
+7.73
+0.39
+TFFormer [45]
+1
+34
+5.9
+14.1
+0.349
+0.63
+32.7
+4.49
+0.45
+PyDiff [70]
+4
+473
+97.9
+17.3±9×10−2 0.544±1×10−3 0.56±5×10−3 33.2±1×10−1 7.38±7×10−2 0.425±2×10−3
+WCDM [20]
+10
+90
+22.1
+17.1±1×10−1 0.553±2×10−3 0.59±7×10−4 25.5±3×10−2 5.94±4×10−2 0.269±7×10−4
+ReDDiT [25]
+2
+128
+17.4
+14.1±7×10−3 0.488±2×10−4 0.59±2×10−3 30.9±1×10−1 7.45±4×10−2 0.359±2×10−3
+GLOW-FM-XL
+1
+48
+124
+20.3
+0.548
+0.48
+36.0
+2.92
+0.625
+GLOW-FM-M
+1
+36
+21.8
+19.5
+0.531
+0.50
+35.5
+2.86
+0.619
+GLOW-FM-S
+1
+34
+9.1
+19.7
+0.516
+0.52
+37.1
+2.70
+0.613
+Table 12. Five-seed evaluation results on LSD-DLL.
+Method
+NFEs↓GFLOPs↓Params (M)↓
+PSNR↑
+SSIM↑
+LPIPS↓
+MUSIQ↑
+NIQE↓
+CLIP-IQA↑
+Retinexformer [5]
+1
+17
+1.6
+30.3
+0.983
+0.05
+34.0
+4.47
+0.286
+HVI-CIDNet [62]
+1
+8
+2.0
+33.7
+0.989
+0.02
+33.1
+5.03
+0.281
+Multinex [4]
+1
+3
+0.04
+24.8
+0.958
+0.09
+32.0
+4.72
+0.293
+TFFormer [45]
+1
+34
+5.9
+31.4
+0.987
+0.04
+32.9
+4.65
+0.267
+PyDiff [70]
+4
+473
+97.9
+22.5±3×10−1 0.956±2×10−3 0.17±6×10−2 32.447±7×10−1 4.83±4×10−2 0.331±6×10−3
+WCDM [20]
+10
+90
+22.1
+26.8±5×10−2 0.957±2×10−5 0.16±3×10−2 31.728±1×10−1 4.08±4×10−2 0.231±1×10−2
+ReDDiT [25]
+2
+128
+17.4
+22.2±1×10−1 0.924±4×10−3 0.25±3×10−3 35.933±2×10−2 5.24±4×10−3 0.301±2×10−4
+GLOW-FM-XL
+1
+48
+124
+31.7
+0.969
+0.12
+35.2
+4.59
+0.323
+GLOW-FM-M
+1
+36
+21.8
+30.6
+0.961
+0.14
+35.1
+4.63
+0.323
+GLOW-FM-S
+1
+34
+9.1
+30.3
+0.962
+0.14
+34.881
+4.62
+0.316
+Table 13. Five-seed evaluation results on UHD-LOL4K.
+Method
+NFEs↓GFLOPs↓Params (M)↓
+NIQE↓
+MUSIQ↑
+CLIP-IQA↑
+Retinexformer [5]
+1
+17
+1.6
+7.35
+23.4
+0.205
+HVI-CIDNet [62]
+1
+8
+2.0
+6.26
+26.5
+0.281
+Multinex [4]
+1
+3
+0.04
+6.96
+27.2
+0.301
+TFFormer [45]
+1
+34
+5.9
+4.42
+24.1
+0.271
+PyDiff [70]
+4
+473
+97.9
+6.96±5×10−2
+26.3±2×10−1
+0.276±1×10−3
+WCDM [20]
+10
+90
+22.1
+6.16±2×10−2 23.692±3×10−1 0.183±3×10−3
+ReDDiT [25]
+2
+128
+17.4
+7.94±2×10−2 26.371±5×10−2 0.265±1×10−3
+GLOW-FM-XL
+1
+48
+124
+4.33
+28.4
+0.367
+GLOW-FM-M
+1
+36
+21.8
+4.49
+28.3
+0.358
+GLOW-FM-S
+1
+34
+9.1
+4.99
+27.7
+0.347
+Table 14. Five-seed evaluation results on LSD-U.
+19
+
+
+Method
+NFE
+NVIDIA H100 GPU
+Apple M4 Max (SME/SME2)
+256×256
+512×512
+1024×1024
+2048×2048
+4096×4096
+1024×1024
+Lat. (ms) Mem. (MB) Lat. (ms) Mem. (MB) Lat. (ms) Mem. (MB) Lat. (ms) Mem. (MB) Lat. (ms) Mem. (MB) Lat. (ms)
+Mem. (MB)
+ReDDiT
+2
+31.4
+291.3
+65.7
+859.1
+286.8
+3130.4
+1791.4
+12215.2
+39704.3
+48554.7
+7484.1
+25000.2
+PyDiff
+4
+80.7
+1099.9
+191.7
+1949.3
+738.6
+5346.7
+4485.5
+18936.2
+80846.0
+73294.4
+23682.8
+27056.0
+WCDM
+10
+166.8
+195.4
+172.6
+430.1
+229.8
+1369.1
+974.7
+5125.1
+7606.8
+35277.1
+4987.1
+4047.0
+GLOW-FM-XL
+1
+40.9
+559.3
+45.8
+708.3
+65.0
+1304.6
+237.4
+3689.6
+1149.1
+13229.6
+3710.3
+4557.8
+GLOW-FM-M
+1
+31.5
+165.5
+37.1
+314.5
+59.8
+910.8
+197.8
+3295.8
+870.2
+12835.8
+2709.6
+3526.0
+GLOW-FM-S
+1
+27.6
+116.4
+32.7
+265.4
+53.8
+861.7
+192.3
+3246.7
+773.5
+12786.7
+1811.2
+3367.2
+Table 15. Runtime efficiency on an NVIDIA H100 GPU and Arm SME/SME2. We report mean end-to-end latency and peak memory usage
+with batch size one after 20 warm-up iterations and over 100 timed inferences. GPU results cover five input resolutions and use PyTorch peak
+allocated memory. SME/SME2 results are measured at 1024×1024 on an Apple M4 Max using ONNX, with memory measured as the peak
+resident-set size (RSS) of the inference process. Best results are shown in bold and second-best results are underlined.
+Figure 10. Qualitative results on LSD-U.
+20
+
+
+Figure 11. Qualitative results on UHD-LOL4K.
+Figure 12. Qualitative results on LOL-v1.
+21
+
+
+Figure 13. Qualitative results on LSD-DLL. Each full-image comparison row is followed by a magnified crop from the full-image.
+22
+
+
+Figure 14. Qualitative results on LSD-DLL. Each full-image comparison row is followed by a magnified crop from the full-image.
+23
+
+
+Figure 15. Qualitative comparisons on the unpaired LIME, DICM, MEF, NPE, and VV datasets. Each full-image comparison row is followed
+by a magnified crop from the full-image.
+24

@@ -1,0 +1,1498 @@
+Unified RAW Image Exposure Correction and
+Restoration via Linear Illumination and
+Frequency-Adaptive Enhancement
+1st Yingkai Zhang
+School of Computer Science
+and Technology
+Beijing Institute of Technology
+Beijing, China
+zhangyingkai@bit.edu.cn
+2nd Yunhao Zou
+School of Computer Science
+and Technology
+Beijing Institute of Technology
+Beijing, China
+yunhaozou@outlook.com
+3rd Ying Fu*
+School of Computer Science
+and Technology
+Beijing Institute of Technology
+Beijing, China
+fuying@bit.edu.cn
+Abstract—Incorrect exposure degrades both image brightness
+and recoverable scene detail. Existing sRGB-based correction
+methods are limited by the non-linear image signal processing
+pipeline, whereas RAW-based methods are usually developed
+for a single degradation type, such as low-light denoising or
+high-light recovery. In this paper, we focus on joint exposure
+correction and restoration directly in the RAW domain and
+propose a unified RAW Image Exposure Correction and Restora-
+tion (RIECR) framework for both under- and over-exposed
+images. RIECR decomposes the problem into two coupled sub-
+problems that follow the RAW imaging model: linear illumination
+correction and residual degradation restoration. First, a Linear
+Illumination Correction Network (LICN) estimates exposure-
+aware linear gains by using channel-specific RAW cues. It exploits
+the high signal-to-noise ratio of Green channels for robust
+brightening and the relatively unsaturated Red/Blue responses
+for high-light darkening. Second, a dual-branch Frequency-based
+Enhancement Network (FEN) restores the remaining degrada-
+tion with a Frequency Dynamic Convolution (FDC) module.
+FDC decomposes convolutional responses into low- and high-
+frequency components and adaptively suppresses amplified noise
+or recovers clipped textures according to the exposure context.
+We further build a real paired RAW benchmark containing
+223 scenes and 1,784 pairs covering complex multi-exposure
+errors. Experiments against sixteen state-of-the-art methods show
+that RIECR achieves state-of-the-art performance on real RAW
+exposure correction.
+Index Terms—RAW image restoration, exposure correction, lin-
+ear illumination adjustment, frequency enhancement, RAW image
+dataset
+I. INTRODUCTION
+Exposure correction improves visibility and preserves scene
+detail for both photography and downstream tasks such as
+segmentation and detection [1]–[5]. Yet exposure errors are
+not a single degradation [6]. Limited photons in under-exposed
+scenes produce photon shot noise, sensor noise [7], and color
+distortion [8]; limited sensor range in over-exposed scenes
+saturates and irreversibly clips bright structures [9]. A practical
+This work was supported by the National Natural Science Foundation of
+China (62331006, 62671049), and the Open Project Program of State Key
+Laboratory of CNS/ATM.
+model must therefore restore exposure-dependent content as
+well as brightness.
+Learning-based
+sRGB
+correction
+has
+progressed
+rapidly
+[10]–[17].
+However,
+sRGB
+is
+produced
+by
+a
+nonlinear ISP involving demosaicking, white balance, tone
+mapping, and quantization [18]; amplified noise or clipped
+highlights are then difficult to recover. RAW data, as shown
+in Fig. 1, retains higher bit depth and a near-linear radiance
+response [9], [19], [20], making it a better domain for
+physical exposure correction. Nevertheless, RAW methods
+remain task-specific, separating low-light denoising [18], [21]
+from high-light recovery [9]. A unified model must estimate a
+valid linear gain and restore the direction-dependent residual
+within one network.
+To this end, we propose RAW Image Exposure Correction
+and Restoration (RIECR), which explicitly decomposes the
+task into two coupled sub-problems. First, the Linear Illu-
+mination Correction Network (LICN) predicts the exposure
+direction and estimates linear gains from complementary RAW
+channels: Green offers robust high-SNR cues for low-light
+brightening, while Red/Blue often remain less saturated and
+guide high-light darkening. Second, the Frequency-based En-
+hancement Network (FEN) restores the remaining degradation
+through local convolution and global attention. Its Frequency
+Dynamic Convolution (FDC) decomposes kernel responses
+and adaptively suppresses amplified high-frequency noise or
+emphasizes missing texture according to the exposure context.
+Because existing RAW datasets usually cover only one
+exposure subtask [9], [18], [22], we collect Complex Multi-
+Exposure RAW (CMER), with 223 real scenes and 1,784
+pairs spanning both directions, and synthesize additional pre-
+training pairs from MIT-Adobe FiveK [23]. CMER supplies
+pixel-aligned supervision for unified evaluation, while the syn-
+thetic data tests whether broader exposure coverage benefits
+real-data fine-tuning. Extensive experiments show consistent
+improvements under both training protocols and exposure
+directions. In summary, the main contributions are summarized
+as follows:
+*Corresponding author: Ying Fu.
+979-8-3195-3836-9/26/$31.00 ©2026 IEEE
+arXiv:2610.28191v1  [cs.CV]  20 Oct 2026
+
+
+Reference (High)
+RAW image
+Camera output
+Reference (Low)
+RAW image
+Camera output
+Fig. 1. The RAW/sRGB images of indoor/outdoor scenes under different lighting conditions. Due to the limited dynamic range of the camera, the 8-bit sRGB
+output loses significant information from the scene under high-light conditions. The stamens of the white flowers are almost invisible in the sRGB image
+but are visible in the 14-bit RAW image. Due to the low signal-to-noise (SNR) and low signal intensity under low-light conditions, the sRGB image loses
+considerable detail. The tail of Pikachu and the edge of the box are essentially unrecognizable in the sRGB image, whereas they are discernible in the RAW
+image (Zoom in for better details).
+• We establish a unified RAW-domain formulation for
+simultaneous exposure correction and restoration. By ad-
+dressing divergent degradations, our framework provides
+a holistic solution to the RAW-domain multi-exposure
+errors within a single model.
+• We propose two physically motivated components: a
+linear illumination correction network for exposure-aware
+linear gain estimation from channel-specific RAW cues,
+and a frequency-based enhancement network with dy-
+namic convolution for adaptive restoration of divergent
+frequency degradations.
+• We construct CMER, a paired real RAW benchmark with
+223 scenes and 1,784 multi-exposure pairs for unified
+RAW-based exposure correction and restoration tasks
+under diverse lighting conditions.
+II. RELATED WORK
+Single Image High Dynamic Range Reconstruction: SI-
+HDR expands local dynamic range through inverse tone
+mapping [24], direct CNN/Transform reconstruction [25]–
+[27], exposure-stack synthesis [28], or inverse-camera model-
+ing [29], [30]. RawHDR further exploits high-bit-depth RAW
+measurements [31]. These methods recover localized dynamic-
+range loss from a nominally exposed input and usually assume
+a usable global tone, whereas exposure correction must infer
+the global rescaling.
+Low-Light Image Enhancement: Classical enhancement ad-
+justs histograms, suppresses noise, or decomposes illumination
+and reflectance [32]–[34]. Learning-based methods employ
+illumination decomposition, color spaces, frequency embed-
+ding, transformers, and Mamba architectures [35]–[43]. RAW
+restoration additionally models sensor noise for synthesis and
+removal [7], [21], [44]–[46]. These methods are effective for
+photon-limited inputs but typically assume a known exposure
+ratio and do not address clipping-dominated over-exposure.
+Image Exposure Correction: Classical exposure correc-
+tion uses histogram, tone, or Retinex adjustment [32], [47],
+[48], while high-light-specific networks recover brightness
+and clipped content [9], [49], [50]. Deep learning has seen
+rapid development recently [51]–[54], unified sRGB methods
+(a) Reference
+(b) Linearly Scaled (High.)
+(c) Linearly Scaled (Low.)
+(d) Reference HF
+(e) High Light HF
+(f) Low Light HF
+(g) Reference LF
+(h) High Light LF
+(i) Low Light LF
+Fig. 2.
+Frequency analysis after linear scaling. (a–c) Scaled images, (d–f)
+high-frequency (HF) components, and (g–i) low-frequency (LF) components.
+Over-exposure removes edges, whereas under-exposure amplifies noise. Under
+different lighting conditions, the low-frequency information is similar to that in
+the reference image, indicating that information such as illumination remains
+essentially unchanged after linear adjustment.
+learn coarse-to-fine correction, exposure consistency, lumi-
+nance, color-space, or task-shared mappings [10]–[17], [55].
+Guided reconstruction can exploit frequency cues or cross-
+modal structure [56]–[62], but does not connect them to RAW
+exposure formation. Existing RAW methods still separate low-
+light restoration [18], [19], [21] and high-light recovery [9];
+RIECR instead couples RAW-linear gain estimation with
+exposure-adaptive residual restoration.
+III. THE PROPOSED METHOD
+A. Problem Formulation
+Let X be the clean normal-exposure RAW image and Y an
+observed RAW image. The linear sensor response:
+Y =
+(
+rX + N = r(X + ˜N),
+if 0 < r < 1
+min(rX, 1) = r · min(X, 1
+r),
+if r ≥1
+(1)
+where r is the exposure ratio, N contains photon and sensor
+noise, and min(·, 1) denotes saturation. Noise and clipping
+make inverse scaling insufficient.
+
+
+Frequency-based 
+Enhancement Network 
+Enhanced RAW Image
+𝐈
+Illumination Adjusted RAW Image
+𝐈"
+Input RAW Image
+𝐘
+Linear Illumination 
+Correction Network
+(a) RAW Image Exposure Correction and Restoration (RIECR) Framework
+(b) Linear Illumination Correction Network (LICN)
+(c) Frequency-based Enhancement Network (FEN)
+𝐈𝒓𝒈𝒃𝒈
+Bayer Pack
+1×1 Conv
+Stride=1
+5×5 Depth-wise Conv
+Stride=1
+3×3 Conv
+Stride=1
+C
+Average
+pooling
+Sigmoid
+AdaIN
+AdaIN
+𝐋= [𝐋𝑩,𝟎, 𝐋𝑩,𝟏]
+C
+Illumination Label Estimation
+C
+Linear
+Weight 
+Transfer
+𝑙𝒃,𝟎
+𝑙𝒃,𝟏
+𝑓𝒍
+𝑓𝒉
+𝑙*,+<𝑙*,,
+𝑙*,+>𝑙*,,
+𝐈)
+𝐈𝒓𝒈𝒃𝒈
+Frequency Dynamic Convolution (FDC)
+Attention Block
+FDC Block
+Attention 
+Block
+FDC Block
+Attention 
+Block
+FDC Block
+Attention Block
+Attention 
+Block
+FDC Block
+Conv Block
+FDC Block
+Conv 
+Block
+FDC Block
+Conv Block
+FDC Block
+Conv Block
+Conv Block
+FDC Block
+C
+Local-Branch
+Global-Branch
+LReLU
+Conv Block
+×2
+M
+M
+Low-frequency
+High-frequency
+𝐊-
+𝐅.
+𝐅
+𝐊.
+𝐊/
+𝐌.
+𝐌/
+𝐈𝒈
+𝐈𝒓𝒃
+M
+Pixel-wise
+Multiplication
+Concatenate
+Pixel-wise
+Subtraction
+Manual
+Convolution
+Pixel-wise
+Addition
+Channel-aware Guidance
+𝐅𝒓𝒈𝒃𝒈
+𝐅𝒈
+𝐅𝒓𝒃
+𝑅𝒓𝒃
+𝑅𝒈
+𝐈
+Fig. 3. The overview framework of the proposed method (RIECR), including Linear Illumination Correction Network (LICN) to adjust the illumination and
+Frequency-based Enhancement Network (FEN) to address the divergent degradation.
+For low-light inputs (0 < r < 1), inverse scaling amplifies
+the normalized noise ˜N:
+X = Y
+r −˜N.
+(2)
+For high-light inputs (r ≥1), let S denote the structural and
+textural signal lost by clipping. Restoration becomes:
+Y = r(X −S),
+X = Y
+r + S.
+(3)
+Amplified noise and missing structure have different causes
+but mainly affect high-frequency residuals, while illumination
+are more stable. Both cases can be written as:
+X = Y
+r + D,
+(4)
+where r is the gain and D is −˜N for low-light denoising or
+S for high-light recovery.
+B. Motivation and Framework Architecture
+Fig. 2 illustrates the frequency behavior. It motivates two
+coupled modules. LICN estimates r using channel-dependent
+RAW responses: Green has higher sensitivity and SNR [31],
+[63], [64], while Red/Blue often retain highlight responses.
+FEN restores D by adapting low-/high-frequency responses to
+amplified noise or missing texture.
+The architecture of the proposed RAW Image Exposure
+Correction and Restoration (RIECR) framework is illustrated
+in Fig. 3. A normalized Bayer image Y ∈R2H×2W is packed
+as Irgbg ∈RH×W ×4 and mapped by:
+I = f(Irgbg; θ),
+(5)
+where f and θ denote RIECR and its parameters. LICN
+produces a linearly corrected ˜I; local and global FEN branches
+then predict the residual and output I.
+C. Linear Illumination Correction Network (LICN)
+LICN contains an exposure-label estimator and channel-
+aware gain guidance (Fig. 3(b)).
+Illumination Label Estimation. A 1 × 1 convolution mixes
+packed channels, a 5 × 5 depth-wise convolution aggregates
+local illumination, and global pooling with a linear projection:
+L = Sigmoid(Linear(Avg.(Convs.(Irgbg)))),
+(6)
+where L = [Lhigh, Llow]. The exposure-time ratio fratio
+and maximum factors fh, fl define severity-aware targets
+ˆL = [fratio/fh, 0] for high-light and [0, fratio/fl] for low-
+light, supervised by:
+Llabel = −ˆL · log(L) −(1 −ˆL) · log(1 −L),
+(7)
+which supervises exposure direction and magnitude.
+Channel-Aware Guidance. We split Irgbg into Green Ig and
+Red/Blue Irb. AdaIN [65] normalizes each cue before fusion
+with the shared feature Frgbg:
+Ft = Convs(Concat[Frgbg, AdaIN(It)]),
+(8)
+where t ∈{rb, g}. The label-weighted gains are:
+Rrb = max(Sigmoid(Avg.(Frb · Lhigh)) · fh, 1),
+(9)
+Rg = max(Sigmoid(Avg.(Fg · Llow)) · fl, 1),
+(10)
+where Rrb and Rg are darkening and brightening ratios. The
+adjusted image is:
+˜I =
+(
+Irgbg/Rrb,
+if Lhigh > Llow
+Irgbg · Rg,
+if Lhigh ≤Llow
+(11)
+so the predicted state selects the RAW cue and linear operator
+before residual restoration.
+D. Frequency-Based Enhancement Network (FEN)
+FEN uses local and global branches with FDC (Fig. 3(c)).
+The local branch exploits spatial self-similarity, while the
+global branch supplies context for severely degraded regions.
+
+
+TABLE I
+COMPARISON OF DATASETS FOR EXPOSURE CORRECTION AND RESTORATION TASKS.
+Task
+Dataset
+Format
+Type
+Size
+High
+High-light
+Exposure Value
+Low
+Low-light
+Exposure Value
+Normal-light
+Ground-Truth
+Under-Exposure Correction
+LOL [66]
+sRGB
+Real
+789
+✘
+N/A
+✓
+N/A
+✓
+LOL-v2 [66]
+sRGB
+Real
+500
+✘
+N/A
+✓
+N/A
+✓
+(RAW Image Denoising)
+SID [18]
+RAW
+Real
+2,697
+✘
+N/A
+✓
+Ratio=
+1
+100,
+1
+250,
+1
+300
+✓
+Over-Exposure Correction
+RPO [9]
+RAW
+Real
+2,600
+✓
+Ratio=3, 5, 8, 10
+✘
+N/A
+✓
+HDR Reconstruction
+SIHDR [22]
+RAW
+Real
+905
+✓
+N/A
+✓
+N/A
+✘
+Multiple-Exposure Correction
+SICE [67]
+sRGB
+Real
+4,413
+✓
+EV=0.5,0.7,1,2,3
+✓
+EV=-0.5,-0.7,-1,-2,-3
+✓
+ME [10]
+sRGB
+Syn.
+24,330
+✓
+EV=1,1.5
+✓
+EV=-1,-1.5
+✓
+CMER (Ours)
+RAW
+Real
+1,784
+✓
+Ratio=2,4,8
+✓
+Ratio= 1
+2, 1
+4, 1
+8, 1
+16, 1
+32
+✓
+Frequency Dynamic Convolution. Fixed convolution cannot
+simultaneously denoise and recover detail across spatially
+varying degradation [56], [57]. FDC decomposes a base kernel
+Ks in the spatial domain:
+Kl = Avg(Ks),
+Kh = Ks −Kl,
+(12)
+where Avg(·) is 3 × 3 pooling. Kl captures stable structure
+and Kh captures residual detail. Pixel-wise gates Ml, Mh:
+ˆF = Mh ⊙MC(Kh, F) + Ml ⊙MC(Kl, Avg(F)),
+(13)
+where MC is the primitive convolution and ⊙denotes multi-
+plication. The gates attenuate noise-exposed high frequencies
+or strengthen contextual texture near saturated structures.
+Local Convolution Branch. A U-shaped CNN uses residual
+blocks:
+ˆF = {LReLU(Conv3×3(F))}×2 + Conv1×1(F),
+(14)
+where LReLU is the activation. Down/up-sampling and two
+skip connections predict a residual added to ˜I, yielding Ilocal.
+Global Attention Branch. A U-shaped transformer supplies
+long-range context [36]. Its i-th attention block is:
+ˆFi = CMCA(LN(Fi−1)) + Fi−1,
+Fi = FFN(LN(ˆFi)) + ˆFi,
+(15)
+where CMCA, LN [68], and FFN denote channel attention,
+layer normalization, and feed-forward layers. Multi-scale FDC
+blocks let reliable regions guide distant degradation; convolu-
+tion fuses Ilocal and Iglobal into I.
+E. Learning Details
+We scale each reference by its exposure ratio to obtain the
+LICN target Il:
+Lillu = ∥˜I −Il∥1.
+(16)
+The total loss is:
+L = Lr + γ1Lillu + γ2Llabel,
+(17)
+where Lr = ∥I−X∥1 and γ1, γ2 balance the illumination and
+label terms.
+IV. MULTIPLE EXPOSURE RAW DATASET
+Existing RAW datasets target low-light denoising, high-
+light recovery, or HDR reconstruction, while multi-exposure
+datasets are mainly sRGB [9], [10], [18], [22], [69]. CMER
+provides paired RAW data for both directions (Table I).
+Reference
+High-light Ratio=8
+High-light Ratio=2
+Low-light Ratio=
+!
+"
+Low-light Ratio=
+!
+#"
+(a) Examples of our CMER dataset
+(b) Comparison of input data range 
+(RAW vs. sRGB)
+(c) Comparison of dataset range 
+(Our CMER vs. SIHDR)
+⋯
+⋯
+Fig. 4.
+Overview and analysis of the proposed CMER dataset. (a) Paired
+Samples: Representative scenes demonstrating rigorous alignment across
+extreme exposure ratios (from 1/32 to 8) and their normal-light ground
+truth. (b) Data Integrity: Histogram comparison confirming that the RAW
+data preserves the original linear response compared to processed sRGB
+formats [10]. (c) Dataset Diversity: Statistical comparison showing CMER
+provides broader scene coverage than the existing SIHDR [22].
+Complex Multiple Exposure RAW (CMER) Dataset: We
+capture 223 static indoor/outdoor scenes with a Canon EOS
+5D Mark IV and save 14-bit RAW images. The scenes include
+dark smooth regions, strong light sources, reflective materials,
+and fine structures. A tripod and remote control fix the
+viewpoint; after acquiring a well-exposed reference, we fix
+aperture and vary only exposure time. Captures with motion,
+illumination variation, or misalignment are discarded, preserv-
+ing pixel alignment. Daytime images use ISO 100; nighttime
+inputs additionally use ISO 1,600–6,400 while references
+remain at ISO 100. We record over-exposure ratios {2,4,8} and
+under-exposure ratios {1/2,1/4,1/8,1/16,1/32} [70]. CMER
+contains 1,784 pairs at 6720 × 4480: 669 over-exposed and
+1,115 under-exposed. A scene-disjoint split uses 213 scenes
+(1,704 pairs) for training and 10 scenes (80 pairs) for testing.
+Data samples and comparative data analysis are shown in
+Fig. 4.
+Synthetic RAW Image Dataset: The synthetic dataset, named
+SMIT, applies the same eight ratios to 1,500 MIT-Adobe
+FiveK RAW references [23]. Linear amplification plus clip-
+
+
+TABLE II
+RESULTS ON THE DISJOINT CMER TEST SPLIT UNDER TWO TRAINING PROTOCOLS. PARAMETERS AND MACS ARE REPORTED IN M AND G,
+RESPECTIVELY, WITH MACS CALCULATED ON A 256 × 256 RAW PATCH. BEST AND SECOND-BEST RESTORATION SCORES ARE BOLD AND UNDERLINED.
+Methods
+CMER (train) →CMER (test)
+SMIT(pre) →CMER(ft) →CMER(test)
+Params.
+(M)
+MACs
+(G)
+High-light
+Low-light
+Average
+High-light
+Low-light
+Average
+PSNR↑SSIM↑PSNR↑SSIM↑PSNR↑SSIM↑PSNR↑SSIM↑PSNR↑SSIM↑PSNR↑SSIM↑
+sRGB-based Model
+MSEC [10][CVPR’21]
+26.72
+0.875
+25.23
+0.824
+25.79
+0.843
+25.72
+0.857
+26.46
+0.836
+26.18
+0.844
+7.02
+10.57
+ECCM [71][BMVC’21]
+28.81
+0.913
+31.84
+0.920
+30.07
+0.917
+30.92
+0.943
+31.65
+0.926
+31.38
+0.933
+5.39
+9.55
+ECLNet [12][MM’22]
+26.76
+0.899
+26.89
+0.876
+26.76
+0.885
+29.08
+0.929
+26.99
+0.890
+27.77
+0.905
+0.02
+1.67
+ENC [72][CVPR’22]
+30.27
+0.940
+31.30
+0.910
+30.91
+0.921
+30.74
+0.956
+31.38
+0.924
+31.14
+0.936
+0.62
+14.24
+FECNet [11][ECCV’22]
+30.47
+0.908
+31.35
+0.915
+31.02
+0.912
+30.62
+0.923
+31.84
+0.917
+31.38
+0.919
+0.15
+5.82
+RF [36][ICCV’23]
+29.94
+0.939
+30.09
+0.906
+30.03
+0.919
+32.69
+0.950
+32.51
+0.924
+32.58
+0.933
+1.61
+20.38
+CSEC [16][CVPR’24]
+28.92
+0.908
+29.80
+0.850
+29.47
+0.872
+29.41
+0.927
+30.43
+0.864
+30.05
+0.887
+6.06
+30.62
+ES [15][CVPR’25]
+28.87
+0.853
+28.92
+0.888
+28.91
+0.875
+30.75
+0.923
+30.62
+0.903
+30.67
+0.911
+1.91
+14.34
+RAW-based Model
+SID [18][CVPR’18]
+25.09
+0.805
+25.32
+0.824
+25.23
+0.817
+25.18
+0.818
+25.79
+0.844
+25.65
+0.834
+7.76
+13.73
+RED [73][CVPR’21]
+25.43
+0.859
+24.37
+0.798
+24.77
+0.806
+26.06
+0.865
+24.61
+0.813
+25.16
+0.832
+0.78
+0.97
+ABF [74][CVPR’22]
+25.74
+0.819
+30.94
+0.920
+29.00
+0.898
+29.00
+0.910
+30.88
+0.922
+30.18
+0.917
+15.01
+22.56
+CGNet [9][TCSVT’23]
+25.46
+0.858
+27.80
+0.867
+26.92
+0.863
+27.99
+0.852
+29.65
+0.834
+29.03
+0.841
+17.67
+46.24
+RawHDR [31][ICCV’23]
+27.03
+0.899
+26.90
+0.879
+26.94
+0.886
+27.81
+0.913
+27.72
+0.890
+27.76
+0.898
+10.49
+50.81
+SMG [75][CVPR’23]
+29.07
+0.867
+30.07
+0.898
+29.69
+0.886
+28.01
+0.860
+30.82
+0.909
+29.77
+0.891
+15.42
+42.64
+ADU [76][TOMM’24]
+28.16
+0.893
+27.33
+0.839
+27.64
+0.859
+28.92
+0.895
+28.49
+0.861
+28.65
+0.874
+0.64
+0.71
+RRM [39][TCSVT’25]
+29.74
+0.941
+30.22
+0.933
+30.05
+0.936
+30.49
+0.942
+32.08
+0.935
+31.48
+0.938
+7.65
+32.06
+RIECR (Ours)
+31.23
+0.950
+33.45
+0.950
+32.63
+0.950
+33.65
+0.965
+33.98
+0.941
+33.85
+0.951
+2.56
+31.91
+Input
+MSEC [10]
+ECCM [71]
+ECLNet [12]
+ENC-DRBN [72]
+ENC-SID [72]
+FECNet [11]
+RF [36]
+CSEC [16]
+ES [15]
+RED [73]
+ABF [74]
+CGNet [9]
+RawHDR [31]
+SMG [75]
+ADU [76]
+RIECR (Ours)
+Reference
+Input
+MSEC [10]
+ECCM [71]
+ECLNet [12]
+ENC-DRBN [72]
+ENC-SID [72]
+FECNet [11]
+RF [36]
+CSEC [16]
+ES [15]
+RED [73]
+ABF [74]
+CGNet [9]
+RawHDR [31]
+SMG [75]
+ADU [76]
+RIECR (Ours)
+Reference
+Fig. 5. CMER visual comparison for over-exposure (top) and under-exposure (bottom), displayed using the same RAW-to-sRGB ISP.
+ping simulates over-exposure; attenuation plus sensor noise
+simulates under-exposure [7], [9], [10], yielding 12,000 pre-
+training pairs.
+V. EXPERIMENTS
+We evaluate RIECR against representative sRGB- and
+RAW-domain methods, followed by component, domain, effi-
+ciency, and cross-camera analyses.
+A. Experimental Settings
+Compared Methods. We compare eight sRGB methods:
+MSEC [10], ECCM [71], ECLNet [12], ENC [72], FEC-
+Net [11], Retinexformer (RF) [36], CSEC [16], and ES [15];
+and eight RAW methods: SID [18], RED [73], ABF [74],
+CGNet [9], RawHDR [31], SMG [75], ADU [76], and
+RRM [39]. We adapt sRGB input/output layers to packed four-
+channel RAW and retrain all methods on identical splits and
+protocols using official implementations when available.
+Evaluation Metrics. We report PSNR and SSIM [77] on
+normalized RAW outputs for high-light, low-light, and their
+average; higher values indicate better restoration. All visual-
+izations use the same RAW-to-sRGB ISP.
+Implementation Details. We train on random 256×256 crops
+
+
+Input
+w/o Guidance
+w/o Label
+w/o Linear
+Ours
+Reference
+Fig. 6. Comparison of illumination correction by the LICN in our model. The term w/o Guidance indicates adjustment without separating the color channels,
+w/o Label means adjustment without estimating the illumination label, w/o Linear means adjustment without linear operation, instead of an illumination map
+that is added to the original image.
+TABLE III
+ABLATION OF THE PROPOSED RIECR FRAMEWORK.
+LICN
+FEN
+High-light
+Low-light
+Average
+PSNR↑
+SSIM↑
+PSNR↑
+SSIM↑
+PSNR↑
+SSIM↑
+✘
+✘
+26.35
+0.894
+27.61
+0.825
+27.13
+0.851
+✓
+✘
+29.90
+0.950
+30.67
+0.808
+30.38
+0.861
+✘
+✓
+30.07
+0.939
+31.37
+0.931
+30.88
+0.934
+✓
+✓
+31.23
+0.950
+33.45
+0.950
+32.63
+0.950
+using PyTorch [78] and Adam [79] (β1 = 0.9, β2 = 0.99),
+with batch size 4 and learning rate 10−4. LICN is initialized
+for 50 epochs with (γ1, γ2) = (1, 0.1) to learn linear correc-
+tion. Joint training uses (0.5, 0.01) and halves the rate every 50
+epochs. Training lasts 50 epochs on SMIT and 500 on CMER
+using an NVIDIA GeForce 4090.
+B. Comparison with State-of-the-Art Methods
+Quantitative Results. Table II reports CMER-only training
+and SMIT pre-training followed by CMER fine-tuning under
+identical real-data supervision. RIECR achieves the best aver-
+age PSNR/SSIM under both protocols and exposure directions:
+32.63 dB/0.950 and 33.85 dB/0.951, exceeding the respective
+second-best averages by 1.61/1.27 dB and 0.014/0.013 SSIM.
+The gain from pre-training shows that SMIT complements
+rather than replaces real paired supervision.
+(1) Physics-Aware vs. Generic Architectures. Generic sRGB
+architectures such as FECNet [11] and RF [36] learn strong
+mappings but do not explicitly model RAW-linear exposure.
+LICN estimates illumination from channel-specific RAW cues,
+while FEN handles the exposure-dependent residual, produc-
+ing consistent gains over both baselines.
+(2) Unified vs. Task-Specific RAW Restoration. SID [18] and
+SMG [75] emphasize low-light recovery, whereas CGNet [9]
+and RawHDR [31] target high-light/HDR restoration. Against
+the strongest average RAW baseline, RRM [39], RIECR gains
+2.58/2.37 dB under the two protocols. This supports sharing
+linear correction while adapting residual restoration to the
+exposure direction.
+(3) Computational Efficiency. RIECR uses 2.56 M pa-
+rameters and 31.91 G MACs. Relative to CGNet/RawHDR,
+it
+reduces
+parameters
+by
+85.5%/75.6%
+and
+MACs
+by
+31.0%/37.2%; versus RRM it uses 66.5% fewer parameters
+at comparable MACs. Lightweight models such as ECLNet,
+FECNet, RED, and ADU require fewer MACs but restore
+substantially worse, indicating that RIECR offers a favorable
+accuracy–complexity trade-off without relying on an exces-
+sively large parameter count.
+TABLE IV
+COMPONENT ABLATION OF LICN AND FEN.
+Methods
+High-light
+Low-light
+Average
+PSNR↑
+SSIM↑
+PSNR↑
+SSIM↑
+PSNR↑
+SSIM↑
+LICN variants
+w/o Linear
+30.47
+0.924
+30.22
+0.913
+30.31
+0.917
+w/o Label
+31.68
+0.944
+32.43
+0.920
+32.15
+0.929
+w/o Guidance
+30.10
+0.940
+31.88
+0.937
+31.21
+0.938
+FEN variants
+w/o Local
+29.41
+0.944
+31.39
+0.929
+30.65
+0.935
+w/o Global
+30.65
+0.950
+30.33
+0.926
+30.45
+0.935
+w/o FDC
+29.08
+0.932
+32.08
+0.926
+30.96
+0.929
+RIECR (Ours)
+31.23
+0.950
+33.45
+0.950
+32.63
+0.950
+Input
+w/o LICN
+w/o Global
+w/o Local
+Ours
+Reference
+Fig. 7. Visual quality comparison of FEN. Local and Global mean the local
+convolution branch and global attention branch, respectively.
+Perceptual Quality. Fig. 5 compares both exposure directions
+after the same ISP. For over-exposure, several methods leave
+color casts or miss clipped window structure, whereas RIECR
+preserves tone and highlight edges. For under-exposure,
+ENC [72] and FECNet [11] retain artifacts or over-smooth
+details. RIECR suppresses amplified noise while maintaining
+boundaries, consistent with the LICN/FDC design.
+C. Ablation Studies
+Unified Framework. LICN and FEN raise the 27.13 dB
+baseline to 30.38 and 30.88 dB, respectively; together they
+reach 32.63 dB/0.950 and perform best on both subsets (Ta-
+ble III). This verifies that physically constrained illumination
+correction and learned residual restoration are complementary
+rather than interchangeable.
+Linear Illumination Correction Network. In Table IV,
+replacing linear gain with residual addition loses 2.32 dB;
+
+
+(a) FDC Input
+(b) Low-frequency
+(c) Standard Input
+(d) FDC Output
+(e) High-frequency
+(f) Standard Output
+Fig. 8. FDC features in the first global-branch layer: (a,d) FDC input/output,
+(b,e) decomposed low/high frequencies, and (c,f) standard-convolution in-
+put/output. FDC retains structure while isolating residual detail.
+TABLE V
+SRGB VERSUS RAW INPUT; METRICS ARE EVALUATED IN RGB.
+Setting
+High-light
+Low-light
+Average
+PSNR↑
+SSIM↑
+PSNR↑
+SSIM↑
+PSNR↑
+SSIM↑
+sRGB
+27.14
+0.911
+29.00
+0.902
+28.35
+0.905
+RAW
+29.43
+0.925
+29.73
+0.915
+29.62
+0.919
+removing the exposure label or channel guidance also degrades
+performance. The variants confirm the need for exposure-
+aware gating and complementary Green and Red/Blue cues.
+As visualized in Fig. 6, our LICN achieves a result close to
+the reference image, validating the necessity of our channel-
+specific design.
+Frequency-Based Enhancement Network. Removing either
+FEN branch reduces performance in Table IV. Fig. 7 confirms
+that local processing suppresses noise while global attention
+supplies context; their combination best preserves structure.
+Frequency Dynamic Convolution. The “w/o FDC” row in
+Table IV drops average PSNR from 32.63 to 30.96 dB. Fig. 8
+shows that FDC retains low-frequency structure while isolating
+high-frequency residuals for exposure-adaptive modulation.
+D. Discussion
+Evaluation between RAW and sRGB. We train RIECR
+on CMER RAW data and sRGB counterparts generated by
+the same ISP [21], and evaluate both through that ISP. Ta-
+ble V shows that RAW improves average PSNR/SSIM from
+28.35 dB/0.905 to 29.62 dB/0.919. The gain occurs in both
+subsets because linear high-bit-depth RAW preserves high-
+lights before tone mapping and enables physically consistent
+low-light scaling and noise restoration. As shown in Fig. 9,
+the visual example further shows that RAW input preserves
+recoverable high-light details that are already compressed or
+clipped in sRGB. This confirms that the rich detail, higher bit
+depth, and linear response of RAW data are crucial for joint
+exposure correction and restoration.
+Evaluation on Cross-Camera Setting. Trained on Canon 5D
+IV, RIECR transfers without retraining to the Sony IMX586
+LRD dataset [80]. Fig. 10 shows corrected global tone and
+recovered structure despite sensor and pipeline changes, sug-
+gesting that the channel-aware decomposition is less device-
+specific than a learned sRGB mapping.
+(a) Input
+(b) sRGB
+(c) RAW
+(d) Reference
+Fig. 9. The visualized comparison between the sRGB and RAW domains.
+(a) Input
+(b) ES [15]
+(c) Ours
+(d) Reference
+Fig. 10.
+The visualized results for the cross-camera setting. The model is
+trained on Canon 5D IV and evaluated on the Sony IMX586 sensor.
+(a) Reference
+(b) Ours
+(c) Input
+(d) Input data range
+Fig. 11. Failure example for over-exposure areas. The histogram of the input
+data range indicates that some pixels are saturated.
+Failure Case and Limitation. Table V shows better detail re-
+covery from RAW than from sRGB. However, RIECR remains
+limited in large, fully saturated highlight regions (Fig. 11).
+When all RAW channels are clipped, the original signal cannot
+be uniquely recovered from a single observation. Contextual
+inference may produce plausible textures but cannot guarantee
+recovery of the original details or colors. Future work could
+incorporate generative priors to improve visual plausibility in
+these severely degraded regions.
+VI. CONCLUSION
+In this paper, we proposed RIECR, a unified RAW-domain
+framework that bridges the information loss of sRGB correc-
+tion and the single-degradation focus of task-specific RAW
+restoration. Following the physical RAW formation model,
+RIECR decomposes joint under- and over-exposure restora-
+tion into linear illumination correction and residual enhance-
+ment. LICN estimates exposure-aware gains through channel-
+specific guidance, using the high SNR of Green channels
+for under-exposure and the less saturated Red/Blue responses
+for over-exposure. FEN then addresses the divergent residual
+degradations, while FDC separates low- and high-frequency
+responses to adaptively suppress amplified noise and recover
+weakened high-light structures. We further constructed CMER
+with 223 real scenes and 1,784 paired RAW images and built
+a synthetic dataset for pre-training. Comparisons with sixteen
+methods, component ablations, RAW/sRGB evaluation, effi-
+ciency analysis, and cross-camera tests validate the unified for-
+mulation and its components. RIECR achieves 33.85 dB/0.951
+after pre-training and fine-tuning with 2.56 M parameters.
+Future work will extend CMER to dynamic scenes and broader
+sensors and explore metadata-aware correction and stronger
+priors for severely clipped regions.
+
+
+REFERENCES
+[1] L. Chen, Y. Fu, K. Wei, D. Zheng, and F. Heide, “Instance segmentation
+in the dark,” International Journal of Computer Vision, vol. 131, no. 8,
+pp. 2198–2218, 2023.
+[2] P. Oza, V. A. Sindagi, V. V. Sharmini, and V. M. Patel, “Unsupervised
+domain adaptation of object detectors: A survey,” IEEE Transactions on
+Pattern Analysis and Machine Intelligence, 2023.
+[3] L. Chen, Y. Fu, J. Shangguan, J. Xu, and Y. Peng, “A survey on degraded
+image segmentation,” Chinese Journal of Electronics, vol. 35, no. 5, pp.
+1–21, 2026.
+[4] Q. Liu, R. Liu, B. Zheng, H. Wang, and Y. Fu, “Infrared small target
+detection with scale and location sensitivity,” in Proc. of Computer
+Vision and Pattern Recognition.
+IEEE, 2024, pp. 17 490–17 499.
+[5] R. Liu, J. Nie, and Y. Fu, “Rdanet: Relative degradation aware network
+for infrared small target detection,” IEEE Transactions on Geoscience
+and Remote Sensing, 2026.
+[6] Y. Fu, Y. Li, S. You, B. Shi, L. Chen, Y. Zou, Z. Wang, Y. Li, Y. Han,
+Y. Zhang et al., “Technique report of cvpr 2024 pbdl challenges,” arXiv
+preprint arXiv:2406.10744, 2024.
+[7] K. Wei, Y. Fu, J. Yang, and H. Huang, “A physics-based noise formation
+model for extreme low-light raw denoising,” in Proc. of Computer Vision
+and Pattern Recognition, 2020, pp. 2758–2767.
+[8] X. Guo and Q. Hu, “Low-light image enhancement via breaking down
+the darkness,” International Journal of Computer Vision, vol. 131, no. 1,
+pp. 48–66, 2023.
+[9] Y. Fu, Y. Hong, Y. Zou, Q. Liu, Y. Zhang, N. Liu, and C. Yan, “Raw
+image based over-exposure correction using channel-guidance strategy,”
+IEEE Transactions on Circuits and Systems for Video Technology,
+vol. 34, no. 4, pp. 2749–2762, 2023.
+[10] M. Afifi, K. G. Derpanis, B. Ommer, and M. S. Brown, “Learning
+multi-scale photo exposure correction,” in Proc. of Computer Vision and
+Pattern Recognition, 2021, pp. 9157–9167.
+[11] J. Huang, Y. Liu, F. Zhao, K. Yan, J. Zhang, Y. Huang, M. Zhou, and
+Z. Xiong, “Deep fourier-based exposure correction network with spatial-
+frequency interaction,” in Proc. of European Conference on Computer
+Vision.
+Springer, 2022, pp. 163–180.
+[12] J. Huang, M. Zhou, Y. Liu, M. Yao, F. Zhao, and Z. Xiong, “Exposure-
+consistency representation learning for exposure correction,” in Proc. of
+the ACM International Conference on Multimedia, 2022, pp. 6309–6317.
+[13] J. Huang, F. Zhao, M. Zhou, J. Xiao, N. Zheng, K. Zheng, and Z. Xiong,
+“Learning sample relationship for exposure correction,” in Proc. of
+Computer Vision and Pattern Recognition, 2023, pp. 9904–9913.
+[14] J.-H. Baek, D. Kim, S.-M. Choi, H.-j. Lee, H. Kim, and Y. J. Koh,
+“Luminance-aware color transform for multiple exposure correction,” in
+Proc. of International Conference on Computer Vision, 2023, pp. 6156–
+6165.
+[15] D. Jung, D. Kim, G. Wang, and T. H. Kim, “Exposure-slot: Exposure-
+centric representations learning with slot-in-slot attention for region-
+aware exposure correction,” in Proc. of Computer Vision and Pattern
+Recognition, 2025, pp. 17 892–17 901.
+[16] Y. Li, K. Xu, G. P. Hancke, and R. W. Lau, “Color shift estimation-and-
+correction for image enhancement,” in Proc. of Computer Vision and
+Pattern Recognition, 2024, pp. 25 389–25 398.
+[17] K.-F. Yang, C. Cheng, S.-X. Zhao, H.-M. Yan, X.-S. Zhang, and Y.-J. Li,
+“Learning to adapt to light,” International Journal of Computer Vision,
+vol. 131, no. 4, pp. 1022–1041, 2023.
+[18] C. Chen, Q. Chen, J. Xu, and V. Koltun, “Learning to see in the dark,”
+in Proc. of Computer Vision and Pattern Recognition, 2018, pp. 3291–
+3300.
+[19] H. Huang, W. Yang, Y. Hu, J. Liu, and L.-Y. Duan, “Towards low
+light enhancement with raw images,” IEEE Transactions on Image
+Processing, vol. 31, pp. 1391–1405, 2022.
+[20] J. Liu, D. Xu, W. Yang, M. Fan, and H. Huang, “Benchmarking low-light
+image enhancement and beyond,” International Journal of Computer
+Vision, vol. 129, pp. 1153–1184, 2021.
+[21] K. Wei, Y. Fu, Y. Zheng, and J. Yang, “Physics-based noise modeling for
+extreme low-light photography,” IEEE Transactions on Pattern Analysis
+and Machine Intelligence, vol. 44, no. 11, pp. 8520–8537, 2021.
+[22] P. Hanji, R. K. Mantiuk, G. Eilertsen, S. Hajisharif, and J. Unger,
+“Comparison of single image hdr reconstruction methods-the caveats of
+quality assessment,” in Proc. of the special interest group on Computer
+Graphics and Interactive Techniques, 2022.
+[23] V. Bychkovsky, S. Paris, E. Chan, and F. Durand, “Learning photo-
+graphic global tonal adjustment with a database of input/output image
+pairs,” in Proc. of Computer Vision and Pattern Recognition, 2011, pp.
+97–104.
+[24] F. Banterle, K. Debattista, A. Artusi, S. Pattanaik, K. Myszkowski,
+P. Ledda, and A. Chalmers, “High dynamic range imaging and low
+dynamic range expansion for generating hdr content,” in Computer
+Graphics Forum, vol. 28, no. 8, 2009, pp. 2343–2367.
+[25] G. Eilertsen, J. Kronander, G. Denes, R. K. Mantiuk, and J. Unger,
+“Hdr image reconstruction from a single exposure using deep cnns,”
+ACM Transactions on Graphics, vol. 36, no. 6, pp. 1–15, 2017.
+[26] D. Marnerides, T. Bashford-Rogers, J. Hatchett, and K. Debattista, “Ex-
+pandnet: A deep convolutional neural network for high dynamic range
+expansion from low dynamic range content,” in Computer Graphics
+Forum, vol. 37, no. 2, 2018, pp. 37–49.
+[27] R. Chen, B. Zheng, H. Zhang, Q. Chen, C. Yan, G. Slabaugh, and
+S. Yuan, “Improving dynamic hdr imaging with fusion transformer,” in
+Proceedings of the AAAI Conference on Artificial Intelligence, vol. 37,
+no. 1, 2023, pp. 340–349.
+[28] S. Lee, G. H. An, and S.-J. Kang, “Deep recursive hdri: Inverse tone
+mapping using generative adversarial networks,” in Proc. of European
+Conference on Computer Vision, 2018, pp. 596–611.
+[29] Y.-L. Liu, W.-S. Lai, Y.-S. Chen, Y.-L. Kao, M.-H. Yang, Y.-Y. Chuang,
+and J.-B. Huang, “Single-image hdr reconstruction by learning to
+reverse the camera pipeline,” in Proc. of Computer Vision and Pattern
+Recognition, 2020, pp. 1651–1660.
+[30] X. Chen, Y. Liu, Z. Zhang, Y. Qiao, and C. Dong, “Hdrunet: Single
+image hdr reconstruction with denoising and dequantization,” in Proc.
+of Computer Vision and Pattern Recognition, 2021, pp. 354–363.
+[31] Y. Zou, C. Yan, and Y. Fu, “Rawhdr: High dynamic range image
+reconstruction from a single raw image,” in Proc. of International
+Conference on Computer Vision, 2023, pp. 12 334–12 344.
+[32] Q.-C. Tian and L. D. Cohen, “Global and local contrast adaptive
+enhancement for non-uniform illumination color images,” in Proc. of
+International Conference on Computer Vision workshops, 2017, pp.
+3023–3030.
+[33] M. R. Hajiaboli, “An anisotropic fourth-order diffusion filter for image
+noise removal,” International Journal of Computer Vision, vol. 92, pp.
+177–191, 2011.
+[34] Q. Zhang, G. Yuan, C. Xiao, L. Zhu, and W.-S. Zheng, “High-quality
+exposure correction of underexposed photos,” in Proc. of the ACM
+International Conference on Multimedia, 2018, pp. 582–590.
+[35] X. Li, M. Liu, and Q. Ling, “Pixel-wise gamma correction mapping
+for low-light image enhancement,” IEEE Transactions on Circuits and
+Systems for Video Technology, vol. 34, no. 2, pp. 681–694, 2023.
+[36] Y. Cai, H. Bian, J. Lin, H. Wang, R. Timofte, and Y. Zhang, “Retinex-
+former: One-stage retinex-based transformer for low-light image en-
+hancement,” in Proc. of International Conference on Computer Vision,
+2023, pp. 12 504–12 513.
+[37] Q. Yan, Y. Feng, C. Zhang, G. Pang, K. Shi, P. Wu, W. Dong, J. Sun, and
+Y. Zhang, “Hvi: A new color space for low-light image enhancement,”
+in Proc. of Computer Vision and Pattern Recognition, 2025, pp. 5678–
+5687.
+[38] P. Huang, X. Chen, X. Feng, Q. Wang, D. Zhang, L. Han, and J. Han,
+“Decouplenet: Domain-specific task decoupling network for low-light
+image enhancement,” Pattern Recognition, p. 112203, 2025.
+[39] X. Chen, L. Han, P. Huang, X. Feng, D. Zhang, and J. Han, “Retinex-
+rawmamba: Bridging demosaicing and denoising for low-light raw
+image enhancement,” IEEE Transactions on Circuits and Systems for
+Video Technology, 2025.
+[40] H. Li, Z. Wu, R. Shao, T. Zhang, and Y. Fu, “Noise calibration and
+spatial-frequency interactive network for stem image enhancement,” in
+Proc. of Computer Vision and Pattern Recognition, 2025, pp. 21 287–
+21 296.
+[41] H. Li, Z. Wu, R. Shao, and Y. Fu, “Statistical characteristic-guided
+denoising for rapid high-resolution transmission electron microscopy
+imaging,” in Proc. of Computer Vision and Pattern Recognition, 2026,
+pp. 34 050–34 060.
+[42] B. Zheng, H. Li, Q. Chen, T. Wang, X. Zhou, Z. Hu, and C. Yan, “Quad
+bayer joint demosaicing and denoising based on dual encoder network
+with joint residual learning,” in Proceedings of the AAAI Conference on
+Artificial Intelligence, vol. 38, no. 7, 2024, pp. 7552–7561.
+[43] Z. Liu, B. Zheng, Q. Chen, Q. Zhang, X. Jia, J. Zhang, and C. Yan,
+“Pyramid learnable bandpass filters for ultra-high-definition image
+
+
+demoir´eing,” IEEE Transactions on Circuits and Systems for Video
+Technology, vol. 35, no. 8, pp. 7821–7834, 2025.
+[44] Y. Zou, C. Yan, and Y. Fu, “Iterative denoiser and noise estimator for
+self-supervised image denoising,” in Proc. of International Conference
+on Computer Vision, October 2023, pp. 13 265–13 274.
+[45] Y. Zou and Y. Fu, “Estimating fine-grained noise model via contrastive
+learning,” in Proc. of Computer Vision and Pattern Recognition, June
+2022, pp. 12 682–12 691.
+[46] Y. Zhang, T. Zhang, J. Nie, and Y. Fu, “Real noise decoupling for
+hyperspectral image denoising,” in Proc. of the AAAI Conference on
+Artificial Intelligence, vol. 40, no. 15, 2026, pp. 12 925–12 933.
+[47] W.-M. Ke, C.-R. Chen, and C.-T. Chiu, “Bita/swce: Image enhancement
+with bilateral tone adjustment and saliency weighted contrast enhance-
+ment,” IEEE Transactions on Circuits and Systems for Video Technology,
+vol. 21, no. 3, pp. 360–364, 2010.
+[48] X. Fu, D. Zeng, Y. Huang, X.-P. Zhang, and X. Ding, “A weighted
+variational model for simultaneous reflectance and illumination estima-
+tion,” in Proc. of Computer Vision and Pattern Recognition, 2016, pp.
+2782–2790.
+[49] J. Liu, J. Shang, R. Liu, and X. Fan, “Attention-guided global-local
+adversarial learning for detail-preserving multi-exposure image fusion,”
+IEEE Transactions on Circuits and Systems for Video Technology,
+vol. 32, no. 8, pp. 5026–5040, 2022.
+[50] Y. Cao, Y. Ren, T. H. Li, and G. Li, “Over-exposure correction via
+exposure and scene information disentanglement,” in Proc. of the Asian
+Conference on Computer Vision, 2020.
+[51] Y. Tian, Y. Fu, and J. Zhang, “Transformer-based under-sampled single-
+pixel imaging,” Chinese Journal of Electronics, vol. 32, no. 5, pp. 1151–
+1159, 2023.
+[52] Y. Fu and Y. Zhang, “Reinforcement learning based plug-and-play
+method for hyperspectral image reconstruction,” in CAAI International
+Conference on Artificial Intelligence.
+Springer, 2022, pp. 466–477.
+[53] Z. Fang, Y. Fu, and L. Liu, “A dual of transformer features-related map-
+intelligent generation method,” Journal of Image and Graphics, vol. 28,
+no. 10, pp. 3281–3294, 2023.
+[54] T. Zhang, B. Wang, Y. Fu, S. Liu, J. Ye, P. Shan, and C. Yan, “Deep
+learning-based spectral image super-resolution: A survey,” Journal of
+Image and Graphics, vol. 29, no. 8, pp. 2113–2136, 2024.
+[55] Z. Li, Y. Shao, F. Zhang, J. Zhang, Y. Wang, and N. Sang, “Difficulty-
+aware dynamic network for lightweight exposure correction,” IEEE
+Transactions on Circuits and Systems for Video Technology, vol. 34,
+no. 6, pp. 5033–5048, 2023.
+[56] X. Hu, X. Chen, B. Ni, T. Li, and Y. Liu, “Bi-volution: A static and
+dynamic coupled filter,” in Proc. of the AAAI Conference on Artificial
+Intelligence, vol. 36, no. 1, 2022, pp. 960–968.
+[57] L. Chen, L. Gu, D. Zheng, and Y. Fu, “Frequency-adaptive dilated
+convolution for semantic segmentation,” in Proc. of Computer Vision
+and Pattern Recognition, 2024, pp. 3414–3425.
+[58] Y. Zhang, Z. Lai, T. Zhang, Y. Fu, and C. Zhou, “Unaligned rgb guided
+hyperspectral image super-resolution with spatial-spectral concordance,”
+International Journal of Computer Vision, vol. 133, no. 9, pp. 6590–
+6610, 2025.
+[59] H. Li and Y. Fu, “Fcdfusion: A fast, low color deviation method for
+fusing visible and infrared image pairs,” Computational Visual Media,
+vol. 11, no. 1, pp. 195–211, 2025.
+[60] Y. Zhang, T. Zhang, J. Nie, and Y. Fu, “Enhancing unregistered hyper-
+spectral image super-resolution via unmixing-based abundance fusion
+learning,” in Proc. of Computer Vision and Pattern Recognition, 2026,
+pp. 41 573–41 583.
+[61] M. Li and Y. Fu, “Joint self-attention transformer for multispectral and
+hyperspectral image fusion,” Journal of Image and Graphics, vol. 28,
+no. 12, pp. 3922–3934, 2023.
+[62] Y. Zhang, S. Chen, Y. Tian, Y. Gao, J. Jiang, and Y. Fu, “Supervise-
+assisted multi-modality fusion diffusion model for pet restoration,”
+Tsinghua Science and Technology, 2026.
+[63] J. Yang, Q. Min, W. Lu, W. Yao, Y. Ma, J. Du, T. Lu, and G. Liu,
+“An automated cloud detection method based on the green channel of
+total-sky visible images,” Atmospheric Measurement Techniques, vol. 8,
+no. 11, pp. 4671–4679, 2015.
+[64] T. Zhang, Y. Fu, J. Zhang, and C. Yan, “Deep guided attention network
+for joint denoising and demosaicing in real image,” Chinese Journal of
+Electronics, vol. 33, no. 1, pp. 303–312, 2024.
+[65] X. Huang and S. Belongie, “Arbitrary style transfer in real-time with
+adaptive instance normalization,” in Proc. of International Conference
+on Computer Vision, Oct 2017.
+[66] C. Wei, W. Wang, W. Yang, and J. Liu, “Deep retinex decomposition for
+low-light enhancement,” Proc. of the British Machine Vision Conference,
+2018.
+[67] J. Cai, S. Gu, and L. Zhang, “Learning a deep single image contrast
+enhancer from multi-exposure images,” IEEE Transactions on Image
+Processing, vol. 27, no. 4, pp. 2049–2062, 2018.
+[68] J. L. Ba, J. R. Kiros, and G. E. Hinton, “Layer normalization,” arXiv
+preprint arXiv:1607.06450, 2016.
+[69] T. Zhu, H. Li, and Y. Fu, “Trim-sod: A multi-modal, multi-task, and
+multi-scale spacecraft optical dataset,” Space: Science & Technology,
+vol. 5, p. 0299, 2025.
+[70] E. Reinhard, W. Heidrich, P. Debevec, S. Pattanaik, G. Ward, and
+K. Myszkowski, High dynamic range imaging: acquisition, display, and
+image-based lighting.
+Morgan Kaufmann, 2010.
+[71] N. E. Nsampi, Z. Hu, and Q. Wang, “Learning exposure correction
+via consistency modeling,” in Proc. of the British Machine Vision
+Conference, 2021.
+[72] J. Huang, Y. Liu, X. Fu, M. Zhou, Y. Wang, F. Zhao, and Z. Xiong,
+“Exposure normalization and compensation for multiple-exposure cor-
+rection,” in Proc. of Computer Vision and Pattern Recognition, 2022,
+pp. 6043–6052.
+[73] M. Lamba and K. Mitra, “Restoring extremely dark images in real time,”
+in Proc. of Computer Vision and Pattern Recognition, 2021, pp. 3487–
+3497.
+[74] X. Dong, W. Xu, Z. Miao, L. Ma, C. Zhang, J. Yang, Z. Jin, A. B. J.
+Teoh, and J. Shen, “Abandoning the bayer-filter to see in the dark,” in
+Proc. of Computer Vision and Pattern Recognition, 2022, pp. 17 431–
+17 440.
+[75] X. Xu, R. Wang, and J. Lu, “Low-light image enhancement via structure
+modeling and guidance,” in Proc. of Computer Vision and Pattern
+Recognition, 2023, pp. 9893–9903.
+[76] J. Huang, H. Ren, S. Liu, Y. Liu, C. Lv, J. Lu, C. Xie, and H. Lu, “Real-
+time attentive dilated u-net for extremely dark image enhancement,”
+ACM Transactions on Multimedia Computing, Communications and
+Applications, vol. 20, no. 8, pp. 1–19, 2024.
+[77] Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli, “Image
+quality assessment: from error visibility to structural similarity,” IEEE
+Transactions on Image Processing, vol. 13, no. 4, pp. 600–612, 2004.
+[78] A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan,
+T. Killeen, Z. Lin, N. Gimelshein, L. Antiga et al., “Pytorch: An
+imperative style, high-performance deep learning library,” Proc. of the
+Advances in Neural Information Processing Systems, vol. 32, 2019.
+[79] D. Kinga, J. B. Adam et al., “A method for stochastic optimization,”
+in Proc. of the International Conference on Learning Representations,
+vol. 5, 2015, p. 6.
+[80] F. Zhang, B. Xu, Z. Li, X. Liu, Q. Lu, C. Gao, and N. Sang,
+“Towards general low-light raw noise synthesis and modeling,” in Proc.
+of International Conference on Computer Vision, 2023, pp. 10 820–
+10 830.

@@ -1,0 +1,1678 @@
+Continual Concept Personalization in Diffusion
+Models via Residual-Space Adaptation
+Yuzhi Liu∗
+Enis Simsar
+Giulia Lanzillotta
+Thomas Hofmann
+ETH Z¨urich
+Abstract
+Text-to-image personalization aims to equip pretrained diffusion models with the
+ability to learn user-specific concepts from only a few reference images. Existing
+methods, however, typically train each concept independently or assume that all
+concepts are available simultaneously. In practical applications, concepts often
+arrive sequentially, requiring models to continually learn new subjects, objects,
+or styles while minimizing interference with previously acquired concepts. We
+address this continual concept personalization setting by extending residual-space
+adaptation to the stochastic adaptation process of pretrained diffusion models. Our
+work achieves the highest concept fidelity among competing continual personal-
+ization methods while maintaining near-zero forgetting. Beyond these empirical
+gains, the learned residual-space dynamics reveal where adaptation capacity is con-
+centrated within the diffusion model. Restricting adaptation to the identified layers
+preserves nearly the same performance while reducing the number of trainable
+parameters by up to 72%, demonstrating that residual-space dynamics can identify
+the layers that contribute most to continual concept personalization and directly
+guide more parameter-efficient adaptation.
+1
+Introduction
+Recent text-to-image models such as Stable Diffusion [15, 17] and FLUX [11] have enabled high-
+quality image synthesis from natural language descriptions, making generative models increasingly
+accessible to end users. Their flexibility has further motivated personalization methods that adapt
+pretrained models to user-specific concepts, subjects, objects, or artistic styles from only a few
+examples.
+Personalization methods commonly rely on parameter-efficient fine-tuning techniques such as
+LoRA [9] to adapt pretrained diffusion models to new concepts. Most existing approaches [7,
+10, 14, 21] perform a separate fine-tuning procedure for every concept, and subsequently merge the
+resulting adapters into a unified personalized model. In many practical scenarios, however, concepts
+are acquired sequentially over time as new subjects, objects, or styles become available. Under this
+setting, whenever a new concept is introduced, the expensive merging procedure must be repeated to
+reconstruct the final personalized model. As the number of concepts grows, this repeated merging
+process becomes increasingly inefficient. This motivates continual concept personalization, where
+a single model is updated incrementally to incorporate new concepts while preserving previously
+acquired ones. The main obstacle to continual concept personalization is interference: learning
+new concepts can degrade performance on previously learned concepts. At the same time, the fixed
+model capacity must be used parsimoniously to preserve sufficient adaptation capacity for future
+concepts. Several continual learning methods [1, 4, 12, 19] achieve low levels of interference by
+constraining the parameter update to a pre-computed safe subspace. The most successful among
+∗Corresponding to: yuzliu@student.ethz.ch
+Preprint.
+arXiv:2610.28567v1  [cs.CV]  20 Oct 2026
+
+
+these rely on layer-wise input statistics to characterize the safe subspace. This procedure cannot
+be directly extended to stochastic backbones, thus limiting its applicability in image generation
+tasks. In this work, we bridge this gap, extending residual-space adaptation to stochastic diffusion
+models for continual concept personalization. In particular, our starting point is an adapted version
+of DyRA [1] into diffusion models, a recent method which we choose for its elegant formulation
+and explicit theoretical guarantees. We also introduce a novel systematic evaluation framework
+for continual concept personalization and show that the resulting residual-space dynamics reveal
+layerwise specialization, providing a practical tool for guiding parameter-efficient adaptation.
+Contributions.
+Our contributions are as follows:
+• We extend residual-space adaptation from deterministic language models to stochastic diffusion
+training, providing a new competitive option for continual concept personalization that mitigates
+interference while maintaining adaptivity at low cost.
+• We introduce a systematic evaluation framework for continual personalization that captures concept
+fidelity, going beyond judging only image-generation quality.
+• We show that residual-space dynamics can serve as an efficient probe for identifying the layers that
+contribute most to continual concept adaptation, providing insights into layerwise specialization
+and guiding more targeted parameter-efficient fine-tuning strategies.
+2
+Related Work
+2.1
+Diffusion Personalization
+Text-to-image personalization has been widely studied for adapting pretrained diffusion models to
+user-specific identities, objects, or styles from only a few examples. Early approaches such as Textual
+Inversion [6] learn new concepts in the text embedding space while keeping the diffusion model
+fixed. DreamBooth [18] improves personalization quality by fine-tuning the diffusion model using a
+prior-preservation objective. Subsequent methods such as Custom Diffusion [10] restrict adaptation
+to selected cross-attention layers, improving parameter efficiency while supporting multi-concept
+customization. More recent personalization methods increasingly adopt parameter-efficient fine-
+tuning techniques such as LoRA. Mix-of-Show [7] introduces ED-LoRA together with structured
+concept tokens for multi-concept personalization, while LoRACLR [21] improves composition
+through contrastive alignment of independently trained adapters.
+Another line of work reduces interference through the design of the adaptation space itself. Orthogonal
+Adaptation (OA) [14] constructs approximately orthogonal LoRA subspaces, allowing independently
+trained adapters to be combined through simple summation with minimal interference. Although
+originally proposed in a non-continual setting, its orthogonal structure naturally lends itself to
+sequential adaptation. Overall, most existing personalization methods assume that all concepts
+are jointly available during training or are learned independently and combined afterward, and are
+therefore not explicitly designed for continual settings.
+2.2
+Continual Adaptation
+Continual learning methods [8] operate in a sequential training fashion, aiming to preserve knowledge
+and plasticity over time. Classical approaches rely on regularization, replay, or gradient projection
+mechanisms to mitigate catastrophic forgetting [23].
+Within diffusion adaptation, C-LoRA [22] extends Custom Diffusion to a sequential setting by
+introducing regularization to preserve earlier concepts. Orthogonal Adaptation [14] can also be
+naturally extended to continual settings through additive composition of orthogonal adapters.
+Several methods constrain the parameter update to a safe subspace based on the layer-wise input
+statistics. Among these, Gradient Projection Memory (GPM) [19] estimates layer-wise feature
+covariance from previous tasks and constrains the new updates to its low-energy subspace. The
+more recent InfLoRA [12] applies the same strategy to LoRA-based fine-tuning, where each task is
+learned within a fixed low-rank budget. Building upon InfLoRA, Barinka et al. [1] propose a dynamic
+rank allocation method with simplified updates which allows for significant capacity savings. In
+addition to providing theoretical guarantees for mitigating forgetting, the method demonstrates strong
+empirical performance on challenging continual language model adaptation tasks.
+2
+
+
+Although effective, these approaches have been studied primarily in deterministic architectures.
+Whether residual-space methods remain effective in stochastic diffusion training, where layer statistics
+are influenced by sampled noise, remains unexplored.
+2.3
+Evaluation of Personalized Generative Models
+Evaluating personalized generative models typically involves measuring text alignment, image
+similarity, and identity preservation. Text alignment is commonly assessed using CLIP-based [16]
+text-image similarity, which measures whether generated images are semantically consistent with
+their prompts. Image alignment metrics compare generated images with reference examples, often
+using CLIP image embeddings. Several works additionally evaluate identity preservation through
+specialized recognition models such as ArcFace [3]. However, these metrics are mainly designed for
+human faces and do not generalize to arbitrary objects.
+Beyond specialized identity metrics, a variety of pretrained embedding models have been used to
+assess perceptual similarity. CLIP [16] is trained on large-scale image–text pairs and provides repre-
+sentations that emphasize global semantic correspondence between images and language. In contrast,
+DINO-based models [2, 13, 20] learn self-supervised visual representations without text supervision
+and preserve fine-grained visual structure and local semantic information. DreamSim [5] combines
+multiple pretrained visual embeddings together with human similarity annotations, leveraging both
+global semantic understanding and fine-grained visual details to produce perceptual representations
+that closely align with human judgments.
+Overall, most existing evaluation protocols are designed for static personalization settings and do not
+measure identity preservation or forgetting over time.
+3
+Evaluating Continual Performance
+Evaluating continual text-to-image personalization requires measuring not only the quality of gen-
+erated images but also how well previously learned concepts are preserved throughout sequential
+adaptation. Unlike discriminative tasks, where forgetting can be directly quantified through accuracy,
+there is no canonical notion of forgetting for generative models. As discussed in Section 2.3, existing
+evaluation protocols are primarily designed for static personalization settings and focus on aggregate
+measures of text or image alignment. In order to assess the degradation of the concept identity over
+time, it is important to have metrics that distinguish concept fidelity from general image quality. To
+address this problem, we first introduce a concept-level fidelity measure that quantifies how faithfully
+a personalized concept is preserved. We then derive continual evaluation metrics directly from this
+quantity.
+3.1
+Concept Fidelity
+Our objective is to evaluate the personalized concept itself rather than the similarity between individual
+images. A generated image may differ substantially from its reference in pose, background, or artistic
+style while still faithfully depicting the same concept. We therefore introduce concept fidelity, which
+measures similarity at the concept level rather than the image level.
+To quantify concept fidelity, we first measure similarity between individual generated and reference
+images in a learned embedding space. Given an embedding function F(·), we define the similarity
+between two images i1 and i2 as
+sim(i1, i2) = cos (F(i1), F(i2)) .
+(1)
+While image similarity is defined between individual image pairs, the fidelity of a personalized
+concept should be assessed from a set of generated images rather than a single sample. We therefore
+generalize the image-level similarity measure by aggregating pairwise similarities across the generated
+and reference image sets.
+Let G = {g1, . . . , gm} denote the generated images corresponding to a personalized concept and let
+I = {i1, . . . , in} denote the associated reference images. The concept fidelity score is defined as
+S(G, I) =
+1
+|G||I|
+X
+g∈G
+X
+i∈I
+sim(g, i).
+(2)
+3
+
+
+This concept fidelity score extends image-level similarity to a set of generated images, providing a
+single measure of how well a model preserves a personalized concept.
+We consider several pretrained embedding models, including CLIP [16], DINO [20], and Dream-
+Sim [5], as candidates for computing concept fidelity. Figure 1 provides a qualitative example of
+nearest-neighbor retrieval using the distance (1−sim), where sim denotes the similarity score defined
+in Eq. (1). DreamSim retrieves images belonging to the same personalized concept despite variations
+in pose and background, whereas CLIP and DINO retrieve visually similar images from different
+concepts. Our quantitative comparison in Appendix A further supports that image similarity in the
+DreamSim embedding space best reflects concept-level similarity. We therefore adopt DreamSim as
+the default embedding model throughout the paper.
+DreamSim
+Reference
+NN1
+NN2
+NN3
+DINOv3
+CLIP
+Figure 1. Nearest-neighbor retrieval for one reference image across embedding spaces. Red frames indicate
+retrieved images that belong to a different concept than the query.
+3.2
+Final Fidelity and Forgetting Metrics
+Using the concept fidelity score, we now define continual evaluation metrics that summarize model
+performance throughout sequential adaptation.
+Let N denote the total number of concepts. For concept k, let G(T )
+k
+denote the generated images after
+all concepts have been learned.
+Final concept fidelity.
+We define the final concept fidelity as:
+Q = 1
+N
+N
+X
+k=1
+S
+
+G(T )
+k
+, Ik
+
+,
+(3)
+which characterizes the average concept fidelity retained at the end of continual training.
+Forgetting dynamics and final forgetting.
+To investigate the dynamics of forgetting throughout
+training, let tk denote the training stage immediately after learning concept k. We define the average
+forgetting trajectory at training stage t ≥tk as
+F(t) = 1
+nt
+nt
+X
+k=1
+h
+S
+
+G(tk)
+k
+, Ik
+
+−S
+
+G(t)
+k , Ik
+i
+,
+(4)
+where nt is the number of concepts that have been learned by stage t. The trajectory measures the
+average loss of concept fidelity as new concepts are acquired.
+4
+
+
+The final forgetting is defined as
+F = F(T),
+(5)
+which measures the average loss of concept fidelity after continual training.
+Together, Q summarizes the model’s average concept fidelity after continual training, while F(t)
+characterizes the forgetting dynamics throughout sequential adaptation.
+4
+Residual-Space Adaptation in Diffusion
+We build upon the residual-space adaptation framework DyRA [1], originally designed for LLMs,
+which constructs layer-wise adaptation subspaces from the input representations. Applying this
+framework to diffusion models is nontrivial, as these representations depend not only on the input
+concept but also on the randomly sampled diffusion noise and denoising timestep. We therefore
+first review the residual-space adaptation procedure and then develop a stochastic interpretation that
+justifies applying the framework to diffusion models and motivates our implementation.
+4.1
+Background: DyRA
+We consider a sequence of concept personalization tasks {Dt}T
+t=1, where each task introduces a new
+concept t and training is performed sequentially. Following [1], each adapted layer l is parameterized
+by a LoRA update
+∆W (l)
+t
+= A(l)
+t B(l)
+t ,
+(6)
+where B(l)
+t
+is initialized before training and kept fixed, while only A(l)
+t
+is optimized. The accumulated
+model after task t is
+W (l)
+t
+= W (l) +
+t
+X
+i=1
+∆W (l)
+i .
+(7)
+The key idea of DyRA is to restrict learning to feature directions that are informative for the current
+task while avoiding directions already captured by previous tasks. For each adapted layer, the method
+applies a spectral decomposition of the input features matrix from all tasks, and identifies therein
+directions unique to the current task, i.e. the residual space leftover from previous tasks. Since
+different layers exhibit different residual-space spectra, the number of informative directions also
+varies, motivating adaptive rank allocation instead of a fixed LoRA rank.
+Concretely, the procedure for each adapted layer consists of three steps:
+1. Estimate the input subspace most representative of previous tasks, named M(l)
+t−1 .
+2. Project the current task input space H(l)
+t
+onto the orthogonal complement of M(l)
+t−1 to obtain the
+residual space.
+3. Initialize the LoRA down-projection matrix B(l)
+t
+in the residual space, picking only directions
+with singular values above a given threshold τ. During training, B(l)
+t
+remains fixed and only the
+corresponding up-projection matrix A(l)
+t
+is optimized.
+Importantly, it is the threshold which implicitly determines the layer-wise rank. This is the key to
+flexible rank allocation.
+4.2
+A Stochastic Formulation for Diffusion
+A key step of residual-space adaptation is constructing the residual space from layer input representa-
+tions collected before training each task. For deterministic backbones, this procedure is well defined
+since each training sample corresponds to a unique layer input. Diffusion models, however, introduce
+an additional source of stochasticity through the sampled diffusion noise and denoising timestep,
+so the layer input of a training sample is no longer unique. This raises the central question of this
+section: how should the layer input space H(l)
+t
+be estimated for residual-space construction?
+Start by interpreting the layer input as the random variable
+x(l)
+t
+= x(l)
+t (s, ϵ),
+(8)
+5
+
+
+where ϵ ∼N(0, I) denotes the sampled diffusion noise and s denotes the sampled denoising timestep.
+Extending the deterministic interference measure in [1], ∥B(l)
+j x(l)
+i ∥2 to its expectation, consider the
+following stochastic interpretation of residual-space adaptation: projection directions should maxi-
+mize the expected adaptation ability of the current task while suppressing the expected interference
+with previously learned tasks,
+max
+B(l)
+j
+Es,ϵ
+B(l)
+j x(l)
+j
+
+2
+s.t.
+Es,ϵ
+B(l)
+j x(l)
+i
+
+2
+≤δ,
+i < j.
+(9)
+From this interpretation the answer to our question directly follows. Since the optimization objective
+is defined over the training distribution of diffusion noise and denoising timesteps, the collected layer
+inputs should provide an empirical estimate of the same distribution. Therefore, layer inputs are
+collected using exactly the same sampling strategy as diffusion training, namely Gaussian noise with
+uniformly sampled denoising timesteps. This simple step extends residual-space adaptation from
+deterministic feature representations to stochastic diffusion training by aligning the feature collection
+procedure with the stochastic optimization objective. Detailed implementation and derivation are
+provided in Appendix B.
+5
+Stable Continual Personalization
+This section evaluates whether residual-space adaptation can be successfully extended to continual
+diffusion personalization. We first assess its ability to preserve concept fidelity while mitigating
+forgetting throughout continual learning, and then examine scalability and capacity preservation.
+5.1
+Experimental Setup
+We conduct all experiments on Concept101 [10], a benchmark containing 101 concepts spanning
+17 semantic classes, including visually similar concepts, making it particularly suitable for studying
+interference and identity preservation in continual learning. All concepts are learned sequentially in
+a rehearsal-free setting, where only the current concept data are available during training. Unless
+otherwise stated, all methods follow the same randomly shuffled task ordering. Throughout the
+experiments, we denote DyRA configured with the sigular value threshold τ as DyRA-τ. We compare
+DyRA with τ ∈{0.5, 1.0} against three continual LoRA baselines: Trainable-AB, which optimizes
+both LoRA projection matrices A, B and corresponds to a continual variant of Mix-of-Show [7];
+Rank-Fixed-B, which optimizes only the LoRA up-projection A while keeping the randomly
+initialized down-projection B fixed; and OA, the continual version of Orthogonal Adaptation [14].
+Unless otherwise specified, all methods adapt the linear projections in the transformer blocks of
+both the text encoder and the UNet, and all fixed-rank methods use rank r = 4. All experiments are
+conducted on Stable Diffusion v1.5 [17]. Models are periodically evaluated throughout continual
+training. For each concept, images are generated using only the learned concept token as the prompt,
+without additional textual descriptions, thereby isolating the learned concept representation and
+enabling a direct comparison of concept fidelity across methods. At the end of training, we further
+validate the model using diverse prompt templates. Additional implementation details and training
+hyperparameters are provided in Appendix C.
+5.2
+Concept Fidelity and Forgetting
+Quantitative Results.
+Table 1 summarizes the final concept fidelity (Q) and forgetting (F).
+Trainable-AB achieves competitive concept fidelity but exhibits the largest forgetting, highlight-
+ing the trade-off between adapting to new concepts and preserving previously learned ones. In
+contrast, Rank-Fixed-B and OA effectively suppress forgetting but achieve slightly lower concept
+fidelity. DyRA maintains negligible forgetting while achieving the highest concept fidelity. These
+results demonstrate that residual-space adaptation extends effectively to the stochastic training process
+of diffusion models.
+6
+
+
+Method
+Q ↑
+F ↓
+Trainable-AB
+0.6392 ± 0.0015
+0.0368 ± 0.0014
+Rank-Fixed-B
+0.6442 ± 0.0029
+−0.0033 ± 0.0020
+OA
+0.6435 ± 0.0031
+−0.0023 ± 0.0003
+DyRA-0.5
+0.6454 ± 0.0022
+0.0002 ± 0.0001
+DyRA-1.0
+0.6497 ± 0.0008
+−0.0001 ± 0.0007
+Table 1. Concept fidelity (Q) and forgetting (F) scores. Values are mean ± SD over three seeds.
+Qualitative Results.
+The quantitative improvements are also reflected in the generated images.
+Figure 2a tracks concept pet dog2, introduced at task 14, from the moment it is learned to the
+final model. As additional concepts are introduced, Trainable-AB exhibits the largest appearance
+drift, Rank-Fixed-B and OA preserve the concept with only minor degradation, and DyRA remains
+nearly unchanged. Figure 2b shows that DyRA maintains high concept fidelity under diverse
+prompt templates, demonstrating generalization beyond the token-only prompts used during continual
+evaluation.
+Forgetting dynamics.
+While Table 1 summarizes the final forgetting score, Figure 3 reveals how
+forgetting evolves throughout continual learning. Trainable-AB oscillates around substantially higher
+forgetting values, indicating persistent forgetting throughout the training process. In contrast, Rank-
+Fixed-B, OA, and DyRA all fluctuate closely around zero, demonstrating that their low forgetting is
+maintained consistently over time rather than occurring only at the final evaluation. Figure 4 provides
+a zoomed-in view, enabling a clearer comparison of the forgetting dynamics among Rank-Fixed-B,
+OA, and DyRA.
+Overall, the quantitative metrics, qualitative generations, and forgetting trajectories consistently
+demonstrate that DyRA preserves high concept fidelity while effectively mitigating catastrophic
+forgetting.
+5.3
+Dynamic Rank Improves Parameter Efficiency
+The performance gains of DyRA stem not only from restricting adaptation to the residual space,
+but also from allocating adaptation capacity according to the residual-space structure of each layer.
+We therefore compare DyRA with the fixed-rank OA under different trainable parameter budgets to
+evaluate the effectiveness of dynamic rank allocation.
+Figure 5 compares concept fidelity against the number of trainable parameters for OA with differ-
+ent fixed ranks and DyRA with different singular-value thresholds. Each point corresponds to a
+different parameter budget. Across the entire range of budgets, DyRA consistently achieves higher
+concept fidelity than OA with comparable numbers of trainable parameters, demonstrating a superior
+performance–parameter trade-off.
+Notably, even under high singular-value thresholds, where DyRA has substantially fewer trainable
+parameters, it outperforms OA with considerably larger parameter budgets. These results indicate that
+allocating rank adaptively according to the residual-space structure is substantially more parameter-
+efficient than assigning a uniform rank to every layer, allowing DyRA to maintain strong concept
+fidelity under a reduced parameter budget.
+6
+Layer-wise Specialization
+Section 5 demonstrated that DyRA achieves strong continual personalization performance while
+improving parameter efficiency through adaptive rank allocation. Beyond these empirical gains,
+the adaptive ranks themselves provide a signal of where adaptation capacity is consumed during
+continual learning, since additional rank is allocated only when new concepts introduce directions
+outside the accumulated input subspace. This section analyzes these rank dynamics to understand
+how adaptation capacity is distributed across the layers and how this information can inform future
+parameter-efficient adaptation.
+7
+
+
+Task 14
+Task 36
+Task 58
+Task 80
+Task 101
+Original
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-1.0
+(a) Continual generation across the task sequence. Row 1 shows reference
+images; rows 2–5 show Trainable-AB, Rank-Fixed-B, OA, and DyRA-
+1.0.
+P1
+P2
+P3
+P4
+P5
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-1.0
+(b) Final generations under diverse prompt templates.
+Rows show
+Trainable-AB, Rank-Fixed-B, OA, and DyRA-1.0.
+Figure 2. Qualitative results for concept 14 (pet dog2).
+10
+20
+30
+40
+50
+60
+70
+80
+90
+100
+Task
+0.01
+0.00
+0.01
+0.02
+0.03
+0.04
+0.05
+0.06
+F(t)
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-0.5
+DyRA-1.0
+Figure 3. Forgetting trajectory across continual training. Higher values indicate more forgetting.
+8
+
+
+3
+6
+9
+12
+15
+18
+21
+24
+0.02
+0.00
+0.02
+0.04
+0.06
+0.08
+0.10
+0.12
+0.14
+Tasks 1 25
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-0.5
+DyRA-1.0
+27
+30
+33
+36
+39
+42
+45
+48
+0.01
+0.00
+0.01
+0.02
+0.03
+0.04
+Tasks 26 50
+51
+54
+57
+60
+63
+66
+69
+72
+75
+0.01
+0.00
+0.01
+0.02
+0.03
+0.04
+Tasks 51 75
+78
+81
+84
+87
+90
+93
+96
+99
+0.01
+0.00
+0.01
+0.02
+0.03
+0.04
+Tasks 76 101
+Figure 4. Zoomed views of the forgetting trajectory over four task intervals.
+40
+50
+60
+70
+80
+Total trainable parameters (M)
+0.640
+0.642
+0.644
+0.646
+0.648
+0.650
+0.652
+0.654
+Fidelity Q (DreamSim)
+r=3
+r=4
+r=5
+r=6
+=0.5
+=1.0
+=1.5
+=2.0
+=2.5
+OA (fixed rank)
+DyRA
+Figure 5. Parameter-efficiency frontier comparing concept fidelity and trainable parameter count for OA and
+DyRA variants. Error bars indicate one standard deviation over three random seeds.
+6.1
+Adaptation Capacity Concentration
+We first analyze how DyRA distributes adaptation capacity across the adapted layers by averaging
+the allocated ranks over all 101 concepts. Figure 6 illustrates the average rank allocated to each layer.
+The x-axis indexes the adapted layers in architectural order, and the corresponding module names are
+provided in Appendix D.
+Rather than allocating the same rank to every layer, DyRA exhibits clear layer-dependent allocation
+patterns that closely follow the repeated transformer architecture. In the text encoder, the allocated
+ranks exhibit a four-layer periodicity that exactly mirrors the repeated key(K), value(V), query(Q), and
+output projection layers within each transformer block. A similar correspondence is observed in the
+UNet, where every group of eight adapted layers corresponds to the self-attention and cross-attention
+projections within a transformer block. Within every block, the two dominant rank peaks consistently
+coincide with the cross-attention key(K) and value(V) projection layers, which repeatedly receive
+substantially larger ranks than all other projections.
+The repeated concentration of residual rank in the UNet cross-attention K,V projections indicates
+that these layers consistently consume more adaptation capacity than other adapted modules during
+9
+
+
+continual concept personalization. This observation motivates a closer examination of these layers in
+the following analysis.
+0
+10
+20
+30
+40
+Layer index
+0
+1
+2
+3
+4
+5
+6
+7
+Avg rank allocated per task
+Text Encoder
+= 1.0
+= 0.5
+0
+20
+40
+60
+80
+100
+120
+Layer index
+0
+2
+4
+6
+8
+10
+12
+Avg rank allocated per task
+UNet
+= 1.0
+= 0.5
+Figure 6. Average allocated rank per adapted layer over 101 concepts.
+6.2
+Early Capacity Saturation
+The UNet cross-attention K,V projections receive the largest residual ranks. We next examine whether
+exhausting the residual capacity of these layers is associated with degraded adaptation to subsequently
+learned concepts.
+Figure 7 summarizes the remaining rank of every adapted layer after learning all 101 concepts. Under
+DyRA-0.5, all 32 UNet cross-attention K,V projections become fully saturated, whereas no UNet
+layer saturates under DyRA-1.0. Figure 8 further illustrates representative remaining-rank trajectories.
+While non-saturated layers retain sufficient residual capacity throughout training, representative cross-
+attention K,V layers under DyRA-0.5 steadily exhaust their available rank and become saturated
+around tasks 77–78. In contrast, the corresponding layers under DyRA-1.0 retain residual capacity
+throughout the entire task sequence.
+0
+10
+20
+30
+40
+Layer index
+0
+20
+40
+60
+80
+100
+Remaining rank after training (%)
+Text Encoder
+= 1.0
+= 0.5
+0
+20
+40
+60
+80
+100
+120
+Layer index
+0
+20
+40
+60
+80
+100
+Remaining rank after training (%)
+UNet
+= 1.0
+= 0.5  (32 layers saturated)
+Figure 7. Remaining rank capacity after 101 tasks.
+20
+40
+60
+80
+100
+Task
+0
+20
+40
+60
+80
+100
+Remaining rank (%)
+UNet (Non-Saturated)
+= 1.0
+= 0.5
+20
+40
+60
+80
+100
+Task
+0
+20
+40
+60
+80
+100
+Remaining rank (%)
+Task 77 78
+UNet Cross-Attention K,V (Saturated)
+= 1.0
+= 0.5
+Figure 8. Representative remaining-rank trajectories of UNet layers: a non-saturated layer (left) and a cross-
+attention K,V layer that saturates under DyRA-0.5 (right).
+To assess the effect of this capacity exhaustion, Table 2 compares the final concept fidelity with
+the average fidelity of the final 20 learned concepts. DyRA-1.0 maintains essentially unchanged
+10
+
+
+performance on later concepts, whereas DyRA-0.5 exhibits a clear late-task fidelity degradation
+after the cross-attention K,V layers become saturated. Although this evidence is correlational, the
+consistent agreement between the rank allocation, capacity saturation, and late-task performance
+suggests that preserving residual capacity in the UNet cross-attention K,V projections is important
+for sustaining continual concept adaptation over long task sequences.
+Method
+Final Q ↑
+Last-20 Q ↑
+Gap ↓
+DyRA-0.5
+0.6454
+0.6340
+0.0114
+DyRA-1.0
+0.6497
+0.6501
+-0.0004
+Table 2. Final concept fidelity compared with the average fidelity on the final 20 learned concepts. The reported
+score are averaged over three seeds. Standard deviations are below 0.007 in all cases.
+6.3
+Layer-Guided Parameter-Efficient Adaptation
+The analyses in Sections 6.1 and 6.2 consistently identify the UNet cross-attention K,V projections as
+the layers that require the largest residual adaptation subspaces throughout continual learning. This
+suggests that these layers differentiate newly learned concepts through distinct adaptation directions.
+If this interpretation is correct, restricting adaptation to the identified layers would be expected to
+preserve most of the continual personalization performance while substantially reducing the number
+of trainable parameters.
+Table 3 supports this hypothesis. Restricting adaptation to only the UNet K,V projections reduces
+the trainable parameter count by approximately 60% (67.56M →27.12M) while achieving virtually
+identical concept fidelity (Q = 0.6496 vs. 0.6497) and comparable forgetting. Restricting adaptation
+further to only the UNet cross-attention K,V projections reduces the trainable parameter count by
+approximately 72% (67.56M →18.87M), yet still preserves nearly all continual personalization
+performance in practice.
+Beyond validating the proposed interpretation, these results also provide a structural explanation for
+previous personalization methods such as Custom Diffusion [10] and C-LoRA [22], which restrict
+adaptation to cross-attention K,V projections based primarily on empirical observations of large
+weight updates during training. In contrast, residual-space dynamics explain the same design choice
+from the perspective of feature-space utilization, providing a principled interpretation of why these
+layers are particularly effective adaptation targets.
+More broadly, residual-space dynamics provide a principled way to identify where adaptation capacity
+is most effectively utilized. Rather than relying on empirical heuristics or exhaustive layerwise search,
+the proposed analysis directly guides targeted adaptation, enabling substantially more parameter-
+efficient continual personalization while preserving nearly the same overall performance.
+Method
+Q ↑
+F ↓
+Params (M)
+Full DyRA
+0.6497 ± 0.0008
+−0.0001 ± 0.0007
+67.56 ± 0.06
+UNet K,V
+0.6496 ± 0.0013
+−0.0011 ± 0.0003
+27.12 ± 0.06
+UNet cross-attention K,V
+0.6479 ± 0.0004
+−0.0008 ± 0.0002
+18.87 ± 0.00
+Table 3. Performance of targeted adaptation strategies guided by residual-space dynamics. Values are mean ±
+SD over three seeds.
+7
+Conclusion
+Limitations and Future Directions.
+Although DyRA achieves strong continual personalization
+performance, several limitations remain. First, the adaptation capacity of residual-space methods is
+fundamentally bounded by the width of individual layers. As continual learning progresses, layers
+with consistently high adaptation demand may eventually exhaust their available residual subspaces,
+limiting scalability to arbitrarily long task sequences. Second, the method is implemented only
+on Stable Diffusion v1.5 and Concept101. Nevertheless, the residual-space analysis developed
+in this work is considerably more general than the specific adaptation algorithm. Since it relies
+11
+
+
+only on layer input statistics and residual-space dynamics, it can potentially be applied to other
+diffusion backbones, transformer-based generative models, or broader neural architectures to identify
+the layers that contribute most to learning new tasks. Exploring these adaptation patterns across
+architectures may provide further insights into representation specialization and guide the design of
+future parameter-efficient adaptation methods.
+Key Takeaways.
+Our work shows that residual-space adaptation extends naturally to stochastic
+diffusion models, enabling continual concept personalization with stable performance, negligible
+interference, and strong parameter efficiency. Beyond its empirical performance, the residual-space
+dynamics observed during continual adaptation reveal how adaptation demand is distributed across
+the adapted layers. By identifying the layers that consistently require new concept-specific adaptation
+directions, it provides a structural interpretation of existing adaptation strategies and directly guides
+more parameter-efficient adaptation. We hope this perspective motivates future work that uses
+adaptation dynamics not only to improve continual learning algorithms, but also to better understand
+layer specialization in modern generative models.
+12
+
+
+References
+[1] Louis Barinka, Giulia Lanzillotta, Enis Simsar, Tanguy Dieudonn´e, and Thomas Hofmann. Provable
+forgetting bounds drive capacity savings: Spectral thresholding in continual lora. In Continual Adaptation
+at Scale: Towards Sustainable AI Workshop, 2026.
+[2] Mathilde Caron, Hugo Touvron, Ishan Misra, Herv´e J´egou, Julien Mairal, Piotr Bojanowski, and Armand
+Joulin. Emerging properties in self-supervised vision transformers. In Proceedings of the IEEE/CVF
+international conference on computer vision, pages 9650–9660, 2021.
+[3] Jiankang Deng, Jia Guo, Niannan Xue, and Stefanos Zafeiriou. Arcface: Additive angular margin loss
+for deep face recognition. In Proceedings of the IEEE/CVF conference on computer vision and pattern
+recognition, pages 4690–4699, 2019.
+[4] Mehrdad Farajtabar, Navid Azizan, Alex Mott, and Ang Li. Orthogonal Gradient Descent for Continual
+Learning. In Proceedings of the Twenty Third International Conference on Artificial Intelligence and
+Statistics, pages 3762–3773. PMLR, 2020.
+[5] Stephanie Fu, Netanel Tamir, Shobhita Sundaram, Lucy Chai, Richard Zhang, Tali Dekel, and Phillip
+Isola. Dreamsim: Learning new dimensions of human visual similarity using synthetic data. arXiv preprint
+arXiv:2306.09344, 2023.
+[6] Rinon Gal, Yuval Alaluf, Yuval Atzmon, Or Patashnik, Amit H Bermano, Gal Chechik, and Daniel
+Cohen-Or. An image is worth one word: Personalizing text-to-image generation using textual inversion.
+arXiv preprint arXiv:2208.01618, 2022.
+[7] Yuchao Gu, Xintao Wang, Jay Zhangjie Wu, Yujun Shi, Yunpeng Chen, Zihan Fan, Wuyou Xiao, Rui Zhao,
+Shuning Chang, Weijia Wu, Yixiao Ge, Ying Shan, and Mike Zheng Shou. Mix-of-show: Decentralized
+low-rank adaptation for multi-concept customization of diffusion models, 2023.
+[8] Raia Hadsell, Dushyant Rao, Andrei A Rusu, and Razvan Pascanu. Embracing change: Continual learning
+in deep neural networks. Trends in cognitive sciences, 24(12):1028–1040, 2020.
+[9] Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and
+Weizhu Chen. Lora: Low-rank adaptation of large language models, 2021.
+[10] Nupur Kumari, Bingliang Zhang, Richard Zhang, Eli Shechtman, and Jun-Yan Zhu. Multi-concept
+customization of text-to-image diffusion. In Proceedings of the IEEE/CVF conference on computer vision
+and pattern recognition, pages 1931–1941, 2023.
+[11] Black Forest Labs, Stephen Batifol, Andreas Blattmann, Frederic Boesel, Saksham Consul, Cyril Diagne,
+Tim Dockhorn, Jack English, Zion English, Patrick Esser, Sumith Kulal, Kyle Lacey, Yam Levi, Cheng Li,
+Dominik Lorenz, Jonas M¨uller, Dustin Podell, Robin Rombach, Harry Saini, Axel Sauer, and Luke Smith.
+Flux.1 kontext: Flow matching for in-context image generation and editing in latent space, 2025.
+[12] Yan-Shuo Liang and Wu-Jun Li. Inflora: Interference-free low-rank adaptation for continual learning. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 23638–
+23647, 2024.
+[13] Maxime Oquab, Timoth´ee Darcet, Th´eo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khalidov, Pierre
+Fernandez, Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, et al. Dinov2: Learning robust visual
+features without supervision. arXiv preprint arXiv:2304.07193, 2023.
+[14] Ryan Po, Guandao Yang, Kfir Aberman, and Gordon Wetzstein. Orthogonal adaptation for modular
+customization of diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and
+pattern recognition, pages 7964–7973, 2024.
+[15] Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas M¨uller, Joe Penna,
+and Robin Rombach. Sdxl: Improving latent diffusion models for high-resolution image synthesis, 2023.
+[16] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish
+Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from
+natural language supervision. In International conference on machine learning, pages 8748–8763. PmLR,
+2021.
+[17] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨orn Ommer. High-resolution
+image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer
+vision and pattern recognition, pages 10684–10695, 2022.
+13
+
+
+[18] Nataniel Ruiz, Yuanzhen Li, Varun Jampani, Yael Pritch, Michael Rubinstein, and Kfir Aberman. Dream-
+booth: Fine tuning text-to-image diffusion models for subject-driven generation. In Proceedings of the
+IEEE/CVF conference on computer vision and pattern recognition, pages 22500–22510, 2023.
+[19] Gobinda Saha, Isha Garg, and Kaushik Roy. Gradient projection memory for continual learning. arXiv
+preprint arXiv:2103.09762, 2021.
+[20] Oriane Sim´eoni, Huy V Vo, Maximilian Seitzer, Federico Baldassarre, Maxime Oquab, Cijo Jose, Vasil
+Khalidov, Marc Szafraniec, Seungeun Yi, Micha¨el Ramamonjisoa, et al.
+Dinov3.
+arXiv preprint
+arXiv:2508.10104, 2025.
+[21] Enis Simsar, Thomas Hofmann, Federico Tombari, and Pinar Yanardag. Loraclr: Contrastive adaptation
+for customization of diffusion models, 2025.
+[22] James Seale Smith, Yen-Chang Hsu, Lingyu Zhang, Ting Hua, Zsolt Kira, Yilin Shen, and Hongxia
+Jin. Continual diffusion: Continual customization of text-to-image diffusion with c-lora. arXiv preprint
+arXiv:2304.06027, 2023.
+[23] Liyuan Wang, Xingxing Zhang, Hang Su, and Jun Zhu. A comprehensive survey of continual learning:
+Theory, method and application. IEEE transactions on pattern analysis and machine intelligence, 46(8):
+5362–5383, 2024.
+14
+
+
+A
+Embedding Metric Comparison
+We quantitatively compare the embedding spaces used to compute concept fidelity in the main text.
+The goal of this comparison is to measure whether an embedding model captures concept-level
+identity rather than only low-level visual similarity. A suitable embedding should map images of the
+same personalized concept close to one another while separating images from different concepts.
+We evaluate this property using a clustering protocol on the ground-truth reference images. Given
+image embeddings, we define the pairwise clustering distance as
+d(i1, i2) = 1 −sim(i1, i2),
+(10)
+where sim(·, ·) denotes the cosine similarity in the corresponding embedding space. We cluster all
+ground-truth images into 101 clusters, matching the number of personalized concepts. To make the
+comparison deterministic and reduce sensitivity to random initialization, the cluster centroids are
+initialized using one image from each ground-truth concept.
+We report clustering accuracy and Adjusted Rand Index (ARI) with respect to the ground-truth
+concept labels. Clustering accuracy is computed as the fraction of images assigned to their correct
+concept cluster. ARI measures the agreement between the predicted clustering and the ground-truth
+partition based on pairwise co-clustering decisions, adjusted for chance. Higher values indicate that
+the embedding space better recovers the underlying concept structure.
+Embedding model
+Acc.
+ARI
+DINOv3 ViT-S/16
+0.9085
+0.8304
+DINO ViT-B/16
+0.9196
+0.8044
+OpenCLIP ViT-B/32
+0.9543
+0.8935
+CLIP ViT-B/32
+0.9385
+0.8873
+DreamSim ensemble
+0.9558
+0.9050
+Table 4. Clustering-based comparison of embedding spaces on ground-truth reference images.
+As shown in Table 4, DreamSim achieves the highest performance on both metrics. This quantitative
+result complements the nearest-neighbor visualization in the main text and supports the use of
+DreamSim as the default embedding for concept fidelity.
+B
+Stochastic Residual-Space Derivation
+This section derives the residual-space construction used in the main text as the solution of a stochastic
+adaptation objective. We focus on one adapted layer l and omit the layer superscript when the notation
+is unambiguous.
+B.1
+Stochastic Objective
+For concept ct, the layer input in a diffusion model depends on the sampled training image, the
+diffusion timestep s, and the Gaussian noise ϵ. We therefore treat the layer input as a random variable
+x(l)
+t
+= x(l)(ct, s, ϵ),
+ϵ ∼N(0, I),
+(11)
+which induces a concept-level feature distribution p(l)
+t (x). Let
+M (l)
+t
+= Ext∼p(l)
+t [xtx⊤
+t ]
+(12)
+denote its second-moment matrix.
+The new projection B(l)
+t
+should satisfy two competing objectives. For the current concept, it should
+preserve as much projected feature energy as possible:
+max
+B(l)
+t
+Ext∼p(l)
+t
+h
+∥B(l)
+t xt∥2i
+,
+B(l)
+t (B(l)
+t )⊤= I.
+(13)
+For a previous concept ci, i < t, it should instead have small expected response:
+min
+B(l)
+t
+Exi∼p(l)
+i
+h
+∥B(l)
+t xi∥2i
+,
+B(l)
+t (B(l)
+t )⊤= I.
+(14)
+15
+
+
+For any concept ci, this expected response can be written as
+Exi∼p(l)
+i
+h
+∥B(l)
+t xi∥2i
+= E
+h
+x⊤
+i (B(l)
+t )⊤B(l)
+t xi
+i
+= Tr
+
+B(l)
+t M (l)
+i (B(l)
+t )⊤
+.
+(15)
+Let the eigenvalues of M (l)
+i
+be sorted in descending order. By the Rayleigh–Ritz variational principle,
+the exact rank-r minimizer of Eq. (14) is the bottom-r eigenspace of M (l)
+i , while the exact rank-r
+maximizer of Eq. (13) is the top-r eigenspace of M (l)
+t . Enforcing the bottom eigenspace solution
+simultaneously for all previous concepts is impractical. DyRA instead uses a tractable relaxation:
+after a task selects its dominant adaptation directions, later tasks are constrained to be orthogonal to
+those directions. This suppresses the directions with largest expected response on previous concepts
+while leaving a residual subspace for new concepts.
+B.2
+Residual-Space Construction
+For the first task, there is no previous occupied subspace. The method therefore solves only the
+adaptability objective in Eq. (13). Its rank-r(l)
+1
+solution is
+R(l)
+1
+= TopEigr(l)
+1
+
+M (l)
+1
+
+,
+Row(B(l)
+1 ) = R(l)
+1 .
+(16)
+We set M(l)
+1
+= R(l)
+1 .
+For task t > 1, let M(l)
+t−1 denote the accumulated occupied subspace from previous tasks and let
+P (l)
+t−1 be its orthogonal projector. The relaxed interference objective constrains the new projection to
+avoid previously selected dominant directions:
+Row(B(l)
+t ) ⊆
+
+M(l)
+t−1
+⊥
+.
+(17)
+This constraint implies
+B(l)
+t P (l)
+t−1 = 0.
+(18)
+Therefore the current feature can be replaced by its residual component in the adaptability objective:
+B(l)
+t xt = B(l)
+t (I −P (l)
+t−1)xt.
+(19)
+The constrained current-task objective becomes
+max
+B(l)
+t
+E
+B(l)
+t (I −P (l)
+t−1)xt
+
+2
+s.t.
+Row(B(l)
+t ) ⊆
+
+M(l)
+t−1
+⊥
+,
+B(l)
+t (B(l)
+t )⊤= I.
+(20)
+The corresponding residual second-moment matrix is
+M (l)
+t,⊥= (I −P (l)
+t−1)M (l)
+t (I −P (l)
+t−1).
+(21)
+Using Eq. (15), the objective in Eq. (20) becomes
+max
+B(l)
+t
+Tr
+
+B(l)
+t M (l)
+t,⊥(B(l)
+t )⊤
+s.t.
+Row(B(l)
+t ) ⊆
+
+M(l)
+t−1
+⊥
+,
+B(l)
+t (B(l)
+t )⊤= I.
+(22)
+By the Rayleigh–Ritz variational principle, the optimal rank-r(l)
+t
+row space is the dominant eigenspace
+of the residual second-moment matrix:
+R(l)
+t
+= TopEigr(l)
+t
+
+M (l)
+t,⊥
+
+,
+Row(B(l)
+t ) = R(l)
+t .
+(23)
+16
+
+
+The occupied subspace is then updated recursively as
+M(l)
+t
+= M(l)
+t−1 ⊕R(l)
+t .
+(24)
+Consequently, the DyRA construction is the natural solution of the stochastic max/min adaptation
+problem under the practical interference relaxation: task 1 selects the dominant eigenspace of its
+stochastic features, and each later task selects the dominant eigenspace of the current stochastic
+features after projecting out directions occupied by previous tasks.
+B.3
+Empirical Estimation and Initialization
+In implementation, M (l)
+t
+is estimated from collected stochastic layer features.
+If H(l)
+t
+=
+[x(l)
+t,1, . . . , x(l)
+t,n] is the feature matrix collected before training task t, we use
+c
+M (l)
+t
+= 1
+nH(l)
+t (H(l)
+t )⊤.
+(25)
+The samples used to construct H(l)
+t
+follow the same stochastic process as diffusion training: each
+forward pass uses sampled Gaussian noise and a sampled denoising timestep. Therefore c
+M (l)
+t
+is an
+empirical estimate of the second moment appearing in the stochastic objective.
+Algorithm 1 summarizes the initialization. The rank is selected independently for each layer by
+thresholding the singular values of the residual second-moment estimate, so a single threshold τ
+induces layer-dependent ranks r(l)
+t .
+We maintain Q(l) as an orthonormal basis of the occupied subspace and form the projector as
+P (l) = Q(l)(Q(l))⊤. This avoids accumulating numerical error from previously initialized LoRA
+matrices and keeps the residual covariance in Eq. (21) symmetric positive semidefinite up to numerical
+precision.
+C
+Implementation Details
+We provide additional implementation details for the continual personalization experiments in the
+main text.
+Dataset and task order.
+We randomly shuffle the 101 concepts once and use this fixed task order
+for all methods and random seeds in the main experiments. This avoids presenting concepts in
+semantic clusters, such as all visually similar instances from the same class arriving consecutively.
+During each task, the dataloader contains only the reference images for the current concept. To check
+robustness to task ordering, we additionally repeat all experiments with two other independently
+shuffled concept orders and observe results consistent with those reported in the main text.
+Backbone and adapted layers.
+We use Stable Diffusion v1.5 [17] as the pretrained text-to-image
+backbone. The model uses a CLIP ViT-L/14 text encoder with 12 transformer blocks and a UNet
+with 16 cross-attention blocks. LoRA modules are inserted into the query, key, value, and output
+projections of the attention layers in both the text encoder and the UNet. This yields 48 adapted
+projection layers in the text encoder and 128 adapted projection layers in the UNet.
+Training configuration.
+Each concept is trained for 400 gradient-update steps. Since each concept
+has only a small number of reference images, the concept dataset is cycled during training. We train
+with fp16 mixed precision on two NVIDIA RTX 4090 GPUs. All methods are run with three global
+random seeds, {0, 42, 619}. The training prompt for concept c follows the dual-token format
+“a photo of ⟨c1⟩⟨c2⟩”.
+(26)
+Residual-space construction.
+Layer inputs for subspace estimation are collected before training
+each new task using the same stochastic inputs as diffusion training: Gaussian noise is sampled for
+each image and the denoising timestep is sampled uniformly.
+17
+
+
+Algorithm 1: DyRA initialization for stochastic diffusion features.
+Input: adapted layers Ladapt; current data Dt; threshold τ; task index t; layer bases Q(l) and
+allocated ranks cumRank(l), initialized as empty and zero before task 1
+Output: fixed LoRA projections B(l)
+t ; updated bases Q(l) and ranks cumRank(l)
+1 Collect stochastic layer features by forwarding Dt with sampled diffusion timesteps and
+Gaussian noise;
+2 Compute c
+M (l)
+t
+= 1
+nH(l)
+t (H(l)
+t )⊤for each l ∈Ladapt;
+3 foreach l ∈Ladapt do
+4
+if t = 1 then
+5
+C(l) ←c
+M (l)
+t ;
+6
+else
+7
+if cumRank(l) ≥d(l)
+in then continue;
+8
+P (l) ←Q(l)(Q(l))⊤;
+9
+C(l) ←(I −P (l))c
+M (l)
+t (I −P (l));
+10
+end
+11
+U, S ←SVD(C(l));
+12
+r ←|{k : Sk ≥τ}|;
+13
+if t = 1 then
+14
+if r = 0 then r ←1;
+15
+else
+16
+if r = 0 then continue;
+17
+r ←min(r, d(l)
+in −cumRank(l));
+18
+end
+19
+Ur ←U[:, 1 : r];
+20
+B(l)
+t
+←U ⊤
+r ;
+21
+Initialize A(l)
+t
+←0;
+22
+Q(l) ←QR([Q(l) | Ur]);
+23
+cumRank(l) ←cumRank(l) + r;
+24 end
+Setting
+Value
+Training steps per task
+400
+Evaluation interval
+Every 50 steps
+Per-device batch size
+2
+Optimizer
+AdamW
+AdamW parameters
+β1=0.9, β2=0.999, wd 0.01
+Learning rate
+LR schedule
+Linear decay, no warmup
+Token-embedding LR
+1 × 10−3
+Text-encoder LoRA LR
+1 × 10−5
+UNet LoRA LR
+1 × 10−4
+LoRA configuration
+Rank (fixed-rank baselines)
+r = 4
+Scaling coefficient
+α = 1.0
+Image preprocessing
+Input resolution
+512 × 512
+Random crop
+p=0.5
+Random scale
+0.8–1.0
+Table 5. Training hyperparameters shared across methods.
+Evaluation protocol.
+We evaluate the model every 50 training steps. At each evaluation checkpoint,
+we generate images for all concepts that have been learned so far. For each concept, we sample 10
+images using different random seeds. The generated images are compared with the ground-truth
+18
+
+
+reference images using the concept-fidelity metric described in the main text. During this quantitative
+evaluation, we prompt the model only with the two concept-specific tokens, ⟨c1⟩⟨c2⟩, to isolate
+concept identity from prompt-induced scene variation.
+Final qualitative validation.
+For final qualitative validation after all 101 concepts have been
+learned, we use the class-level prompt templates provided by Concept 101. Each semantic class has 10
+prompts, and we replace the placeholder token in each template with the two concept-specific tokens.
+We sample 8 images per prompt with different random seeds. For the pet dog2 validation example
+shown in the main text, the five selected prompts are <TOK> at a beach with a view of the
+seashore., <TOK> in Times Square., <TOK> is in a construction outfit., <TOK> is
+playing with a ball., and <TOK> is wearing a sombrero. In all templates, <TOK> is re-
+placed by the two concept-specific tokens. All methods use the same prompts and seeds.
+Setting
+Value
+Sampler
+DPM-Solver++ multistep
+Inference steps
+50
+CFG scale
+7.5
+Output resolution
+512 × 512
+Evaluation samples per concept
+10
+Validation prompts per class
+10
+Validation samples per prompt
+8
+Table 6. Generation settings used for evaluation and final validation.
+D
+Layer-Index Mapping
+This section provides the mapping between the adapted layer indices used in the layer-wise rank
+analysis and the corresponding attention projections. We use Q, K, V , and O to denote the query,
+key, value, and output projections, respectively. For the UNet, we explicitly distinguish self-attention
+from cross-attention projections.
+Text encoder.
+The CLIP text encoder contains 12 transformer blocks. In each block, we adapt the
+self-attention projections in the order K, V, Q, O. Thus, for text-encoder block b ∈{0, . . . , 11}, the
+adapted layer indices are
+4b + {0, 1, 2, 3}
+←→
+{K, V, Q, O}.
+(27)
+All text-encoder adapted layers have input dimension din = 768.
+Block b
+K
+V
+Q
+O
+din
+0
+0
+1
+2
+3
+768
+1
+4
+5
+6
+7
+768
+2
+8
+9
+10
+11
+768
+3
+12
+13
+14
+15
+768
+4
+16
+17
+18
+19
+768
+5
+20
+21
+22
+23
+768
+6
+24
+25
+26
+27
+768
+7
+28
+29
+30
+31
+768
+8
+32
+33
+34
+35
+768
+9
+36
+37
+38
+39
+768
+10
+40
+41
+42
+43
+768
+11
+44
+45
+46
+47
+768
+Table 7. Text-encoder layer-index mapping. The text encoder uses self-attention only.
+UNet.
+The UNet contains 16 adapted transformer modules across the down, up, and middle blocks.
+Each module contributes eight adapted projection layers: four self-attention projections followed by
+four cross-attention projections. For UNet transformer module m, the self-attention indices are
+8m + {0, 1, 2, 3} ←→{self-Q, self-K, self-V, self-O},
+(28)
+19
+
+
+and the cross-attention indices are
+8m + {4, 5, 6, 7} ←→
+{cross-Q, cross-K, cross-V, cross-O}.
+(29)
+The cross-attention K and V projections take text-encoder features as input, so their input dimension
+is always 768. The remaining projections use the UNet hidden dimension of the corresponding
+transformer module.
+m
+Range
+Block UNet dim.
+0
+0–7
+down 0
+320
+1
+8–15
+down 0
+320
+2
+16–23
+down 1
+640
+3
+24–31
+down 1
+640
+4
+32–39
+down 2
+1280
+5
+40–47
+down 2
+1280
+6
+48–55
+up 1
+1280
+7
+56–63
+up 1
+1280
+8
+64–71
+up 1
+1280
+9
+72–79
+up 2
+1280
+10
+80–87
+up 2
+1280
+11
+88–95
+up 2
+1280
+12 96–103
+up 3
+320
+13 104–111
+up 3
+320
+14 112–119
+up 3
+320
+15 120–127 middle
+1280
+Table 8. UNet transformer-module mapping. Within each layer range, offsets 0–3 correspond to self-attention
+Q, K, V, O, and offsets 4–7 correspond to cross-attention Q, K, V, O.
+This mapping explains the periodic structure in the rank-allocation plots. In particular, the UNet
+cross-attention K, V projections correspond to indices 8m + 5 and 8m + 6 for each transformer
+module m, which are the layers that consistently receive the largest residual ranks in the analysis.
+E
+Additional Qualitative Examples
+We provide additional final-validation and continual-generation examples for three other concepts
+spanning different categories. For each concept, the continual-generation figure is shown first,
+followed by the final validation generations. In the validation figures, columns P1–P5 correspond
+to the prompt set listed in the same subsection, and <TOK> is replaced by the two learned concept
+tokens. For each continual-generation figure, the first shown task is the task at which the concept is
+introduced.
+20
+
+
+E.1
+Jewelry Ring
+Validation prompts.
+P1: A close shot of <TOK> worn by a model.
+P2: A <TOK> lying in a red jewelry box.
+P3: A <TOK> on a blue velvet rug.
+P4: A <TOK> on a mossy forest floor.
+P5: A <TOK> on a sunlit beach, a seashell beside it.
+Task 23
+Task 42
+Task 62
+Task 82
+Task 101
+Original
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-1.0
+(a) Continual generation, beginning at task 23.
+P1
+P2
+P3
+P4
+P5
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-1.0
+(b) Final validation; columns correspond to prompts P1–P5.
+Figure 9. Additional qualitative results for Jewelry Ring.
+21
+
+
+E.2
+Plushie Panda
+Validation prompts.
+P1: Photo of a <TOK>.
+P2: <TOK> in front of a medieval castle.
+P3: <TOK> in Grand Canyon.
+P4: <TOK> in Times Square.
+P5: <TOK> on a boat in the sea.
+Task 52
+Task 64
+Task 76
+Task 88
+Task 101
+Original
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-1.0
+(a) Continual generation, beginning at task 52.
+P1
+P2
+P3
+P4
+P5
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-1.0
+(b) Final validation; columns correspond to prompts P1–P5.
+Figure 10. Additional qualitative results for Plushie Panda.
+22
+
+
+E.3
+Wearable Jacket
+Validation prompts.
+P1: A humanoid robot wearing <TOK> with a futuristic city in the background.
+P2: A mannequin showcasing <TOK>.
+P3: A <TOK> on a hanger in the window of a shop.
+P4: A <TOK> on a hook in a study room with bookshelves.
+P5: Photo of a <TOK>.
+Task 32
+Task 49
+Task 66
+Task 83
+Task 101
+Original
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-1.0
+(a) Continual generation, beginning at task 32.
+P1
+P2
+P3
+P4
+P5
+Trainable-AB
+Rand-Fixed-B
+OA
+DyRA-1.0
+(b) Final validation; columns correspond to prompts P1–P5.
+Figure 11. Additional qualitative results for Wearable Jacket.
+23
