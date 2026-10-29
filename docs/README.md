@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-28</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-29</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 17 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>6</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-28 23:30:55 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-29 23:53:26 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今天筛完 17 篇论文，精读 6 篇、速读 11 篇，重点集中在图像复原与增强、扩散模型个性化两条主线。最值得看的是两篇 9.0 分工作：用文本引导的退化课程重新思考水下图像增强，以及用激活校准 SVD 实现盲压缩图像复原的免训练加速，前者强调退化建模要“教得对”，后者证明免训练加速已能落地。普通读者可先读这两篇 9.0 分论文建立判断框架，再按兴趣速读 BiNar 的码流原生复原与可复用图层编辑，后续重点关注“退化感知 + 免训练”组合方向。</p>
+<p>今日筛选17篇论文并精读6篇，聚焦多主体图像编辑与视觉变换。最值得关注LOCI的局部连续控制和CrossPair的通用视觉变换学习（均9.0分）。普通读者可先看这两篇精读，再按需浏览扩散模型速读。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -81,7 +81,7 @@
     <strong class="dpr-home-dashboard-count">6 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Rethinking Underwater Image Enhancement: Learning through Text-Guided Degradation Curriculum">Rethinking Underwater Image Enhancement: Learning through Text-Guided Degradation Curriculum</span></li><li><span class="dpr-home-dashboard-paper-title" title="Training-free Acceleration for Blind Compressed Image Restoration via Activation-Calibrated Singular Value Decomposition">Training-free Acceleration for Blind Compressed Image Restoration via Activation-Calibrated Singular Value Decomposition</span></li><li><span class="dpr-home-dashboard-paper-title" title="GLOW-FM: Efficient Generative Low-Light Image Enhancement with One-Step Latent Flow Matching">GLOW-FM: Efficient Generative Low-Light Image Enhancement with One-Step Latent Flow Matching</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="LOCI: Localized Continuous Control for Multi-Subject Image Editing">LOCI: Localized Continuous Control for Multi-Subject Image Editing</span></li><li><span class="dpr-home-dashboard-paper-title" title="CrossPair: Unlocking Generalist Visual Transformation Learning in Image Editors">CrossPair: Unlocking Generalist Visual Transformation Learning in Image Editors</span></li><li><span class="dpr-home-dashboard-paper-title" title="EditJev: System One Routing for Image Editing Models">EditJev: System One Routing for Image Editing Models</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>6</strong></span></div>
 </section>
@@ -94,7 +94,7 @@
     <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="BiNar: Bitstream Native Restorer for Bitstream-corrupted Image Restoration">BiNar: Bitstream Native Restorer for Bitstream-corrupted Image Restoration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Editing Images into Reusable Layers via Compositional Edit-Prior Distillation">Editing Images into Reusable Layers via Compositional Edit-Prior Distillation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Continual Concept Personalization in Diffusion Models via Residual-Space Adaptation">Continual Concept Personalization in Diffusion Models via Residual-Space Adaptation</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="The Noise-Transmission Burden of Diffusion Network: Why Image Prediction Can Outperform Noise Prediction">The Noise-Transmission Burden of Diffusion Network: Why Image Prediction Can Outperform Noise Prediction</span></li><li><span class="dpr-home-dashboard-paper-title" title="SpeeDiff: Scalable Pixel-Anchored End-to-End Latent Diffusion Model">SpeeDiff: Scalable Pixel-Anchored End-to-End Latent Diffusion Model</span></li><li><span class="dpr-home-dashboard-paper-title" title="Physics Guided Diffusion Model Based Exposure Interpolation for High Dynamic Range Imaging">Physics Guided Diffusion Model Based Exposure Interpolation for High Dynamic Range Imaging</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>11</strong></span></div>
 </section>

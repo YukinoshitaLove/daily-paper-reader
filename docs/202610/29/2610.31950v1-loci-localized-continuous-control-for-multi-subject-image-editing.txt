@@ -1,0 +1,1050 @@
+LOCI: Localized Continuous Control for
+Multi-Subject Image Editing
+Sai Vidyaranya Nuthalapati1, Shlok Kumar Mishra1
+1Meta AI
+Recent instruction-following image editors such as Flux.1-Kontext enable text-driven editing but
+lack fine-grained control over where and how much an edit is applied. Existing approaches provide
+either continuous but global control or spatially localized editing at a fixed strength. To our knowledge,
+none jointly supports explicit spatial localization, continuous per-region strength, and independent
+simultaneous control of multiple subjects. We present LOCI (LOcalized Continuous control for multi-
+subject Image editing). Given a multi-subject image with per-subject regions and instructions, LOCI
+edits each subject at an independently chosen, continuously adjustable strength, for instance gradually
+aging one person while adding a beard to another with minimal cross-region leakage. LOCI pairs
+subject-level attention binding for spatial isolation with a Regional LoRA layer that replaces the
+LoRA’s scalar coefficient with a per-token scaling vector aligned to the spatial layout.
+A single
+adapter is trained at one suppression point, and continuous edit strengths follow by rescaling its
+regional residual at inference. Experiments on multi-subject scenes demonstrate that LOCI achieves
+strong edit fidelity with significantly reduced cross-region interference compared to baselines, while
+maintaining continuous control over edit strength.
+Date: October 26, 2026
+Correspondence:
+saividyaranya@meta.com
+1
+Introduction
+The rise of text-to-image (T2I) generative models (Ramesh et al., 2022; Saharia et al., 2022b; Podell et al.,
+2023; Rombach et al., 2022) has revolutionized image editing, enabling creative expression at an unprecedented
+scale through simple textual prompts. Ranging from Generative Adversarial Networks (Goodfellow et al.,
+2014) to diffusion models (Sohl-Dickstein et al., 2015; Song et al., 2021; Dhariwal and Nichol, 2021), to flow-
+based models (Lipman et al., 2023; Liu et al., 2023; Esser et al., 2024; Black Forest Labs, 2024), these models
+have demonstrated the ability to generate high-quality images which adhere to the text prompts. Recently
+diffusion and flow matching models have excelled at various tasks such as inpainting (Lugmayr et al., 2022),
+outpainting (Saharia et al., 2022a), style transfer (Zhang et al., 2023), and instruction-based editing (Brooks
+et al., 2023; Zhang et al., 2024; Sheynin et al., 2024; Black Forest Labs, 2025) to name a few.
+Existing editors fall into two families. Firstly, continuous editors expose an edit-strength control but reach a
+subject only through the prompt (Zarei et al., 2025; Parihar et al., 2026). Language grounding is coarse: it
+can express “replace the dog with a cat,” but not “replace the second dog from the left” when several same-
+category instances co-occur. Because the control is never bound to an image region, it cannot designate which
+subject to edit, cannot assign independently chosen intensities to several subjects in one pass (Gandikota
+et al., 2023; Ye et al., 2025; Endo et al., 2026), and cannot confine the edit once it is applied without spilling
+onto its neighbours where an edit intended for one subject spills onto its neighbours (Dahary et al., 2024;
+Mun et al., 2025).
+The second family binds edits to regions, through masks or attention, and so resolves both designation and
+containment. These methods, however, apply the edit at a single fixed strength, offering no interpolation
+between the source image and the fully applied edit (Chakrabarty et al., 2024; Zaccagnino et al., 2026; Cai
+et al., 2026; Xiong et al., 2026).
+The two capabilities therefore live in separate families. To our knowledge, no existing approach combines
+1
+arXiv:2610.31950v1  [cs.CV]  22 Oct 2026
+
+
+Input
+transform the teapot into
+an ornate steampunk
+contraption with brass
+pipes, pressure gauges and
+copper rivets
+change the teapot into a
+vessel carved from
+luminous jade, with dragon
+motifs and a serpent
+handle
+edit strength increases (α decreasing) −→
+Subject 1
+Subject 2
+Both
+Figure 1 LOCI gives every subject its own continuous edit control. From one input, the top row strengthens the edit on the
+first teapot while the second stays pinned at the neutral anchor, the middle row does the converse, and the bottom
+row moves both controls together. The boxes on the input are the spatial annotations supplied to the model: red for
+subject 1 and blue for subject 2, matching the row labels.
+explicit regional localization, continuous per-region edit strength, and independent simultaneous control of
+multiple subjects in a single editing process.
+We present LOCI, a single framework that resolves these limitations. Given a multi-subject image annotated
+with per-subject regions and edit instructions, LOCI edits each designated subject at an independently
+chosen, continuously adjustable strength while confining every edit to its own region. Each region is given as
+either a bounding box or a segmentation mask, and it supplies the explicit spatial addressing that language
+grounding lacks, so the user can specify exactly which subject to modify. Scaling each region’s contribution
+independently gives every subject its own continuous strength within a single forward pass, and attention
+masking isolates the regions to suppress cross-subject leakage.
+Realizing per-region strength control is nontrivial. The conditioning paths in MMDiT backbones (Esser et al.,
+2024; Black Forest Labs, 2024) (AdaLN modulation and attention) govern what features are computed, not
+how intensely an edit is applied; modulating their parameters does not yield a linear interpolation between
+unedited and edited outputs. Attention masking can partition which edit reaches which region (Zaccagnino
+et al., 2026), but this isolation is binary and carries no notion of graded strength. On the other hand, the
+low-rank update of LoRA (Hu et al., 2022), enters as an additive residual whose magnitude directly governs
+edit intensity. Scaling it by zero recovers the base output, scaling by one applies the learned update in full,
+and intermediate values interpolate continuously by construction (Zarei et al., 2025). However, scaling the
+residual per region is not sufficient on its own because the learned edit direction is spatially entangled: the
+residual is written only inside a region, but attention carries its effect outward, so assigning different scales
+to different regions does not produce independent edits. Our key insight is that training the LoRA under
+instance-aware attention masking yields region-local edit directions. Once each direction is local, per-region
+scaling of the residual becomes meaningful, and each subject can be edited at an independently chosen
+strength within a single forward pass, without modifying the base architecture.
+We make the following
+contributions.
+2
+
+
+1. We introduce LOCI, a framework for independently controllable multi-subject editing that represents an
+edit as an instruction, a spatial support, and a continuous control coefficient. At its core is Regional LoRA,
+a layer that scales the residual separately in each region instead of applying one strength to the whole
+image, so every subject carries its own control and the background carries none. Multiple subject-specific
+edits are then composed within one model while their strength and spatial influence stay independently
+controlled.
+2. We curate a multi-subject evaluation set comprising 128 scenes and 427 source–region–edit tuples spanning
+people, animals, vehicles, furniture, and mixed compositions with 2–7 subjects per scene, and define
+four evaluation protocols (single-target editing, independent multi-control sweeps, joint editing, and two-
+dimensional Cartesian grid control) that together probe target fidelity, cross-subject leakage, continuity,
+and slider independence.
+2
+Related Work
+Instruction-following image editing.
+Instruction-following editing has advanced rapidly through better train-
+ing data and multi-task objectives (Brooks et al., 2023; Zhang et al., 2024; Sheynin et al., 2024). We build
+on Flux.1-Kontext (Black Forest Labs, 2025), a prominent recent architecture that represents the source
+image as latent tokens concatenated into the transformer’s sequence, a property our construction relies on
+(section 3.1).
+Spatial control.
+Attention manipulation localizes edits without training (Hertz et al., 2023; Cao et al., 2023),
+and layout-guided generation injects boxes or keypoints as conditions (Li et al., 2023). For multi-instance
+editing, Zaccagnino et al. (Zaccagnino et al., 2026) build disentanglement and harmonization masks from box
+layouts to block cross-instance leakage, which we adopt as our spatial backbone. Masked inpainting (Rombach
+et al., 2022) localizes an edit but needs a binary region and offers no graded strength. None of these vary
+edit intensity smoothly.
+Continuous edit-strength control.
+Concept Sliders (Gandikota et al., 2023) learn attribute directions in
+LoRA weight space. SliderEdit (Zarei et al., 2025) scales instruction-indexed token-selective adapters, and
+Kontinuous Kontext (Parihar et al., 2026) maps a scalar strength to instruction-conditioned global modulation.
+Both reach a subject only through language, so neither binds a strength control to a user-specified image
+region.
+Multi-subject and localized editing.
+Mask-guided multi-object editing (Chakrabarty et al., 2024) and regional
+LoRA composition (Dalva et al., 2025) edit several subjects at once but at a fixed intensity, as do patch-
+weighted concept merging (Foteinopoulou et al., 2026) and region-aware adapters (Cai et al., 2026; Xiong
+et al., 2026). Layered Diffusion Brushes (Gholami and Xiao, 2024) exposes a regeneration amount tied to
+the noise injection timestep. Neither applies distinct per-subject edits, and neither isolates regions at the
+attention level. Appendix A expands this comparison.
+Positioning.
+Existing work addresses continuous strength, spatial control, or multi-subject isolation sepa-
+rately. LOCI unifies region-based addressing, per-token LoRA scaling, and instance-disentangled attention,
+so several subjects can be edited at independently chosen strengths in a single forward pass.
+3
+Method
+A multi-subject editing request consists of a source image I ∈RH×W ×3 and N region-specific instructions
+{(en, Mn)}N
+n=1, where en is the instruction for subject n and Mn ∈{0, 1}H×W is its binary region mask. The
+user supplies each region as either a bounding box or a segmentation mask. A segmentation mask is used
+directly, and a bounding box is converted by marking every pixel inside it as foreground, so the method takes
+a single region representation Mn in both cases. For attention routing, we additionally associate each region
+with a bounding box. This can be the supplied box itself or the tight box enclosing a supplied segmentation
+mask. Each subject also has a control value αn ∈R, the slider exposed to the user. Our goal is to produce
+3
+
+
+1 Regional request
+B1
+B2
+T1: “cartoon character”, α1
+T2: “look older”, α2
+2 FLUX transformer
+19 dual-stream blocks
+T1
+T2
+🔥
+∆W
+text stream
+Lu
+L1
+L2
+🔥
+∆W
+Cu
+C1
+C2
+🔥
+∆W
+image stream
+merge
+38 single-stream blocks
+one joint sequence
+T1
+T2
+🔥
+∆W
+Lu
+L1
+L2
+🔥
+∆W
+Cu
+C1
+C2
+🔥
+∆W
+harm. 0–9
+disentanglement 10–46
+harm. 47–56
+3 Edited output
+α1
+α2
+one adapter, independent con-
+trols, one trajectory
+Attention routing
+Row = query, column = key. A filled cell means that query may attend to that key.
+disentanglement (10–46)
+T1 T2LuL1L2CuC1C2
+T1
+T2
+L1 ∪C1
+L2 ∪C2
+Lu ∪Cu
+harmonization (0–9, 47–56)
+T1 T2LuL1L2CuC1C2
+T1
+T2
+L1 ∪C1
+L2 ∪C2
+Lu ∪Cu
+permitted, tinted by the query
+opens in the outer blocks
+blocked
+Figure2 ArchitectureofLOCI. Stage 1: the user supplies a source image, per-region bounding boxes Bn, edit instructions,
+and independent scalar controls αn. Stage 2: text and image tokens are organized into the partition {Tn, Ln, Cn}
+indexed by subject, with trainable low-rank adapters (∆W, marked with 🔥) whose residuals are gated per token by
+αn; background tokens Lu, Cu receive zero adapter contribution. Stage 3: the frozen Flux.1-Kontext transformer
+processes the sequence through 19 dual-stream and 38 single-stream blocks under a three-zone attention schedule,
+with harmonization in the outer blocks (0–9, 47–56) and disentanglement in the middle blocks (10–46). Inset: the
+query–key attention matrices for both regimes. Under disentanglement, each subject’s tokens attend only within their
+own partition; under harmonization, subject image tokens additionally read all visual tokens (dashed cells), restoring
+the cross-region evidence needed for background coherence.
+an edited image in which every subject realizes its own instruction at the strength set by its own control,
+while the background is preserved. We use a suppression parameterization, in which αn = 1 leaves subject
+n unedited, αn = 0 applies the nominal edit, and αn < 0 extrapolates beyond it, where the nominal edit is
+the output that the frozen Flux.1-Kontext editor produces for en on its own.
+Section 3.1 fixes the backbone and the token partition our construction is built on. Section 3.2 introduces
+Regional LoRA, which turns the scalar adapter scale into a per-token vector aligned with that partition.
+Section 3.3 describes the attention routing, which binds each instruction to its own subject, and section 3.4
+the objective that trains one shared adapter on single-region examples only, under exactly the routing used
+at test time. Section 3.5 composes an arbitrary number of controls in a single pass.
+3.1
+Preliminaries
+We first fix the backbone, the token partition that our construction indexes, and the low-rank adapter that
+it modifies.
+Backbone and token partition.
+We build on the frozen Flux.1-Kontext (Black Forest Labs, 2025) editor,
+an MMDiT (Esser et al., 2024) with 19 dual-stream and 38 single-stream blocks. The model is trained under
+a rectified-flow objective (Lipman et al., 2023; Liu et al., 2023; Esser et al., 2024) and predicts a velocity. We
+denote its input token sequence by Z = (Z1, . . . , Z|Z|),
+Z = Ztext ∥Ztarget ∥Zcontext,
+(1)
+4
+
+
+where ∥denotes concatenation along the sequence axis. The stream Ztext contains the instruction tokens
+produced by T5 (Raffel et al., 2020). The other two streams are latent tokens from the frozen Flux.1-
+Kontext autoencoder (Black Forest Labs, 2025): Ztarget is the evolving latent that the model denoises into
+the edited image, and Zcontext is a fixed encoding of the source image, which conditions the edit but is not
+itself denoised.
+For subject-indexed control, we organize the three streams by subject association. The text stream physically
+concatenates independently encoded blocks, Ztext = T1∥· · · ∥TN, where Tn holds instruction en. The image
+tokens remain in their original sequence order. For attention routing, we write Ln ⊆Ztarget and Cn ⊆Zcontext
+for the target and context tokens whose spatial cells lie inside the region mask associated with subject n.
+The tokens outside all routing boxes form Lu and Cu. We can represent them as
+Ztarget = Lu ∪
+N
+[
+n=1
+Ln,
+Zcontext = Cu ∪
+N
+[
+n=1
+Cn.
+(2)
+We call this labelling of every token by stream and subject the token partition.
+Low-rank update:
+For a layer mapping input x ∈Rdin to output y ∈Rdout, LoRA (Hu et al., 2022) augments
+the frozen projection W ∈Rdout×din with an update ∆W = BA of rank at most r, where A ∈Rr×din and
+B ∈Rdout×r are trainable. A scalar coefficient β ∈R controls the update,
+y = Wx + β ∆Wx.
+(3)
+The update is linear in β, so β = 0 recovers the frozen projection and β = 1 applies the learned update in
+full.
+3.2
+Regional LoRA
+The coefficient β in equation (3) applies to all tokens equally. To give each region its own edit strength, we
+replace it with a vector λ ∈R|Z| that holds one coefficient λj per token, defined over the token partition of
+section 3.1. To project Mn from pixel space into the token grid, we define
+Gn(j) = max
+p∈c(j) Mn(p),
+(4)
+where c(j) is the block of source pixels that token j covers. The gate is therefore one whenever any pixel of
+subject n falls in that block, and both image streams share the same token grid, so token j covers the same
+block in Ztarget and Zcontext. The coefficient at each token is then
+λj =
+
+
+
+
+
+αn
+Zj ∈Tn, n ∈{1, . . . , N},
+αn⋆(j)
+Gn(j) = 1 for some n,
+0
+otherwise,
+(5)
+where n⋆(j) = arg maxn: Gn(j)=1 αn. Thus, when projected gates overlap, an image token receives the largest
+coefficient among the active controls, that is, the most suppressive and hence least edited of them. The
+background tokens Lu, Cu carry λj = 0 and receive no adapter residual. Substituting λj for the scalar β of
+equation (3), each LoRA layer computes
+yj = Wxj + λj ∆Wxj.
+(6)
+Thus αn modulates three groups of low-rank writes, namely its instruction block Tn, its projected region in
+the target stream, and the corresponding region in the context stream.
+3.3
+Instance-Disentangled Attention
+The write gate of section 3.2 localizes where the residual is added, but not where its effect lands: attention
+lets a change at one token reach every other token in the following blocks. We therefore route attention with
+5
+
+
+Input
+turn the person into
+a cartoon character
+make the person look
+older
+stronger edit −→
+Subject 1
+Subject 2
+Both
+Input
+make the person
+laugh
+turn the person into
+a metallic figure
+stronger edit −→
+Subject 1
+Subject 2
+Both
+Input
+add makeup to the
+person
+make the person
+laugh
+stronger edit −→
+Subject 1
+Subject 2
+Both
+Input
+one instruction, both
+regions: change the
+colour of the
+climbing wall from
+gray to a tan shade
+stronger edit −→
+Subject 1
+Subject 2
+Both
+Figure 3 Independent and joint control across four scenes. Each block shows its input and instructions on the left, with
+red and blue boxes marking the spatial annotations given to the model. The three rows sweep subject 1, subject 2,
+and both, and within a row the edit strengthens from left to right. see section 4.3.
+Extrapolation ↑
+Direction corr. ↓
+Mean range ↑
+Disentanglement ↓
+Protocol
+Method
+CLIP
+SigLIP
+CLIP
+SigLIP
+CLIP
+SigLIP
+LPIPS-Alex
+LPIPS-VGG
+DINOv2
+Identity
+A
+(1) SliderEdit
+0.2431
+0.1114
+−0.4907
+−0.4666
+0.0575
+0.0470
+0.3315
+0.3826
+0.1612
+0.3640
+A
+(2) SliderEdit + IDAttn
+0.2500
+0.1187
+−0.6326
+−0.6192
+0.0726
+0.0587
+0.1508
+0.2010
+0.0609
+0.2598
+A
+(4) Regional LoRA without IDAttn
+0.2445
+0.1133
+−0.5829
+−0.5689
+0.0761
+0.0625
+0.3085
+0.3581
+0.1700
+0.3406
+A
+(5) LOCI (ours)
+0.2527
+0.1207
+−0.7081
+−0.6953
+0.0894
+0.0721
+0.1467
+0.1979
+0.0550
+0.2548
+B
+(1) SliderEdit
+0.2426
+0.1121
+−0.5503
+−0.5106
+0.0589
+0.0488
+0.3346
+0.3875
+0.1471
+0.3502
+B
+(2) SliderEdit + IDAttn
+0.2479
+0.1181
+−0.6199
+−0.6284
+0.0708
+0.0578
+0.1128
+0.1500
+0.0804
+0.2397
+B
+(4) Regional LoRA without IDAttn
+0.2439
+0.1131
+−0.6636
+−0.6438
+0.0807
+0.0649
+0.2331
+0.2835
+0.1176
+0.3088
+B
+(5) LOCI (ours)
+0.2531
+0.1221
+−0.7078
+−0.6977
+0.0890
+0.0720
+0.0748
+0.1128
+0.0508
+0.1988
+Table 1 Protocols A and B. Best per column bold, second best underlined, ranked within each protocol block.
+Instance-Disentangled Attention (IDAttn) (Zaccagnino et al., 2026), which adds a bias Ω∈{0, −∞}|Z|×|Z|
+inside the softmax,
+IDAttn(Q, K, V, Ω) = softmax
+
+QK⊤
+√
+d + Ω
+
+V,
+(7)
+where Q, K and V are the query, key and value projections of Z and d is the per-head dimension.
+Two regimes are defined on the partition. Under the disentanglement regime Ωdis, the three blocks of subject
+n, namely Tn, Ln and Cn, attend only among themselves, while background queries in Lu and Cu may read
+every target and context token. The relation is therefore asymmetric. Further, no query outside subject n
+may read its instruction block Tn. The harmonization regime Ωhar modifies only the subject rows, letting
+Ln and Cn read all target and context tokens, which restores the cross-region evidence that lighting, shadow
+and background continuity depend on while leaving instruction binding unchanged (Zaccagnino et al., 2026).
+We apply Ωhar in the outer blocks 0 to 9 and 47 to 56, and Ωdis in the middle blocks 10 to 46, using the same
+schedule at training and inference.
+6
+
+
+3.4
+Single-Region Suppression Training
+Sections 3.2 and 3.3 fix how the adapter is applied and how attention is routed. Here we describe how it is
+trained. The frozen editor supplies its own supervision. Run on a source image with a neutral instruction it
+reproduces that image, and run with the real instruction it produces the edit. Following (Zarei et al., 2025),
+we train a single low-rank adapter, one subject at a time, to turn the second prediction into the first, so that
+at α = 1 it removes exactly the change the instruction causes. No edited image is therefore required: each
+example is a source image I, an instruction e, and its region M. Training uses the same attention routing as
+inference.
+Routing-matched suppression.
+For each training tuple, we encode I once. One copy of its latent serves as the
+clean context latent Xsrc, while another is corrupted with noise by the standard rectified-flow interpolation to
+form the denoising latent Xt at a logit-normally sampled noise level (Liu et al., 2023; Esser et al., 2024). We
+denote by FR the target-stream velocity that Flux.1-Kontext predicts under a routing schedule R, and by
+Fλ
+R the same prediction with the adapter active at scale vector λ. The two passes share these image-derived
+latents, the sampled noise level, token layout, region and routing schedule, but differ in their instruction
+conditioning and adapter state:
+vref = FR
+ Xt, Xsrc, eneu
+
+,
+vadapt = Fλ
+R
+ Xt, Xsrc, e
+
+,
+(8)
+where eneu is the neutral instruction “keep the image the same”, λ follows from α = 1 and the gate G1 of
+region M by equation (5), and R is the schedule of section 3.3. The detached vref is the velocity target
+for optimization, and gradients update the adapter through vadapt. The instruction block T1 is the only
+conditioning that differs between the two velocity calculations, and the routing schedule in particular is
+shared. If the reference pass instead used relaxed attention, the loss would ask the adapter to do two things
+at once: suppress the instruction and compensate for the difference between relaxed attention and IDAttn
+routing. At inference only the IDAttn schedule is present, yet the regional control would rescale both learned
+effects together. Using the same schedule in both passes therefore isolates edit suppression at a fixed routing
+operating point.
+Masked objective.
+Let m ∈{0, 1}|Ztarget| be the binary training mask derived from the token-space gate G1
+of equation (4). We supervise only the corresponding target-stream tokens:
+L =
+P|Ztarget|
+j=1
+mj
+vadapt,j −vref,j
+2
+2
+P|Ztarget|
+j=1
+mj
+.
+(9)
+3.5
+Multi-Region Inference
+Although training uses a single subject, inference may instantiate N > 1 controls on the token partition of
+section 3.1. We assemble all regional coefficients into a single vector λ using equation (5) which modulates
+the shared adapter at every denoising step. The controls may have different signs, allowing suppression and
+extrapolation to be applied to different subjects in the same trajectory.
+Inference applies the support pattern used during single-region training to each subject, so that its instruction
+block Tn and the image tokens selected by Gn share the coefficient αn. On subject n’s tokens, λ is therefore
+αn times its value during training.
+Since no query outside subject n may read Tn under either regime
+(section 3.3), adding subjects does not directly expose subject n to another subject’s text, and the same
+adapter can be applied without retraining for a particular subject count.
+4
+Experiments
+4.1
+Experimental Setup
+Evaluation benchmark.
+We evaluate on 128 multi-subject scenes containing 2–7 subjects per scene. The
+benchmark provides 427 annotated subject–edit pairs spanning people, animals, vehicles, furniture, and mixed
+7
+
+
+Protocol C: joint editing
+Protocol D: two-dimensional control
+Method
+Regional success ↑
+Worst-region ∆CLIP ↑
+Intended response ↑
+Semantic cross-talk ↓
+LPIPS cross-talk ↓
+(1) SliderEdit
+0.8231
+0.0045
+0.0307
+0.6456
+0.6597
+(2) SliderEdit + IDAttn
+0.8773
+0.0122
+0.0353
+0.2776
+0.1909
+(3) IDAttn only
+0.9153
+0.0282
+not slider-capable
+(4) Regional LoRA without IDAttn
+0.7577
+−0.0015
+0.0393
+0.7146
+0.9599
+(5) LOCI (ours)
+0.9099
+0.0251
+0.0458
+0.2211
+0.1860
+Table 2
+Protocols C and D. Protocol D applies only to slider-capable methods. Best per column bold, second best
+underlined.
+compositions. Each pair associates a subject in the source image with a spatial annotation and a semantic
+edit instruction. The scenes are synthetic: we author a specification per scene and generate the source image
+with Flux.2. The benchmark is therefore disjoint from the HQ-Edit training data by construction, and the
+generator differs from the frozen editor, so no method is evaluated on images produced by the model it edits
+with. Spatial annotations are produced offline with Grounding-DINO (Liu et al., 2024) and SAM2 (Ravi
+et al., 2024); these annotators are not part of the editing pipeline, and at inference the annotation is supplied
+by the user. Appendix E gives the full construction. Methods without an explicit spatial interface instead
+receive positional language identifying the target, such as “the leftmost dog” or “the second person from the
+right.”
+4.2
+Quantitative Evaluation
+We call a method slider-capable when it exposes a continuous, per-subject edit control, and sweep every
+slider-capable method over α ∈{1.0, 0.8, . . . , −0.8, −1.0}.
+Compared methods.
+1. SliderEdit. The released Selective Token LoRA checkpoint (Zarei et al., 2025), the multi-instruction variant,
+which scales instruction text spans but is given no mask, box, or routing.
+2. SliderEdit + IDAttn. The same checkpoint with IDAttn (Zaccagnino et al., 2026) added at inference and
+each instruction block paired with its subject box, testing whether a naive combination works.
+3. IDAttn only. Routing and local instruction blocks, but no LoRA, so there is no learned strength control.
+4. Regional LoRA without IDAttn. The regional adapter trained with the masked suppression objective of
+section 3.4, but under ordinary full attention.
+5. LOCI (ours). The regional adapter and IDAttn routing, trained under the routing-matched objective of
+section 3.4.
+Two contrasts within this set carry the component analysis. Methods 3, 4 and 5 isolate the two components,
+giving routing alone, the regional adapter alone, and both together, which shows what either contributes by
+itself and whether the two compound. Methods 2 and 5 form the second contrast, testing whether routing
+must be present while the regional edit direction is learned or whether composing the two post hoc suffices.
+Evaluation protocols.
+1. Protocol A: single-target editing. We supply one subject-level instruction and sweep its control over the full
+range, with no instruction assigned to any other subject.
+2. Protocol B: independent multi-control. Every subject now carries an instruction, but we move one control
+and hold the rest at the neutral anchor α = 1. This measures whether one control can move without
+dragging the others with it.
+3. Protocol C: joint editing. Every subject carries an instruction, and we generate one image with all regional
+controls at the nominal edit, α = 0, which we compare with the corresponding neutral output at α = 1.
+This tests whether several requested edits remain effective when composed in the same image.
+4. Protocol D: two-dimensional control. We consider two-subject scenes and sweep both controls over the full
+grid αA, αB ∈{−1, −2
+3, −1
+3, 0, 1
+3, 2
+3, 1}. The resulting 7 × 7 grid forms a response surface: each row varies
+one subject while holding the other fixed, and each column does the converse. This separates the response
+8
+
+
+to a subject’s own control from changes caused by the other control, exposing cross-talk that the joint
+endpoint in Protocol C cannot reveal.
+Protocols B and D require per-subject controls and are therefore run only on the slider-capable methods.
+Metrics.
+For Protocols A and B we adopt the extrapolation and disentanglement metrics of SliderEdit (Zarei
+et al., 2025). Extrapolation is the maximum target similarity attained over the control trajectory, measured
+with CLIP (Radford et al., 2021) and SigLIP (Zhai et al., 2023), and disentanglement is the LPIPS (Zhang
+et al., 2018), DINOv2 (Oquab et al., 2024) and ArcFace (Deng et al., 2019) distance between each edited out-
+put and the source image. We do not adopt their continuity score, which by construction cannot distinguish
+a wide, well-ordered sweep from a narrow or noisy one; appendix B gives the argument. In its place we report
+two diagnostics of the trajectory itself. Direction correlation is the Spearman rank correlation between α and
+the target similarity. Mean range is the average gap between the highest and lowest similarity a trajectory
+reaches, which reports how far the control actually moves the target. Target similarity for these diagnostics
+is measured between the edit text and a crop of the edited image formed from the subject bounding box,
+independently with CLIP and SigLIP.
+Protocol C scores each region by the CLIP similarity between a crop of the subject and its edit description, and
+measures how much that similarity improves from the neutral output to the nominal edit. Regional success
+rate is the fraction of regions that show an edit, and worst-region ∆CLIP is the smallest improvement among
+the subjects. Protocol D moves one control by a single step and records the size of each region’s change
+per unit of control. Moving a subject’s own control should change that subject, and the average of those
+changes is the intended response. Moving the other subject’s control should change nothing, so semantic
+cross-talk reports that unintended change as a fraction of the intended one, averaged over the two subjects,
+and perceptual cross-talk repeats this with regional LPIPS in place of the CLIP score. Appendix D gives the
+formal definitions of every metric above.
+Implementation details.
+All five methods use FLUX.1-Kontext-dev (Black Forest Labs, 2025) as the frozen
+base editor and generate at 1024 × 1024 resolution with 28 denoising steps, guidance scale 3.5, and seed 0.
+Only prompt syntax and spatial inputs vary, following each method’s interface. The two trained methods
+add a rank-16 LoRA to the frozen transformer and train it for 10,000 steps on 8×H200 GPUs over 22,482
+examples derived from HQ-Edit (Hui et al., 2024), each pairing a source image with one subject mask and
+one instruction; appendix F gives the full configuration.
+Edit strength and preservation.
+Across Protocols A and B, LOCI attains both the highest extrapolation and
+the lowest disentanglement on every metric and both encoders (table 1). These two normally trade off, since
+a method can preserve the source simply by editing less; here the strongest preservation coincides with the
+strongest target alignment, so it does not come from weaker editing.
+Continuous control.
+LOCI also gives the most reliably ordered response and the widest semantic range,
+under both protocols and both encoders.
+Joint editing.
+Under Protocol C, routing is what allows several requested edits to land at once (table 2).
+IDAttn alone gives the best coverage but exposes no continuous control, and LOCI comes close to matching
+it while retaining an independent slider per subject, so continuous control costs little coverage.
+Two-dimensional control.
+Protocol D separates the components most clearly and shows that neither substi-
+tutes for the other. The regional adapter without routing produces a strong intended response but the worst
+cross-talk in the table, worse even than unmodified SliderEdit: the control moves its target, but its effect is
+not confined there, which is what a spatially entangled edit direction predicts. Post-hoc composition fails
+in the opposite way, containing the edit well while responding weakly. Only training the adapter under the
+routing it will be used with achieves both, giving the strongest intended response together with the lowest
+cross-talk on both measures, though its perceptual margin over post-hoc composition remains small. Routing
+supplies the spatial isolation; routing-aware training supplies the control.
+9
+
+
+4.3
+Qualitative Results
+Figure 3 shows four multi-subject scenes. Each block places the source image on the left, with the red and
+blue boxes marking the spatial annotations supplied to the model and the corresponding instructions printed
+beneath it. The three rows isolate the controls: the first sweeps subject 1 while subject 2 is held at the
+neutral anchor α = 1, the second sweeps subject 2 while subject 1 is held neutral, and the third moves both.
+Within a row the edit strengthens from left to right. The final block is the exception, applying one instruction
+to both annotated regions rather than a separate instruction to each. We encourage referring to figure 4 and
+figure 5 in the appendix for examples where more than two objects are edited.
+5
+Conclusion
+We presented LOCI, a framework for region-aware continuous image editing that edits multiple subjects in
+one image at independently chosen strengths within a single forward pass. By replacing the adapter’s scalar
+coefficient with a per-token vector aligned to the token partition, and training that adapter under the same
+instance-disentangled routing used at inference, we obtain region-local edit directions whose rescaling gives
+each subject its own continuous control.
+10
+
+
+References
+Shuai Bai et al. Qwen2.5-vl technical report. arXiv preprint arXiv:2502.13923, 2025.
+Black Forest Labs. FLUX. https://github.com/black-forest-labs/flux, 2024.
+Black Forest Labs. FLUX.1 Kontext: Flow matching for in-context image generation and editing in latent space.
+arXiv preprint arXiv:2506.15742, 2025.
+Tim Brooks, Aleksander Holynski, and Alexei A Efros. Instructpix2pix: Learning to follow image editing instructions.
+CVPR, 2023.
+Honghao Cai, Xiangyuan Wang, Yunhao Bai, et al. Edit where you mean: Region-aware adapter injection for mask-free
+local image editing. arXiv preprint arXiv:2604.23763, 2026.
+Mingdeng Cao, Xintao Wang, Zhongang Qi, Ying Shan, Xiaohu Qie, and Yinqiang Zheng. Masactrl: Tuning-free
+mutual self-attention control for consistent image synthesis and editing. ICCV, 2023.
+Goirik Chakrabarty, Aditya Chandrasekar, Ramya Hebbalaguppe, and Prathosh AP. Lomoe: Localized multi-object
+editing via multi-diffusion. arXiv preprint arXiv:2403.00437, 2024.
+Omer Dahary, Or Patashnik, Kfir Aberman, and Daniel Cohen-Or. Be yourself: Bounded attention for multi-subject
+text-to-image generation. In ECCV, 2024.
+Yusuf Dalva, Hidir Yesiltepe, and Pinar Yanardag.
+Lorashop: Training-free multi-concept image generation and
+editing with rectified flow transformers. arXiv preprint arXiv:2505.23758, 2025.
+Jiankang Deng, Jia Guo, Niannan Xue, and Stefanos Zafeiriou. Arcface: Additive angular margin loss for deep face
+recognition. CVPR, 2019.
+Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. NeurIPS, 2021.
+Taichi Endo, Guoqing Hao, and Kazuhiko Sumi. Flowslider: Training-free continuous image editing via fidelity-steering
+decomposition. arXiv preprint arXiv:2604.02088, 2026.
+Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik
+Lorenz, Axel Sauer, Frederic Boesel, Dustin Podell, Tim Dockhorn, Zion English, and Robin Rombach. Scaling
+rectified flow transformers for high-resolution image synthesis. In ICML, 2024.
+Niki Foteinopoulou, Ignas Budvytis, and Stephan Liwicki. Training-free multi-concept image editing. arXiv preprint
+arXiv:2602.20839, 2026.
+Rohit Gandikota, Joanna Materzyńska, Jaden Fiotto-Kaufman, and David Bau. Concept sliders: Lora adaptors for
+precise control in diffusion models. arXiv preprint arXiv:2311.12092, 2023.
+Peyman Gholami and Robert Xiao.
+Streamlining image editing with layered diffusion brushes.
+arXiv preprint
+arXiv:2405.00313, 2024.
+Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil Ozair, Aaron Courville,
+and Yoshua Bengio. Generative adversarial nets. NeurIPS, 2014.
+Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Prompt-to-prompt
+image editing with cross attention control. ICLR, 2023.
+Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen.
+Lora: Low-rank adaptation of large language models. ICLR, 2022.
+Mude Hui, Siwei Yang, Bingchen Zhao, Yichun Shi, Heng Wang, Peng Wang, Yuyin Zhou, and Cihang Xie. Hq-edit:
+A high-quality dataset for instruction-based image editing. arXiv preprint arXiv:2404.09990, 2024.
+Minsuk Kang et al. Numerikontrol: Adding numeric control to diffusion transformers for instruction-based image
+editing. arXiv preprint arXiv:2511.23105, 2025.
+Eran Levin and Ohad Fried. Differential diffusion: Giving each pixel its strength. arXiv preprint arXiv:2306.00950,
+2023.
+Yuheng Li, Haotian Liu, Qingyang Wu, Fangzhou Mu, Jianwei Yang, Jianfeng Gao, Chunyuan Li, and Yong Jae Lee.
+Gligen: Open-set grounded text-to-image generation. CVPR, 2023.
+11
+
+
+Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative
+modeling. In ICLR, 2023.
+Shilong Liu, Zhaoyang Zeng, Tianhe Ren, Feng Li, Hao Zhang, Jie Yang, Chunyuan Li, Jianwei Yang, Hang Su, Jun
+Zhu, and Lei Zhang. Grounding dino: Marrying dino with grounded pre-training for open-set object detection.
+ECCV, 2024.
+Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate and transfer data with
+rectified flow. In ICLR, 2023.
+Andreas Lugmayr, Martin Danelljan, Andres Romero, Fisher Yu, Radu Timofte, and Luc Van Gool. Repaint: In-
+painting using denoising diffusion probabilistic models. CVPR, 2022.
+Sunung Mun, Jinhwan Nam, Sunghyun Cho, and Jungseul Ok. Addressing text embedding leakage in diffusion-based
+image editing. In ICCV, 2025.
+Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fernandez,
+Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, et al.
+Dinov2: Learning robust visual features without
+supervision. TMLR, 2024.
+Rishubh Parihar, Or Patashnik, Daniil Ostashev, R. Venkatesh Babu, Daniel Cohen-Or, and Kuan-Chieh Wang.
+Kontinuous kontext: Continuous strength control for instruction-based image editing. CVPR, 2026.
+Dustin Podell, Zion English, Kyle Lacey, et al. Sdxl: Improving latent diffusion models for high-resolution image
+synthesis. arXiv preprint arXiv:2307.01952, 2023.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, et al.
+Learning
+transferable visual models from natural language supervision. ICML, 2021.
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine Lee, Sharan Narang, Michael Matena, Yanqi Zhou, Wei Li,
+and Peter J. Liu. Exploring the limits of transfer learning with a unified text-to-text transformer. JMLR, 2020.
+Aditya Ramesh, Prafulla Dhariwal, Alex Nichol, Casey Chu, and Mark Chen. Hierarchical text-conditional image
+generation with clip latents. arXiv preprint arXiv:2204.06125, 2022.
+Nikhila Ravi, Valentin Gabeur, Yuan-Ting Hu, Ronghang Hu, Chaitanya Ryali, Tengyu Ma, Haitham Khedr, Filip
+Radenovic, Chloe Rolber, Laura Gustafson, et al. Sam 2: Segment anything in images and videos. arXiv preprint
+arXiv:2408.00714, 2024.
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer.
+High-resolution image
+synthesis with latent diffusion models. CVPR, 2022.
+Chitwan Saharia, William Chan, Huiwen Chang, Chris A. Lee, Jonathan Ho, Tim Salimans, David J. Fleet, and
+Mohammad Norouzi. Palette: Image-to-image diffusion models. In SIGGRAPH, 2022a.
+Chitwan Saharia, William Chan, Saurabh Saxena, et al.
+Photorealistic text-to-image diffusion models with deep
+language understanding. NeurIPS, 2022b.
+Shelly Sheynin, Adam Polyak, Uriel Singer, Yuval Kirstain, Amit Zohar, Oron Ashual, Devi Parikh, and Yaniv
+Taigman. Emu edit: Precise image editing via recognition and generation tasks. CVPR, 2024.
+Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsupervised learning using
+nonequilibrium thermodynamics. ICML, 2015.
+Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based
+generative modeling through stochastic differential equations. ICLR, 2021.
+Peilin Xiong, Honghui Yuan, Junwen Chen, and Keiji Yanai. Bridge: Background routing and isolated discrete gating
+for coarse-mask local editing. arXiv preprint arXiv:2605.07846, 2026.
+Weixin Ye, Hongguang Zhu, Wei Wang, Yahui Liu, Mengyu Wang, and Xuecheng Nie. All-in-one slider for attribute
+manipulation in diffusion models. arXiv preprint arXiv:2508.19195, 2025.
+Carmine Zaccagnino, Fabio Quattrini, Enis Simsar, Marta Tintoré Gazulla, Rita Cucchiara, Alessio Tonioni, and Silvia
+Cascianelli. Shifting the breaking point of flow matching for multi-instance editing. arXiv preprint arXiv:2602.08749,
+2026.
+Arman Zarei, Samyadeep Basu, Mobina Pournemat, Sayan Nag, Ryan Rossi, and Soheil Feizi. Slideredit: Continuous
+image editing with fine-grained instruction control. arXiv preprint arXiv:2511.09715, 2025.
+12
+
+
+Xiaohua Zhai, Basil Mustafa, Alexander Kolesnikov, and Lucas Beyer. Sigmoid loss for language image pre-training.
+ICCV, 2023.
+Kai Zhang, Lingbo Mo, Wenhu Chen, Huan Sun, and Yu Su.
+Magicbrush: A manually annotated dataset for
+instruction-guided image editing. NeurIPS, 2024.
+Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreasonable effectiveness of
+deep features as a perceptual metric. CVPR, 2018.
+Yuxin Zhang, Nisha Huang, Fan Tang, et al. Inversion-based style transfer with diffusion models. CVPR, 2023.
+13
+
+
+Appendix
+A
+Extended Related Work
+This section expands the comparison summarized in section 2.
+Instruction-following image editing.
+InstructPix2Pix (Brooks et al., 2023) established the paradigm by train-
+ing on synthetically generated edit triplets, MagicBrush (Zhang et al., 2024) improved data quality with
+manually annotated pairs, and Emu Edit (Sheynin et al., 2024) decomposed editing into recognition and
+generation sub-tasks. Flux.1-Kontext (Black Forest Labs, 2025) concatenates source and noise latents
+inside an MMDiT backbone.
+Spatial control.
+Prompt-to-Prompt (Hertz et al., 2023) edits by swapping cross-attention maps between
+prompts, and MasaCtrl (Cao et al., 2023) obtains consistent synthesis by sharing mutual self-attention keys
+and values. GLIGEN (Li et al., 2023) injects bounding box or keypoint conditions through gated self-attention,
+but targets generation rather than editing.
+Continuous edit-strength control.
+NumeriKontrol (Kang et al., 2025) conditions on explicit numeric descrip-
+tors written into the prompt, which gives numeric control over an attribute but no spatial addressing.
+Multi-subject and localized editing.
+Differential Diffusion (Levin and Fried, 2023) assigns each pixel or region
+its own strength through a change map. Because the map scales the per-pixel noising schedule under a single
+global prompt, it modulates how much a region changes rather than applying distinct edits to different
+subjects, and it provides no attention-level isolation. Layered Diffusion Brushes (Gholami and Xiao, 2024)
+exposes a per-layer strength that scales the Gaussian noise injected into a user-drawn region. That control
+is a regeneration amount coupled to the injection timestep, rather than a disentangled slider interpolating
+a single edit from source to full application. Both rely on manually specified regions and allow regions to
+interact without isolation.
+Cross-subject interference.
+Interference between subjects is well documented. Bounded Attention (Dahary
+et al., 2024) attributes it to semantic leakage between subjects in the attention layers, and text-embedding
+leakage has been shown to spill edits onto unintended regions (Mun et al., 2025). These studies motivate a
+dedicated isolation mechanism rather than reliance on language alone.
+B
+Why We Do Not Report Semantic Continuity
+SliderEdit (Zarei et al., 2025) summarizes the continuousness of a control trajectory with a continuity score.
+Given the similarity sequence s1, . . . , sδ recorded over the α sweep, the interval [mini si, maxi si] is divided
+into δ bins, the number of scores falling in each bin is counted, and the reported value is (χ2/dof)−1 against
+the uniform expectation of one score per bin. Higher values indicate a more evenly traversed range.
+Two normalizations in that construction discard the information a slider is meant to provide. Binning counts
+is invariant to order, so a trajectory that oscillates scores exactly as well as one that rises monotonically.
+Binning between the observed minimum and maximum is invariant to scale, so a trajectory whose similarity
+moves by 0.005 is stretched to fill the same bins as one that moves by 0.30. A control that barely responds
+therefore scores highly: measurement noise is close to uniformly distributed by construction, which is exactly
+what the statistic rewards.
+We therefore report the trajectory diagnostics of table 1 instead: Spearman correlation restores sensitivity
+to order, and mean range restores sensitivity to scale.
+14
+
+
+C
+Aggregation
+Multiple subject–edit pairs derive from the same source image and are therefore correlated. Unless stated
+otherwise, we first average subject-level measurements within each source image and then average equally over
+source images, rather than treating the 427 subject-level pairs as independent observations. The trajectory
+diagnostics of table 1 instead take one source–region–instruction trajectory as their unit and average over all
+427 trajectories.
+D
+Formal Metric Definitions
+Let u = 1 −α denote edit strength, so that u = 0 is the exact neutral output and u = 1 is the nominal edit.
+Let I(u) be the image generated with all regional controls set to u, let pn be the target-state description
+corresponding to instruction en, and let crop(I, Mn) be the masked crop of region n. The regional score is
+qn(u) = simCLIP
+ crop(I(u), Mn), pn
+
+.
+(10)
+Protocol C.
+At the nominal edit we compute
+∆n = qn(1) −qn(0),
+Succ = 1
+N
+N
+X
+n=1
+1[∆n > 0],
+Worst = min
+n ∆n.
+(11)
+Regional success rate counts how often a requested edit improves its own target score, while worst-region
+gain exposes a scene in which composition sacrifices even one subject.
+Protocol D.
+Each cell of the 7 × 7 grid is an image I(u1, u2), and the two regional score surfaces q1(u1, u2)
+and q2(u1, u2) follow equation (10). Comparing cells that differ by one step in a single control gives 6×7 = 42
+adjacent pairs per control direction. For region i and control j,
+Si←j = mean
+∆jqi
+
+∆u ,
+(12)
+where ∆jqi is the change in qi across one step of control j and the mean runs over those 42 pairs. We report
+Respint = 1
+2
+ S1←1 + S2←2
+
+,
+Crosssem = 1
+2
+
+S1←2
+S1←1 + S2←1
+S2←2
+
+.
+(13)
+Perceptual cross-talk replaces the change in CLIP score with the LPIPS distance between regional crops of
+adjacent generated images, so Pi←j substitutes for Si←j in equation (13). Unlike the source-referenced disen-
+tanglement measure of SliderEdit (Zarei et al., 2025), both cross-talk terms compare neighbouring generated
+outputs rather than each output against the source. Because equation (12) takes absolute differences and
+therefore carries no sign, we separately verify that the mean signed response is positive.
+E
+Benchmark Construction
+The 128 evaluation scenes are curated rather than sampled from an existing corpus.
+For each scene we
+authored a specification giving a source-image generation prompt, the intended number and type of subjects,
+and one edit instruction per subject. Source candidates were generated at 1024×1024 with Flux.2, using 28
+denoising steps, guidance scale 3.5, and typically four fixed seeds per scene. We inspected the candidates and
+kept images showing the intended subject count; scenes that failed this check were regenerated from revised
+prompts. Note that the generator differs from the frozen editor used at inference, Flux.1-Kontext, so no
+method is evaluated on images produced by the model it edits with.
+15
+
+
+Grounding-DINO (Liu et al., 2024) then detected the requested subjects in each retained image. Detections
+were de-duplicated and ordered left to right, which fixes the subject indices used throughout the protocols,
+and each box was passed to SAM2 (Ravi et al., 2024) for a subject silhouette. Every scene stores the source
+image, the per-subject boxes and masks, the detection confidence and mask area, and the ordered per-subject
+instructions.
+Instructions follow the prompt construction of SliderEdit (Zarei et al., 2025), extended by LLM-assisted
+generation and manual curation so that each subject receives a single atomic edit that can be verified visually.
+F
+Implementation Details
+Training data.
+Training examples are derived from HQ-Edit (Hui et al., 2024).
+We decode all 98,675
+source images together with their original edit instructions. Each instruction is passed to a vision–language
+model (Bai et al., 2025), which assigns it one of four types, modify, add, remove or global, and names the
+primary target noun; the instruction text itself is left unchanged. That noun prompts Grounding-DINO (Liu
+et al., 2024), and the resulting box is passed to SAM2 (Ravi et al., 2024) to obtain a mask. We discard
+examples for which no usable mask is produced, and those whose instruction requests a change of pose,
+movement, size, rotation or camera viewpoint, as these do not correspond to a confined image region. The
+resulting manifest holds 23,591 examples; removing instances whose mask covers less than 3% of the image
+leaves 22,482 training examples spanning 21,962 distinct instructions. Rows are shuffled during training, but
+instructions are used as written and are never resampled, recombined or synthesised.
+The VAE, the T5 and CLIP text encoders, and the scheduler are frozen wherever applicable, and we train
+only a regional adapter: a rank-16 LoRA without dropout wrapping the linear layers of the transformer,
+stored in fp32 while the frozen backbone computes in bf16.
+The per-region write gate projects each subject’s mask onto the transformer’s token grid. The VAE down-
+samples by 8× and Flux.1-Kontext packs 2 × 2 latent neighbourhoods into one token, so each token cell
+spans 16×16 pixels and a 1024×1024 input yields a 64×64 grid. The gate takes the max over each cell rather
+than a coverage threshold, which keeps thin structures alive at the cost of dilating each gate by at most one
+token. The resulting per-token scale is applied stream-aware: text entries are sliced into the dual-stream text
+modules, image entries into the dual-stream image modules, and the full vector into single-stream blocks.
+The text sequence uses a 512-token T5 encoding truncated to the first 200 positions per instruction block.
+Combined with 4096 noise and 4096 source-image tokens, the joint sequence is 8,392 tokens for a single-region
+training example.
+Both adapters are trained for 10,000 steps on 8×H200 GPUs under data parallelism with one example per
+rank (effective batch size 8), using AdamW (lr = 7 × 10−5, weight decay 10−5), a cosine schedule with 500
+warmup steps, gradient clipping at 1.0, gradient checkpointing, logit-normal timestep sampling (µ = 0, σ = 1),
+guidance embedding 3.5, and no SNR reweighting.
+G
+Four-Subject Control
+The vases of figure 5 are the case positional language handles worst: the four targets are visually similar and
+differ mainly by position, which is where an explicit spatial annotation matters most.
+16
+
+
+Input
+turn the chair into an ornate gold
+throne
+make the chair look old and weathered
+with torn fabric
+turn the chair into an acrylic chair
+make the chair a wooden chair
+edit strength increases (α decreasing) −→
+Chair 1
+Chair 2
+Chair 3
+Chair 4
+All
+Figure 4 Four independent controls in one scene. The input carries four spatial annotations, drawn in red, blue, green
+and orange, each with its own instruction. Each of the first four rows moves one chair’s control while the other three
+are held at the neutral anchor α = 1; the last row moves all four together. Every column shows an edited output; the
+unedited scene is the input on the left.
+17
+
+
+Input
+turn the vase into an ornate golden vase
+with jewels
+make the vase look ancient with cracks
+and patina
+turn the vase into a crystal glass vase
+make the vase appear to be carved from
+rough weathered stone
+edit strength increases (α decreasing) −→
+Vase 1
+Vase 2
+Vase 3
+Vase 4
+All
+Figure 5 Four independent controls on a second scene. Each of the first four rows moves one vase’s control while the
+other three are held at the neutral anchor α = 1, and the last row moves all four together. The first column is the
+unedited output at α = 1.
+18

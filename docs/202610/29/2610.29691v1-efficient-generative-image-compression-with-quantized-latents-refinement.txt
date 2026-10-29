@@ -1,0 +1,2839 @@
+Efficient Generative Image Compression with Quantized Latents Refinement
+Hao Cao1
+Yinhuan Huang1
+Wenqi Guo2
+Zhijin Qin1,3* Jungong Han2,4
+1Department of Electronic Engineering, Tsinghua University
+2Department of Automation, Tsinghua University
+3State Key Laboratory of Space Network and Communications
+4Beijing National Research Center for Information Science and Technology
+Abstract
+Generative image compression (GIC) delivers strong per-
+ceptual quality at low bitrates. However, GIC methods with
+strong perceptual quality often rely on pretrained diffusion
+models with high latency, while recent lightweight GIC meth-
+ods reduce latency but deliver lower perceptual quality. We
+observe that, for lightweight GIC methods at low bitrates,
+coarse deterministic quantization can collapse nearby en-
+coder latents corresponding to different fine details to the
+same point, making these details difficult to recover. Moti-
+vated by this, we propose GR-GIC, an efficient GIC that
+delivers competitive reconstruction performance with fast
+inference. For better performance, we introduce Guided
+Refinement (GR), which combines latent refinement guided
+by entropy context with adaptive perturbations for training
+regularization, jointly improving reconstruction at low bi-
+trates. For fast inference, we introduce reorganized projected
+residual vector quantization (P-RVQ), which equivalently
+reorganizes residual updates into low-dimensional lookups
+to expose greater parallelism and reduce sequential compu-
+tation. Experiments on Kodak show that for performance,
+compared with OneDC, GR-GIC achieves BD-rate savings
+of 23.19%, 37.71%, 22.30%, and 22.14% for LPIPS, DISTS,
+PSNR, and FID, respectively. For fast inference, the highly
+optimized implementation of GR-GIC encodes and decodes
+in 4.60 and 5.98 ms on an NVIDIA A100. Specifically, the re-
+organized P-RVQ implementation achieves a 3.14× average
+speedup over the original implementation under the same
+FP32 setting. On an NVIDIA Jetson Orin NX, GR-GIC
+achieves latency comparable to lightweight GIC methods.
+1. Introduction
+Generative image compression (GIC) provides strong per-
+ceptual reconstruction at low bitrates. This is challenging
+for traditional codecs and learned image codecs optimized
+*Corresponding author.
+primarily for pixel fidelity, which tend to smooth textures
+and weaken fine details as the bitrate decreases [3, 24, 28,
+40]. GIC addresses this limitation with adversarial genera-
+tors [31, 33], discrete generative representations [34, 42], or
+diffusion priors [8, 41, 46], whose learned priors can syn-
+thesize plausible details that are not fully specified by the
+compressed representation.
+However, high-performing GIC methods often rely on
+pretrained diffusion models, whose large parameter counts
+and FLOPs hinder practical deployment [18, 36, 41, 46]. To
+address this issue, recent work has explored lightweight GIC
+methods with fewer parameters and faster inference [6, 7,
+22], but their reconstruction performance still leaves room
+for improvement compared with diffusion-based methods.
+This leaves a trade-off between reconstruction performance
+and fast inference.
+We observe that, in lightweight GIC methods, images
+with similar coarse content but different fine details can be
+mapped to nearby points in the continuous latent space. At
+low bitrates, coarse deterministic quantization can collapse
+these distinct latents to the same quantized point, making
+their fine detail differences unavailable from the quantized
+representation, as illustrated in Figures 1a and 1b. By con-
+trast, diffusion based methods introduce diversity through
+Gaussian noise and use strong generative priors to synthesize
+plausible details, providing a natural mechanism to compen-
+sate for this uncertainty.
+Motivated by this observation, we propose GR-GIC, an
+efficient GIC that combines competitive reconstruction per-
+formance with fast inference, as shown in Figure 1d. For
+better performance, we introduce Guided Refinement (GR),
+which uses entropy context to parameterize a Gaussian re-
+finement distribution around the recovered latent. Its mean
+shifts the recovered latent toward a refined center, while its
+variance controls adaptive perturbations for training regular-
+ization, jointly improving reconstruction at low bitrates. For
+fast inference, we target projected residual vector quantiza-
+tion (P-RVQ), which is a major encoder latency bottleneck in
+EF-LIC [6]. We derive an algebraically equivalent reorgani-
+1
+arXiv:2610.29691v1  [cs.CV]  21 Oct 2026
+
+
+-50%
+-50%
+-50%
+-50%
+75%
+75%
+75%
+75%
+400
+400
+3000
+8000
+4.0
+4.0
+30
+200
+2559
+36%
+36%
+36%
+36%
+96
+96
+223
+Blur
+Clear
+Context-guided
+(a) Latents with shared
+coarse content
+(b) Deterministic VQ 
+point recovery
+(c) Guided refinement of
+quantized latents
+(d) Reconstruction Performance and
+Inference Latency
+Figure 1. Motivation and overview of GR-GIC. (a) Images with similar coarse content but different fine details are mapped to nearby points
+in the continuous latent space. (b) At low bitrates, coarse deterministic quantization can collapse these distinct latents to the same quantized
+point, leaving their fine detail differences unspecified. (c) GR uses entropy context to define a Gaussian refinement distribution around the
+recovered latent and introduces adaptive perturbations during training. (d) GR-GIC combines competitive reconstruction performance with
+fast inference.
+zation that replaces serial high dimensional residual updates
+with low dimensional lookups, exposing greater parallelism
+and reducing sequential computation.
+Experiments on Kodak show that (i) for performance,
+compared with OneDC [41], GR-GIC achieves BD-rate [5]
+savings of 23.19%, 37.71%, 22.30%, and 22.14% for
+LPIPS [45], DISTS [11], PSNR, and FID [19], respectively.
+(ii) For fast inference, the highly optimized implementa-
+tion of GR-GIC encodes and decodes in 4.60 and 5.98
+ms on an NVIDIA A100, achieving 16.73× and 34.19×
+speedups over the official OneDC implementation, respec-
+tively. Specifically, the reorganized P-RVQ implementation
+achieves a 3.14× average speedup over the original imple-
+mentation under the same FP32 setting. We further validate
+GR-GIC on an NVIDIA Jetson Orin NX, where it achieves
+latency comparable to existing lightweight GIC methods,
+supporting its deployment on edge devices.
+Our contributions are summarized as follows:
+• We introduce GR-GIC, an efficient GIC that combines
+GR and reorganized P-RVQ for competitive reconstruction
+performance and fast inference.
+• GR uses entropy context to parameterize an adaptive refine-
+ment distribution around quantized latents. Reorganized
+P-RVQ replaces serial high dimensional residual updates
+with low dimensional lookups, reducing sequential com-
+putation and inference latency.
+• For performance, experiments demonstrate competitive
+results across multiple reconstruction metrics. For fast
+inference, the highly optimized implementation achieves
+low latency on both GPU and edge platforms.
+2. Related Work
+Diffusion-based generative image compression.
+Diffu-
+sion models provide strong generative priors for reconstruct-
+ing details that are not fully specified by compressed rep-
+resentations [8, 43]. Recent GIC methods increasingly use
+pretrained diffusion models and improve their efficiency
+through fewer diffusion steps, one-step reconstruction, or
+lighter architectures [18, 22, 29, 41, 46]. Despite these ad-
+vances, their model size and computation remain substantial
+for efficient deployment.
+VAE-based generative image compression.
+VAE-based
+GIC provides a more efficient alternative through adver-
+sarial priors, improved latent representations, and vector
+quantization [20, 23, 26, 31, 33, 42]. Recent work further
+develops lightweight GIC. ProGIC combines a depthwise
+convolutional backbone with RVQ [7], while EF-LIC models
+correlations among latents in the representation domain [6].
+GR-GIC builds on EF-LIC, introducing GR for better recon-
+struction and reorganizing P-RVQ to move high dimensional
+reconstruction outside the sequential search path.
+Latent refinement after quantization.
+Prior LIC methods
+have compensated quantization loss through latent residual
+prediction, post-quantization filtering, and adaptive quan-
+tization or correction [15, 16, 32, 48]. Recent work also
+studies latent and noise compensation [44]. These methods
+mainly perform deterministic correction using decoder con-
+text, rely on guidance from the encoder for content-adaptive
+compensation, or model stochastic compensation without
+adapting it to context. In contrast, GR uses entropy context
+already available at the decoder to parameterize a refinement
+distribution that adapts to spatial location and image content,
+2
+
+
+without additional payload, while adaptive perturbations pro-
+vide training regularization for generative reconstruction.
+3. Method
+3.1. Overview
+As illustrated in Figures 1a and 1b, at low bitrates, coarse de-
+terministic quantization can collapse nearby encoder latents
+corresponding to different fine details to the same quantized
+point, making these details difficult to recover in lightweight
+GIC. GR-GIC builds on EF-LIC [6], whose context model
+provides the recovered latent and entropy context without ad-
+ditional payload. GR uses the entropy context to parameter-
+ize a Gaussian refinement distribution around the recovered
+latent, with adaptive perturbations providing latent noise
+regularization during training. GR-GIC retains the analysis
+transform, hyperprior, groupwise context, and P-RVQ struc-
+ture of EF-LIC, adds a GR head before synthesis as shown
+in Figure 2, and reorganizes P-RVQ execution in Figure 3.
+Given an image x ∈R3×H×W , the encoder ga produces
+the latent y. The hyper encoder ha maps y to the hyper
+latent z, which the hyper latent RVQ Qz quantizes to obtain
+ˆz. The hyper decoder hs reconstructs the context feature ϕ
+from ˆz:
+y = ga(x),
+z = ha(y),
+ˆz = Qz(z),
+ϕ = hs(ˆz).
+The latent y has a spatial downsampling factor of fy = 16
+and enters the groupwise affine projections. Following the
+quadtree context modeling of EF-LIC and DCVC-RT [6, 21],
+we partition y into N = 4 groups {yn}N
+n=1. For group n, the
+context model fn combines ϕ with the previously recovered
+groups to predict the mean µn and scale σn:
+(µn, σn) = fn(concat(ϕ, ˆy<n)) ,
+σn ≥σmin.
+Before quantization, the affine projection (AP) centers and
+scales yn using µn and σn. The inverse AP then recon-
+structs ˆyn after quantization:
+y′
+n = (yn −µn) ⊘σn,
+ˆy′
+n = Qn(y′
+n),
+ˆyn = σn ⊙ˆy′
+n + µn.
+(1)
+After all groups are recovered, their concatenation forms ˆy.
+The recovered latent ˆy and the aligned context parameters
+(µ, σ) are then fed to the GR head rθ to produce ˜y, which
+the decoder gs maps to the reconstruction ˆx = gs(˜y).
+The codec uses five RVQs, with Qz quantizing the hyper
+latent z and Qn quantizing each of the N = 4 main latent
+groups. At a given operating point, all five RVQs activate
+the same number M ∈{1, 2, 3, 4} of codebooks, and m ∈
+{1, . . . , M} indexes an active stage. With this shared RVQ
+depth and fixed width indices, the bit rate is RM = 0.0356M
+bits per pixel (BPP). Secs. B.3 and B.4 provide the exact rate
+calculation and boundary handling.
+3.2. Guided Refinement of Quantized Latents
+To improve low-bitrate reconstruction in lightweight GIC,
+we introduce Guided Refinement (GR) after RVQ recovery.
+GR uses entropy context to define a Gaussian refinement
+distribution around the recovered latent that adapts to spatial
+location and image content. During joint training, sampling
+from this distribution introduces adaptive perturbations that
+provide latent noise regularization.
+We first formalize the effect of deterministic quantization
+that motivates this refinement. To express the mapping with
+the notation of Equation (1), we suppress group and stage
+indices, write Q for the deterministic quantizer, and denote
+its jth reconstruction point by ˆy′
+j. Its quantization cell is
+Cj = {y′ : Q(y′) = ˆy′
+j}, and inverse projection gives
+ˆyj = σ ⊙ˆy′
+j + µ. The continuous latent distribution is
+transformed as
+p ˆ
+Y (ˆy | µ, σ)
+=
+Z
+pY ′(y′ | µ, σ)
+× p ˆ
+Y (ˆy | Y ′ = y′, µ, σ) dy′
+=
+X
+j
+ Z
+Cj
+pY ′(y′ | µ, σ) dy′
+!
+× δD(ˆy −ˆyj).
+(2)
+Here δD is the Dirac delta. Equation (2) shows that deter-
+ministic quantization assigns all latent realizations within
+one quantization cell to the same recovered point. The trans-
+mitted index therefore identifies the quantization cell, but
+does not preserve the continuous variation within that cell.
+At low bitrates, where the quantization cells are relatively
+coarse, this unresolved variation can correspond to different
+fine details that are difficult to determine from the recovered
+latent alone. This motivates learning a refinement distribu-
+tion around the recovered point using information already
+provided by the entropy context.
+We therefore use a Gaussian family conditioned on en-
+tropy context, as its simple mean-variance form separates
+the refinement center from adaptive perturbations without
+introducing additional latent correlations. Concatenating
+the groupwise reconstruction points in Equation (2) gives
+the recovered latent ˆy. Let ϵ ∼N(0, I) denote a standard
+Gaussian variable for one latent realization. We model the
+refined latent distribution as
+pθ(˜y | ˆy, µ, σ)
+=
+Z
+pϵ(ϵ) pθ
+ ˜y | ϵ, ˆy, µ, σ
+
+dϵ
+= N
+ ˜y | ˆy + δ, diag(β2)
+
+.
+(3)
+3
+
+
+Figure 2. Overview of GR-GIC. The encoder ga produces the latent y, while the hyper encoder ha and hyper decoder hs provide the
+context feature ϕ. The context model predicts (µ, σ) for the groupwise affine projections (APs) and P-RVQ. The GR head refines the
+recovered latent ˆy into ˜y before the decoder gs reconstructs ˆx.
+Here δ shifts the recovered latent to the refinement center
+ˆy + δ, while β controls the perturbation scale across spatial
+locations and image content. Both quantities are predicted
+from the recovered latent and entropy context parameters
+that are already available after decoding:
+(δ, ˜β) = rθ(concat(ˆy, µ, σ)) ,
+β = max( ˜β, 0).
+(4)
+The refined latent is then sampled as
+ϵ ∼N(0, I),
+˜y = ˆy + δ + β ⊙ϵ.
+(5)
+All codec components are jointly optimized with one inde-
+pendent Gaussian draw per crop. The learned refinement
+center adjusts the recovered latent according to the entropy
+context, while the adaptive perturbation provides latent noise
+regularization during training. Section 4.3 further supports
+the important role of β ⊙ϵ during training.
+3.3. Reorganized Projected Residual Vector Quan-
+tization
+EF-LIC [6] reported that P-RVQ takes 9.16 ms on Kodak,
+accounting for 52.0% of the measured 17.62 ms encoder
+latency and forming a major encoder latency bottleneck.
+For fast inference, we reorganize P-RVQ execution while
+preserving its greedy quantization process.
+Within this subsection, z ∈RD denotes an abstract input
+to a hyper or main latent P-RVQ. At stage m, Am ∈Rd×D
+projects the residual from high to low dimensions for search.
+The codebook Em = [Em[1], . . . , Em[K]] ∈Rd×K stores
+K low dimensional codewords as columns, and Bm ∈
+RD×d maps them back to the reconstruction space, with
+projection biases suppressed. Starting from ˆz0 = 0, the par-
+tial reconstruction is defined for m = 1, . . . , M and returns
+ˆz = ˆzM. As illustrated in Figure 3a, the original recursion
+carries a state in RD, projects the residual into Rd for search,
+and maps the selected codeword back to RD before the next
+stage, so both projection directions remain on the critical
+dependency path:
+ORIGINAL:
+ˆzm =
+ˆzm−1 + BmEm
+h
+arg min
+1≤j≤K ∥Am(z −ˆzm−1) −Em[j]∥2
+2
+i
+|
+{z
+}
+critical dependency path with high dimensional updates:
+RD→Rd→RD
+.
+(6)
+We derive an algebraically equivalent reorganization that
+stacks the source projections and expresses subsequent resid-
+ual updates as low dimensional lookups, as illustrated in
+Figure 3b. Since the projection matrices and codebooks are
+fixed after training, each product AmBℓEℓ∈Rd×K can be
+fused offline into a new d dimensional codebook. Here, iℓ
+denotes the codeword index selected at an earlier stage ℓ:
+REORGANIZED:
+ˆzm = ˆzm−1 + BmEm
+"
+arg min
+1≤j≤K
+Amz −
+X
+ℓ<m
+AmBℓEℓ[iℓ]
+|
+{z
+}
+critical dependency path using new
+d dimensional codebooks fused offline
+−Em[j]
+
+2
+2
+#
+.
+(7)
+The reorganized search evaluates all source projections to-
+gether and updates later search states through lookups in
+Rd. The high dimensional reconstruction is gathered from
+offline tables only after the codeword indices are selected.
+By linearity, the original and reorganized forms preserve the
+same search states, greedy assignments, and final reconstruc-
+tion in real arithmetic. The reorganization therefore moves
+high dimensional reconstruction outside the critical depen-
+dency path, exposing greater parallelism and shortening the
+sequential computation path.
+Under the same Torch FP32 backend and precision, the
+reorganized P-RVQ implementation achieves a 3.14× aver-
+age speedup over the original implementation across the 16
+evaluated stage count and resolution settings. This matched
+4
+
+
+high dimension vector
+low dimension vector
+critical dependency path
+(a) Original P-RVQ 
+(b) Reorganized P-RVQ
+Figure 3. Reorganized P-RVQ. (a) Original P-RVQ alternates high dimensional residual updates, projections, and greedy search. (b) The
+equivalent form stacks source projections and uses precomputed low dimensional lookups. Red arrows mark the critical dependency path.
+comparison isolates the gain from the algebraic reorgani-
+zation, which accounts for 23.54% of the total encoder la-
+tency reduction. The CUDA FP16 implementation further
+increases the average speedup to 7.15× relative to the origi-
+nal FP32 implementation. At the highest evaluated Kodak
+BPP, compression-only P-RVQ reaches an 18.80× speedup,
+and the complete P-RVQ acceleration accounts for 31.28%
+of the total encoder latency reduction.
+4. Experiments
+4.1. Experimental Setup
+Implementation Details.
+Our implementation largely fol-
+lows EF-LIC [6], with a GR head added before synthesis and
+P-RVQ execution reorganized as described above. Section B
+provides the complete architecture and codebook settings.
+For fast inference, the highly optimized implementation fur-
+ther uses fused CUDA operators following DCVC-UF [27].
+Training Details.
+Each operating point is trained on Ima-
+geNet [9] in two 1M-iteration stages. Stage one samples
+1% per epoch with 256 × 256 random crops at a learn-
+ing rate of 10−4. Stage two samples 10% of images ex-
+ceeding 512 pixels in both dimensions with 512×512 ran-
+dom crops at 10−5. Both stages apply random horizon-
+tal flipping and use AdamW [30] with weight decay 10−4,
+(β1, β2) = (0.9, 0.999), batch size 16, and one NVIDIA
+A100. Each training crop uses one standard Gaussian draw
+ϵ ∼N(0, I) to sample the refinement distribution condi-
+tioned on entropy context and estimate the expected image-
+space objective, which includes a generative adversarial net-
+work (GAN) term:
+L = Eϵ
+
+λrecL2 + λperLLPIPS + λadvLGAN
+
++ λcbLcb + λcomLcom.
+(8)
+Here L2 = ∥x −ˆx∥2
+2 is averaged over pixels and channels,
+LGAN is the generator-side PatchGAN term, and Lcb and
+Lcom are the codebook and commitment terms. We use
+λrec = 18, λper = 2, λcb = 1, and λcom = 1, with adaptive
+λadv following VQGAN [13]. All configurations in the study
+share the PatchGAN rule, training data, and losses. For the
+final codec, the adaptive perturbation provides latent noise
+regularization with all codec components jointly optimized.
+Evaluation Datasets and Metrics.
+We evaluate Kodak,
+Tecnick, DIV2K validation, and CLIC 2020 Professional [1,
+2, 12, 39].
+Metrics are LPIPS with a Visual Geometry
+Group (VGG) backbone, DISTS, PSNR, and patch-based
+FID [11, 19, 20, 37, 45]. LPIPS and DISTS capture percep-
+tual similarity, PSNR reports RGB pixel fidelity, and FID
+measures distribution-level alignment. All codecs use the
+same metric pipeline on decoded images for direct curves
+and pairwise BD-rate calculations. Appendix C gives dataset,
+metric, and pairwise PCHIP details [5].
+Compared Methods.
+The pretrained diffusion group com-
+prises ResULIC, StableCodec, RDEIC, OneDC, OSCAR,
+DiT-IC, AEIC, and CoD-Lite [18, 22, 25, 29, 36, 41, 46, 47].
+The VAE-based group comprises MS-ILLM, Control-GIC,
+GLC, DLF, ProGIC, RDVQ, EF-LIC, and GR-GIC [6, 7, 20,
+23, 26, 33, 42]. Runtime uses batch size one with 512×768
+images on one NVIDIA A100. Latency follows the imple-
+mentation and timing protocols in Sec. C.2, with parameters
+and forward FLOPs reported as additional model complexity
+measures. CoD-Lite uses our measurements of its official
+code, with its paper profile in Sec. C.3.
+4.2. Comparison with Previous Methods
+Figure 4 and Tab. 1 compare the reconstruction performance
+and inference latency of GR-GIC with previous GIC meth-
+ods. For performance, GR-GIC achieves bitrate savings
+over OneDC for LPIPS, DISTS, and FID across all four
+datasets. On Kodak, the OneDC-anchored BD-rate sav-
+ings are 23.19%, 37.71%, 22.30%, and 22.14% for LPIPS,
+5
+
+
+Figure 4. Rate and reconstruction quality across four datasets. Lower LPIPS, DISTS, and FID and higher PSNR indicate better quality. FID
+uses base-2 logarithmic vertical axes.
+DISTS, PSNR, and FID, respectively.
+For fast inference, the highly optimized implementation
+of GR-GIC encodes and decodes a 512 × 768 image in 4.60
+and 5.98 ms on an NVIDIA A100. The official OneDC im-
+plementation takes 76.98 and 204.47 ms under the evaluated
+system settings, making the corresponding latency ratios
+16.73× and 34.19×. Section C.2 details the numerical pre-
+cision, acceleration paths, and timing boundaries used for
+the compared systems.
+Among the evaluated VAE-based methods, GR-GIC im-
+proves the rate-quality curves of previous lightweight codecs
+across the reported reconstruction metrics while retaining
+low inference latency. Taken together, these results show
+that GR-GIC combines gains across multiple reconstruction
+metrics with fast inference.
+At similar rates, the qualitative comparisons in Figure 5
+further illustrate the reconstruction differences. In the first
+row, GR-GIC preserves the thin eyeglass frame and nose
+pad. In the second row, it reconstructs the small circular
+fixture with coherent local geometry. These examples are
+consistent with the quantitative gains and show clearer re-
+construction of local structures.
+6
+
+
+Table 1. Results on the Kodak dataset, with latency measured on one NVIDIA A100 GPU. Encoding and decoding latencies are in
+milliseconds (ms), FLOPs in billions (G), parameters in millions (M), and BD-rate in percent. OneDC is the BD-rate anchor, and lower
+values are better for every reported measure. Bold and underlined values indicate the best and second best results, respectively.
+Family
+Method
+Complexity
+BD-rate (%)
+Enc.
+Dec.
+FLOPs
+Params
+LPIPS DISTS
+PSNR
+FID
+Pretrained
+diffusion
+ResULIC
+96.24 428.32 8549.01 1390.00 206.40 260.74
+10.77 304.92
+StableCodec 100.18 200.03 6820.28 1065.81
+8.03
+6.77
+-17.10
+-4.45
+RDEIC
+157.25 426.68 7767.46 1380.27
+69.79 166.61
+-12.14
+80.26
+OneDC
+76.98 204.47 8557.18 1406.42
+0.00
+0.00
+0.00
+0.00
+OSCAR
+53.04 167.56 6485.61 1009.30 127.15 131.50 154.09 159.92
+DiT-IC
+97.62 151.89 5743.15 1069.41
+35.99
+-6.44
+33.24
+56.47
+AEIC
+12.39
+82.98 2143.06
+885.70
+41.65
+-16.71
+2.11
+7.16
+CoD-Lite
+9.33
+20.86
+771.69
+80.15
+44.53
+51.35
+18.72
+53.06
+VAE-based
+MS-ILLM
+165.38 147.79
+599.52
+181.40 293.59 364.46
+-47.46 468.10
+Control-GIC 103.56 436.26 5816.37
+130.36 602.72 807.48 175.78 855.14
+GLC
+34.75
+48.26 2466.28
+163.99
+21.53
+54.70
+56.04
+82.95
+DLF
+168.78 240.63 5880.53 1286.01
+20.87
+20.19
+42.73
+70.80
+ProGIC
+7.64
+10.99
+333.38
+33.11
+36.47
+80.41
+49.84 156.32
+RDVQ
+408.24 412.44 3090.29
+251.84
+17.06
+9.87
+62.13
+49.51
+EF-LIC
+17.62
+13.72
+279.61
+35.74
+-3.33
+10.05
+11.49
+49.01
+GR-GIC
+4.60
+5.98
+456.55
+79.39
+-23.19
+-37.71
+-22.30
+-22.14
+0.1339 / 0.0719
+0.1699 / 0.1069
+0.1566 / 0.0772
+0.1998 / 0.1251
+DiT-IC
+GR-GIC (Ours)
+0.2368 / 0.0778
+OSCAR
+0.2031 / 0.1172
+0.1351 / 0.0945
+0.1775 / 0.1069
+OneDC
+RDEIC
+0.1527 / 0.0980
+0.2586 / 0.1535
+Original Image
+LPIPS / BPP
+LPIPS / BPP
+CoD-lite
+GR-GIC (Ours)
+ProGIC
+EF-LIC
+MS-ILLM
+Original Image
+Figure 5. Qualitative comparisons of GR-GIC with high-capacity diffusion and lightweight codecs at similar rates. Boxes mark local details.
+Labels report LPIPS and BPP, where lower is better.
+4.3. Guided Refinement Configuration Study
+We compare five refinement configurations, each trained
+from scratch for 1M iterations at each rate under identical op-
+timization conditions. M0 bypasses refinement. M1 predicts
+an offset from the recovered latent, while M2 additionally
+uses entropy context. M3 introduces stochastic perturbation
+with a channel-wise scale, and M4 further adapts this scale
+to spatial location and image content. Both M2 and M3
+match M4 in parameter count and forward FLOPs, provid-
+ing matched baselines that control for gains from increased
+model size or computation.
+In Tab. 2, M0 removes GR, retains the direct synthesis
+path of the EF-LIC backbone, and shows performance close
+to EF-LIC. Because M0 and M1–M4 are trained under the
+same conditions, M0 also provides a direct reference for
+comparing GR with the EF-LIC backbone. M4 reduces FID
+7
+
+
+Table 2. Guided Refinement configurations on Kodak at four nominal rates. The GR columns indicate a learned offset, decoder context,
+stochastic scale, and adaptive scale.
+Model
+GR configuration
+BPP = 0.036 BPP = 0.071 BPP = 0.107 BPP = 0.143
+Offset Ctx. Stoch. Adapt. LPIPS
+FID LPIPS
+FID LPIPS
+FID LPIPS
+FID
+M0
+✗
+✗
+✗
+✗
+0.277
+66.2
+0.214
+51.2
+0.184
+43.6
+0.165
+38.1
+M1
+✓
+✗
+✗
+✗
+0.271
+63.6
+0.212
+46.8
+0.184
+39.2
+0.164
+35.4
+M2
+✓
+✓
+✗
+✗
+0.264
+62.4
+0.208
+41.2
+0.182
+36.5
+0.162
+31.9
+M3
+✓
+✓
+✓
+✗
+0.264
+59.5
+0.207
+37.9
+0.182
+33.8
+0.162
+29.5
+M4
+✓
+✓
+✓
+✓
+0.261
+54.6
+0.206
+36.0
+0.180
+32.3
+0.160
+27.6
+Table 3. Encoding (Enc.) and decoding (Dec.) latency (ms) on an NVIDIA Jetson Orin NX. Bold and underline mark the two best reported
+values in each column.
+Method
+512×768
+1080p
+2K
+4K
+Enc.
+Dec.
+Enc.
+Dec.
+Enc.
+Dec.
+Enc.
+Dec.
+EF-LIC
+71.253
+143.040
+347.490
+633.721
+623.651
+1137.985
+1441.824
+2628.537
+ProGIC
+83.204
+164.517 413.956
+781.443
+748.899
+1412.819
+1670.957
+3182.561
+AEIC
+96.784 1290.483
+–
+> 10 s
+–
+> 10 s
+OOM
+CoD-Lite
+114.456
+239.371 564.422
+1348.999
+974.139
+2489.412
+–
+> 10 s
+OneDC
+773.388 1981.831
+OOM
+OOM
+OOM
+GR-GIC
+90.342
+99.850 265.745
+428.361
+465.576
+754.362
+1061.516
+1739.863
+by 4.2 to 7.8 relative to M2 and by 1.5 to 4.9 relative to
+M3, while achieving lower LPIPS at every evaluated rate.
+Since M2 and M3 match M4 in parameter count and forward
+FLOPs, these results show that the complete GR configura-
+tion improves reconstruction performance on the lightweight
+EF-LIC backbone. We select M4 for GR.
+To further understand the role of the perturbation, we set
+only the sampled term β ⊙ϵ to zero during M4 inference
+and observe only a small performance change. Together
+with the gains over deterministic M2, this result supports
+an important role of adaptive perturbation as latent noise
+regularization during training. The gains over M3 further
+show the benefit of adapting the perturbation scale to spatial
+location and image content. Section C.4 specifies the config-
+uration training protocol, and Sec. D.7 reports the inference
+perturbation results.
+4.4. Edge-Device Deployment
+We evaluate GR-GIC on a 16 GB NVIDIA Jetson Orin NX.
+Among the compared methods, GR-GIC achieves the low-
+est decoding latency at all four resolutions and the lowest
+encoding latency from 1080p to 4K in Tab. 3. Measurements
+use MAXN SUPER mode, batch size one, and synchro-
+nized wall-clock timing. GR-GIC remains deployable at 4K,
+where OneDC and AEIC run out of memory and CoD-Lite
+decoding exceeds 10 seconds. These results demonstrate
+effective low-latency deployment on edge hardware.
+5. Limitations
+Our evaluation spans 0.0356 to 0.1426 BPP, with the lowest
+point below the 0.05 BPP ultra-low bitrate threshold [46, 47].
+Extending lightweight GIC to even lower bitrates requires
+greater decoder generative capacity as less fine detail is
+transmitted. Future work can strengthen lightweight priors
+and synthesis capacity while retaining fast inference. Our
+latency results characterize the complete deployed codec,
+including P-RVQ reorganization and CUDA acceleration.
+We do not claim the fastest backbone-only FP32 inference
+under identical backends. Comparisons retain official or
+released implementations and available acceleration paths,
+reflecting system-level performance.
+6. Conclusion
+We introduced GR-GIC, an efficient GIC combining GR
+and reorganized P-RVQ for competitive reconstruction per-
+formance and fast inference. GR refines quantized latents
+using entropy context, while adaptive perturbations provide
+latent noise regularization during training. Reorganized P-
+RVQ replaces serial high dimensional residual updates with
+low dimensional lookups to reduce sequential computation.
+Experiments across four datasets show consistent gains in
+LPIPS, DISTS, and FID over OneDC, together with fast
+inference on both an NVIDIA A100 and Jetson Orin NX.
+8
+
+
+References
+[1] Eirikur Agustsson and Radu Timofte. NTIRE 2017 Challenge
+on Single Image Super-Resolution: Dataset and Study. In
+Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition (CVPR) Workshops, pages 126–135,
+2017.
+[2] Nicola Asuni and Andrea Giachetti. TESTIMAGES: a Large-
+scale Archive for Testing Visual Devices and Basic Image
+Processing Algorithms. In Smart Tools and Apps for Graphics
+- Eurographics Italian Chapter Conference, pages 63–70. The
+Eurographics Association, 2014.
+[3] Johannes Ball´e, David Minnen, Saurabh Singh, Sung Jin
+Hwang, and Nick Johnston. Variational image compression
+with a scale hyperprior. In International Conference on Learn-
+ing Representations (ICLR), 2018.
+[4] Jean B´egaint, Fabien Racap´e, Simon Feltman, and Akshay
+Pushparaja. CompressAI: a PyTorch library and evaluation
+platform for end-to-end compression research. arXiv preprint
+arXiv:2011.03029, 2020.
+[5] Gisle Bjøntegaard. Calculation of average PSNR differences
+between RD-curves. Technical Report VCEG-M33, ITU-T
+Video Coding Experts Group (VCEG), Austin, Texas, USA,
+2001.
+[6] Hao Cao, Wenqi Guo, Zhijin Qin, and Jungong Han. Efficient
+Learned Image Compression without Entropy Coding. In
+Proceedings of the 43rd International Conference on Machine
+Learning, 2026.
+[7] Hao Cao, Chengbin Liang, Wenqi Guo, Zhijin Qin, and Jun-
+gong Han. ProGIC: Progressive and Lightweight Generative
+Image Compression with Residual Vector Quantization. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition (CVPR) Findings, pages 2915–
+2925, 2026.
+[8] Marl`ene Careil, Matthew J. Muckley, Jakob Verbeek, and
+St´ephane Lathuili`ere. Towards image compression with per-
+fect realism at ultra-low bitrates. In The Twelfth International
+Conference on Learning Representations, 2024.
+[9] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li
+Fei-Fei. ImageNet: A large-scale hierarchical image database.
+In 2009 IEEE Conference on Computer Vision and Pattern
+Recognition, pages 248–255. IEEE, 2009.
+[10] Nicki Skafte Detlefsen,
+Jiri Borovec,
+Justus Schock,
+Ananya Harsh Jha, Teddy Koker, Luca Di Liello, Daniel
+Stancl, Changsheng Quan, Maxim Grechkin, and William
+Falcon. TorchMetrics - Measuring Reproducibility in Py-
+Torch. Journal of Open Source Software, 7(70):4101, 2022.
+[11] Keyan Ding, Kede Ma, Shiqi Wang, and Eero P. Simoncelli.
+Image Quality Assessment: Unifying Structure and Texture
+Similarity. IEEE Transactions on Pattern Analysis and Ma-
+chine Intelligence, 44(5):2567–2581, 2022.
+[12] Eastman Kodak Company. Kodak Lossless True Color Im-
+age Suite (PhotoCD PCD0992).
+https://r0k.us/
+graphics/kodak/, 1993.
+[13] Patrick Esser, Robin Rombach, and Bj¨orn Ommer. Taming
+Transformers for High-Resolution Image Synthesis. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR), pages 12873–12883, 2021.
+[14] Frederick N. Fritsch and Judy Butland.
+A Method for
+Constructing Local Monotone Piecewise Cubic Interpolants.
+SIAM Journal on Scientific and Statistical Computing, 5(2):
+300–304, 1984.
+[15] Haisheng Fu, Feng Liang, Jie Liang, Binglin Li, Guohe
+Zhang, and Jingning Han. Asymmetric Learned Image Com-
+pression With Multi-Scale Residual Block, Importance Scal-
+ing, and Post-Quantization Filtering. IEEE Transactions on
+Circuits and Systems for Video Technology, 33(8):4309–4321,
+2023.
+[16] Ziqing Ge, Siwei Ma, Wen Gao, Jingshan Pan, and Chuanmin
+Jia. NLIC: Non-Uniform Quantization-Based Learned Image
+Compression. IEEE Transactions on Circuits and Systems for
+Video Technology, 34(10):9647–9663, 2024.
+[17] Robert M. Gray and David L. Neuhoff. Quantization. IEEE
+Transactions on Information Theory, 44(6):2325–2383, 1998.
+[18] Jinpei Guo, Yifei Ji, Zheng Chen, Kai Liu, Min Liu, Wang
+Rao, Wenbo Li, Yong Guo, and Yulun Zhang.
+OSCAR:
+One-Step Diffusion Codec Across Multiple Bit-rates.
+In
+Advances in Neural Information Processing Systems, pages
+85267–85286, 2025.
+[19] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bern-
+hard Nessler, and Sepp Hochreiter. GANs Trained by a Two
+Time-Scale Update Rule Converge to a Local Nash Equilib-
+rium. In Advances in Neural Information Processing Systems,
+pages 6626–6637. Curran Associates, Inc., 2017.
+[20] Zhaoyang Jia, Jiahao Li, Bin Li, Houqiang Li, and Yan Lu.
+Generative Latent Coding for Ultra-Low Bitrate Image Com-
+pression. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), pages
+26088–26098, 2024.
+[21] Zhaoyang Jia, Bin Li, Jiahao Li, Wenxuan Xie, Linfeng Qi,
+Houqiang Li, and Yan Lu. Towards Practical Real-Time Neu-
+ral Video Compression. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition (CVPR),
+pages 12543–12552, 2025.
+[22] Zhaoyang Jia, Naifu Xue, Zihan Zheng, Jiahao Li, Bin Li,
+Xiaoyi Zhang, Zongyu Guo, Yuan Zhang, Houqiang Li, and
+Yan Lu. CoD-Lite: Real-Time Diffusion-Based Generative
+Image Compression. In Proceedings of the 43rd International
+Conference on Machine Learning, 2026.
+[23] Shiyin Jiang, Wei Long, Minghao Han, Zhenghao Chen, Ce
+Zhu, and Shuhang Gu. Differentiable Vector Quantization
+for Rate-Distortion Optimization of Generative Image Com-
+pression. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), pages
+14440–14450, 2026.
+[24] Joint Video Experts Team (JVET). VVC Test Model (VTM),
+Version 23.10. https://vcgit.hhi.fraunhofer.
+de/jvet/VVCSoftware_VTM/- /tags/VTM- 23.
+10, 2025. Accessed: 2025-06-05.
+[25] Anle Ke, Xu Zhang, Tong Chen, Ming Lu, Chao Zhou, Ji-
+awen Gu, and Zhan Ma. Ultra Lowrate Image Compression
+with Semantic Residual Coding and Compression-aware Dif-
+fusion. In Proceedings of the 42nd International Conference
+on Machine Learning, pages 29626–29650. PMLR, 2025.
+[26] Anqi Li, Feng Li, Yuxi Liu, Runmin Cong, Yao Zhao, and
+Huihui Bai. Once-for-All: Controllable Generative Image
+9
+
+
+Compression with Dynamic Granularity Adaptation. In The
+Thirteenth International Conference on Learning Representa-
+tions (ICLR), 2025.
+[27] Jiahao Li, Wenxuan Xie, Zhaoyang Jia, Bin Li, Zongyu Guo,
+Xiaoyi Zhang, and Yan Lu. Ultra-Fast Neural Video Com-
+pression. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), pages
+41311–41321, 2026.
+[28] Yuqi Li, Haotian Zhang, Li Li, and Dong Liu.
+Learned
+Image Compression with Hierarchical Progressive Context
+Modeling. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision (ICCV), pages 18834–18843,
+2025.
+[29] Zhiyuan Li, Yanhui Zhou, Hao Wei, Chenyang Ge, and Aj-
+mal Mian. RDEIC: Accelerating Diffusion-Based Extreme
+Image Compression With Relay Residual Diffusion. IEEE
+Transactions on Circuits and Systems for Video Technology,
+35(11):11540–11552, 2025.
+[30] Ilya Loshchilov and Frank Hutter. Decoupled Weight Decay
+Regularization. In International Conference on Learning
+Representations (ICLR), 2019.
+[31] Fabian Mentzer, George D. Toderici, Michael Tschannen, and
+Eirikur Agustsson. High-Fidelity Generative Image Compres-
+sion. In Advances in Neural Information Processing Systems,
+pages 11913–11924. Curran Associates, Inc., 2020.
+[32] David Minnen and Saurabh Singh. Channel-Wise Autore-
+gressive Entropy Models for Learned Image Compression. In
+2020 IEEE International Conference on Image Processing
+(ICIP), pages 3339–3343, 2020.
+[33] Matthew J. Muckley, Alaaeldin El-Nouby, Karen Ullrich,
+Herv´e J´egou, and Jakob Verbeek. Improving Statistical Fi-
+delity for Neural Image Compression with Implicit Local
+Likelihood Models.
+In Proceedings of the 40th Interna-
+tional Conference on Machine Learning, pages 25426–25443.
+PMLR, 2023.
+[34] Linfeng Qi, Zhaoyang Jia, Jiahao Li, Bin Li, Houqiang Li,
+and Yan Lu. Generative Latent Coding for Ultra-Low Bitrate
+Image and Video Compression. IEEE Transactions on Cir-
+cuits and Systems for Video Technology, 35(10):10500–10515,
+2025.
+[35] Xihua Sheng, Lingyu Zhu, Tianyu Zhang, Dong Liu, Shiqi
+Wang, and Jing Wang. CADC: Content Adaptive Diffusion-
+Based Generative Image Compression. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 32936–32946, 2026.
+[36] Junqi Shi, Ming Lu, Xingchen Li, Anle Ke, Ruiqi Zhang, and
+Zhan Ma. DiT-IC: Aligned Diffusion Transformer for Effi-
+cient Image Compression. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 25719–25729, 2026.
+[37] Karen Simonyan and Andrew Zisserman. Very Deep Convo-
+lutional Networks for Large-Scale Image Recognition. In In-
+ternational Conference on Learning Representations (ICLR),
+2015.
+[38] Kedar Tatwawadi, Parisa Rahimzadeh, Zhanghao Sun, Zhiqi
+Chen, Ziyun Yang, Sanjay Nair, Divija Hasteer, and Oren Rip-
+pel. What Matters in Practical Learned Image Compression.
+In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR), pages 12095–12105,
+2026.
+[39] George Toderici, Wenzhe Shi, Radu Timofte, Lucas Theis, Jo-
+hannes Ball´e, Eirikur Agustsson, Nick Johnston, and Fabian
+Mentzer. Workshop and Challenge on Learned Image Com-
+pression (CLIC 2020).
+CVPR Workshop and Challenge,
+2020.
+[40] Gregory K. Wallace. The JPEG still picture compression
+standard. IEEE Transactions on Consumer Electronics, 38
+(1):xviii–xxxiv, 1992.
+[41] Naifu Xue, Zhaoyang Jia, Jiahao Li, Bin Li, Yuan Zhang, and
+Yan Lu. One-Step Diffusion-Based Image Compression with
+Semantic Distillation. In Advances in Neural Information
+Processing Systems, pages 37108–37144, 2025.
+[42] Naifu Xue, Zhaoyang Jia, Jiahao Li, Bin Li, Yuan Zhang,
+and Yan Lu. DLF: Extreme Image Compression with Dual-
+generative Latent Fusion. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision (ICCV), pages
+19227–19236, 2025.
+[43] Ruihan Yang and Stephan Mandt. Lossy Image Compression
+with Conditional Diffusion Models. In Advances in Neural
+Information Processing Systems, pages 64971–64995. Curran
+Associates, Inc., 2023.
+[44] Fangzhou Yi, Zhicheng Gong, and Hui Zeng. Rethinking
+Latent Variable in Learned Image Compression. In Proceed-
+ings of the IEEE/CVF Winter Conference on Applications of
+Computer Vision (WACV), pages 8531–8540, 2026.
+[45] Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shecht-
+man, and Oliver Wang. The Unreasonable Effectiveness of
+Deep Features as a Perceptual Metric. In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recogni-
+tion (CVPR), pages 586–595, 2018.
+[46] Tianyu Zhang, Xin Luo, Li Li, and Dong Liu. StableCodec:
+Taming One-Step Diffusion for Extreme Image Compression.
+In Proceedings of the IEEE/CVF International Conference
+on Computer Vision (ICCV), pages 17379–17389, 2025.
+[47] Tianyu Zhang, Dong Liu, and Chang Wen Chen. Ultra-Low
+Bitrate Perceptual Image Compression with Shallow Encoder.
+In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR), pages 12118–12128,
+2026.
+[48] Yichi Zhang, Zhihao Duan, Ming Lu, Dandan Ding, Fengqing
+Zhu, and Zhan Ma. Another Way to the Top: Exploit Contex-
+tual Clustering in Learned Image Coding. In Proceedings of
+the AAAI Conference on Artificial Intelligence, pages 9377–
+9386, 2024.
+10
+
+
+Appendix
+In the appendix, we provide the following:
+• Section A derives the reorganized P-RVQ, analyzes its
+complexity, and reports implementation details and latency
+results.
+• Section B describes the model architecture, bitstream pack-
+ing, padding, and nominal rate.
+• Section C defines the dataset, metric, runtime, baseline,
+and GR ablation evaluation protocols.
+• Section D reports additional efficiency and quality compar-
+isons, high-resolution results, and GR inference stability.
+• Section E provides additional visual comparisons on all
+four evaluation datasets.
+A. Analysis of Reorganized P-RVQ
+The main text presents the key reorganization of P-RVQ with
+projection biases omitted for clarity. This appendix restores
+the complete affine transformations, establishes the equiva-
+lence between the original and reorganized forms, analyzes
+their computation and storage, and reports the corresponding
+runtime results.
+A.1. Complete P-RVQ Reorganization
+We use the notation of Sec. 3.3. Let z ∈RD denote the input
+to a P-RVQ module, covering both the hyper latent and the
+main latent groups. The following equations describe one
+input vector, while L denotes the number of input vectors
+when counting operations.
+At stage m, the affine projection (Am, am) maps the
+current residual from RD to the search space Rd, where
+Am ∈Rd×D and am ∈Rd.
+The codebook Em =
+[Em[1], . . . , Em[K]] ∈Rd×K contains K codewords. The
+reconstruction projection (Bm, bm) maps the selected code-
+word back to RD, where Bm ∈RD×d and bm ∈RD. The
+value of K may differ among the five P-RVQ modules.
+Starting from ˆz0 = 0, let ˆzm denote the partial recon-
+struction after stage m, and let ˆz = ˆzM denote the final
+reconstruction.
+Original execution.
+The original P-RVQ projects the cur-
+rent residual for nearest neighbor search and immediately
+adds the selected reconstruction to the high dimensional
+state:
+im = arg min
+1≤j≤K ∥Am(z −ˆzm−1) + am −Em[j]∥2
+2 ,
+(9)
+ˆzm = ˆzm−1 + BmEm[im] + bm.
+(10)
+The final reconstruction is therefore
+ˆz = ˆzM =
+M
+X
+m=1
+(BmEm[im] + bm) .
+(11)
+Before stage m + 1, the selected codeword must pass
+through Bm and update the state in RD. The next stage then
+projects this updated residual back to Rd. This produces the
+RD →Rd →RD dependency path shown in Equation (6).
+Reorganized execution.
+Expanding the partial reconstruc-
+tion inside the search projection gives
+Am(z −ˆzm−1) + am
+= Amz + am −
+X
+ℓ<m
+Am (BℓEℓ[iℓ] + bℓ) .
+All parameters and codewords in the terms from earlier
+stages are fixed after training. We therefore precompute the
+d dimensional lookup table
+Fℓ→m[j] = Am (BℓEℓ[j] + bℓ)
+= (AmBℓ)Eℓ[j] + Ambℓ,
+ℓ< m.
+(12)
+This restores the bias term omitted from the simplified ex-
+pression in Equation (7). Using these tables, the reorganized
+recursion becomes
+im = arg min
+1≤j≤K
+Amz + am
+−
+X
+ℓ<m
+Fℓ→m[iℓ] −Em[j]
+
+2
+2,
+(13)
+ˆzm = ˆzm−1 + BmEm[im] + bm.
+The source projections for all stages are evaluated to-
+gether:
+
+
+s(0)
+1...
+s(0)
+M
+
+=
+
+
+A1...
+AM
+
+z +
+
+
+a1...
+aM
+
+.
+(14)
+At stage m, the corresponding search state is
+sm = s(0)
+m −
+X
+ℓ<m
+Fℓ→m[iℓ] = Am(z−ˆzm−1)+am. (15)
+After selecting iℓ, the later search states are updated
+through Fℓ→m[iℓ] for m > ℓ. Equation 15 shows that the
+original and reorganized forms present the same search vec-
+tor to every stage in real arithmetic. Starting from the first
+stage, the same nearest neighbor decision therefore produces
+11
+
+
+the same update for all later stages. Induction over m pre-
+serves all greedy indices and the final reconstruction.
+The reorganized execution does not need to materialize
+the high dimensional partial reconstruction between search
+stages. It maintains the low dimensional states sm until all
+indices are selected, and then gathers and sums BmEm[im]+
+bm to obtain Equation (11). The greedy stage order remains
+unchanged, while the high dimensional reconstruction is
+removed from the critical dependency path.
+For nearest neighbor search, the part of the squared dis-
+tance that depends on candidate j is
+im = arg min
+j
+∥sm −Em[j]∥2
+2
+= arg min
+j
+
+∥Em[j]∥2
+2 −2sT
+mEm[j]
+
+,
+because ∥sm∥2
+2 is constant across candidates. The code-
+word norms and codebook transposes can therefore be stored
+before inference.
+A.2. Complexity and Parallelism
+The reorganization preserves the projection used for search
+and the nearest neighbor computation. For L input vectors,
+the shared multiply-accumulate counts are
+CMAC
+proj
+= L
+M
+X
+m=1
+Dd = LMDd,
+CMAC
+search = L
+M
+X
+m=1
+Kd = LMKd,
+CMAC
+common = LM(D + K)d.
+Both forms also require LMd additions for projection
+biases and LM(K −1) candidate comparisons.
+In the
+evaluated codec, the four main latent P-RVQ modules use
+D = 256, d = 16, and K ∈{1024, 512, 256, 128}. The
+hyper latent P-RVQ uses D = 128, d = 8, and K = 1024.
+Thus, all five modules satisfy D = 16d.
+Reconstruction cost.
+The original execution evaluates
+BmEm[im] + bm online for every selected codeword. The
+reorganized execution evaluates these projections for all
+codewords during checkpoint conversion and stores the re-
+sulting reconstruction tables. For one P-RVQ module,
+CMAC
+out,online = LMDd,
+CMAC
+out,offline = MKDd,
+Sdecode = MKD.
+The original online path additionally performs LMD
+bias additions. The reorganized online path replaces the
+projections with table lookups and requires L(M −1)D
+additions to sum the selected reconstruction vectors. Both
+forms produce the same reconstruction in Equation (11).
+State update cost.
+The main reduction occurs in the se-
+quential state updates. The corresponding addition counts
+and their ratio are
+Cadd
+high = L
+M
+X
+m=2
+D = L(M −1)D,
+(16)
+Cadd
+low = L
+M
+X
+m=2
+(m −1)d = LM(M −1)d
+2
+,
+(17)
+Cadd
+high
+Cadd
+low
+= 2D
+Md.
+(18)
+For M = 4 and D = 16d, the original and reorganized
+state update counts become 48Ld and 6Ld, respectively. The
+reorganization therefore uses 8× fewer additions for state
+propagation. The projection MACs, nearest neighbor MACs,
+and number of ordered greedy decisions remain unchanged.
+This reduction characterizes the sequential state update path
+rather than the complete P-RVQ runtime.
+Parallelism.
+The original schedule exposes one source pro-
+jection at each stage. The reorganized schedule evaluates the
+M source projections together. After selecting iℓ, the lookup
+updates for all later stages can also be applied concurrently.
+The reorganized execution therefore exposes all M source
+projections and up to M −1 parallel low dimensional up-
+dates, while retaining the same M ordered nearest neighbor
+decisions.
+Lookup storage.
+The cross stage tables are constructed
+once after training. Their offline computation and nonzero
+storage for one P-RVQ module are
+CMAC
+cross,offline = KDd
+M
+X
+m=2
+(m −1) = M(M −1)KDd
+2
+,
+Scross,nonzero = Kd
+M
+X
+m=2
+(m −1) = M(M −1)Kd
+2
+.
+For M = 4, six pairs satisfy ℓ< m. Across all five
+P-RVQ modules, the corresponding nonzero content is
+Sall
+nonzero = 6
+ 1024·16 + 512·16 + 256·16
++ 128·16 + 1024·8
+
+= 233,472.
+12
+
+
+The implementation uses a dense table with M 2 = 16
+stage slots, giving
+Sall
+dense = 16
+ 1024·16 + 512·16 + 256·16
++ 128·16 + 1024·8
+
+= 622,592.
+The dense table has shape (M, K, Md) and occupies
+1.19 MiB in FP16 or 2.38 MiB in FP32 across the five P-
+RVQ modules. This storage is prepared before inference and
+contains the static lookup values used by the reorganized
+search.
+A.3. Implementation and Runtime Evaluation
+CUDA implementation.
+Checkpoint conversion materi-
+alizes the stacked search projection, codeword norms, code-
+book transposes, reconstruction tables, and the cross stage
+lookup tables in Equation (12). At runtime, the source pro-
+jections in Equation (14) are evaluated with one matrix mul-
+tiplication.
+A fused CUDA kernel then processes the ordered P-RVQ
+stages. Candidate dot products, distance evaluation, parallel
+reduction for index selection, table lookup, and updates to
+the later low dimensional states are performed within one
+kernel launch. The kernel preserves the ordered greedy
+decisions while parallelizing candidate evaluation and the
+updates to future search states. This avoids separate search
+launches at every stage and avoids materializing complete
+distance and update tensors.
+When reconstruction is required, a second kernel gathers
+the selected high dimensional vectors, sums them, and writes
+the reconstructed output. During decompression, these re-
+construction operations are further combined with the sur-
+rounding codec operations. This codec integration lies out-
+side the isolated P-RVQ timing reported below.
+Benchmark protocol.
+We evaluate the original Torch
+FP32 implementation, the reorganized Torch implementa-
+tions in FP32 and FP16, and the CUDA FP16 implemen-
+tation on one NVIDIA A100 with batch size one. All im-
+plementations use weights converted from the same check-
+points.
+We evaluate M ∈{1, 2, 3, 4} at latent sizes correspond-
+ing to 512 × 768, 1080p, 2K, and 4K images, giving 16
+settings in total. Each latency is the median of 100 synchro-
+nized repetitions after 20 warmup runs.
+The reported latency isolates P-RVQ execution. Complete
+codec latency is reported in Tabs. 1, 3 and 10.
+Runtime results.
+Under the same Torch FP32 backend and
+precision, the reorganized P-RVQ achieves a 3.14× average
+speedup over the original implementation across the 16 eval-
+uated settings. The reorganized Torch FP16 implementation
+achieves a 2.97× average speedup. These matched Torch
+results isolate the effect of the algebraic reorganization and
+numerical precision.
+The CUDA FP16 implementation further increases the
+average speedup to 7.15× relative to the original FP32 im-
+plementation. This number includes the algebraic reorgani-
+zation, FP16 execution, and fused CUDA kernels. Table 4
+reports the latency and speedup for every resolution and
+P-RVQ depth.
+At the highest evaluated Kodak rate, the P-RVQ latency
+during compression is 11.2824 ms for the original FP32
+implementation, 3.2435 ms for the reorganized Torch FP32
+implementation, and 0.6001 ms for the CUDA FP16 im-
+plementation. The matched FP32 reorganization gives a
+3.48× speedup at this operating point. The CUDA FP16
+implementation gives an 18.80× speedup.
+For complete encoder attribution, we construct an original
+P-RVQ reference by restoring the latency difference between
+the original and reorganized FP32 P-RVQ to the measured
+Torch FP32 encoder. Using the reduction from this reference
+to the final CUDA FP16 encoder as a common denominator,
+the algebraic reorganization accounts for 23.54% of the total
+encoder latency reduction. The complete P-RVQ acceler-
+ation, including the CUDA implementation, accounts for
+31.28%.
+Numerical consistency.
+The original and reorganized
+Torch FP32 implementations select identical indices, with a
+maximum absolute reconstruction difference of 4.77×10−7.
+Under FP16, the reorganized Torch and CUDA implementa-
+tions differ on only 0.2293% of the evaluated indices. These
+differences mainly occur between nearby codewords and
+have little effect on the final reconstruction.
+B. Architecture and Bitstream Details
+B.1. Backbone and Context Pathway
+GR-GIC follows the lightweight backbone and context path-
+way of EF-LIC [6]. Table 5 gives the complete implemented
+topology.
+For clarity, Sec. 3.1 absorbs the normalization used in the
+implementation into the analysis and synthesis transforms.
+The encoder first computes the latent before normalization,
+v = ga(x),
+z = ha(v).
+After quantizing the hyper latent, the hyper decoder produces
+the normalization scale and context feature,
+(qenc, ϕ) = hs(ˆz),
+y = v ⊘qenc.
+The normalized latent y is then processed by the groupwise
+affine projections and P-RVQ.
+13
+
+
+Table 4. P-RVQ latency on an NVIDIA A100. Each entry reports the median CUDA event latency in ms followed by speedup over the
+corresponding original FP32 result. All implementations use weights converted from the same checkpoints.
+Resolution
+M
+Original FP32
+Reorganized FP32
+Reorganized FP16
+CUDA FP16
+512×768
+1
+3.84/1.00×
+1.54/2.50×
+1.54/2.49×
+0.93/4.12×
+2
+5.38/1.00×
+1.74/3.09×
+1.74/3.09×
+0.64/8.43×
+3
+10.80/1.00×
+3.29/3.29×
+3.33/3.24×
+0.87/12.38×
+4
+14.09/1.00×
+4.03/3.49×
+4.15/3.40×
+0.87/16.12×
+1080p
+1
+2.82/1.00×
+1.14/2.47×
+1.14/2.48×
+0.67/4.18×
+2
+5.42/1.00×
+1.77/3.07×
+1.83/2.97×
+0.66/8.26×
+3
+8.37/1.00×
+2.43/3.45×
+2.56/3.27×
+0.78/10.67×
+4
+10.59/1.00×
+3.03/3.49×
+3.20/3.31×
+0.95/11.16×
+2K
+1
+2.88/1.00×
+1.12/2.58×
+1.16/2.47×
+0.68/4.25×
+2
+5.40/1.00×
+1.74/3.09×
+1.96/2.76×
+0.87/6.23×
+3
+8.34/1.00×
+2.51/3.33×
+2.55/3.27×
+1.18/7.10×
+4
+10.83/1.00×
+3.06/3.55×
+3.27/3.31×
+1.48/7.32×
+4K
+1
+2.93/1.00×
+1.13/2.61×
+1.16/2.54×
+0.98/3.00×
+2
+5.97/1.00×
+1.92/3.11×
+3.00/1.99×
+1.67/3.58×
+3
+8.61/1.00×
+2.45/3.51×
+2.49/3.46×
+2.30/3.74×
+4
+11.42/1.00×
+3.09/3.69×
+3.24/3.52×
+2.99/3.82×
+Mean speedup
+1.00×
+3.14×
+2.97×
+7.15×
+At the decoder, the same hyper decoder gives
+(qdec, ϕ) = hs(ˆz).
+For a fixed checkpoint and bitstream, qenc = qdec, and
+reconstruction is obtained as
+ˆx = gs(qdec ⊙˜y).
+The notation in Sec. 3.1 absorbs these deterministic scales
+into ga and gs. The normalization scale qdec and entropy
+context scale σ are lower bounded by 0.11.
+The main latent uses the same four group quadtree con-
+text model as EF-LIC and DCVC-RT [6, 21]. Each group
+contains one quarter of the spatial positions and is recov-
+ered using the previously decoded groups. The GR head
+receives the recovered latent and entropy context parameters
+(ˆy, µ, σ) and predicts the offset δ and perturbation scale β.
+Each P-RVQ depth M ∈{1, 2, 3, 4} defines one separately
+trained operating point with its corresponding GR head.
+B.2. Fixed-Width Index Packing
+Each power of two codebook in Tab. 6 uses a fixed index
+width according to the size of its quantization alphabet [17].
+The hyper latent uses 10 bits per index, while the four main
+latent groups use 10, 9, 8, and 7 bits.
+The multistage structure and low dimensional search
+spaces follow the P-RVQ configuration of EF-LIC [6].
+Stored indices are flattened in (stage, batch, height, width)
+order and written with the least significant bit first. The five
+streams are ordered as Qz →Q1 →Q2 →Q3 →Q4.
+A standalone bitstream stores the original image height
+and width as two unsigned 16 bit integers, followed by the
+five index streams. No additional side information is trans-
+mitted. We report payload BPP and exclude this 4 byte image
+size header. For a 512×768 image, the header contributes
+only
+Rmeta =
+32
+512 · 768 = 8.14 × 10−5 bpp.
+B.3. Padding and Cropping
+The encoder pads the input on the right and bottom so that
+both spatial dimensions are multiples of 32. The hyper anal-
+ysis path additionally pads the main latent to a multiple of
+four, while the main latent path retains its original logical
+shape. The quadtree groups, main latent P-RVQ modules,
+GR head, and synthesis transform therefore operate on this
+original latent shape. The decoder removes the correspond-
+ing padding and returns the reconstruction at the original
+image size.
+B.4. Nominal Rate
+The fixed index widths give an exact nominal payload rate
+before boundary padding. At each P-RVQ stage, the four
+main latent groups contribute
+14
+
+
+Table 5. Detailed GR-GIC architecture. Conv, DCB, and SP denote convolution, DepthConvBlock, and subpixel upsampling, respectively.
+The analysis and synthesis depths count the repeated body DCBs, while the entry and final refinement blocks are listed separately.
+Module
+Implemented topology
+Output or role
+Analysis transform
+8× pixel unshuffle, 192→368 entry DCB, six 368-channel
+body DCBs, 3×3 Conv with stride 2 to 256 channels
+Main latent at 1/16 resolution
+Hyper analysis
+1×1 Conv 256→512, two 512-channel DCBs, two residual
+downsampling stages with stride 2, final 128-channel
+projection
+Hyper latent at 1/64 resolution
+Hyper synthesis
+SP 128→512, one DCB, SP 512→512, two DCBs, 1×1
+Conv to 512 channels
+256-channel normalization scale
+qdec and 256-channel context
+feature ϕ
+Context path
+Quadtree support projection, projection of previously decoded
+groups, one group adaptor DCB, three shared 512-channel
+DCBs, final 1×1 Conv
+256-channel entropy context
+mean µ and scale σ
+GR head
+1×1 Conv 768→768, three 768-channel DCBs, 1×1 Conv
+768→512
+256-channel offset δ and
+adaptive perturbation scale β
+Synthesis transform
+SP 256→368, twelve 368-channel body DCBs, one final
+refinement DCB, 1×1 Conv 368→192, 8× pixel shuffle
+RGB reconstruction
+DCB
+Pointwise mixing, weighted sigmoid linear unit (SiLU), 3×3
+depthwise Conv, pointwise projection, fourfold feedforward
+expansion and projection
+Residual feature transformation
+Table 6. P-RVQ configuration. The four main latent quantizers
+operate on quadtree groups. The fifth quantizes the hyper latent.
+“Bits per stage” is the fixed index width.
+Stream
+y1
+y2
+y3
+y4
+z
+Input dim.
+256
+256
+256
+256
+128
+Code dim.
+16
+16
+16
+16
+8
+Entries
+1024
+512
+256
+128
+1024
+Bits per stage
+10
+9
+8
+7
+10
+Ry = 10 + 9 + 8 + 7
+4 · 162
+= 0.033203125 bpp,
+while the hyper latent contributes
+Rz = 10
+642 = 0.00244140625 bpp.
+Thus, with M active P-RVQ stages,
+RM = M(Ry + Rz) = 0.03564453125M bpp.
+(19)
+Boundary padding changes the number of transmitted
+indices and causes the small deviations from these nominal
+rates.
+C. Evaluation Protocol
+C.1. Datasets and Objective Evaluation
+Kodak, Tecnick, DIV2K validation, and CLIC 2020 Profes-
+sional test contain 24, 100, 100, and 250 images, respectively.
+All reconstructed images are evaluated at their original image
+resolution.
+Objective evaluation.
+We use standardized objective met-
+rics as the primary quantitative evaluation. Subjective user
+studies can provide complementary perceptual evidence, but
+their results depend on the participant population, viewing
+conditions, presentation protocol, and selected test images,
+and naturally exhibit observer variability. These factors
+make subjective scores less suitable for reproducible compar-
+isons across many methods, datasets, and operating points.
+Standardized objective metrics instead provide repeatable
+measurements under a fixed evaluation protocol.
+This practice is also common in generative image com-
+pression.
+Representative methods including MS-ILLM,
+GLC, Control-GIC, DLF, OneDC, OSCAR, and RDVQ pri-
+marily evaluate reconstruction using objective metrics such
+as LPIPS, DISTS, and FID without reporting a subjective
+user study [18, 20, 23, 26, 33, 41, 42]. We therefore use
+LPIPS and DISTS to measure reference-based perceptual
+similarity, PSNR to measure pixel fidelity, and FID to mea-
+sure distribution-level alignment, together with qualitative
+reconstructions for visual comparison.
+LPIPS is computed with pretrained VGG features after
+15
+
+
+mapping RGB inputs to [−1, 1]. DISTS receives RGB inputs
+in [0, 1], and PSNR is computed in RGB.
+FID.
+Following the patch evaluation protocol used for low-
+rate generative image compression [20], we compute FID
+from local image patches. Reference and reconstructed RGB
+images in [0, 1] are rounded to unsigned 8-bit values and
+passed to the TorchMetrics implementation of FID [10, 19].
+Kodak uses 64 × 64 patches, while Tecnick, DIV2K, and
+CLIC 2020 use 256 × 256 patches. We extract one non-
+overlapping patch grid and a second grid shifted by half a
+patch along both spatial axes. This increases the number of
+Inception samples and improves the stability of distribution-
+level evaluation on the 24-image Kodak set. All compared
+methods use the same FID pipeline.
+BD-rate.
+We use BD-rate [5] to summarize the average
+rate difference between two rate-quality curves at matched
+reconstruction quality. For each metric, operating points
+are ordered by the metric value, and pairs without a valid
+common interval are left unreported.
+Let q denote the metric value. We use monotone PCHIP
+interpolation [14] for the natural logarithm of bitrate. Let
+fA(q) and fT(q) denote the interpolated curves of the anchor
+and tested codec over the common interval [qmin, qmax]. The
+reported BD-rate is
+BD-rate = 100
+"
+exp
+ 
+1
+qmax −qmin
+Z qmax
+qmin
+(fT(q) −fA(q)) dq
+!
+−1
+#
+.
+(20)
+OneDC is the anchor for the main comparisons. Negative
+values indicate bitrate savings over the common interval.
+The numerical tables report pairwise BD-rate, while the rate-
+quality curves show the corresponding behavior over the
+evaluated operating points.
+C.2. Runtime and Model Cost Protocol
+All A100 codec runtimes use batch size one on one NVIDIA
+A100 GPU. For GR-GIC, CPU payload processing is per-
+formed on an AMD EPYC 7763.
+The latency comparison retains the numerical precision,
+inference backend, and acceleration path provided by each
+available implementation. The reported values therefore
+characterize realized system latency rather than architecture-
+only speed under an identical backend. EF-LIC and ProGIC
+follow their published FP32 evaluation settings [6, 7], while
+the remaining methods retain their released inference set-
+tings.
+The highly optimized implementation of GR-GIC com-
+bines reorganized P-RVQ with fused CUDA operators fol-
+lowing DCVC-UF [27]. It uses FP16 execution and CUDA
+Graphs together with custom kernels for quantization and
+reconstruction. The remaining convolution operations use
+optimized ATen and cuDNN kernels.
+The reported encoding and decoding times cover the com-
+plete codec path. Encoding includes index generation, trans-
+fer to the CPU, and bitstream packing. Decoding includes
+bitstream unpacking, transfer to the GPU, index recovery,
+one GR realization, and image synthesis. Timing starts after
+model loading, input construction, and CUDA Graph cap-
+ture. We use two warmup runs followed by ten synchronized
+repetitions.
+For GR-GIC, the reported latency and model cost are
+averaged over four independently trained operating points at
+0.0356, 0.0713, 0.1069, and 0.1426 BPP. The same averag-
+ing convention is used for the A100 and Jetson results.
+Parameter accounting across operating points.
+We re-
+port the parameter count of the complete codec deployed
+at one evaluated operating point. Each of the four inde-
+pendently trained GR-GIC checkpoints contains 79.389M
+parameters. The reported 79.389M therefore represents one
+deployed model rather than the combined storage of all four
+checkpoints.
+This convention is also applied to methods that use sepa-
+rate checkpoints for different target rates. Among the com-
+pared methods, ResULIC, StableCodec, RDEIC, OneDC,
+MS-ILLM, DLF, DiT-IC, AEIC, and CoD-Lite use sepa-
+rately trained or fine-tuned model weights for different oper-
+ating points [22, 25, 29, 33, 36, 41, 42, 46, 47].
+We use the same parameter accounting rule for both types
+of codec. The tables report the complete model required
+for the evaluated operating point and do not sum multiple
+checkpoints across the rate curve. The storage required to
+retain all supported operating points is a separate deployment
+property from the parameter count of one deployed codec.
+FLOPs are measured for one encoder and decoder pass
+with batch size one on the corresponding PyTorch FP32 path
+under the profiler-supported operator scope. We count one
+multiply-accumulate operation as two FLOPs. The same
+pass definition and arithmetic convention are used for all
+methods. Peak memory denotes the maximum allocated
+GPU memory including the loaded model and active codec
+buffers.
+C.3. Baseline Evaluation Protocol
+Except where noted, we evaluate released checkpoints on
+the same NVIDIA A100 with batch size one. Each method
+follows the coding and inference procedure provided by its
+official implementation.
+16
+
+
+EF-LIC and ProGIC use their published FP32 settings [6,
+7]. OneDC follows its official path with BF16 autocast for
+the feedforward and codec networks while retaining the large
+VAE in FP32 [41]. CoD-Lite uses its official 0.0312 BPP
+checkpoint with BF16 inference [22]. Under our full codec
+profiling scope, this checkpoint gives 771.69G FLOPs at
+512 × 768. The CoD-Lite paper reports 535 kMAC per
+pixel, corresponding to 420.74G FLOPs under our arith-
+metic convention. We use our common profiling scope for
+the system comparison and retain the published value as a
+separate reference. Control-GIC uses its official granularity
+control, which we enumerate at intervals of 0.01, together
+with official tiling on DIV2K and CLIC 2020 [26].
+For GLC [20], the released interface provides analysis
+and synthesis without a complete bitstream path. For the
+high-resolution codec comparison, we additionally use a
+CompressAI 1.2.6 integration [4] that produces and decodes
+the actual bitstream.
+For OSCAR, rate and quality evaluation uses CPU of-
+floading on high-resolution images when required, while the
+resource tables report the direct execution result [18].
+CADC [35] and PICO [38] do not provide the correspond-
+ing executable models used in our comparison. We therefore
+use their published curves or released numerical results only
+when the metric definition and evaluation range are compati-
+ble with ours.
+For CoD-Lite, measurements from the released imple-
+mentation differ from the latency values reported in its paper.
+At the 1024×1920 reference resolution, we measure 39.522
+ms for encoding and 56.863 ms for decoding, compared with
+the reported 16 and 24 ms. We therefore use measurements
+from the released code under our common hardware and
+timing protocol rather than mixing measured and separately
+reported runtime values. The system comparisons use the
+official 0.0312 BPP checkpoint specified by the published
+speed evaluation.
+C.4. GR Ablation Protocol
+The configurations in Tab. 2 are trained independently from
+scratch at each bitrate. All configurations use the same train-
+ing data, loss terms and weights, AdamW settings, learning-
+rate schedule, and update budget. Each ablation model is
+trained for 1M iterations. The main operating-point results
+use separately trained models with the complete 2M iteration
+schedule.
+M0 bypasses GR and directly synthesizes from the recov-
+ered quantized latent. It retains the direct synthesis path of
+the EF-LIC backbone and provides a reference under the
+same training conditions used for the GR configurations.
+M1 predicts an offset from the recovered latent. M2 ad-
+ditionally uses entropy context for deterministic refinement.
+M3 introduces Gaussian perturbation with one learned scale
+for each channel, shared across spatial locations. M4 further
+adapts the perturbation scale to spatial location and image
+content.
+Each crop for M3 and M4 uses one standard Gaussian
+draw to estimate the expected image objective. M2 and M3
+have the same reported parameter count and forward FLOPs
+as M4. They provide matched references for evaluating
+stochastic perturbation and its adaptation to image content
+and spatial location.
+C.5. Stochastic Evaluation Protocol
+The main results use a fixed decoder seed of 1926 and recon-
+struct each bitstream once. Stochastic sampling is applied
+only after deterministic RVQ index recovery, so the trans-
+mitted indices and payload do not depend on the decoder
+seed.
+Inference perturbation ablation.
+To examine the role of
+the sampled perturbation after training, we use the same
+trained M4 checkpoints as in Tab. 2. We retain the recovered
+indices, learned offset, and all model parameters, and set
+only β ⊙ϵ in Equation (5) to zero during inference. The
+decoder therefore synthesizes from the learned refinement
+center
+˜y = ˆy + δ.
+The corresponding results are reported in the additional
+experiments.
+Decoder seed stability.
+To measure sensitivity to the sam-
+pled Gaussian perturbation, we keep the checkpoint, trans-
+mitted indices, input images, and all deterministic compu-
+tations fixed and vary only the decoder seed. We evaluate
+ten seeds on all Kodak images at each operating point. For
+every seed, metrics are first averaged over the dataset before
+variation across seeds is measured.
+The resulting stability measurements are reported to-
+gether with the additional GR experiments.
+D. Additional Experimental Results
+This section reports additional experimental results under
+the evaluation protocols defined in Sec. C. We first examine
+the efficiency of different GR-GIC operating points and in-
+ference backends, then provide additional comparisons with
+existing codecs, and finally analyze the inference behavior
+of GR.
+D.1. Efficiency across Operating Points
+Table 7 reports the complexity and runtime of the four inde-
+pendently trained operating points at 512 × 768, 1080p, and
+2K.
+At 512 × 768, encoding latency ranges from 4.475 to
+4.717 ms, while decoding latency ranges from 5.947 to 6.028
+17
+
+
+Table 7. Per operating point GR-GIC complexity, CUDA latency, and peak memory on one A100. FLOPs are reported in G for one encoder
+and decoder pass under the profiler-supported operator scope. Latency is in ms and peak GPU memory is in GiB.
+Resolution
+BPP
+Params
+FLOPs
+Enc.
+Dec.
+Mem.
+512×768
+0.0356
+79.389
+456.491
+4.475
+5.949
+0.183
+0.0713
+79.389
+456.531
+4.523
+5.947
+0.185
+0.1069
+79.389
+456.571
+4.717
+6.028
+0.187
+0.1426
+79.389
+456.610
+4.674
+6.009
+0.189
+1080p
+0.0356
+79.389
+2425.111
+13.817
+21.428
+0.250
+0.0713
+79.389
+2425.321
+14.111
+21.483
+0.250
+0.1069
+79.389
+2425.532
+14.137
+21.389
+0.252
+0.1426
+79.389
+2425.742
+14.323
+21.466
+0.255
+2K
+0.0356
+79.389
+4293.353
+22.447
+35.987
+0.312
+0.0713
+79.389
+4293.725
+22.501
+36.022
+0.313
+0.1069
+79.389
+4294.097
+22.880
+35.897
+0.315
+0.1426
+79.389
+4294.469
+23.209
+35.905
+0.318
+ms. At 1080p, the encoding and decoding ranges span at
+most 0.506 and 0.094 ms, respectively. At 2K, the corre-
+sponding ranges are 0.762 and 0.125 ms.
+These results show that increasing the active P-RVQ depth
+changes runtime only modestly relative to the shared back-
+bone.
+D.2. GR-GIC Backend Comparison
+We further compare three implementations of the same GR-
+GIC checkpoints to separate the effects of numerical preci-
+sion and backend optimization.
+At 512 × 768, the eager PyTorch FP32 implementation
+encodes in 30.453 ms and decodes in 44.708 ms. Relative to
+the official OneDC implementation, these times are 2.53×
+and 4.57× lower, respectively. The eager PyTorch FP32
+implementation is also faster in both encoding and decoding
+than six of the eight displayed diffusion codecs, and this
+behavior remains consistent across the evaluated resolutions.
+The CUDA FP16 implementation further reduces runtime
+relative to the PyTorch FP32 implementation. Across the
+evaluated resolutions, encoding is accelerated by 6.62× to
+8.18×, while decoding is accelerated by 7.47× to 8.74×.
+The eager FP32 results show that low latency is already
+present before the additional CUDA acceleration, while the
+optimized backend provides a further reduction in runtime.
+D.3. Additional Baseline Comparisons
+CADC and PICO do not provide the corresponding exe-
+cutable models used in our comparison. Following the proto-
+col in Sec. C, we therefore compare against their published
+curves or released numerical results where the metric defini-
+tions and rate ranges are compatible.
+CADC.
+At the shared lowest Kodak rate of 0.03564 BPP,
+interpolation of the published CADC curves gives approxi-
+mately 23.15 dB PSNR and 0.087 DISTS [35]. At the same
+rate, GR-GIC achieves 23.35 dB PSNR and 0.075 DISTS.
+This corresponds to a PSNR increase of approximately 0.20
+dB and a DISTS reduction of approximately 0.012.
+CADC reports LPIPS using AlexNet features, while our
+main evaluation uses VGG features. We therefore restrict
+this comparison to the aligned PSNR and DISTS metrics.
+PICO.
+PICO reports VGG-based LPIPS on CLIC
+2020 [38]. Over the common quality interval, GR-GIC
+obtains a PICO-anchored LPIPS BD-rate of −54.01%.
+This corresponds to a 54.01% average bitrate reduction at
+matched LPIPS over the evaluated common interval.
+D.4. Comparison with Lightweight Codecs
+Figure 6 compares GR-GIC with ProGIC, EF-LIC, and
+CoD-Lite across all four datasets and metrics. At compara-
+ble rates, GR-GIC provides the strongest displayed LPIPS,
+DISTS, PSNR, and FID curves among these lightweight
+codecs.
+The four GR-GIC operating points span approximately
+0.036 to 0.143 BPP. The highest-rate GR-GIC point at 0.143
+BPP uses a lower bitrate than the fifth EF-LIC point while
+achieving higher PSNR and lower DISTS and FID on every
+dataset. Its LPIPS is comparable or lower. The four GR-
+GIC operating points therefore cover the shared comparison
+range without requiring an additional higher-rate point.
+D.5. Additional Rate and Quality Results
+Table 9 reports OneDC-anchored BD-rate for LPIPS, DISTS,
+PSNR, and FID on Kodak, Tecnick, DIV2K, and CLIC 2020.
+Entries without a valid monotone common interval are left
+18
+
+
+Table 8. GR-GIC backend comparison on one A100. Latency is in ms and peak GPU memory is in GiB. Online E2E denotes one consecutive
+pair of in-memory encode and decode calls.
+Resolution
+Backend
+Enc.
+Dec.
+Online E2E
+Mem.
+512×768
+PyTorch FP32
+30.453
+44.708
+66.519
+0.438
+PyTorch FP16
+15.439
+20.298
+37.784
+0.222
+CUDA FP16
+4.597
+5.983
+10.353
+0.186
+1080p
+PyTorch FP32
+109.967
+176.403
+282.883
+0.965
+PyTorch FP16
+32.895
+57.600
+86.817
+0.465
+CUDA FP16
+14.097
+21.442
+35.567
+0.252
+2K
+PyTorch FP32
+185.468
+312.454
+495.019
+1.446
+PyTorch FP16
+55.968
+95.262
+145.070
+0.691
+CUDA FP16
+22.759
+35.952
+59.118
+0.314
+4K
+PyTorch FP32
+407.490
+709.180
+1114.092
+2.909
+PyTorch FP16
+120.631
+221.758
+327.342
+1.373
+CUDA FP16
+49.787
+81.143
+132.971
+0.492
+unavailable according to the protocol in Sec. C. CoD-Lite
+and MS-ILLM are already included in the main Kodak and
+high-resolution comparisons, so their full entries are not
+repeated across all four metric blocks in this table.
+Across the twelve LPIPS, DISTS, and FID entries, GR-
+GIC achieves a negative OneDC-relative BD-rate on every
+dataset. The corresponding rate and quality curves in Fig-
+ures 4 and 6 show the behavior over the evaluated operating
+ranges.
+The table also places these reconstruction results in the
+context of model complexity. AEIC uses approximately
+11.2× the parameters and 4.7× the FLOPs of GR-GIC.
+StableCodec uses approximately 13.4× the parameters and
+14.9× the FLOPs. EF-LIC and ProGIC use fewer parameters
+and FLOPs than GR-GIC, while GR-GIC provides lower
+DISTS and FID over the reported comparisons.
+D.6. High-Resolution Runtime and Memory
+Table 10 extends the runtime comparison to 1080p, 2K, and
+4K images on one NVIDIA A100.
+The released GLC interface reports analysis and synthesis
+without a complete bitstream path. Its forward execution
+takes (159.460, 259.762) ms at 1080p, (291.436, 488.817)
+ms at 2K, and (659.937, 1101.531) ms at 4K for analy-
+sis and synthesis, respectively. Under the complete Com-
+pressAI integration defined in Sec. C, the corresponding
+encoding and decoding times are (340.746, 475.738) ms,
+(638.989, 826.327) ms, and (1456.258, 1816.005) ms. Peak
+memory is 5.66, 9.71, and 20.76 GiB at the three resolutions.
+Among the available implementations in Tab. 10, GR-
+GIC achieves the lowest encoding latency, decoding latency,
+and peak memory at all three resolutions. Relative to the
+second-lowest values, the reductions correspond to factors of
+1.26× to 1.39× for encoding, 1.43× to 1.66× for decoding,
+and 2.58× to 4.27× for peak memory.
+EF-LIC provides the second-lowest decoding latency and
+peak memory across the three resolutions. AEIC provides
+the second-lowest encoding latency at 2K and 4K. These
+results show that the fast inference of GR-GIC extends from
+Kodak resolution to high-resolution images.
+D.7. GR Inference Stability
+Inference perturbation.
+We first evaluate the effect of
+the sampled perturbation at inference using the protocol in
+Sec. C.5. With the perturbation term removed, the decoder
+uses only the learned refinement center ˆy + δ.
+In the same rate order as Tab. 2, the resulting LPIPS
+and FID pairs are (0.262, 54.8), (0.206, 36.4), (0.181, 32.5),
+and (0.162, 27.9).
+Relative to the complete M4 results, removing the sam-
+pled perturbation changes LPIPS by only 0.000 to 0.002 and
+increases FID by 0.2 to 0.4. Most of the gain of the complete
+GR configuration therefore remains when inference uses
+only the learned refinement center.
+Without sampled perturbation at inference, M4 retains
+FID reductions of 7.6, 4.8, 4.0, and 4.0 relative to determin-
+istic M2. It also retains reductions of 4.7, 1.5, 1.3, and 1.6
+relative to M3, which uses a channel-wise perturbation scale.
+LPIPS remains equal to or lower than both configurations at
+every evaluated rate.
+These results support the interpretation in Sec. 4.3 that
+the adaptive perturbation primarily contributes through train-
+ing regularization rather than through the particular random
+realization used at inference.
+Decoder seed stability.
+We next vary only the decoder
+seed according to the protocol in Sec. C.5. Across ten seeds
+19
+
+
+Figure 6. Rate and reconstruction quality of GR-GIC and lightweight codecs on four datasets. GR-GIC uses four operating points, while
+EF-LIC uses five. Lower LPIPS, DISTS, and FID and higher PSNR indicate better reconstruction. FID uses a base-2 logarithmic vertical
+axis.
+on Kodak, aggregate LPIPS varies by less than 10−4 and
+FID by less than 10−2.
+The transmitted indices and payload are identical across
+these runs. The small metric variation shows that the re-
+ported aggregate reconstruction performance is stable across
+the evaluated GR realizations.
+FID repeatability.
+We also repeat the Kodak FID compu-
+tation four times with the reconstructed images and patch
+extraction fixed. All four runs produce identical FID values.
+This confirms that the variation measured above comes from
+the GR realization rather than repeated execution of the FID
+estimator.
+E. Additional Visual Comparisons
+This section provides additional visual comparisons of GR-
+GIC on all four evaluation datasets. Each figure places com-
+parisons with high-capacity diffusion codecs above those
+with lightweight baselines and reports LPIPS and BPP for
+the displayed reconstructions. Two further panels extend the
+Tecnick and CLIC 2020 coverage under the same LPIPS and
+BPP annotation protocol.
+20
+
+
+Table 9. Pairwise OneDC-anchored BD-rate (%). Bold and underline mark the two lowest displayed values per dataset.
+Metric
+Family
+Method
+Kodak
+Tecnick
+DIV2K
+CLIC 2020
+LPIPS
+Diffusion
+OneDC
+0.00
+0.00
+0.00
+0.00
+StableCodec
+8.03
+32.28
+27.06
+36.13
+AEIC
+41.65
+34.58
+25.27
+32.18
+DiT-IC
+35.99
+61.79
+49.18
+52.00
+OSCAR
+127.15
+225.78
+201.57
+–
+VAE-based
+GLC
+21.53
+47.87
+33.19
+39.53
+DLF
+20.87
+54.78
+47.02
+45.66
+ProGIC
+36.47
+56.48
+42.04
+84.07
+EF-LIC
+-3.33
+15.12
+3.51
+24.62
+RDVQ
+17.06
+47.25
+26.35
+33.11
+GR-GIC
+-23.19
+-11.27
+-20.24
+-18.39
+DISTS
+Diffusion
+OneDC
+0.00
+0.00
+0.00
+0.00
+StableCodec
+6.77
+31.27
+9.38
+24.27
+AEIC
+-16.71
+-20.02
+-30.19
+-21.29
+DiT-IC
+-6.44
+-0.28
+-16.61
+-10.82
+OSCAR
+131.50
+240.68
+223.40
+339.84
+VAE-based
+GLC
+54.70
+72.21
+50.63
+70.55
+DLF
+20.19
+62.90
+56.62
+64.56
+ProGIC
+80.41
+126.30
+78.51
+172.95
+EF-LIC
+10.05
+44.93
+13.25
+69.31
+RDVQ
+9.87
+27.16
+9.10
+27.14
+GR-GIC
+-37.71
+-28.12
+-42.46
+-31.53
+PSNR
+Diffusion
+OneDC
+0.00
+0.00
+0.00
+0.00
+StableCodec
+-17.10
+41.35
+31.65
+–
+AEIC
+2.11
+1.78
+-4.44
+-12.35
+DiT-IC
+33.24
+50.41
+40.19
+26.63
+OSCAR
+154.09
+248.22
+195.61
+338.47
+VAE-based
+GLC
+56.04
+72.28
+61.07
+79.51
+DLF
+42.73
+78.89
+63.48
+67.35
+ProGIC
+49.84
+105.02
+72.35
+116.69
+EF-LIC
+11.49
+61.07
+39.83
+59.45
+RDVQ
+62.13
+70.23
+60.92
+70.88
+GR-GIC
+-22.30
+19.60
+-0.41
+16.48
+FID
+Diffusion
+OneDC
+0.00
+0.00
+0.00
+0.00
+StableCodec
+-4.45
+-5.58
+-26.77
+-28.75
+AEIC
+7.16
+-38.95
+-49.80
+-55.10
+DiT-IC
+56.47
+41.17
+30.56
+44.53
+OSCAR
+159.92
+222.65
+–
+–
+VAE-based
+GLC
+82.95
+54.94
+50.70
+90.98
+DLF
+70.80
+73.87
+66.43
+66.97
+ProGIC
+156.32
+267.15
+225.46
+389.82
+EF-LIC
+49.01
+143.61
+138.95
+257.90
+RDVQ
+49.51
+55.05
+40.18
+59.78
+GR-GIC
+-22.14
+-32.07
+-45.68
+-34.26
+21
+
+
+Table 10. High-resolution encoding and decoding latency (ms) and peak GPU memory (GiB) on one A100. Bold and underline mark the
+two best results.
+Method
+1080p
+2K
+4K
+Enc.
+Dec. Mem.
+Enc.
+Dec. Mem.
+Enc.
+Dec. Mem.
+ResULIC
+481.75 3702.45
+20.38
+–
+> 10 s
+–
+–
+> 10 s
+–
+StableCodec
+641.76 1657.43
+21.80 1085.39 3161.54
+30.65
+–
+> 10 s
+–
+RDEIC
+683.20 2296.58
+13.55 1436.00 5963.77
+20.17
+–
+> 10 s
+–
+OneDC
+303.33
+742.06
+12.81
+585.72 1554.82
+18.86
+1542.18
+4846.63
+35.38
+OSCAR
+513.20 1123.38
+24.75 2382.55 2719.79
+79.44
+–
+–
+> 80
+DiT-IC
+480.22
+750.38
+10.98
+718.17 1111.59
+14.47
+1581.91
+2448.49
+25.41
+AEIC
+25.15
+682.50
+6.95
+30.69 1943.15
+9.87
+62.70
+9303.96
+17.83
+CoD-Lite
+42.37
+60.47
+2.45
+73.61
+105.09
+3.97
+163.43
+236.05
+8.33
+MS-ILLM
+350.85
+379.01
+2.99
+516.47
+601.18
+4.87
+1305.93
+1613.82
+9.94
+Control-GIC
+610.76 2186.30
+69.99
+–
+–
+> 80
+–
+–
+> 80
+GLC
+340.746 475.738
+5.66 638.989 826.327
+9.71 1456.258 1816.005
+20.76
+DLF
+915.42 1416.49
+10.00 1380.00 2153.39
+12.61
+3001.08
+5122.21
+22.35
+ProGIC
+28.40
+55.00
+1.07
+38.63
+80.38
+1.46
+78.26
+145.24
+2.58
+RDVQ
+704.64
+809.99
+6.01
+953.80 1130.17
+10.08
+8575.63
+8655.58
+20.07
+EF-LIC
+19.53
+35.62
+0.65
+31.58
+55.50
+1.04
+65.24
+116.28
+2.10
+GR-GIC
+14.10
+21.44
+0.25
+22.76
+35.95
+0.31
+49.79
+81.14
+0.49
+0.1327 / 0.0713
+0.1558 / 0.0713
+0.1515 / 0.0758
+0.1654 / 0.1251
+DiT-IC
+GR-GIC (Ours)
+0.2203 / 0.0781
+OSCAR
+0.1844 / 0.0781
+0.1432 / 0.0929
+0.1705 / 0.0713
+OneDC
+RDEIC
+0.1761 / 0.0735
+0.2506 / 0.0809
+Original Image
+LPIPS / BPP
+LPIPS / BPP
+CoD-lite
+GR-GIC (Ours)
+ProGIC
+EF-LIC
+MS-ILLM
+Original Image
+Figure 7. Additional Kodak visuals with LPIPS and BPP labels, where lower is better.
+22
+
+
+0.1838 / 0.1098
+0.1013 / 0.0732
+0.2186 / 0.1124
+0.1182 / 0.1284
+DiT-IC
+GR-GIC (Ours)
+0.2433 / 0.1250
+OSCAR
+0.1369 / 0.0781
+0.2120 / 0.1135
+0.1146 / 0.0732
+OneDC
+RDEIC
+0.2171 / 0.1237
+0.1500 / 0.1306
+Original Image
+LPIPS / BPP
+LPIPS / BPP
+CoD-lite
+GR-GIC (Ours)
+ProGIC
+EF-LIC
+MS-ILLM
+Original Image
+Figure 8. Additional Tecnick visuals with LPIPS and BPP labels, where lower is better.
+0.1976 / 0.1093
+0.0797 / 0.1074
+0.2405 / 0.1264
+0.1135 / 0.1255
+DiT-IC
+GR-GIC (Ours)
+0.2537 / 0.1242
+OSCAR
+0.0999 / 0.1176
+0.2364 / 0.1098
+0.0951 / 0.1074
+OneDC
+RDEIC
+0.2353 / 0.1179
+0.1486 / 0.1493
+Original Image
+LPIPS / BPP
+LPIPS / BPP
+CoD-lite
+GR-GIC (Ours)
+ProGIC
+EF-LIC
+MS-ILLM
+Original Image
+Figure 9. Additional DIV2K visuals with LPIPS and BPP labels, where lower is better.
+0.1940 / 0.0719
+0.0716 / 0.1078
+0.2258 / 0.0765
+0.1147 / 0.1289
+DiT-IC
+GR-GIC (Ours)
+0.2842 / 0.0778
+OSCAR
+0.0975 / 0.1181
+0.2201 / 0.0746
+0.0843 / 0.1103
+OneDC
+RDEIC
+0.2371 / 0.0822
+0.1580 / 0.1101
+Original Image
+LPIPS / BPP
+LPIPS / BPP
+CoD-lite
+GR-GIC (Ours)
+ProGIC
+EF-LIC
+MS-ILLM
+Original Image
+Figure 10. Additional CLIC 2020 visuals with LPIPS and BPP labels, where lower is better.
+23
+
+
+0.1767 / 0.1098
+0.1340 / 0.1098
+0.2133 / 0.1105
+0.1597 / 0.1284
+DiT-IC
+GR-GIC (Ours)
+0.2204 / 0.1250
+OSCAR
+0.1619 / 0.1172
+0.2011 / 0.1098
+0.1505 / 0.1098
+OneDC
+RDEIC
+0.2024 / 0.1215
+0.1767 / 0.1306
+Original Image
+LPIPS / BPP
+LPIPS / BPP
+CoD-lite
+GR-GIC (Ours)
+ProGIC
+EF-LIC
+MS-ILLM
+Original Image
+Figure 11. Additional Tecnick visuals with LPIPS and BPP labels, where lower is better.
+0.2095 / 0.0729
+0.1048 / 0.0370
+0.2340 / 0.0817
+0.1430 / 0.1360
+DiT-IC
+GR-GIC (Ours)
+0.3043 / 0.0777
+OSCAR
+0.1422 / 0.0396
+0.2360 / 0.0852
+0.1362 / 0.0388
+OneDC
+RDEIC
+0.2479 / 0.0929
+0.2408 / 0.0585
+Original Image
+LPIPS / BPP
+LPIPS / BPP
+CoD-lite
+GR-GIC (Ours)
+ProGIC
+EF-LIC
+MS-ILLM
+Original Image
+Figure 12. Additional CLIC 2020 visuals with LPIPS and BPP labels, where lower is better.
+24
