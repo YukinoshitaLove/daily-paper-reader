@@ -1,0 +1,563 @@
+Title: ImageRSI: Verification-Driven Recursive Self-Improvement for Agentic Image Generation
+
+URL Source: https://arxiv.org/pdf/2610.32120v1
+
+Published Time: Mon, 26 Oct 2026 00:28:40 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# ImageRSI: Verification-Driven Recursive Self-Improvement for Agentic Image Generation 
+
+Shuo Han 1,2,∗ Zhilin Wang 2,∗ Peng Ling 2 Wenjia Gong 2
+
+Yang Liu 2 Guanjun Jiang 2 Yukun Cao 3,† Xike Xie 1,†
+
+> 1
+
+University of Science and Technology of China 
+
+> 2
+
+Qwen Business Unit of Alibaba, Alibaba Token Hub 
+
+> 3
+
+Xidian University    
+
+> shuo.han@mail.ustc.edu.cn ,{wzl446229,lingpeng.lp,wenjia.gwj,zhuda.zd,guanj.jianggj}@alibaba-inc.com ,
+> caoyukun@xidian.edu.cn ,xkxie@ustc.edu.cn
+> ∗Equal contribution. †Corresponding authors.
+
+Abstract 
+
+Complex text-to-image requests remain diffi-cult to satisfy reliably. Verifying and repair-ing an image can fix an individual output, but a successful repair does not necessarily carry over to other requests. We present ImageRSI ,a framework that keeps the image generator frozen and combines three components: five-dimensional verification and repair within each task, an experience library shared across tasks, and offline updating of the judge. Candidate ex-periences enter the library only after paired A/B validation, and the judge is updated with super-vised fine-tuning and GRPO on accumulated image–judgment records and evaluated before reuse. We also introduce ImageReq-Bench , a benchmark of 961 requests built around hard cases in real-world image-generation requests, each paired with an evaluation checklist. Im-ageRSI achieves a Checklist Strict Accuracy (CSA) of 52.6% on MindBench (with Nano Banana Pro as the generator) and 65.66% on ImageReq-Bench, and we compare system out-comes across judge-training configurations. 
+
+1 Introduction 
+
+Text-to-image models such as GPT-Image and Wan2.7-Image (Mao et al., 2026) generate high-quality images with fine-grained style control and strong instruction following. Yet requests that com-bine multiple constraints still reveal failures in fac-tual knowledge, exact text rendering, object counts, attribute binding, and spatial relations (Huang et al., 2023; Zhang et al., 2025; Sun et al., 2026). Re-quests may also leave some requirements implicit. For example, a request for a labeled diagram of a solar eclipse implicitly requires the Moon to appear between the Sun and Earth, with the three bodies aligned and legible labels identifying each body. Reliable generation therefore requires inferring the intended constraints, verifying that the resulting image satisfies them, and applying targeted repair when needed. Beyond fixing the current image, verification and repair leave trajectories that record the errors, the changes made to the generation conditions, and the resulting outcomes (Ye et al., 2025b; Yang et al., 2024; Zhu et al., 2025); these trajectories can pro-vide candidate strategies for future tasks. How-ever, a single successful repair does not establish that a strategy is reliable or transferable: stochastic generation can produce improvements by chance, redundant trajectories can overstate the evidence, and judge errors can reinforce incorrect diagnoses. Candidate experience therefore requires validation, explicit conditions of applicability, and criteria for revising or retiring it. Existing agentic systems address these issues only in part. Some apply verification and itera-tive repair to individual requests (Shen et al., 2026; Chen et al., 2025; Ouyang et al., 2026; He et al., 2026a; Feng et al., 2026a), and additionally incor-porate cross-task memory (Zhang et al., 2026c; Xiong et al., 2026). Retaining feedback, however, does not determine when the resulting experience is actually useful. Evaluation faces a related limi-tation: fixed-prompt benchmarks (Niu et al., 2025; He et al., 2026b) measures final-output quality, but it cannot by itself establish whether an agent im-proves as it accumulates experience across tasks. We propose ImageRSI , a verification-driven re-cursive self-improvement framework that couples within-task repair, cross-task experience reuse, and offline judger self-evolution, where the judger is the verification model that scores images. Within each task, the agent parses the request, retrieves rele-vant experience and, when needed, external knowl-edge, generates an image, and evaluates it for Align-ment, Faithfulness, Quality, Aesthetic, and Physics. Defect feedback then guides targeted prompt re-1arXiv:2610.32120v1 [cs.CV] 23 Oct 2026 pair while leaving the original requirements un-changed. Across tasks, an experience library stores candidate strategies, each recording when it ap-plies and when it does not, the prompt change it makes, and its observed effects and side effects; paired A/B validation decides which experiences are admitted for reuse. For judger self-evolution, selected trajectory images are paired with model-generated score-and-reason annotations for super-vised fine-tuning (SFT), followed by GRPO (Shao et al., 2024) to optimize scoring behavior. After evaluation, a candidate judge can guide verification and repair in a later collection round, yielding new records for further updates. Experience admission updates inference-time knowledge, whereas judger self-evolution updates the judge’s parameters of-fline; the image generator stays frozen throughout. Figure 1 gives a schematic example of task-level repair and cross-task reuse, and Figure 2 illustrates the three processes in detail. Our contributions are as follows: • We propose ImageRSI, a verification-driven recursive self-improvement framework for agentic image generation with a frozen image generator. Within each task, five-dimensional verification localizes unmet requirements, and repair rewrites the prompt to target these de-fects while locking the parsed requirements, so that satisfied requirements are preserved across rounds. • We formulate two complementary uses of re-pair trajectories: an experience library records when each strategy applies and requires paired A/B validation before reuse, while accumu-lated image–judgment records support offline judge post-training and evaluation before re-deployment. • We introduce ImageReq-Bench, a benchmark of 961 complex image-generation requests built around hard cases in real-world image-generation requests. Each request is linked to its source records and an evaluation check-list for assessing whether its requirements are jointly satisfied. • ImageRSI achieves state-of-the-art CSA on both benchmarks, reaching 52.6% on Mind-Bench and 65.66% on ImageReq-Bench and surpassing the strongest baselines by 10.2 and 9.28 pp, respectively. Li Bai’s Quiet Night Thought 
+
+> Moonlight on the floor in front of the bed.
+> How it works
+> Put a paper ticket into a bus fare-box slot.
+> One-shot Generation
+> Light under bed
+> Text prompt
+> Generate once
+> Not inserted
+> Static Workflow
+> Light in front
+> Check & fix
+> Still outside
+> ImageRSI (ours)
+> Rule verified
+> Verify & reuse
+> Inserted
+
+Figure 1: Schematic illustration of task-level repair and cross-task reuse of a relation-grounding strategy. 
+
+2 Related Work 
+
+Agentic image generation. Diffusion and multi-modal generators have substantially advanced im-age synthesis (Rombach et al., 2022; Podell et al., 2024; Esser et al., 2024; Sun et al., 2024; Team, 2024). However, satisfying factual, textual, spa-tial, and physical requirements that interact with one another remains challenging, as examined in MindBench and WISE (He et al., 2026b; Niu et al., 2025). Agentic approaches handle complex re-quests through planning, external tools, and itera-tive evaluation (Xue et al., 2024; He et al., 2026b; Zhang et al., 2026c), and Qwen-Image-Agent al-ready reuse memory across tasks (Zhang et al., 2026c). ImageRSI additionally specifies an explicit validation protocol and applicability conditions for candidate experience. 
+
+Experience-driven improvement. Prior work has used verification and search to improve reason-ing (Hosseini et al., 2024; Zhang et al., 2024; Cao et al., 2025; Fan et al., 2025), distilled lessons from agent trajectories (Zhao et al., 2024), and explored iterative improvement of programs or agent con-text (Zelikman et al., 2024; Zhang et al., 2026a,b; Yang et al., 2026; Wei et al., 2026; Wu et al., 2026; Zheng et al., 2026). ImageRSI brings these ideas to image generation in two ways: it admits reusable experience through A/B testing, and it supports judger self-evolution through offline post-training on versioned verification records. Experience vali-dation checks whether a piece of experience applies before it is activated, and the judge-training loop turns newly collected failures and successes into supervision for later versions. 23 Method 
+
+3.1 Overview 
+
+ImageRSI uses image verification to repair the cur-rent output, maintain experience for later tasks, and accumulate training records for offline judger self-evolution. These processes address three con-nected challenges: identifying unmet requirements, deciding when a repair strategy can be reused, and adapting the judge to observed failures. For task t, let qt denote the request, it an op-tional input image, and Mt−1 the available expe-rience library. Given a frozen image generator G
+
+and the judge J(k) from training iteration k, the task-level workflow produces an image xt and a trajectory τt that records the generation conditions, verification results, and repair actions. As shown in Figure 2, this trajectory provides both candidate experience for M and supervision for a later judge version. Experience updates the inference-time context, whereas judger self-evolution updates the judge’s parameters between data-collection rounds. The generator stays frozen throughout each run. 
+
+3.2 Online Generation and Verification Requirement-preserving generation. The workflow first parses qt into a set of requirements 
+
+Ct = {ct, 1, . . . , c t,m }, covering entities, attributes, counts, spatial relations, exact text, layout, and image-to-image (I2I) preservation or exclusion conditions. Holding Ct fixed across repair rounds gives a stable target: a revision must satisfy an unmet requirement rather than drop it from the evaluation criteria. Generation context combines factual and visual evidence, gathered through bounded ReAct-style retrieval (Yao et al., 2022), with procedural advice drawn from active experience. A language model selects the relevant entries from a compact meta-data index and adapts their actions to the current request (Appendix C.1). At round r, the prompt combines the request, the fixed requirements, the available evidence, the selected experience, and feedback from earlier rounds. After a failed round, experience selection is rerun with the observed defects as additional con-text, and the image generator produces one image from the resulting conditions. Appendix C.3 gives the prompt interfaces for each stage. 
+
+Verification and targeted repair. The judge evaluates five core dimensions: Alignment (sat-isfaction of explicit instructions), Faithfulness 
+
+(correct referents and factual content), Quality 
+
+(visible defects), Aesthetic (visual presentation), and Physics (physical or spatial coherence). For each dimension, the verification interface returns a score, defect evidence, and a confidence value. For trained judges, which do not output confidence, an inference adapter supplies constant values (Ap-pendix D.1). Deterministic rules convert these judg-ments into an acceptance decision. Let At be the set of active dimensions. For each active dimension d, let st,r,d denote the score of image xt,r and at,r,d a confidence adjustment. The aggregate score is then 
+
+bwt,r,d = wdat,r,d 
+
+P 
+
+> j∈A t
+
+wj at,r,j 
+
+,S(xt,r ) = X
+
+> d∈A t
+
+bwt,r,d st,r,d . (1) An image is accepted only if it meets the score threshold and triggers no hard veto (Appendix A.2). Scoring is based on the request, the parsed re-quirements, and the image evidence; a separate attribution step may then examine the generation prompt and the selected experience to propose re-pairs, without altering the scores. A separately enabled constraint-aware variant checks each original requirement individually and keeps already-satisfied clauses intact during repair (Appendix A.3). 
+
+Stopping and delivery. The workflow stops at the first accepted round or once its generation bud-get is exhausted (Appendix A.1). If no judged round is accepted, it returns the highest-scoring available image as a fallback. 1 Trajectories are retained for both accepted and fallback outputs. 
+
+3.3 Cross-Task Experience 
+
+A correction observed on one task may depend on the specifics of that task or on variability in genera-tion. The experience protocol therefore separates 
+
+candidate extraction from admission for reuse .
+
+From trajectories to candidate strategies. The extractor proposes a procedural strategy by ex-amining observed defects, prompt changes, and post-repair outcomes. Each candidate strategy records a Trigger , Negative Trigger , Action , Ef-fect , and Known Side Effects . A versioned ex-perience library links each entry to its retrieval 
+
+> 1External CSA evaluation is separate from in-loop accep-tance (Appendix B.2).
+
+3Data Flow  Update  Frozen G
+
+trajectory τt
+
+(b) Cross-task experience 
+
+↻ Paired Gain 
+
+1 Extraction  
+
+> Candidate e
+
+2 Admission  
+
+> With vs. w/o e
+
+3 Activation  
+
+> Library ℳt
+
+(c) Judger self-evolution (offline) 
+
+↻ Offline Cycle 
+
+1 Collection 
+
+> Records
+
+𝒟 (k) 
+
+2 Training  
+
+> SFT GRPO
+
+3 Evaluation  
+
+> Candidate J(k+1)
+
+Training Records 
+
+> Active Lbrary
+> ℳ
+> t
+> updated judge J(k+1)
+
+Candidates   
+
+> CtEtet,r
+
+(a) Online generation and verification            
+
+> “Irène Joliot-Curie presents her
+> results to two assistants standing
+> behind the instruments.”
+> Round 1
+> S= 3.71 < θ
+> Context assembly Generation Judging and repair
+> S(xt,r ) = Σdŵdst,r,d ≥ θ ?
+> Judge J(k)
+> ✗Alignment 2
+> no presenting to
+> assistants
+> + show record to
+> assistants
+> − facing forward
+> Round 2
+> ✓Presents to assistants
+> S = 4.42, best of 2
+> delivered
+
+localized repair: round r → r+1         
+
+> pt,r = Prompt( qt,Ct,Et,et,r ,f<r )xt,r =G(pt,r )
+
+1 2 3            
+
+> Δe(q) = u(xq+e ,q) − u(xq−e ,q)J(k) →
+> 𝒟 (k) →SFT →GRPO →J(k+1)
+
+Figure 2: Overview of ImageRSI. (a) Online generation and verification: the frozen generator G produces an image, and the judge J(k) verifies it and guides targeted repair. (b) Cross-task experience: candidates extracted from trajectories are admitted by paired A/B validation and activated for later tasks. (c) Offline judger self-evolution: trajectory records train a candidate judge with SFT and GRPO, which replaces J(k) after evaluation. Solid and dashed arrows denote data flow and updates, respectively. 
+
+metadata, source trajectories, and trial records. Ap-pendices C.1 and C.2 detail the record fields and representative entries. 
+
+Paired admission and maintenance. For a can-didate e, the validation protocol compares images generated with and without its action, keeping the request, upstream inputs, generator configuration, and seed fixed. A blinded evaluator scores the resulting image pair. For validation task q, the recorded difference is 
+
+∆e(q) = u(x+eq , q ) − u(x−eq , q ), (2) where u is the score assigned by the paired evalu-ator, which is distinct from the in-loop aggregate 
+
+S. Calibration tests whether eligible trials support reuse, and a separate holdout phase tests the candi-date before it is activated. Both phases account for improvements as well as regressions, following the admission criteria in Appendix A.4. The admission protocol promotes a candidate version to the active library after calibration and holdout. Trigger and Negative Trigger conditions constrain when these versions are later selected, and recorded outcomes inform their revision, con-solidation, or retirement. Unless experience evolu-tion is explicitly enabled, evaluation uses a fixed snapshot of the library. 
+
+3.4 Judger Self-Evolution 
+
+Judger self-evolution updates the judger, i.e., the verification model that serves as the in-loop judge, using records accumulated during generation and repair. The judge remains fixed within a task; pa-rameter updates take place offline between col-lection rounds. This process converts task-level observations into supervision for later judge ver-sions, whose five-dimensional scores and evidence-based explanations support acceptance decisions and prompt repair. 
+
+From trajectories to training records. Genera-tion and repair under judge J(k) produce trajecto-ries T (k). Selected images are paired with score-and-reason annotations to form a versioned training set D(k). Each input z = ( q, C, E, i, x ) contains 4the request, parsed requirements, permitted evi-dence, optional task input image, and generated image; its target y contains a score and an evidence-based reason for each dimension. Targets come from model-generated annotations; acceptance by 
+
+J(k) is not treated as ground truth. For example, an image that omits requested text can receive a low Alignment score with an explanation of the omis-sion. Each data version combines retained records with additional or oversampled cases addressing observed scoring weaknesses (Appendix D.1). 
+
+Post-training the judge. SFT trains the judge to predict y from z, with loss computed only on response tokens (Appendix D.2). The GRPO stage, trained on requests disjoint from the SFT data, fur-ther optimizes scoring behavior while preserving the score-and-reason output format. 2 Its reward combines pointwise assessment of the five scores and their rationales with a within-group ranking adjustment; severe false accepts and critical fabri-cations or omissions place the reward in a lower band that accurate assessments on other dimensions cannot offset (Appendix D.2). Section 4.4 evalu-ates these stages through both scoring error and CSA. 
+
+Returning the updated judge to the workflow. 
+
+After evaluation, a candidate J(k+1) can replace the in-loop judge in Section 3.2: its scores enter Equa-tion 1, and its reasons guide prompt repair. Subse-quent runs then produce records for another offline update. Collection, post-training, evaluation, and redeployment define the proposed self-evolution cycle. Training annotation, in-loop verification, and external CSA evaluation serve distinct roles; external test verdicts are not fed back into gener-ation. The reported judge configurations evaluate the post-training stages, while repeated collection– training cycles remain a proposed extension. 
+
+4 Experiments 
+
+We organize our experiments around three ques-tions: (i) how ImageRSI performs end to end com-pared with generative models and agent systems (§4.1); (ii) how localized repair and experience reuse each contribute to its gains (§4.2 and §4.3); and (iii) whether post-training the judge on the 
+
+> 2Advanced post-training methods (Liu et al., 2026; Deng et al., 2026; Han et al., 2026; Deng et al., 2025b; Feng et al., 2026b; Ma et al., 2026) are orthogonal to our framework and can be naturally integrated. We adopt standard GRPO to keep the optimization protocol general and reproducible.
+
+system’s accumulated judgment records improves end-to-end performance (§4.4). 
+
+4.1 Main Results 4.1.1 Experimental Setup Benchmarks. MindBench (He et al., 2026b) contains 500 image-generation requests requiring world knowledge or reasoning across ten cate-gories; three categories (Life, GU, and Math) in-volve image-to-image (I2I) tasks with an input im-age. ImageReq-Bench, constructed in this work, contains 961 requests across four reporting cate-gories: Illustration, Scene, Infographic, and Design & Art. Each request is paired with an evaluation checklist, yielding 8,165 check items in total. We use a category-stratified split into an experience set (530 requests), used to construct the experience library, and a disjoint test set (431 requests) for evaluation. Table 2 reports results on the test set. 
+
+Metric. We adopt Checklist Strict Accuracy (CSA): a request counts as passed only if the de-livered image satisfies every item on its checklist. Requests without a generated image or with an eval-uator error count as failures, so the denominator includes every request in the evaluation set. The external evaluator is Gemini 3.1 Pro; it is indepen-dent of the system’s internal judge, and its verdict on a request is never fed back into the generation of that request. 
+
+Implementation details. The generator is al-ways frozen: Qwen-Image-2.0 for the main Mind-Bench results and the judge experiments (§4.4), and Wan2.7-Image elsewhere. The internal judge scores each image along five dimensions: Align-ment, Faithfulness, Quality, Aesthetic, and Physics (§3.2). An image is accepted if its weighted score is at least 4.5 and no veto is triggered; otherwise, the system repairs the localized defects, using zero, one, or two repair rounds per request. For each baseline, we report the higher of our reproduction and the value claimed in its original paper. 
+
+4.1.2 Results on MindBench 
+
+As shown in Table 1, ImageRSI achieves an over-all CSA of 48.2%, outperforming all baselines. It improves over direct generation with its own gener-ator, Qwen-Image-2.0 (22.4%), by 25.8 percentage points (pp), and over the strongest agent baseline, GEMS (He et al., 2026c)(42.4%), by 5.8 pp; with Wan2.7-Image, ImageRSI reaches 47.4%. Per cate-gory, ImageRSI ranks first on IP (30%) and leads 5most clearly on Math (80% vs. 46% for Nano Ba-nana Pro). Replacing the generator with Nano Banana Pro raises the overall CSA of ImageRSI to 52.6% (263/500), 4.4 pp higher than the Qwen-Image-2.0 version; the difference comes mainly from SE (70% vs. 48%) and SL (72% vs. 56%). 
+
+4.1.3 Results on ImageReq-Bench 
+
+As shown in Table 2, ImageRSI achieves the high-est overall CSA, 65.66%. It improves over di-rect generation with Wan2.7-Image (38.28%) by 27.38 pp; over the strongest generative model, Nano Banana (56.38%), and the strongest agent baseline, GEMS (55.68%), by 9.28 and 9.98 pp, respectively; and over MemoGen R2 (47.56%) and SCOPE (Ren et al., 2026) (46.87%) by 18.10 and 18.79 pp. Per category, ImageRSI ranks first on Il-lustration, Scene, and Infographic. On Illustration and Scene, which together account for 75.2% of the test set, it leads the runner-up, GEMS, by 9.17 and 11.58 pp. 
+
+4.2 Effectiveness of Verification and Repair 
+
+We first test whether the gain from verification and repair comes only from generating one additional image, by comparing second-round strategies un-der the same generation budget. 
+
+Experimental settings. The repair and experience-reuse ablations (§4.2 and §4.3) use the test set defined in §4.1.1, with Wan2.7-Image for generation and Gemini 3.1 Pro for evaluation. 
+
+Compared strategies. All strategies share the same first-round image. If the judge accepts it, the image is delivered directly; otherwise, one of the following strategies generates a second image. Each request therefore receives at most two images, and all strategies have the same generation budget. (i) Best-of-2 resampling: regenerate with the same prompt and let the judge select the better image; (ii) Generic-feedback repair: ask the rewriter to revise the original prompt without specifying the defects; (iii) Localized repair (ImageRSI): spec-ify the localized defects in the rewrite instruction and lock the parsed requirements (§3.2) so that sat-isfied requirements are preserved. We also ablate requirement locking by removing it from localized repair, keeping all else unchanged. 
+
+Results. As shown in Figure 3a, localized re-pair raises CSA from 53.4% to 65.7% (+12.3 pp), 10.7 pp above Best-of-2 resampling, which gains only 1.6 pp. The gain therefore does not come from the additional generation alone. Generic-feedback repair gains only 3.2 pp, indicating that signaling failure alone is of limited help. Without require-ment locking, CSA drops to 57.8%, 7.9 pp below full localized repair, suggesting that locking con-tributes substantially to the gain. Figure 4 presents two cases. Case (a) requires a desert roadside gas station to display a complete, legible Shell emblem, comprising the scallop-shell graphic and the brand name “Shell,” on both the canopy front and the fuel-pump casing. In the first-round image, both emblems show only the graphic without the text, failing the three text-related check items (6/9); the judge correctly localizes the miss-ing brand name. Case (b) requires the main charac-ter to present measurement results to two assistants in a radiation laboratory, with detailed constraints on her appearance and clothing and on how the two assistants differ. In the first-round image, she faces forward while operating an instrument, without in-teracting with the assistants, who are also not stand-ing behind the instruments; two items fail (8/10), and the judge identifies the missing interaction with the assistants. In both cases, the second images from Best-of-2 resampling and generic-feedback repair fail to fix these errors; in case (b), the generic-feedback image even contains three assistants and loses two previously satisfied requirements (6/10). Localized repair instead states the defect in the rewritten prompt and excludes it in the negative prompt (“graphic only, no text”; “facing forward and operating an instrument, no interaction”), after which all items pass in both cases. 
+
+4.3 Experience Reuse 
+
+Beyond repairing a single request, ImageRSI reuses experience across requests. We examine whether experience accumulated from past trajectories im-proves performance on new requests, and whether the gain grows with library size. 
+
+Experience construction and use. Taking the final prompt delivered to the generator as the trajec-tory and the external evaluator’s per-item verdicts as supervision, Qwen3.8-Max distills one candi-date experience per request in the experience set. Each candidate specifies the applicable request type (with proper nouns, numbers, and text content re-moved), at most three sentences of prompt-writing advice, and the check items most prone to failure 6Method SE Weather MC IP WK SL Poem Life GU Math Overall 
+
+Generative models 
+
+SD-3.5-M 0.02 0.00 0.00 0.00 0.02 0.00 0.00 – – – 0.00 Bagel (Deng et al., 2025a) 0.02 0.00 0.00 0.00 0.00 0.02 0.02 0.02 0.00 0.08 0.02 Qwen-Image (Wu et al., 2025) 0.08 0.00 0.04 0.00 0.00 0.04 0.00 0.04 0.00 0.00 0.02 Echo-4o (Ye et al., 2025a) 0.04 0.00 0.00 0.00 0.00 0.02 0.06 0.02 0.02 0.02 0.02 DraCo (Jiang et al., 2026) 0.02 0.00 0.02 0.00 0.00 0.02 0.02 0.04 0.02 0.06 0.02 Wan2.7-Image 0.00 0.02 0.24 0.06 0.00 0.20 0.06 0.06 0.08 0.12 0.084 GPT-Image-1 0.32 0.06 0.22 0.02 0.16 0.32 0.10 0.24 0.10 0.12 0.17 Nano Banana 0.30 0.10 0.12 0.00 0.30 0.32 0.36 0.20 0.04 0.08 0.18 FLUX 2 Pro 0.38 0.12 0.08 0.00 0.20 0.44 0.64 0.18 0.04 0.02 0.21 GPT-Image-1.5 0.36 0.18 0.22 0.04 0.30 0.34 0.08 0.34 0.10 0.02 0.198 FLUX 2 Max 0.44 0.12 0.10 0.04 0.38 0.40 0.50 0.20 0.02 0.06 0.23 Qwen-Image-2.0 (Zhao et al., 2026) 0.19 0.24 0.23 0.04 0.12 0.42 0.58 0.12 0.02 0.28 0.224 Seedream 4.5 0.16 0.18 0.30 0.06 0.32 0.36 0.58 0.18 0.30 0.24 0.268 Nano Banana Pro 0.50 0.36 0.40 0.16 0.56 0.62 0.68 0.30 0.16 0.46 0.420 
+
+Agent systems 
+
+Mind-Brush 0.54 0.16 0.62 0.18 0.40 0.26 0.54 0.10 0.16 0.14 0.31 GenSearcher-style (Feng et al., 2026a) 0.42 0.34 0.70 0.26 0.66 0.64 0.08 0.32 0.30 0.44 0.416 Qwen-Image-Agent 0.60 0.28 0.70 0.16 0.28 0.58 0.82 0.24 0.20 0.34 0.42 GEMS 0.38 0.48 0.56 0.16 0.60 0.44 0.66 0.18 0.38 0.40 0.424 
+
+ImageRSI (Wan2.7-Image) 0.42 0.30 0.72 0.28 0.46 0.56 0.72 0.28 0.22 0.78 0.474 
+
+ImageRSI (Qwen-Image-2.0) 0.48 0.30 0.62 0.30 0.50 0.56 0.74 0.30 0.22 0.80 0.482 
+
+ImageRSI (Nano Banana Pro) 0.70 0.24 0.62 0.26 0.58 0.72 0.76 0.30 0.26 0.82 0.526 
+
+Table 1: Per-category CSA on MindBench. Best results are in bold and second-best ones are underlined; ImageRSI rows are shaded. SE: special events; MC: new movie characters; IP: popular IPs; WK: world knowledge; SL: science and logic; GU: map-to-view. First-round image only Best-of-2 resampling Generic-feedback repair Localized repair (w/o req. locking) 
+
+> Localized repair (ImageRSI)
+> 53.4 55.0 (+1.6) 56.6 (+3.2) 57.8 (+4.4)
+> 65.7 (+12.3)
+
+(a) Second-round strategy 
+
+> 0 entries (no experience) 131 entries (25%) 266 entries (50%)
+> 527 entries (100%)
+> 55.7 56.8 (+1.2) 61.3 (+5.6)
+> 65.7 (+10.0)
+
+(b) Experience library size 
+
+Figure 3: Ablation studies of repair strategies and experience library size on the held-out test set. (a) Second-round strategies with a shared first-round image and at most two images per request; bars show the gain over the first-round image only (pp), and labels give CSA (%) with the gain. (b) CSA with nested experience libraries of 0, 131, 266, and 527 entries. 
+
+for such requests. We retain 527 experiences after applying the admission protocol in Appendix A.4. At inference time, the system retrieves the three most similar experiences by character-bigram TF-IDF similarity and injects them into prompt rewrit-ing in both the first round and the repair round; all other settings follow localized repair in §4.2. 
+
+Library size. We arrange the experience-set re-quests in a fixed random order and take successive prefixes to build four nested libraries with 0, 131, 266, and 527 experiences, corresponding to roughly 0%, 25%, 50%, and 100% of the full library. The libraries differ only in size. 
+
+Results. As shown in Figure 3b, CSA increases monotonically with library size: 55.7%, 56.8%, 61.3%, and 65.7%. The full library improves CSA by 10.0 pp over using no experience and exceeds the 25% and 50% libraries by 8.8 and 4.4 pp, re-spectively. The benefit of experience reuse thus grows with the size of the library. 
+
+4.4 Recursive Self-Improvement 
+
+ImageRSI improves itself at two levels. Within a task, it revises its output round by round based on judge feedback; across tasks, it distills trajectories into experience and updates the judge with accu-mulated judgment records. This section evaluates the judge update (§3.4). 
+
+Setup. We train Qwen3.8-27B with supervised fine-tuning (SFT) on 30%, 60%, and 100% of the SFT training set, obtaining SFT 30% , SFT 60% ,and SFT 100% . We then train GRPO 100% with 7Round 1 (6/9) Best-of-2 (6/9) Generic feedback (6/9) ImageRSI (9/9)                  
+
+> Round 1 (8/10) Best-of-2 (8/10) Generic feedback (6/10) ImageRSI (10/10)
+> (a)
+> ✗'Shell' on canopy and pump ✗'Shell' on canopy and pump ✗'Shell' on canopy and pump ✓'Shell' on canopy and pump
+> (b)
+> ✗Showing results to assistants ✗Showing results to assistants ✗Showing results to assistants ✓Showing results to assistants
+
+Figure 4: Verification-and-repair cases from the test set: (a) case 1006; (b) case 0656. Each row shows the first-round image and the second-round image of each strategy; parentheses give the passed check items, and marks give the external verdict on the key item failed in the first round. In (b), the judge ultimately delivers the first-round image under Best-of-2 resampling and generic-feedback repair. 
+
+Method Illus. Scene Info. D&A All 
+
+Generative models 
+
+Qwen-Image-2.0 38.43 35.79 35.38 16.67 35.27 Wan2.7-Image 42.36 30.53 35.38 38.10 38.28 Seedream 4.5 49.34 35.79 40.00 52.38 45.24 Nano Banana 57.64 50.53 50.77 71.43 56.38 
+
+Agent systems 
+
+Mind-Brush 39.74 35.79 32.31 28.57 36.66 Qwen-Image-Agent 46.29 33.68 36.92 40.48 41.53 GenSearcher-style 49.78 40.00 35.38 45.24 45.01 SCOPE 50.22 38.95 43.08 52.38 46.87 MemoGen R2 54.15 38.95 38.46 45.24 47.56 GEMS 59.83 52.63 52.31 45.24 55.68 
+
+ImageRSI 69.00 64.21 53.85 69.05 65.66 
+
+Table 2: CSA (%) on the ImageReq-Bench test set by category. Best results are in bold and second-best ones are underlined. Illus.: Illustration; Info.: Infographic; D&A: Design & Art. 
+
+GRPO initialized from SFT 100% on a separate GRPO training set whose requests do not overlap with the SFT set, keeping the SFT output format. The GRPO reward combines pointwise assessment with within-group ranking (Appendix D.2). The pointwise term scores both the five-dimensional scores, through the weighted scoring error and per-dimension agreement with the target label at the pass boundary (score ≥ 4), and the rationales, by checking whether each criticism is supported by the image and the request. Malformed outputs re-ceive the lowest reward; accepting an image whose target alignment or faithfulness score is at most 2, or making a critical fabrication or omission, moves the reward into a separate lower band that accu-
+
+Internal judge MAE ↓ MindBench CSA (%) 
+
+Frozen closed-source models 
+
+Qwen3.6-Plus – 24.2 Qwen3.7-Plus – 43.4 GPT-6-Astra – 44.2 
+
+Qwen3.8-27B with judge training 
+
+Base (untrained) 0.598 38.6 SFT 30% 0.596 39.8 SFT 60% 0.582 40.2 SFT 100% 0.453 44.8 
+
+GRPO 100 % 0.403 48.2 
+
+Table 3: End-to-end MindBench results with different internal judges. Best values are in bold and second-best values are underlined. MAE is computed against teacher scores on the same 90 images (–: not reported); end-to-end runs use the Qwen-Image-2.0 generator, at most two repair rounds, and a frozen experience library. 
+
+rate assessments on other dimensions cannot off-set. We report the mean absolute error (MAE) against teacher-model reference scores and the end-to-end CSA when each judge is plugged into the full pipeline. For reference, we also report results with off-the-shelf multimodal LLMs used as the internal judge without training. 
+
+Results. As shown in Table 3, as the training data grows from 30% to 100%, the MAE of the SFT judges decreases from 0.596 to 0.453 (base model: 0.598), and CSA increases from 39.8% to 44.8% (base model: 38.6%). GRPO further reduces MAE to 0.403 and raises CSA to 48.2%, the best on both metrics, improving over SFT 100% by 0.050 and 3.4 pp, respectively. Off-the-shelf judges yield 8CSA between 24.2% (Qwen3.6-Plus) and 44.2% (GPT-6-Astra), showing that the choice of judge markedly affects system performance. Base model without updates (38.6%) falls below Qwen3.7-Plus and GPT-6-Astra, whereas after SFT and GRPO (48.2%) it surpasses all off-the-shelf judges, ex-ceeding GPT-6-Astra by 4.0 pp. Training on the system’s own accumulated judgment records thus enables the 27B judge to outperform every off-the-shelf judge we evaluated. 
+
+5 Conclusion 
+
+ImageRSI couples five-dimensional verification and targeted repair with a validated cross-task ex-perience library and offline judger self-evolution under a frozen image generator. It reaches 52.6% CSA on MindBench with Nano Banana Pro and 65.66% on ImageReq-Bench. Under a matched generation budget, localized repair with require-ment locking outperforms resampling and generic feedback, and CSA increases with the size of the ex-perience library; post-training the judge on accumu-lated judgment records further improves end-to-end CSA. The gains from repeated collection–training cycles remain to be evaluated. 
+
+Limitations 
+
+We evaluate ImageRSI with several base image generators. Our focus is on improving generation quality for a given generator through verification, repair, and cross-task experience reuse. A related application arises when the base generator is re-placed. Here, existing experience could be reused to reduce the cost of accumulating it again. For ex-ample, one could study which experiences transfer directly and which need to be adapted to the charac-teristics of the new generator. Such optimizations could be added to the existing pipeline as an op-tional extension of the experience library, and they are independent of the contributions of our method. 
+
+References 
+
+Yukun Cao, Shuo Han, Zengyi Gao, Zezhong Ding, Xike Xie, and S Kevin Zhou. 2025. Graphinsight: Unlocking insights in large language models for graph structure understanding. In Proceedings of the 63rd Annual Meeting of the Association for Compu-tational Linguistics (Volume 1: Long Papers) , pages 12096–12134. Chieh-Yun Chen, Min Shi, Gong Zhang, and Humphrey Shi. 2025. T2i-copilot: A training-free multi-agent text-to-image system for enhanced prompt interpretation and interactive generation. In 2025 IEEE/CVF International Conference on Computer Vision (ICCV) , pages 19396–19405. IEEE. Chaorui Deng, Deyao Zhu, Kunchang Li, Chenhui Gou, Feng Li, Zeyu Wang, Shu Zhong, Weihao Yu, Xiao-nan Nie, Ziang Song, et al. 2025a. Emerging proper-ties in unified multimodal pretraining. arXiv preprint arXiv:2505.14683 .Jingcheng Deng, Liang Pang, Zihao Wei, Shicheng Xu, Zenghao Duan, Kun Xu, Yang Song, Huawei Shen, and Xueqi Cheng. 2025b. Llm latent rea-soning as chain of superposition. arXiv preprint arXiv:2510.15522 .Jingcheng Deng, Zihao Wei, Liang Pang, Junhong Wu, Shicheng Xu, Zenghao Duan, and Huawei Shen. 2026. Latent-grpo: Group relative policy optimization for latent reasoning. arXiv preprint arXiv:2604.27998 .Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Do-minik Lorenz, Axel Sauer, Frederic Boesel, et al. 2024. Scaling rectified flow transformers for high-resolution image synthesis. In Forty-first interna-tional conference on machine learning .Shengda Fan, Xin Cong, Zhong Zhang, Yuepeng Fu, Yesai Wu, Hao Wang, Xinyu Zhang, Enrui Hu, and Yankai Lin. 2025. Generalizing experience for lan-guage agents with hierarchical metaflows. In Ad-vances in Neural Information Processing Systems ,volume 38, Main Conference, pages 64103–64132. Curran Associates, Inc. Kaituo Feng, Manyuan Zhang, Shuang Chen, Yunlong Lin, Kaixuan Fan, Yilei Jiang, Hongyu Li, Dian Zheng, Chenyang Wang, and Xiangyu Yue. 2026a. Gen-searcher: Reinforcing agentic search for image generation. arXiv preprint arXiv:2603.28767 .Yuan Feng, Qize Yang, Ruizhe Chen, Sibo Song, Haolin He, Muzhi Zhu, Zihan Liu, Yunfei Chu, Xize Cheng, Yuxuan Wang, et al. 2026b. Visionweave: Weaving elastic visual representations as a native capability of mllms. arXiv preprint arXiv:2610.07987 .Shuo Han, Yukun Cao, Zezhong Ding, Zengyi Gao, S Kevin Zhou, and Xike Xie. 2026. See or say graphs: Agent-driven scalable graph understanding with vision-language models. In Findings of the As-sociation for Computational Linguistics: ACL 2026 ,pages 41565–41589. Haolin He, Yunfei Chu, Qi Chen, Wen Huang, Yuan Feng, Muzhi Zhu, Zheqi Dai, Haoning Xu, Dongchao Yang, Chunyat Wu, et al. 2026a. Omnivchat: Synthe-sizing, benchmarking, and training for native audio-visual dialogue. arXiv preprint arXiv:2609.21465 .Jun He, Junyan Ye, Zilong Huang, Dongzhi Jiang, Chen-jue Zhang, Leqi Zhu, Renrui Zhang, Xiang Zhang, and Weijia Li. 2026b. Mind-brush: Integrating agen-tic cognitive search and reasoning into image genera-tion. arXiv preprint arXiv:2602.01756 .
+
+9Zefeng He, Siyuan Huang, Xiaoye Qu, Yafu Li, Tong Zhu, Yu Cheng, and Yang Yang. 2026c. Gems: Agent-native multimodal generation with memory and skills. arXiv preprint arXiv:2603.28088 .Arian Hosseini, Xingdi Yuan, Nikolay Malkin, Aaron Courville, Alessandro Sordoni, and Rishabh Agar-wal. 2024. V-star: Training verifiers for self-taught reasoners. arXiv preprint arXiv:2402.06457 .Kaiyi Huang, Kaiyue Sun, Enze Xie, Zhenguo Li, and Xihui Liu. 2023. T2i-compbench: A comprehen-sive benchmark for open-world compositional text-to-image generation. Advances in Neural Information Processing Systems , 36:78723–78747. Dongzhi Jiang, Renrui Zhang, Haodong Li, Zhuofan Zong, Ziyu Guo, Jun He, Claire Guo, Junyan Ye, Rongyao Fang, Weijia Li, et al. 2026. Draco: Draft as cot for text-to-image preview and rare concept gen-eration. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 5903–5914. Jiacai Liu, Chaojie Wang, Chris Liu, Liang Zeng, Rui Yan, Yiwen Sun, and Yang Liu. 2026. Dapo: Improv-ing multi-step reasoning abilities of large language models with direct advantage-based policy optimiza-tion. Advances in Neural Information Processing Systems , 38:71445–71477. Chiyu Ma, Shuo Yang, Kexin Huang, Jinda Lu, Haoming Meng, Shangshang Wang, Bolin Ding, Soroush Vosoughi, Guoyin Wang, and Jingren Zhou. 2026. Fipo: Eliciting deep reasoning with future-kl influenced policy optimization. arXiv preprint arXiv:2603.19835 .Chaojie Mao, Chen-Wei Xie, Chongyang Zhong, Haoyou Deng, Jiaxing Zhao, Jie Xiao, Jinbo Xing, Jingfeng Zhang, Jingren Zhou, Jingyi Zhang, et al. 2026. Wan-image: Pushing the boundaries of generative visual intelligence. arXiv preprint arXiv:2604.19858 .Yuwei Niu, Munan Ning, Mengren Zheng, Weiyang Jin, Bin Lin, Peng Jin, Jiaqi Liao, Chaoran Feng, Fanqing Meng, Kunpeng Ning, et al. 2025. Wise: A world knowledge-informed semantic evaluation for text-to-image generation. arXiv preprint arXiv:2503.07265 .Ziheng Ouyang, Yiren Song, Yaoli Liu, Shihao Zhu, Qibin Hou, Ming-Ming Cheng, and Mike Zheng Shou. 2026. The consistency critic: Correcting incon-sistencies in generated images via reference-guided attentive alignment. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recog-nition , pages 2035–2046. Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe Penna, and Robin Rombach. 2024. Sdxl: Improving latent diffusion models for high-resolution image synthesis. In International Conference on Learning Representa-tions , volume 2024, pages 1862–1874. Tianfei Ren, Zhipeng Yan, Yiming Zhao, Zhen Fang, Yu Zeng, Guohui Zhang, Hang Xu, Xiaoxiao Ma, Shiting Huang, Ke Xu, et al. 2026. Scope: Struc-tured decomposition and conditional skill orchestra-tion for complex image generation. arXiv preprint arXiv:2605.08043 .Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. 2022. High-resolution image synthesis with latent diffusion mod-els. In 2022 IEEE/CVF conference on computer vision and pattern recognition (CVPR) , pages 10674– 10685. ieee. Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, et al. 2024. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 .Shaocheng Shen, Jianfeng Liang, Chunlei Cai, Cong Geng, Huiyu Duan, Xiaoyun Zhang, Qiang Hu, and Guangtao Zhai. 2026. Agentic retoucher for text-to-image generation. In Conference on Computer Vision and Pattern Recognition 2026 .Kaiyue Sun, Rongyao Fang, Chengqi Duan, Xian Liu, Aoxue Li, and Xihui Liu. 2026. T2i-reasonbench: Benchmarking reasoning-informed text-to-image generation. In Findings of the Association for Com-putational Linguistics: ACL 2026 , pages 8919–8944. Quan Sun, Qiying Yu, Yufeng Cui, Fan Zhang, Xiaosong Zhang, Yueze Wang, Hongcheng Gao, Jingjing Liu, Tiejun Huang, and Xinlong Wang. 2024. Emu: Generative pretraining in multimodality. In In-ternational conference on learning representations ,volume 2024, pages 12352–12380. Chameleon Team. 2024. Chameleon: Mixed-modal early-fusion foundation models. arXiv preprint arXiv:2405.09818 .Zihao Wei, Wenjie Shi, Liang Pang, Jingcheng Deng, Shicheng Xu, Shasha Guo, Zenghao Duan, Jia-hao Liu, Jingang Wang, Huawei Shen, et al. 2026. Dynamic rollout editing for reducing overthink-ing in rl-trained reasoning models. arXiv preprint arXiv:2606.17890 .Bingxian Wu, Yu Zhang, Zonghao Guo, Tang Liu, Chen Qian, Yuxiang Lu, Xingbo Du, Yanghao Li, Yidan Zhang, Chi Chen, Ling Yao, Chenghu Zhou, and Maosong Sun. 2026. RSMeM: Knowledge-enhanced memory evolution for remote Sensing agents with systematic evaluation. In Proceedings of the 64th An-nual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , San Diego, Cal-ifornia, United States. Association for Computational Linguistics. Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Sheng-ming Yin, Shuai Bai, Xiao Xu, Yilei Chen, et al. 2025. Qwen-image tech-nical report. arXiv preprint arXiv:2508.02324 .
+
+10 Zidi Xiong, Yuping Lin, Wenya Xie, Pengfei He, Zirui Liu, Jiliang Tang, Himabindu Lakkaraju, and Zhen Xiang. 2026. How memory management impacts LLM agents: An empirical study of experience-following behavior. In Proceedings of the 64th An-nual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , San Diego, Cal-ifornia, United States. Association for Computational Linguistics. Xiangyuan Xue, Zeyu Lu, Di Huang, Wanli Ouyang, and Lei Bai. 2024. Genagent: Build col-laborative ai systems with automated workflow generation–case studies on comfyui. arXiv preprint arXiv:2409.01392 , 2(3):4. Yutao Yang, Junsong Li, Qianjun Pan, Bihao Zhan, Yux-uan Cai, Lin Du, Jie Zhou, Kai Chen, Qin Chen, Xin Li, et al. 2026. Autoskill: Experience-driven life-long learning via skill self-evolution. arXiv preprint arXiv:2603.01145 .Zhengyuan Yang, Jianfeng Wang, Linjie Li, Kevin Lin, Chung-Ching Lin, Zicheng Liu, and Lijuan Wang. 2024. Idea2img: Iterative self-refinement with gpt-4v for automatic image design and generation. In 
+
+European conference on computer vision , pages 167– 184. Springer. Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, and Yuan Cao. 2022. React: Synergizing reasoning and acting in language models. arXiv preprint arXiv:2210.03629 .Junyan Ye, Dongzhi Jiang, Zihao Wang, Leqi Zhu, Zhenghao Hu, Zilong Huang, Jun He, Zhiyuan Yan, Jinghua Yu, Hongsheng Li, et al. 2025a. Echo-4o: Harnessing the power of gpt-4o synthetic im-ages for improved image generation. arXiv preprint arXiv:2508.09987 .Wen Ye, Zhaocheng Liu, Yuwei Gui, Tingyu Yuan, Yun-yue Su, Bowen Fang, Chaoyang Zhao, Qiang Liu, and Liang Wang. 2025b. Genpilot: A multi-agent system for test-time prompt optimization in image generation. Findings of EMNLP .Eric Zelikman, Eliana Lorch, Lester Mackey, and Adam Tauman Kalai. 2024. Self-taught optimizer (stop): Recursively self-improving code generation. In Conference on Language Modeling (COLM) .Dan Zhang, Sining Zhoubian, Ziniu Hu, Yisong Yue, Yuxiao Dong, and Jie Tang. 2024. Rest-mcts*: Llm self-training via process reward guided tree search. 
+
+Advances in Neural Information Processing Systems ,37:64735–64772. Jenny Zhang, Shengran Hu, Cong Lu, Robert Lange, and Jeff Clune. 2026a. Darwin gödel machine: Open-ended evolution of self-improving agents. In Inter-national Conference on Learning Representations ,volume 2026, pages 104223–104294. Qizheng Zhang, Changran Hu, Shubhangi Upasani, Boyuan Ma, Fenglu Hong, Vamsidhar Kamanuru, Jay Rainton, Chen Wu, Mengmeng Ji, Hanchen Li, et al. 2026b. Agentic context engineering: Evolving contexts for self-improving language models. In In-ternational Conference on Learning Representations ,volume 2026, pages 86069–86100. Tianyu Zhang, Xinyu Wang, Lu Li, Zhenghan Tai, Jijun Chi, Jingrui Tian, Hailin He, and Suyuchen Wang. 2025. Strict: Stress-test of rendering image contain-ing text. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing ,pages 21148–21161. Zekai Zhang, Jiahao Li, Jie Zhang, Kaiyuan Gao, Kun Yan, Lihan Jiang, Ningyuan Tang, Shengming Yin, Tianhe Wu, Xiaoyue Chen, et al. 2026c. Qwen-image-agent: Bridging the context gap in real-world image generation. arXiv preprint arXiv:2606.26907 .Andrew Zhao, Daniel Huang, Quentin Xu, Matthieu Lin, Yong-Jin Liu, and Gao Huang. 2024. Expel: Llm agents are experiential learners. In Proceedings of the AAAI Conference on Artificial Intelligence ,volume 38, pages 19632–19642. Bing Zhao, Chenfei Wu, Deqing Li, Hao Meng, Jiahao Li, Jie Zhang, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kuan Cao, et al. 2026. Qwen-image-2.0 techni-cal report. arXiv preprint arXiv:2605.10730 .Tong Zheng, Xidong Wu, Zheng Zhang, Zhankui He, Chaoyi Zhang, Benjamin Coleman, Ruoqiao Wei, Di Bai, Haolin Liu, Rui Liu, et al. 2026. Dream-rsi: Recursive self-improvement through evolving worlds. 
+
+arXiv preprint arXiv:2609.14858 .Kaiwen Zhu, Jinjin Gu, Zhiyuan You, Yu Qiao, and Chao Dong. 2025. An intelligent agentic system for complex image restoration problems. In Inter-national Conference on Learning Representations ,volume 2025, pages 57985–58013. 
+
+11 Appendix organization. Appendix A gives im-plementation details; Appendix B describes the datasets and the CSA metric; Appendix C presents experience records and prompt interfaces; Ap-pendix D describes judge training; Appendix E gives additional experimental details; and Ap-pendix F contains a supplementary figure. 
+
+A Implementation Details 
+
+A.1 Generation and Delivery 
+
+Retrieval is limited to four passes per request. Each round generates one image, and a request receives an initial round followed by at most two repair rounds; the direct-generation baseline uses a sin-gle round. In each round, the workflow selects experience, builds the prompt from the fixed re-quirements and earlier feedback, generates an im-age, and scores it. The first accepted image is returned. If no round is accepted within the budget, the highest-scoring judged image is returned as a fallback; it is not counted as accepted. Failed gener-ation or judging calls are recorded in the trajectory. 
+
+A.2 Scoring and Acceptance 
+
+Each dimension is scored on an integer scale from 1 to 5. For T2I requests, the base weights of Align-ment, Faithfulness, Quality, Aesthetic, and Physics are 0.40 , 0.20 , 0.25 , 0.20 , and 0.15 . Following Equation 1, the weight of a low-confidence dimen-sion is multiplied by 0.7, and the weights are then normalized over the active dimensions. I2I requests additionally activate a reference-consistency check. An image is accepted if its aggregate score is at least 4.5 and no veto applies. A Quality score of at most 3 vetoes acceptance; so does an Alignment score of at most 3, unless the requirement parser reports low confidence. 
+
+A.3 Constraint-Aware Verification 
+
+In this optional variant, an extractor splits the re-quest into atomic requirements, each linked to its source phrase in the request. The verifier labels ev-ery requirement pass , fail , or unknown and cites visible evidence; counts that are occluded or rela-tions that cannot be seen remain unknown . Early acceptance requires every requirement to pass. The repair prompt keeps the clauses of satisfied require-ments and rewrites only those for failed or un-known ones; satisfied requirements are rechecked after repair. 
+
+A.4 Experience Admission 
+
+A candidate needs at least two independent source trajectories. Each validation trial applies only the candidate’s action, with the seed and all upstream inputs shared between the two arms, and the im-age pair is scored blind. Calibration and holdout use separate splits. Calibration requires at least three trials, at least two positive differences ∆e(q),no negative difference, and a mean difference of at least 0.05 . Holdout requires at least two tri-als, at least one positive difference, no negative difference, and a nonnegative mean. A candidate becomes verified after calibration and active 
+
+after holdout; any hard regression rejects it. 
+
+B Datasets and Evaluation 
+
+B.1 ImageReq-Bench 
+
+ImageReq-Bench is built around hard cases in real-world text-to-image requests, i.e., requests whose requirements current generators often fail to satisfy jointly. Benchmark scope and the experience/test split are described in §4.1.1. During curation, we deduplicated candidate requests and removed or replaced identified personal information. Each re-quest is linked to its source records. All methods and judges are evaluated on the same fixed list of test case IDs. We consolidate the 12 content categories into four: Illustration (511 requests), Scene (213), In-fographic (144), and Design & Art (93). These categories are organizational labels rather than a validated difficulty taxonomy. Language or vision–language models were used to draft and refine a checklist for each request, re-moving unsupported requirements, merging dupli-cate items, and expressing the remaining require-ments as visually checkable statements. Checklists contain 2 to 18 items per request, and all meth-ods are scored against the same checklist version. The benchmark assesses whether multiple require-ments within a request are jointly satisfied and uses individual checks to identify unmet requirements, providing a common basis for evaluating image generation, targeted repair, and cross-task experi-ence reuse. The three MindBench I2I categories (Life, GU, and Math) comprise 150 requests. 
+
+B.2 Checklist Strict Accuracy 
+
+Let bij be the external evaluator’s Boolean verdict on checklist item j of request i. Request i passes 12 (yi = 1 ) only if a delivered image exists, the evalu-ator returns a valid verdict for every item, and all 
+
+bij are true; otherwise yi = 0 . For an evaluation set of N requests, 
+
+CSA = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+yi. (3) Malformed evaluator responses are never parsed as passes. The external evaluator, Gemini 3.1 Pro, is sep-arate from the internal judge. Its verdicts on a re-quest are never fed back into the generation of that request; experience is distilled only from verdicts on the experience set (§4.3). 
+
+C Experience Records and Prompt Interfaces 
+
+C.1 Experience Record Structure 
+
+Table 4 lists the fields of an experience record. Dur-ing selection, the model first sees only the Domain, Task Type, Generation Type, and Failure Pattern of each entry, and then loads the selected entries in full. 
+
+C.2 Example Entries 
+
+Two entries from the experience library are shown below, using the fields of Table 4. 
+
+preserve-identity-anchors 
+
+Trigger: A named subject is generalized, confused with another person, or hard to tell apart from other subjects. 
+
+Negative Trigger: Anonymous subjects, intentionally hidden faces, or images whose identities are already cor-rect. 
+
+Action: Add a separate identity description for each subject, using only attributes supported by the request or by retrieved references. 
+
+Protected: The requested pose, clothing, scene, and style. 
+
+Known Side Effects: Less compositional freedom; extra text that may itself be rendered incorrectly. 
+
+explicit-spatial-anchoring 
+
+Trigger: Object placement or relation binding is ambigu-ous. 
+
+Negative Trigger: Requests that leave the arrangement open, or failures that concern only style or lighting. 
+
+Action: Name each target and reference object, state the direction or containment explicitly, and list discrete elements when a count is required; for example, place A nearby is replaced with an explicit reference object and spatial relation. 
+
+Protected: Subject identity, exact text, counts, and other appearance constraints. 
+
+Known Side Effects: Longer prompts and less layout freedom. 
+
+C.3 Prompt Interfaces 
+
+The boxes below summarize the input and output of each prompt. Prompts 1–5 belong to the task-level workflow (§3.2), Prompt 6 to experience admission (§3.3), and Prompt 7 to the optional constraint-aware variant (Appendix A.3); Prompts 8 and 9 are specific to the controlled experiments in §4.2 and §4.3. Angle brackets denote placeholders. 
+
+Prompt 1: Requirement Parsing Input: Request qt, permitted evidence, and optional input image it.
+
+Output: Requirement set Ct covering entities, attributes, counts, spatial relations, exact text, layout, and I2I preser-vation or exclusion conditions, together with their bind-ings. 
+
+Rule: Ct stays fixed across repair rounds; a revision must satisfy an unmet requirement rather than drop it. 
+
+Prompt 2: Experience Selection Input: Request, requirements, the Domain, Task Type, Generation Type, and Failure Pattern of each entry, and, after a failed round, the observed defects. 
+
+Output: Names of applicable entries, which are then loaded in full; entries whose Negative Trigger matches are excluded. 
+
+Prompt 3: Prompt Rewriting Input: Request qt, fixed requirements Ct, evidence Et,selected experience et,r , and feedback from earlier rounds 
+
+f<r .
+
+Output: Generation prompt pt,r that keeps entities, exact text, counts, and relations. 
+
+Localized repair: State the localized defects in the rewrit-ten prompt and exclude them in the negative prompt. 
+
+Example: Case 1006 (Figure 4a). Defect: both Shell emblems show only the scallop-shell graphic, without the brand name. Negative prompt: “graphic only, no text”. 
+
+Prompt 4: Dimension Scoring Input: Request, parsed requirements, generated image, and references if any. 
+
+Output: For each active dimension, a score from 1 to 5, defect evidence, and a confidence value. 
+
+Rule: Scores rely only on the request, the requirements, and the image evidence; the generation prompt and se-lected experience are not shown. 
+
+Trained-judge target: Five lines in a fixed order (schematic):          
+
+> Alignment: <1-5> <reason grounded in the image> Faithfulness: <1-5> <reason grounded in the image> Quality: <1-5> <reason grounded in the image> Physics: <1-5> <reason grounded in the image> Aesthetic: <1-5> <reason grounded in the image>
+
+Prompt 5: Attribution Input: Dimension scores, image, generation prompt, and selected experience. 
+
+Output: Repair suggestions; the scores are not changed. 
+
+13 Field Content Domain, Task Type, Generation Type Subject area and input modality, used to narrow retrieval. Failure Pattern, Trigger The observed failure or request condition under which the strategy applies. Negative Trigger Conditions under which the strategy should not be used. Action, protected constraints The prompt change and the requirements it must keep. Effect, Known Side Effects Observed outcomes in trials and possible regressions. Source, trial records, state Supporting trajectories, paired validation trials, and admission state. 
+
+Table 4: Fields of an experience record. 
+
+Prompt 6: Paired Experience Review Input: Request and a blinded image pair generated with and without candidate e, sharing the seed and upstream inputs. 
+
+Output: A score for each image; their difference gives 
+
+∆e(q) in Equation 2. 
+
+Prompt 7: Constraint Checking (optional variant) Input: Atomic requirements of the original request and the current image. 
+
+Output: Each requirement ID exactly once, with a status and visible evidence: 
+
+> {"constraints": [{ "id": "<requirement ID>", "status": "pass | fail | unknown", "evidence": "<visible evidence>" }]}
+
+Rule: A visible contradiction counts as fail ; when the evidence is insufficient, such as an occluded count, the item remains unknown .
+
+Prompt 8: Generic-Feedback Repair (ablation, §4.2) Instruction: The image did not pass; improve the prompt against the original request. 
+
+Not provided: Any information about the defects. 
+
+Prompt 9: Case-Level Experience Distillation (§4.3) Model: Qwen3.8-Max. 
+
+Input: Final prompt delivered to the generator and the external evaluator’s per-item verdicts, for experience-set requests only. 
+
+Output: (i) The applicable request type, with proper nouns, numbers, and text content removed; (ii) at most three sentences of prompt-writing advice; (iii) the check items most prone to failure for such requests. 
+
+Use: The three most similar entries by character-bigram TF-IDF are injected into prompt rewriting in both the first round and the repair round. 
+
+D Judge Training 
+
+D.1 Training Data Training requests. We assemble approximately 2,000 requests for judge training, combining 530 requests from the experience split of ImageReq-Bench with approximately 1,500 additional re-quests. The latter are constructed using WISE’s taxonomy and prompt design as guidance, together with MindBench’s knowledge- and reasoning-driven task categories (Niu et al., 2025; He et al., 2026b). WISE provides sampled coverage of world knowledge, while MindBench contains 50 evalu-ation examples per category. Although both offer useful evaluation resources, neither directly sup-plies the five-dimensional score-and-reason super-vision required by our judge. We therefore expand the request pool along their task categories and pair selected images from generation and repair trajec-tories with dimension-specific scores and evidence-grounded explanations. 
+
+Inputs and targets. Each training input contains the request, the parsed requirements, permitted ev-idence, any task input image, and the generated image. The target consists of five lines, one per dimension in the order Alignment, Faithfulness, Quality, Physics, and Aesthetic; each line gives an integer score from 1 to 5 and a reason grounded in the image. Images that violate the request are kept, since their targets describe the violation. Training covers only scores and reasons. The confidence values used in Equation 1 are set to constants by an inference adapter when a trained judge is deployed. 
+
+D.2 Training Objective 
+
+Let z be the judge input and y = ( y1, . . . , y L) the target response. SFT minimizes 
+
+LSFT (θ) = − 1
+
+L
+
+> L
+
+X
+
+> ℓ=1
+
+log pθ(yℓ | z, y <ℓ ), (4) with prompt and image tokens masked from the loss. GRPO then starts from the SFT 100% check-point. 
+
+GRPO reward. The GRPO reward combines pointwise assessment with within-group ranking. Pointwise assessment evaluates five-dimensional score accuracy and rationale correctness, checking whether the judge’s criticisms are supported by the image and task requirements and identifying overly harsh assessments or other misjudgments. Mal-formed outputs receive the lowest reward, while se-14 Configuration CSA (%) ∆ (pp) First-round image only 53.4 –Best-of-2 resampling 55.0 +1.6 Generic-feedback repair 56.6 +3.2 Localized repair w/o locking 57.8 +4.4   
+
+> Localized repair (ImageRSI) 65.7 +12.3
+
+Table 5: Second-round strategies on the test set (431 requests). All strategies share the first-round image and use at most two images per request; ∆ is the gain over the first-round image only. 
+
+vere false accepts and critical fabrications or omis-sions enter a separate lower reward band that can-not be offset by other dimensions. Within each band, a small ranking adjustment is added only when two reversed-order reviews yield consistent, evidence-supported rankings with sufficient confi-dence. Score aggregation and acceptance rules are fixed and not learned. 
+
+E Experimental Details 
+
+E.1 Baselines on MindBench 
+
+Table 1 combines values reported in the original papers with our reproductions; for each baseline, we report the higher of the two (§4.1). GEMS and GenSearcher-style are reproduced locally with the Qwen-Image-2.0 generator and a Gemini 3.1 Pro backbone; image retrieval is unavailable in our GenSearcher-style reproduction. Seedream 4.5 is evaluated with direct generation. Wan2.7-Image is run locally; one request remained unevaluated and is counted as a failure, so its CSA is a lower bound. For ImageRSI (Nano Banana Pro), 12 requests pro-duced no image and are counted as failures. 
+
+E.2 Repair Strategies 
+
+In generic-feedback repair, the rewriter is told only that the image did not pass and is asked to improve the prompt against the original request; no defect information is given. Table 5 lists the values plotted in Figure 3a. The two cases in Figure 4 use seeds 12345 (case 1006) and 22345 (case 0656). 
+
+E.3 Experience Library Size 
+
+Table 6 lists the values plotted in Figure 3b. The four libraries are nested prefixes of the same fixed random order over the experience set, and all other settings follow localized repair.                 
+
+> Library Entries CSA (%) ∆(pp) 0% (no experience) 055.7 –25% 131 56.8 +1.2 50% 266 61.3 +5.6
+> 100% 527 65.7 +10.0
+
+Table 6: CSA on the test set with nested experience libraries; ∆ is the gain over using no experience. 20 25 30 35 40 45 
+
+False-accept rate (%) 
+
+60 65 70 75 80 85 90 
+
+> Recall of CSA-passing images (%)
+> deployed w/o alignment w/o quality w/o physics w/o aesth./faith. alignment only uniform weights no hard vetoes
+
+Figure 5: Offline ablation of the five-dimensional judge on delivered ImageReq-Bench images. Each point re-aggregates the recorded dimension scores under one configuration and compares the resulting decision with the external CSA label. Removing the alignment dimen-sion raises the false-accept rate from 24.8% to 37.1%; removing the quality dimension or the hard vetoes in-creases recall but also the false-accept rate; removing the low-confidence discount changes no decision and thus coincides with the deployed configuration. “w/o aesth./faith.” marks the two nearby points that remove the aesthetics and faithfulness dimensions, respectively. 
+
+F Supplementary Figures 
+
+Figure 5 reports an offline ablation of the judge’s score aggregation. 15

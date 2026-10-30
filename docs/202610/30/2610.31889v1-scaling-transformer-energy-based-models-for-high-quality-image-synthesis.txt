@@ -1,0 +1,549 @@
+Title: Scaling Transformer Energy-based Models For High Quality Image Synthesis
+
+URL Source: https://arxiv.org/pdf/2610.31889v1
+
+Published Time: Mon, 26 Oct 2026 00:13:21 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+Preprint 
+
+# SCALING TRANSFORMER ENERGY -BASED MODELS 
+
+# FOR HIGH QUALITY IMAGE SYNTHESIS 
+
+Jungsoo Lee 1∗ Alexi Gladstone 2 Yilun Du 3
+
+> 1
+
+MIT 2UIUC 3Harvard University 
+
+Project page Code 
+
+## ABSTRACT 
+
+Energy-Based Models (EBMs) are a flexible class of generative models that de-couple probabilistic modeling from the generation process. This decoupling di-rectly enables compositional generation and inference-time scaling, where sam-ple quality can be refined simply by increasing sampling steps. However, severe challenges in high-dimensional sampling and training instabilities with deep ar-chitectures have restricted EBMs to low-dimensional regimes. To resolve these bottlenecks, we introduce the Transformer Energy-Based Model (TEM), a scal-able transformer energy function operating entirely within a latent space. On top of this backbone, we extract energies at multiple layers and sum them, compos-ing complementary constraints from local texture to global semantics. Further-more, two components make this high-quality at scale: Positive Representation Alignment (PRA), which supervises TEM’s intermediate representations with a vision foundation model, and advanced sampling strategies that improve sample quality at inference. TEM-XL achieves an FID-50K of 3.82 on class-conditional ImageNet 256 ×256 without classifier-free guidance, showing that a contrastive EBM can generate high-fidelity images. On ImageNet 512 ×512, TEM achieves an FID-50K of 8.24, demonstrating that the approach scales to higher resolution. We further validate the core promises of EBMs: compositional generation, zero-shot inpainting, and out-of-distribution detection. 
+
+## 1 INTRODUCTION 
+
+Energy-Based Models (EBMs) [9, 23] parameterize probability distributions via an energy function that assigns lower energies to more probable samples and higher energies to less probable sam-ples. EBMs provide a flexible and mathematically elegant framework that fundamentally separates explicit generation from probabilistic modeling. Unlike Diffusion [18, 38] and Flow [24] models, which are mathematically constrained to pre-defined generative trajectories governed by carefully designed timestep schedules, EBMs define the data distribution solely through an energy function, entirely decoupling the model from the generative process. This decoupling of the model from the generative process yields profound advantages. First, EBMs decouple learning from inference, allowing the sampling procedure to be chosen independently of model training. This enables flex-ible test-time compute scaling by increasing the MCMC steps, progressively refining the samples through a deeper exploration of the learned energy landscape. Second, this flexibility enables the composition of different distributions together [9, 11], which can enable zero-shot generation and generalization capabilities. However, despite their theoretical advantages and compositional properties, EBMs have struggled with widespread adoption due to several critical unresolved challenges. First, EBMs face severe vulnerability to the curse of dimensionality: MCMC sampling suffers from poor mixing in high-dimensional spaces, leading to slow convergence and mode collapse. Second, EBMs scale poorly with model capacity. As network depth increases, conventional architectures exhibit severe training instability, making robust optimization exceedingly difficult [9, 10]. Consequently, existing EBM 
+
+> ∗
+
+bus6479@mit.edu 
+
+1arXiv:2610.31889v1 [cs.LG] 22 Oct 2026 Preprint    
+
+> “zebra” “beach”
+> ⇓
+> composed result
+> Figure 1: High-fidelity ImageNet 256 ×256, 512 ×512 generation and compositional synthesis by TEM-XL/2. Left: uncurated class-conditional samples from 80 Langevin steps. The two large images are 512 ×512 samples and the remaining tiles are 256 ×256. Right: compositional generation by summing the energy func-tions of two independent classes, producing a coherent scene that satisfies both concepts without retraining.
+
+research has been largely limited to smaller-scale benchmarks, unable to demonstrate competitive performance on challenging, high-resolution datasets. In this work, we address these fundamental limitations and demonstrate that EBMs trained con-trastively, with negatives drawn from the model’s own MCMC sampler, can generate high-quality 
+
+256 × 256 ImageNet [6] samples through persistent sampling initialized solely from Gaussian noise, achieving performance competitive with strong generative models (Table 1). We further validate the core theoretical promises of EBMs by demonstrating compositional generalization as well as flexible inference-time control. Our work addresses the long-standing scalability bottleneck of contrastive EBMs, reestablishing them as a viable contender for high-fidelity image generation. Our key contributions are: (1) A scalable Vision Transformer-based EBM architecture with multiple energy heads that enables stable training at high resolution. (2) A comprehensive training framework encompassing latent space design, representation alignment, and advanced sampling strategies that together achieve state-of-the-art quality images for contrastive energy-based models. (3) Empirical validation of the theoretical advantages of energy-based modeling at high resolution: compositional generation, zero-shot inpainting, and out-of-distribution detection from a single scalar energy. 
+
+## 2 BACKGROUND 
+
+2.1 ENERGY -B ASED MODELS 
+
+Energy-Based Models (EBMs) define a probability distribution implicitly over an input domain using a scalar energy function, expressed as pθ (x) = exp( −Eθ (x))  
+
+> Z(θ)
+
+, where Eθ (x) is the parameterized energy function. In practice, Eθ (x) is parameterized by a neural network Eθ : X → R, yielding an unnormalized density model. Maximum likelihood training then shapes the energy landscape such that low-energy regions correspond to high-density regions of the data distribution pdata (x),ensuring that pθ (x) approximates pdata (x). However, Z(θ) = R 
+
+> x
+
+exp( −Eθ (x)) dx is intractable, which makes exact maximum likelihood training of EBMs computationally infeasible. On the other hand, the gradient of log-likelihood remains tractable [9, 17]: 
+
+∇θ Ex∼pdata (x)
+
+ − log pθ (x) = Ex∼pdata (x)
+
+∇θ Eθ (x) − Ex∼pθ (x)
+
+∇θ Eθ (x) (1) The first term is estimated directly from samples from the data. The second requires expectations under pθ (x), which is intractable to sample exactly. Running Markov Chain Monte Carlo (MCMC) to convergence is required, implying infinitely long chains with infinitesimal steps. 2.2 SHORT -R UN LANGEVIN MCMC We therefore rely on short-run MCMC to obtain approximate samples. In particular, we start from a fixed initial distribution p0(z) and perform a finite number of T Langevin updates with step size η:
+
+zt+1 = zt + η∇z log π(zt) + p2η ϵ, t = 0 , . . . , T − 1, (2) 2Preprint VAE Latent Image(32x32x4)  
+
+> TEM Block TEM Block TEM Block TEM Block
+> E Head E Head E Head  +++
+> [E early, Emid , E fin ]
+> x N
+> RMSNorm Scale MHSA Scale RMSNorm Scale FFN Scale
+> ++
+> yPositive Sample x+~p data
+> Negative Sample x-~q θ
+> Representation Aware Push Down Push Up E(x)
+
+Figure 2: Proposed Architecture and Training Strategy. Left : the Transformer Energy-Based Model pro-cesses VAE-encoded latent tokens through a stack of TEM blocks. Energy heads at multiple intermediate layers produce scalar energies whose sum defines the total energy. Right : contrastive training pushes down the energy of data samples x+ and pushes up the energy of MCMC negatives x−, while Positive Representation Align-ment (PRA) aligns the model’s internal features with a frozen VFM. 
+
+where ϵ ∼ N (0 , I) [9, 29]. Let ˜π(z) denote the distribution of the final state zT . Since initialization 
+
+p0, step size η, and number of steps T are fixed, ˜π is well-defined. In practice, we use a finite number of steps and tune the step size and noise scale independently, yielding an efficient but biased sampler. 
+
+## 3 SCALABLE TRANSFORMER ENERGY -B ASED MODELS 
+
+3.1 TRANSFORMER ENERGY -B ASED MODELS ARCHITECTURE 
+
+TEM Architecture. We parameterize the energy function Eθ (x, c ) with a Vision Transformer (ViT) [8] backbone adapted for large-scale energy-based modeling. Given an input x, we tokenize it into spatial patch embeddings, which are processed through a stack of transformer blocks. The final patch tokens are aggregated via global average pooling and passed through a small MLP head to produce a scalar energy Eθ (x, c ).Our architecture adopts several modern design choices for stability and expressivity. We encode spatial structure with rotary positional embeddings [39], and apply query-key normalization [15] to stabilize attention logits at scale. Feed-forward layers use SwiGLU activations [36], and the condi-tioning signal is projected into feature-wise affine parameters in an AdaLN-style formulation [33] built on the same RMSNorm variant. Importantly, this design demonstrates stable and effective energy-based modeling at scale without requiring EBM specific components such as spectral normalization commonly used in prior energy-based models [9]. 
+
+Multi-layer Energy Extraction. Energy-based models are naturally suited to composition, since combining distributions amounts to addition in energy space. Du et al. [10] demonstrate this by composing several separately trained models, each capturing a distinct concept. Composition of this kind has so far required multiple models. We show that it can instead be obtained within one, extracting energies through multiple heads at-tached to representations at different depths of a single Transformer. Its layers encode progressively more abstract features, from low-level structure in early layers to high-level semantics in deeper ones [34]. For L depth layer with k heads, we attach them at the blocks nearest to ( L/k , 2L/k , . . . , 
+
+L). The resulting heads form a hierarchy of energy terms, each enforcing the structure visible at its depth. We train on the sum of these energies, allowing each layer to contribute at its own level of abstraction. This not only yields a better energy function but also decomposes the generative process across layers, opening the way to understanding each layer’s role and further applications. 3Preprint 3.2 TRAINING TRANSFORMER ENERGY -B ASED MODELS 
+
+Latent Space. Training Eθ requires sampling negatives by MCMC at every step, which is expensive in high dimensions and mixes poorly. Therefore, we operate entirely in the latent space induced by the autoencoder of Stable Diffusion [35], which is common in the literature [33]. Given an input image x ∈ R256 ×256 ×3, we encode to latent space z ∈ R32 ×32 ×4 where the encoder predicts the mean μenc (x) and variance σ2
+
+> enc
+
+(x). We sample latent variables as 
+
+z ∼ N (μenc (x), σ 2
+
+> enc
+
+(x)) (3) which corresponds to drawing from the learned posterior distribution of the autoencoder. In this latent space, we define an energy-based model Eθ (z, c ) and perform learning and sampling directly on z. The decoder D(·) maps latent samples back to the image space via x ≈ D(z).
+
+Contrastive Energy Objective. We train the energy-based model using a contrastive objective that encourages lower energy for data samples than for model samples. 
+
+Lcontrast = E(z+) − E(qθ (z0)) + λ E(z+)2 + E(qθ (z0)) 2 (4) Here, z+ denotes an encoded positive sample drawn from the dataset, and qθ (z0) denotes a negative sample produced by sampler. z0 is from pure noise or replay buffer. Since the likelihood gradient depends only on energy differences, the magnitudes of energies are relative and drift during training. We add an L2 regularization term penalizing the magnitude of the energy to resolve this gauge freedom and bound the energy magnitude following Du & Mordatch [9]. 
+
+Sampler Matching Loss. Because the sampler runs for a finite number of steps, its output distribu-tion qθ may not exactly match the model distribution pθ from which the negative phase should draw. Following Du et al. [10], we introduce a regularizer motivated by KL( qθ ∥ pθ ):
+
+Lsampler-match = Eqθ (ˆ z−)
+
+Esg( θ)(ˆ z−)| {z }
+
+> Lopt
+
++ Eqθ (ˆ z−)
+
+log qθ (ˆ z−)| {z }
+
+> Lent
+
+, (5) where ˆz− is a sample generated by sampler and the stop-gradient sg( ·) freezes the energy parame-ters, so gradients reach θ only through the sampler. The first term drives the sampler toward low-energy regions. The second is an entropy term, estimated with a nearest-neighbor statistic [2], that keeps its outputs diverse. Together, these terms encourage low-energy, diverse sampler outputs. Appendix A, B gives the details and reports training settings. 
+
+Representation Supervision. Contrastive EBM training provides only a scalar supervisory signal per sample, one energy value, which makes representation learning challenging at high resolution. A natural remedy is to supply a dense signal to the representation itself, as in diffusion models, where aligning generative features with those of a pretrained vision foundation model (VFM) substantially improves sample quality [43, 48]. We study how such alignment should be formulated for energy-based models and introduce Positive Representation Alignment (PRA), an objective designed for the contrastive setting. Let ¯hVFM (x+) ∈ RN ×D denote the spatially normalized patch-wise output of the VFM, where 
+
+N is the number of patches and D is the embedding dimension. Let hθ (z+) denote the internal representation of the EBM and Pϕ(·) a learnable projection network. PRA maximizes the patch-wise cosine similarity between the projected EBM features and the VFM targets: 
+
+LPRA (θ, P ϕ) := − 1
+
+N
+
+> N
+
+X
+
+> n=1
+
+sim 
+
+¯hVFM (x+)[n], P ϕ
+
+ hθ (z+)
+
+> [n]
+
+
+
+. (6) We apply this alignment loss only to positive (data) samples, and never to MCMC negatives. Two complementary intuitions motivate this choice. From a contrastive learning view, alignment acts as a shaping term on the low-energy side of the landscape, while the objective is simultaneously driving negatives toward high energy. Aligning negatives would therefore pull them back toward the data manifold in feature space, working directly against that push. From a manifold view, the VFM produces meaningful features only for inputs near the natural-data manifold. MCMC negatives are typically off-manifold, and this is most pronounced early in training and at intermediate sampling steps, so their embeddings provide no reliable semantic target to align against. 4Preprint                                                                                          
+
+> Table 1: Class-conditional generation on ImageNet-256 ×256 and 512 ×512 (FID-50K). Params refer to the 256 ×256 configuration unless a resolution-specific model is used. Baseline values are taken as reported in the original papers; “–” indicates that the corresponding setting is or was not reported. ImageNet 256 ×256 ImageNet 512 ×512 Method Params NFE FID ↓FID ↓(CFG) NFE FID ↓FID ↓(CFG)
+> GAN
+> BigGAN-deep 112M 16.95 –18.43 –GigaGAN 569M 13.45 ––––
+> Autoregressive / Masked
+> MaskGIT 227M 86.18 –12 7.32 –VAR-d30 2B 10 –1.92 –––
+> Diffusion/Flow
+> ADM 554M 250 10.94 –250 23.24 –LDM-4 400M 250 10.56 3.60 –––DiT-XL/2 675M 250 9.62 2.27 250 12.03 3.04 SiT-XL/2 675M 250 8.3 2.06 250 –2.62 SiT-XL/2+REPA 675M 250 5.9 1.42 250 –2.08
+> EBM
+> TEM-L 415M 60 4.74 ––––TEM-XL 609M 60 3.82 –60 8.24 –
+
+This positive-only design also clarifies how PRA is both similar and different to representation align-ment in diffusion models, where the distinction lies in what each network receives as input. That line of work aligns the features of a noisy input xt with the VFM features of its clean counterpart x0; the clean target is dynamic and guides the denoising trajectory toward the data manifold. In our setting both the EBM and the VFM receive the same clean input x+, so PRA does not guide any sampling trajectory. Instead it shapes the geometry of the low-energy region of the landscape directly, PRA encourages semantically structured representations of positive samples. 
+
+Overall Objective. Combining the contrastive energy objective (Eq. 4), the sampler matching term (Eq. 5), and the representation alignment loss (Eq. 6), the full training objective is: 
+
+Ltotal = Lcontrast + λ1Lsampler-match + λ2LPRA , (7) where λ1 and λ2 are coefficients for each loss. Each term plays a distinct role: Lcontrast shapes the energy landscape by pushing data samples to low energy and sampled negatives to high energy, LPRA 
+
+injects semantic structure into the model’s internal representations, and Lsampler-match encourages low-energy, diverse sampler outputs. The full training algorithm is provided in Appendix D. 3.3 INFERENCE TIME SCALING 
+
+At inference, we adjust the sampling step size while keeping the injected noise scale fixed: 
+
+xt+1 = xt − η∇xEθ (xt) + σϵ, ϵ ∼ N (0 , I ). (8) 
+
+η controls the balance between energy-driven refinement and stochastic exploration. It provides control over sample quality, without retraining or additional unconditional network evaluations. Increasing the step size η amplifies the deterministic energy-gradient update relative to the fixed noise. Similarly, extending sampling beyond the training horizon allows further refinement of inter-mediate samples. Empirically, both adjustments can sharpen individual samples and produce more class-typical images at the cost of mode coverage. 
+
+## 4 EXPERIMENTS 
+
+4.1 MAIN RESULTS 
+
+Unless otherwise noted, all TEM experiments use batch size 256, learning rate 2 × 10 −4, and 50K iterations, training with 40 steps sampling and inference with 60 steps sampling. Main benchmark 5Preprint 12.5K 25K 37.5K 50K    
+
+> Training Steps
+> 46812 20 30 50 80 100 160
+> FID-50K
+> TEM-XL/2 TEM-L/2 TEM-B/2 TEM-S/2 10 10 10 11
+> Training GFLOPs
+> 46812 20 30 50 80 100 160
+> FID-50K
+> TEM-XL/2 TEM-L/2 TEM-B/2 TEM-S/2 10 10 10 11 10 12
+> Training GFLOPs
+> 4567912 15 20 30 45 70 100
+> FID-50K
+> DiT-XL/2 SiT-XL/2 SiT-XL/2+REPA TEM-XL/2
+
+Figure 3: Scaling behavior of TEM on class-conditional ImageNet 256 ×256. Left : FID-50K as a function of training steps across model sizes. Larger models consistently achieve lower FID at every checkpoint; 40 sampling steps are used for sampling during training. Middle : FID-50K as a function of cumulative training GFLOPs. All four model sizes follow a consistent compute–quality trend (dashed line). Right : FID-50K versus training GFLOPs for TEM-XL compared against DiT-XL, SiT-XL and SiT-XL+REPA showing that TEM tracks, and eventually achieves lower FID than unguided diffusion baselines with less training compute. 
+
+(a) Early (b) Middle 
+
+(c) Final (d) Full 0 20 40 60 80    
+
+> Langevin Step
+> 0.4
+> 0.2
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Cosine Similarity
+> early middle
+> early final
+> middle final
+
+Variant FID ↓
+
+Loss terms (3 heads) 
+
+Lcontrast only 121.11 
+
++ Lopt 46.30 
+
++ Lent 42.76 
+
++ LPRA 19.86 
+
+One head 20.95 Two heads 20.50 Figure 5: Ablations on Multi-energy Head and Loss Terms. Left : generated images from different energy heads, where (a), (b), (c) decompose the energy into early, middle, and final heads respectively, and (d) uses the full energy head. Middle : cosine similarity between energy head gradients across Langevin steps. Right :FID-50K at 50K steps for TEM-B. The upper block adds each loss term cumulatively with three heads; the lower block varies the number of energy heads under the full loss, against the three-head configuration above. 
+
+numbers for TEM are obtained with inference-time scaling but without classifier-free guidance. All conditions within each ablation are controlled. Full training details are provided in Appendix B. 12.5K 25K 37.5K 50K 
+
+> Training Steps
+> 020 40 60 80 100 120 140 160
+> FID-50K
+> 137.3 103.5 43.4 19.9 151.2 107.5 78.5 42.8 155.6 107.4 63.2 36.6
+> Without RA Pos+Neg RA With PRA
+
+Figure 4: Effect of PRA on training. FID-50K across training steps for TEM-B with no representation alignment, Pos+Neg RA, and PRA. PRA consistently outperforms both, reaching 19.9 FID at 50K steps ver-sus 42.8 without alignment and 36.6 with Pos+Neg RA. This supports aligning only positive samples in our method. 
+
+Our TEM-XL model achieves a guidance-free FID-50K of 3.82 on ImageNet 256 ×256 and 8.24 on 512 ×512 (Ta-ble 1). To our knowledge, these are the best reported large-scale results for a contrastively trained EBM us-ing its own MCMC negatives. Evaluation uses persis-tent sampling initialized from Gaussian noise and out-performs unguided diffusion transformers of compara-ble size. This brings contrastive EBMs into the perfor-mance range of modern large-scale generative models. Although EBMs are often considered expensive, TEM’s training and inference costs are comparable to, or even lower than, those of diffusion transformers of similar size (Appendix C). As shown in Figure 3, TEM scales with model size in both training steps and training compute (left, middle), and scales more steeply than other base-lines, overtaking them at the highest budget (right). 4.2 ABLATIONS 
+
+Analysis of Multi-Head Energy Composition. We validate the use of multiple energy functions through three analyses (Figure 5). The three-head model reaches a lower FID than a single- or 6Preprint 
+
+T = 0 T = 20 T = 40 T = 60 T = 80 T = 100 T = 120 
+
+Figure 6: Progressive sample refinement via extended sampling steps. Two generation trajectories (top: snail, bottom: lemon) visualized from T = 0 (pure noise) to T = 120 . At the training horizon ( T = 40 ), coarse structure is established but residual noise remains. Extending beyond the training horizon produces increasingly sharp, class-typical images, demonstrating inference-time scaling without retraining. 
+
+Algorithm 1 Sampling Algorithm 
+
+1: if |B| = N then ▷ B ← ∅ at beginning 
+
+2: Sample x0 ∼ B 
+
+3: else 
+
+4: Sample x0 ∼ N (0 , I )
+
+5: end if 
+
+6: for t = 1 to T do 
+
+7: xt ← xt−1 − η∇xEθ (xt−1) + σϵ 
+
+8: if t = 40 then 
+
+9: Add x40 to replay buffer B
+
+10: end if 
+
+11: end for 
+
+12: return xT45678  
+
+> FID-50K
+> 100 120 140 160 180 200 220 240 260
+> IS
+> 40 60 80 100 120 750 1000 1250 1500
+> # Steps ( =500)
+> Step size (T=40)
+
+Figure 7: Inference-time scaling pseudocode and quality–diversity trade-off. Left: MCMC sampling proce-dure of TEM. Chains can run beyond 40 steps, but only the step-40 state is inserted into the replay buffer, so the buffer stays matched to the training dynamics. Right: FID-50K vs. Inception Score for TEM-XL, increasing the number of sampling steps (blue, η=500 ) or the step size (green, T =40 ) from the training configuration (T =40 , η=500 ). Moderately increasing the number of steps improves both metrics (FID 3.82 at 60 steps). Beyond that, IS keeps rising while FID degrades as samples concentrate on high-density modes. This mirrors the fidelity–diversity trade-off controlled by classifier-free guidance, but here it comes from a single network with no retraining. 
+
+double-head baseline at 50K steps (right). Fitting three energy functions whose sum must jointly explain the data yields a better energy landscape. Sampling from individual heads (left) suggests complementary roles. The early head recovers local texture without global structure (a), the middle head captures object layout without fine detail (b), and the final head preserves coarse semantics alone (c), while their sum (d) satisfies all three simulta-neously. Gradient cosine similarity between heads (middle) is high early in sampling and decreases in later steps, suggesting a shared initial direction followed by more specialized contributions. 
+
+Ablation on Representation Supervision. As shown in Figure 4, PRA lowers FID-50K of TEM-B from 42.8 to 19.9 at 50K steps. Additionally aligning negative samples (Pos+Neg RA) still improves over no alignment but reaches only 36.6, erasing most of this gain. As discussed in Section 3.2, negatives provide a wrong alignment target, and aligning them can even be harmful. 4.3 TEST -T IME SCALING ANALYSIS 
+
+We investigate the effect of scaling sampling dynamics at inference time by varying both the number of sampling steps and the step size. Figure 6 visualizes the progressive refinement: at T = 40 
+
+7Preprint                
+
+> Composed ImageNet Masked T= 0 T= 20 T= 40 T= 60 T= 80
+> Figure 8: Application of TEM for Image Composition and Inpainting. Left : composed ImageNet images, car mirror + white shark and border collie + rapeseed (top), strawberry + petri dish and lemon + fountain (bottom). Right : inpainting of a meerkat (top) and a movie theater (bottom) across sampling steps. Both applications require no retraining or architectural modification.
+
+(the training horizon), samples contain residual noise, but extended sampling produces increasingly sharp, class-typical images. Figure 7 quantifies this trade-off. Increasing the number of steps from 40 to 120 and scaling the step size from 500 to 1500 yields higher Inception Scores (indicating more recognizable samples) at the cost of slightly elevated FID (indicating reduced diversity). Notably, this FID-IS trade-off curve closely resembles that of classifier-free guidance, despite requiring no architectural modifications or unconditional network evaluations, but rather just inference-time scaling. This controllability lets users tune sampling to the application, with longer, larger-step trajectories for fidelity and shorter, smaller-step ones for diversity. 4.4 APPLICATIONS OF TEM               
+
+> Models 1 obj. 2 obj. 3 obj.
+> Comp. Diff. 0.863 0.598 0.262
+> TEM (Ours) 0.956 0.766 0.274
+> Figure 9: CLEVR 256 ×256 compositional gen-eration. Top: conditioning inputs, yellow boxes indicate specified object positions; second row shows TEM-B samples, green boxes indicate de-tected objects. Bottom: compositional generation accuracy ( ↑), object detection success rate by a trained classifier over 1000 scenes for 1-, 2-, and 3-object compositions.
+
+Compositional Generation. Compositional gen-eration arises naturally in the energy-based for-mulation. Let p1(x) ∝ exp( −E1(x)) and 
+
+p2(x) ∝ exp( −E2(x)) denote two energy-defined distributions. Their composition is defined as the product distribution pcomp (x) ∝ p1(x)p2(x),which can be equivalently written as pcomp (x) ∝
+
+exp( −(E1(x) + E2(x))) . Consequently, composi-tional sampling is obtained by replacing the original energy with the summed energy E1(x) + E2(x), en-abling joint generation that simultaneously satisfies both energy functions. We train TEM-B conditioned on object location and generate compositions of multiple objects at multi-ple specified positions with CLEVR dataset. Fig-ure 9 shows qualitative samples alongside a com-parison against Composable Diffusion [25], where we report object detection accuracy for 1-, 2-, and 3-object compositions. Following their evaluation protocol, we train the classifier ourselves using their training recipe. TEM outperforms Composable Dif-fusion at every composition count. Experimental de-tails are provided in Appendix E.                           
+
+> Table 2: Out-of-distribution detection on Im-ageNet benchmarks (AUROC ↑). Comparison of DiT-XL/2, SiT-XL/2, SiT-XL/2+REPA and our TEM-XL.
+> OOD Dataset DiT SiT SiT-REPA Ours
+> iNaturalist 0.777 0.733 0.780 0.904
+> Textures 0.439 0.426 0.438 0.687
+> Places365 0.669 0.621 0.481 0.636 SUN 0.505 0.513 0.500 0.640
+> Average 0.598 0.573 0.549 0.717
+
+Out-of-Distribution Detection. EBMs naturally provide a density-based score for OOD detection. 
+
+Eθ (x) assigns lower energy to in-distribution data and higher energy to OOD inputs [9]. Thus, a sin-gle forward pass of Eθ (x) directly provides an OOD score without any task-specific training. In con-trast, diffusion models do not directly provide such 8Preprint a scalar energy and require an additional scoring procedure based on their score function. For the diffusion baselines, we follow Wyatt et al. [44]. Using the ImageNet-1k validation set as the in-distribution reference, we report AUROC ( ↑) on four standard benchmarks [19]. Experiment details are in Appendix F. 
+
+Inpainting. Inpainting is particularly simple in energy-based models. Our EBM defines a single energy over image latents, allowing refinement from any intermediate completion. We mask the input image before VAE encoding, preventing access to ground-truth content in the missing region. We then apply sampling updates to the missing latent region, restoring the observed-region latents to their initial encoded values after each step. Figure 8 shows image composition and inpainting results. 
+
+## 5 RELATED WORK 
+
+Foundations of Energy-Based Models. Energy-based models assign an unnormalized scalar en-ergy to each input and define a Gibbs distribution over the data space, an idea with deep roots in statistical physics and undirected graphical models [17, 23]. Classical instantiations such as Re-stricted Boltzmann Machines relied on tractable architectures to make learning feasible, which in turn limited their representational capacity. Du & Mordatch [9] showed that short-run Langevin MCMC combined with a replay buffer yields a practical training loop, producing coherent samples on CIFAR-10. Follow-up work refined the training recipe through improved MCMC initialization, sampler matching terms, and regularization strategies [10, 29, 30], yet these methods operated at resolutions of 32 ×32 or less diverse dataset, leaving the scalability of the paradigm unresolved. 
+
+Latent-Space Energy-Based Models. Pang et al. [32] proposed training an EBM as a prior over the latent codes of a variational autoencoder, while Hill et al. [16] explored energy-based priors for hierarchical latent variable models. Nie et al. [28] further demonstrated controllable generation by manipulating energies in a learned latent manifold. VAEBM [46] combines a VAE with an EBM refinement in data space, reparameterizing the MCMC chain through the VAE’s latent space to make sampling practical at higher resolutions. In contrast, we train a single scalar output Transformer energy function in the frozen latent space of a pretrained autoencoder [35], keeping the EBM as the sole generative component. 
+
+Scaling Energy-Based Models. Several recent efforts have pushed EBMs toward higher resolution and stronger performance, though each introduces auxiliary mechanisms that depart from the pure energy-based formulation. EGC [14] hybridizes energy-based learning with diffusion modeling and can produce 256 ×256 ImageNet samples. However, its sampling procedure relies on the full diffusion denoising trajectory. On the adversarial side, Grathwohl et al. [13] reinterpret classifier logits as energies, and Yin et al. [47] scale this idea to ImageNet 256 ×256. However, their sampler is initialized from an auxiliary image dataset at both training and inference, and is never seeded from noise at this scale. Trained contrastively, TEM generates high-fidelity 256 ×256 images, enabling inference-time scal-ing and all EBM native applications. Appendix G provides an extended discussion of related work. 
+
+## 6 LIMITATIONS AND CONCLUSION 
+
+Limitations. TEM’s primary limitation is the computational cost of iterative sampling during both training and inference. One promising direction is to train a feed-forward proposal model to gen-erate candidates in low-energy regions, reducing the sampling needed to refine them. Extended sampling also introduces a fidelity–diversity trade-off: longer trajectories sharpen images but can reduce diversity and worsen FID. Adaptive noise schedules and proposals that enable movement between distinct modes could help preserve diversity while improving sample quality. 
+
+Conclusion. In this work, we introduce the Transformer Energy-Based Model (TEM), an approach that addresses long-standing scalability issues in contrastive training of energy-based models. With a modern transformer backbone, multi-layer energy extraction, and representation-aware training, we demonstrate that a contrastively trained EBM can synthesize high-fidelity ImageNet images at 256 ×256 and 512 ×512, competitive with other generative models. We also show that the properties that motivate energy-based modeling in the first place, compositional generation, inpainting, and 9Preprint out-of-distribution detection, remain available at this resolution. We hope this work serves as a starting point for further scaling of contrastively trained EBMs. 
+
+## ACKNOWLEDGMENTS 
+
+We thank William Moy for helpful discussion and feedback. The authors acknowledge computa-tional support from the Kempner Institute. Jungsoo Lee is supported from Korea Foundation for Advance Studies Fellowship. 10 Preprint 
+
+## REFERENCES 
+
+[1] Michal Balcerak, Tamaz Amiranashvili, Antonio Terpin, Suprosanna Shit, Lea Bogensperger, Sebastian Kaltenbach, Petros Koumoutsakos, and Bjoern Menze. Energy matching: Unify-ing flow matching and energy-based models for generative modeling. Advances in Neural Information Processing Systems , 38:8583–8609, 2025. 19 [2] Jan Beirlant, Edward J Dudewicz, L´ aszl´ o Gy¨ orfi, Edward C Van der Meulen, et al. Nonpara-metric entropy estimation: An overview. International Journal of Mathematical and Statistical Sciences , 6(1):17–39, 1997. 4, 14 [3] Andrew Brock, Jeff Donahue, and Karen Simonyan. Large scale GAN training for high fidelity natural image synthesis. In International Conference on Learning Representations , 2019. URL 
+
+https://openreview.net/forum?id=B1xsqj09Fm . 18 [4] Huiwen Chang, Han Zhang, Lu Jiang, Ce Liu, and William T Freeman. Maskgit: Masked generative image transformer. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 11315–11325, 2022. 18 [5] Mircea Cimpoi, Subhransu Maji, Iasonas Kokkinos, Sammy Mohamed, and Andrea Vedaldi. Describing textures in the wild. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 3606–3613, 2014. 18 [6] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition , pp. 248–255. Ieee, 2009. 2 [7] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. 
+
+Advances in neural information processing systems , 34:8780–8794, 2021. 19 [8] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, et al. An image is worth 16x16 words: Transformers for image recognition at scale. arXiv preprint arXiv:2010.11929 , 2020. 3 [9] Yilun Du and Igor Mordatch. Implicit generation and modeling with energy based models. 
+
+Advances in neural information processing systems , 32, 2019. 1, 2, 3, 4, 8, 9, 15 [10] Yilun Du, Shuang Li, Joshua Tenenbaum, and Igor Mordatch. Improved contrastive divergence training of energy based models. arXiv preprint arXiv:2012.01316 , 2020. 1, 3, 4, 9, 14, 15 [11] Yilun Du, Conor Durkan, Robin Strudel, Joshua B Tenenbaum, Sander Dieleman, Rob Fergus, Jascha Sohl-Dickstein, Arnaud Doucet, and Will Sussman Grathwohl. Reduce, reuse, recycle: Compositional generation with energy-based diffusion models and mcmc. In International conference on machine learning , pp. 8489–8510. PMLR, 2023. 1, 19 [12] Alexi Gladstone, Ganesh Nanduru, Md Mofijul Islam, Peixuan Han, Hyeonjeong Ha, Aman Chadha, Yilun Du, Heng Ji, Jundong Li, and Tariq Iqbal. Energy-based transformers are scalable learners and thinkers. arXiv preprint arXiv:2507.02092 , 2025. 15, 19 [13] Will Grathwohl, Kuan-Chieh Wang, J¨ orn-Henrik Jacobsen, David Duvenaud, Mohammad Norouzi, and Kevin Swersky. Your classifier is secretly an energy based model and you should treat it like one. arXiv preprint arXiv:1912.03263 , 2019. 9 [14] Qiushan Guo, Chuofan Ma, Yi Jiang, Zehuan Yuan, Yizhou Yu, and Ping Luo. Egc: Im-age generation and classification via a diffusion energy-based model. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pp. 22952–22962, 2023. 9 [15] Alex Henry, Prudhvi Raj Dachapally, Shubham Shantaram Pawar, and Yuxuan Chen. Query-key normalization for transformers. In Findings of the Association for Computational Linguis-tics: EMNLP 2020 , pp. 4246–4253, 2020. 3 [16] Mitch Hill, Erik Nijkamp, Jonathan Mitchell, Bo Pang, and Song-Chun Zhu. Learning prob-abilistic models from generator latent spaces with hat ebm. Advances in Neural Information Processing Systems , 35:928–940, 2022. 9 11 Preprint [17] Geoffrey Hinton, Simon Osindero, Max Welling, and Yee-Whye Teh. Unsupervised discovery of nonlinear structure using contrastive backpropagation. Cognitive science , 30(4):725–731, 2006. 2, 9 [18] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Ad-vances in neural information processing systems , 33:6840–6851, 2020. 1 [19] Rui Huang and Yixuan Li. Mos: Towards scaling out-of-distribution detection for large se-mantic space. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 8710–8719, 2021. 9, 18 [20] Justin Johnson, Bharath Hariharan, Laurens Van Der Maaten, Li Fei-Fei, C Lawrence Zitnick, and Ross Girshick. Clevr: A diagnostic dataset for compositional language and elementary visual reasoning. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 2901–2910, 2017. 17 [21] Minguk Kang, Jun-Yan Zhu, Richard Zhang, Jaesik Park, Eli Shechtman, Sylvain Paris, and Taesung Park. Scaling up gans for text-to-image synthesis. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 10124–10134, 2023. 18 [22] Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B Brown, Benjamin Chess, Rewon Child, Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. Scaling laws for neural language models. arXiv preprint arXiv:2001.08361 , 2020. 16 [23] Yann LeCun, Sumit Chopra, Raia Hadsell, M Ranzato, Fujie Huang, et al. A tutorial on energy-based learning. Predicting structured data , 1(0), 2006. 1, 9 [24] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. arXiv preprint arXiv:2210.02747 , 2022. 1 [25] Nan Liu, Shuang Li, Yilun Du, Antonio Torralba, and Joshua B Tenenbaum. Compositional visual generation with composable diffusion models. In European conference on computer vision , pp. 423–439. Springer, 2022. 8, 17, 18 [26] Nanye Ma, Mark Goldstein, Michael S Albergo, Nicholas M Boffi, Eric Vanden-Eijnden, and Saining Xie. Sit: Exploring flow and diffusion-based generative models with scalable inter-polant transformers. In European Conference on Computer Vision , pp. 23–40. Springer, 2024. 18, 19 [27] Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik, Jonathan T Barron, Ravi Ramamoorthi, and Ren Ng. Nerf: Representing scenes as neural radiance fields for view synthesis. Commu-nications of the ACM , 65(1):99–106, 2021. 18 [28] Weili Nie, Arash Vahdat, and Anima Anandkumar. Controllable and compositional generation with latent-space energy-based models. Advances in Neural Information Processing Systems ,34:13497–13510, 2021. 9 [29] Erik Nijkamp, Mitch Hill, Song-Chun Zhu, and Ying Nian Wu. Learning non-convergent non-persistent short-run mcmc toward energy-based model. Advances in Neural Information Processing Systems , 32, 2019. 3, 9 [30] Erik Nijkamp, Mitch Hill, Tian Han, Song-Chun Zhu, and Ying Nian Wu. On the anatomy of mcmc-based maximum likelihood learning of energy-based models. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 34, pp. 5272–5280, 2020. 9 [31] Maxime Oquab, Timoth´ ee Darcet, Th´ eo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khali-dov, Pierre Fernandez, Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, et al. Dinov2: Learning robust visual features without supervision. Transactions on Machine Learning Re-search , 2024. 15 [32] Bo Pang, Tian Han, Erik Nijkamp, Song-Chun Zhu, and Ying Nian Wu. Learning latent space energy-based prior model. Advances in Neural Information Processing Systems , 33:21994– 22008, 2020. 9 12 Preprint [33] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF international conference on computer vision , pp. 4195–4205, 2023. 3, 4, 15, 16, 18, 19 [34] Maithra Raghu, Thomas Unterthiner, Simon Kornblith, Chiyuan Zhang, and Alexey Dosovit-skiy. Do vision transformers see like convolutional neural networks? Advances in neural information processing systems , 34:12116–12128, 2021. 3 [35] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 10684–10695, 2022. 4, 9, 15, 19 [36] Noam Shazeer. Glu variants improve transformer. arXiv preprint arXiv:2002.05202 , 2020. 3 [37] Jaskirat Singh, Xingjian Leng, Zongze Wu, Liang Zheng, Richard Zhang, Eli Shechtman, and Saining Xie. What matters for representation alignment: Global information or spatial structure? arXiv preprint arXiv:2512.10794 , 2025. 15 [38] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsuper-vised learning using nonequilibrium thermodynamics. In International conference on machine learning , pp. 2256–2265. pmlr, 2015. 1 [39] Jianlin Su, Murtadha Ahmed, Yu Lu, Shengfeng Pan, Wen Bo, and Yunfeng Liu. Roformer: Enhanced transformer with rotary position embedding. Neurocomputing , 568:127063, 2024. 3 [40] Keyu Tian, Yi Jiang, Zehuan Yuan, Bingyue Peng, and Liwei Wang. Visual autoregressive modeling: Scalable image generation via next-scale prediction. Advances in neural informa-tion processing systems , 37:84839–84865, 2024. 18 [41] Grant Van Horn, Oisin Mac Aodha, Yang Song, Yin Cui, Chen Sun, Alex Shepard, Hartwig Adam, Pietro Perona, and Serge Belongie. The inaturalist species classification and detection dataset. In Proceedings of the IEEE conference on computer vision and pattern recognition ,pp. 8769–8778, 2018. 18 [42] Runqian Wang and Yilun Du. Equilibrium matching: Generative modeling with implicit energy-based models. arXiv preprint arXiv:2510.02300 , 2025. 19 [43] Runqian Wang and Kaiming He. Diffuse and disperse: Image generation with representation regularization. arXiv preprint arXiv:2506.09027 , 2025. 4 [44] Julian Wyatt, Adam Leach, Sebastian M Schmon, and Chris G Willcocks. Anoddpm: Anomaly detection with denoising diffusion probabilistic models using simplex noise. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW) , pp. 649–655. IEEE, 2022. 9, 18 [45] Jianxiong Xiao, James Hays, Krista A Ehinger, Aude Oliva, and Antonio Torralba. Sun database: Large-scale scene recognition from abbey to zoo. In 2010 IEEE computer society conference on computer vision and pattern recognition , pp. 3485–3492. IEEE, 2010. 18 [46] Zhisheng Xiao, Karsten Kreis, Jan Kautz, and Arash Vahdat. Vaebm: A symbiosis between variational autoencoders and energy-based models. arXiv preprint arXiv:2010.00654 , 2020. 9 [47] Xuwang Yin, Claire Zhang, Julie Steele, Nir Shavit, and Tony Wang. Scalable energy-based models via adversarial training: Unifying discrimination and generation. In International Con-ference on Learning Representations , volume 2026, pp. 68385–68424, 2026. 9 [48] Sihyun Yu, Sangkyung Kwak, Huiwon Jang, Jongheon Jeong, Jonathan Huang, Jinwoo Shin, and Saining Xie. Representation alignment for generation: Training diffusion transformers is easier than you think. arXiv preprint arXiv:2410.06940 , 2024. 4, 18, 19 [49] Bolei Zhou, Agata Lapedriza, Aditya Khosla, Aude Oliva, and Antonio Torralba. Places: A 10 million image database for scene recognition. IEEE transactions on pattern analysis and machine intelligence , 40(6):1452–1464, 2017. 18 13 Preprint 
+
+## A THE SAMPLER -M ATCHING LOSS 
+
+Maximum likelihood training of an EBM minimizes LNLL = EpD [Eθ (x)] + log Z(θ), whose gra-dient is given in Eq. 1: a positive phase over data and a negative phase over samples from pθ . The negative phase is the obstacle, since exact samples from pθ require MCMC run to convergence. In practice we replace pθ by the distribution qθ of the final state of a short Langevin chain initialized at N (0 , I ) or at a past sample. The resulting gradient, 
+
+Lcontrast −only = EpD (x)[Eθ (x)] − Esg( qθ (x′)) [Eθ (x′)] , (9) is therefore biased by the gap between qθ and pθ , and the bias is largest exactly when the sampler fails to reach the model’s low-energy regions. Following Du et al. [10], we introduce a loss motivated by this gap that encourages low-energy, diverse sampler outputs: 
+
+LKL = KL( qθ ∥ psg( θ)) + const = Eqθ (x)[Esg( θ)(x)] + Eqθ (x)[log qθ (x)] , (10) where the stop-gradient sg( ·) freezes the energy parameters so that gradients flow only through the sampler, and the constant − log Z(sg( θ)) does not depend on the differentiated parameters. Minimizing LKL makes the sampler’s outputs both low-energy and diverse, which is precisely what an accurate negative phase requires. It also counteracts the failure mode in which the energy function shapes a landscape that its own sampler cannot descend. A.1 ESTIMATING THE SAMPLER -ENERGY TERM 
+
+Eq. 10 splits into two pieces, LKL = Lopt + Lent , with Lopt = Eqθ (x)[Esg( θ)(x)] and Lent =
+
+Eqθ (x)[log qθ (x)] = −H(qθ ).The first is directly tractable: each sampling step is a differentiable function of θ, so 
+
+∂Lopt 
+
+∂θ = Eqθ (x0,...,x T )
+
+" ∂ E sg( θ)
+
+ xT −1 − η∇xEθ
+
+ xT −1 + ωT 
+
+∂θ 
+
+#
+
+, (11) which is a second-order gradient term. Backpropagating through all T steps is memory-prohibitive at our sequence lengths, so we differentiate only through the final sampling step, following [10]. A.2 ESTIMATING THE ENTROPY TERM 
+
+The second piece is the obstacle. Evaluating log qθ (x) exactly is intractable: qθ is the pushforward of the buffer distribution through T sampling steps, and its density at a point requires marginalizing over all trajectories that could have produced it. We instead use the non-parametric nearest-neighbor entropy estimator [2], which estimates H(p)
+
+from n samples by their average log-distance to the nearest other sample. Up to factors independent of θ, minimizing Lent therefore amounts to 
+
+Lent = Eqθ (x)[− log NN( x, B)] , NN( x, B) = min  
+
+> x′∈B
+
+∥x − x′∥2 , (12) where B is a set of past MCMC samples treated as constants (stop-gradient) and distances are L2 in latent space. Repelling samples from one another increases their diversity. This class of estimators scale poorly with dimension, and the buffer samples are neither independent nor drawn from the current qθ . As in Du et al. [10], we use it only as a diversity regularizer rather than as an accurate estimate of H(qθ ).
+
+## B TRAINING & I NFERENCE DETAILS 
+
+B.1 TRAINING DETAILS .The energy head consists of a two-layer MLP with SiLU activations. Details of the transformer ar-chitecture are provided in Table 3. All experiments operate in the latent space of a pre-trained Stable 14 Preprint Diffusion VAE [35], following Peebles & Xie [33] and are trained with bfloat16 mixed precision. The latent space is clipped by norm 100 to stabilize sampling for 256 ×256 and by norm 200 for 512 ×512, which is chosen as the threshold containing over 99 .99% of ImageNet training latents, which stabilizes sampling. A smaller threshold clips real data points, while a larger one expands the region the sampler has to search, which slightly degrades performance. For sampling, we use a step size of 500 and noise scale of 0.05. With a small step size, the network would have to produce very large input gradients to move samples meaningfully within a limited number of steps, and we found that this destabilizes training. With an excessively large step size, however, each update is coarse, and the model struggles to learn a fine-grained energy landscape. Following prior work [9, 10, 12], who likewise decouple the step size from the noise scale and use a step size much larger than the standard Langevin prescription, we select the step size empirically to balance these two effects. During training, 40-step sampling is employed. The replay buffer’s replay probability is set to 0.99 and capacity is 16000. Class labels are drawn independently for every chain, including chains initialized from the buffer. Buffer states therefore serve as class independent initializations near the data manifold, which the conditional energy re-fines toward the requested class. Once full, each newly added sample replaces a uniformly randomly selected buffer entry. For the sampler matching term, the distance with the nearest neighbor term is calculated based on the distance from 100 randomly sampled seeds to the replay buffer follow-ing [10]. We use DINOv2-large [31] as the VFM and implement the projection network Pϕ as a lightweight CNN with spatial normalization following Singh et al. [37] attached after the block nearest to one-third of the total network depth. We use λ = 1 for energy L2 regularization, λ1 = 1 
+
+and λ2 = 0 .6 for overall objective’s coefficient at Equation 7 following Du et al. [10] and Singh et al. [37]. We optimize the model using Adam with a learning rate of 2 × 10 −4, momentum parameters 
+
+(β1, β 2) = (0 , 0.999) , ϵ = 10 −8, and no weight decay. We keep an exponential moving average (EMA) of the weights with decay 0.9999 , updated after every optimizer step. All reported samples and metrics use the EMA weights. During training, we replace the class label with a null token with probability 0.15 , enabling unconditional energy evaluation for OOD detection.                           
+
+> Table 3: TEM architecture configurations. Model variants from TEM-S to TEM-XL. All variants use a patch size of 2×2and operate in the latent space of a pretrained Stable Diffusion VAE. Scaling from S to XL increases both depth and hidden dimension, yielding monotonic FID improvements (see Figure 3).
+> Model TEM-S TEM-B TEM-L TEM-XL
+> Params 33M 122M 415M 609M Depth (layers) 12 12 24 28 Hidden size 384 768 1024 1152 Attention heads 612 16 16
+
+B.2 INFERENCE DETAILS .Evaluation uses persistent chains: the first 5,000 chains are initialized from N (0, I), and subsequent chains continue from buffered 40-step states (Algorithm 1), so no external data enters sampling. Once full, each newly added 40 step state replaces a uniformly randomly selected buffer entry. Class labels are sampled independently for each chain and are randomly mixed throughout evaluation. We apply the same latent-norm clipping threshold used during training. Each output requires T
+
+additional sampling steps, including for noise-initialized chains, giving an amortized cost of T steps per sample under this persistent evaluation protocol. To discuss more about details about fidelity-diversity trade-off at Section 4.3, Table 4 directly quan-tifies this trade-off: increasing sampling steps from 40 to 80 raises precision from 0.65 to 0.81 while reducing recall from 0.65 to 0.51. This trend is similar to the fidelity-diversity trade-off observed with increasing classifier-free guidance in diffusion models. 
+
+## C COMPUTATIONAL COST 
+
+Training the TEM-XL model for 50K steps on ImageNet 256 ×256 dataset takes approximately 6 days using 4 H200 GPUs. For sampling, it takes about an hour to sample 50K images with 1 H200 15 Preprint     
+
+> Table 4: Fidelity-diversity trade-off. Top: TEM-XL with varying numbers of sampling steps, precision/recall with k= 3 . Bottom: DiT-XL/2 with varying classifier-free guidance scale gresults from Peebles & Xie [33]
+
+Model # Steps FID ↓ IS ↑ Precision ↑ Recall ↑
+
+TEM-XL 40 7.63 106.0 0.65 0.65 TEM-XL 60 3.82 176.2 0.76 0.57 TEM-XL 80 4.72 221.1 0.81 0.51 DiT-XL ( g=1.0) 250 9.62 121.5 0.67 0.67 DiT-XL ( g=1.25) 250 3.22 201.8 0.76 0.62 DiT-XL ( g=1.5) 250 2.27 278.2 0.83 0.57 GPU for 60 sampling steps. Higher resolution training on 512 ×512 takes roughly 3–4 times longer than 256 ×256 on both training and inference. C.1 TRAINING COST 
+
+Training cost. We follow the FLOP accounting convention of Kaplan et al. [22], letting F denote the cost of a single forward pass. A standard training step for a diffusion transformer costs 3F per image: one forward pass and a backward pass of roughly 2F , since gradients are taken with respect to both the activations and the parameters. A TEM step has four components: • Negative sampling. Each of the Ttrain =40 sampling steps requires ∇zEθ (z), a gradient with respect to the input only, which costs approximately F in addition to the forward pass. The chain therefore costs about 2F T train = 80 F .• Sampler matching loss. This term calculates the second-order gradient for last sampling step which takes about 8F based on measurement. • Contrastive loss and parameter update. The energies of the positive and negative batches are each evaluated and backpropagated through, about 3F each. • Representation alignment. One forward pass of the frozen VFM, which is not backprop-agated through. For DINOv2-L at our token count this is approximately 0.9F .Despite this per-step overhead, TEM reaches a lower guidance-free FID with less total training compute, because it converges in far fewer steps. Table 5 compares the total training cost of TEM with that of representative models.   
+
+> Table 5: Training cost on ImageNet 256 ×256. All values use the same accounting convention. VFM forwards are included for TEM and SiT+REPA.
+
+Model Training steps Training FLOPs FID ↓
+
+DiT-XL/2 7M 638 E 9.62 SiT-XL/2 7M 638 E 8.30 SiT-XL/2+REPA 4M 393 E 5.90 TEM-XL 50K 146 E 3.82 C.2 INFERENCE COST 
+
+Because each sampling requires the input gradient ∇zEθ (z) at every step, the number of steps is not directly comparable to that of diffusion models, we report FLOPs instead. Following the accounting convention of Kaplan et al. [22], let F denote the cost of one forward pass. Sampling requires only the gradient with respect to the input, which costs approximately F , as opposed to roughly 2F when parameter gradients are also required. Each sampling step therefore costs about 2F , and sampling with K steps costs 2F K . Table 6 compares the sampling cost of TEM with that of other models. Although each sampling step costs roughly twice the cost of a single forward pass, TEM uses far fewer steps while reaching a lower guidance-free FID. Classifier-free guidance would improve the baselines’ quality but doubles their sampling cost. Although accelerated solvers can further reduce 16 Preprint   
+
+> Table 6: Sampling cost on ImageNet 256 ×256. All results are without classifier-free guidance.
+
+Model Steps / Sample FLOPs / Sample FID ↓
+
+DiT-XL/2 250 29.66 T 9.62 SiT-XL/2 250 29.66 T 8.30 TEM-L 60 9.87 T 4.74 TEM-XL 60 14.48 T 3.82 
+
+Algorithm 2 Transformer Energy-Based Model (TEM) Training  
+
+> 1:
+
+Input: Data distribution pD (x), encoder E, frozen VFM hVFM , sampling step size η, noise scale σ, number of steps T , loss coefficients λ, λ 1, λ 2, replay probability preplay  
+
+> 2:
+
+Initialize: Replay buffer B ← ∅  
+
+> 3:
+
+while not converged do  
+
+> 4:
+
+# 1. Sample positive data and initialize negative chains  
+
+> 5:
+
+Sample real images x+ ∼ pD (x); z+ ← E (x+) 
+
+> 6:
+
+Sample ˜z0 ∼ B with probability preplay , else ˜z0 ∼ N (0 , I ) 
+
+> 7:
+
+# 2. Sampling  
+
+> 8:
+
+for t = 1 to T do  
+
+> 9:
+
+˜zt ← ˜zt−1 − η∇zEθ (˜ zt−1) + ω, ω ∼ N (0 , σ 2) 
+
+> 10:
+
+end for  
+
+> 11:
+
+ˆz− ← ˜zT ; z− ← sg(˜ zT ) ▷ with and without gradient  
+
+> 12:
+
+# 3. Compute Training Objectives  
+
+> 13:
+
+L ← 1
+
+> N
+
+P 
+
+Eθ (z+) − Eθ (z−) + λ Eθ (z+)2 + Eθ (z−)2 
+
+> 14:
+
++λ1
+
+ Esg( θ)(ˆ z−) − log NN(ˆ z−, B) + λ2LPRA (x+, z+)
+
+ 
+
+> 15:
+
+# 4. Backpropagation and Parameter Update  
+
+> 16:
+
+∆θ ← ∇ θ L 
+
+> 17:
+
+# 5. Update persistent buffer  
+
+> 18:
+
+B ← B ∪ { z−} 
+
+> 19:
+
+end while 
+
+the cost of diffusion sampling, the overhead of computing input gradients is modest in practice, and TEM attains a lower guidance-free FID at a comparable sampling cost. 
+
+## D TRAINING ALGORITHM 
+
+The full training procedure for TEM is given in Algorithm 2. 
+
+## E COMPOSITIONAL GENERATION IN 256 X256 CLEVR D ATASET 
+
+To quantitatively evaluate TEM’s compositional performance, we train TEM on a 256×256 location-conditioned CLEVR [20] dataset consisting of 70,000 images. Prior work on compositional gen-eration evaluates at 128 ×128 with a classifier trained at that resolution. We extend this setting to 256×256 to test whether the compositional advantage of energy-based models persists at higher res-olution, which is a harder generative setting. The following describes the training setup and the evaluation protocol used to compare against Composable Diffusion [25]. 
+
+Training a location-conditioned TEM on CLEVR 256 ×256. We train our TEM-B model and evaluate it by providing object locations from real images and composing images according to the number of objects. We condition the energy network on a target object location p = ( x, y ) ∈ [0 , 1] 2
+
+(normalized image coordinates) through two complementary pathways: a global coordinate code injected by adaptive layer normalization, and a spatial bias added directly to the patch-token grid. To condition TEM on location, we encode each coordinate with a NeRF-style Fourier feature encoding, 
+
+γ(c) = c, sin(2 0πc ), cos(2 0πc ), . . . , sin(2 L−1πc ), cos(2 L−1πc ), (13) 17 Preprint which gives a richer positional signal than raw coordinates [27]. With L=8 frequency bands, (x, y )
+
+maps to a 2(1+2 L)=34 -dimensional code, which is linearly projected, combined with the (optional) attribute embeddings, and injected into every transformer block via AdaLN. We train for 150k steps with batch size 64. 
+
+Evaluation protocol. Composable Diffusion [25] operates at 128 ×128, and its evaluation classifier is trained at this resolution. We use their released 128 ×128 CLEVR checkpoint directly, and train the classifier ourselves following their training recipe with 128 ×128 CLEVR dataset. TEM gener-ates at 256 ×256, and we downsample its samples to 128 ×128 only for scoring, so both methods are judged by the same classifier at the same resolution. The classifier reaches over 99.9% detec-tion accuracy on real 128 ×128 CLEVR images, so the reported accuracies reflect generation quality rather than detector error. We report detection success rate over 1,000 scenes for 1-, 2-, and 3-object compositions. 
+
+## F OUT -OF -D ISTRIBUTION DETECTION 
+
+TEM as an OOD Detector. TEM provides a scalar energy that we evaluate as an OOD score, using lower energy to indicate more ID-like inputs. We evaluate this property as a secondary capability of TEM. Specifically, we use a TEM-XL model trained with class-label dropout: during training, the class condition is randomly replaced with a null token, allowing the model to learn an unconditional energy function Eθ (x) alongside the conditional one. At test time, we query the unconditional branch and use the scalar energy S(x) = −Eθ (x) as the OOD score in a single forward pass, with no class labels, post-hoc calibration, or OOD exposure. 
+
+Diffusion Baselines. As baselines we use pretrained DiT-XL/2 [33], SiT-XL/2 [26], and SiT-XL/2+REPA [48] as ImageNet-trained generative baselines. We use the official released check-points: 7M training iterations for DiT-XL/2 and SiT-XL/2, and 4M for SiT-XL/2+REPA. Each test image x is encoded to a latent z0 = E(x) by the Stable Diffusion VAE. For DiT, we construct 
+
+zt = √¯αt z0 + √1 − ¯αt ϵ with ϵ ∼ N (0 , I), and the network is queried under the null class to-ken y = ∅ (the learned embedding at index 1000, used for classifier-free guidance dropout during training). The OOD score is the denoising residual 
+
+s(x) = ∥ϵ − ϵθ (zt, t, ∅)∥2 , (14) where lower s(x) indicates a more in-distribution input, following Wyatt et al. [44]. We score DiT using its noise-prediction residual and SiT-based models using their velocity-prediction residuals, with each model’s native interpolation and time convention. All baselines use a single network evaluation, matching the single-forward-pass cost of TEM. For DiT, we use timestep t=350 . For SiT+REPA, we select the timestep that matches the same noise level. We include SiT-XL/2+REPA to separate two possible explanations for TEM’s performance. Since TEM is trained with PRA, its energy function inherits semantic structure from VFM, and one might attribute the gain to that supervision rather than to the energy score itself. SiT-XL/2+REPA receives the same DINOv2 alignment signal but is scored by its denoising residual, and its AUROC is close to that of SiT-XL/2 (Table 2). Alignment to a vision foundation model therefore does not by itself account for the gap. What distinguishes TEM is that the energy provides a single scalar that directly ranks inputs by fit to the learned distribution. 
+
+Evaluation Protocol. Following Huang & Li [19], we use the ImageNet-1k validation set (50,000 images) as the in-distribution reference and evaluate on four OOD benchmarks spanning a range of semantic distances from ImageNet: iNaturalist [41], SUN [45], Places365 [49], and Textures [5]. We report AUROC ( ↑). 
+
+## G ADDITIONAL RELATED WORK 
+
+G.1 BASELINES IN TABLE 1All baseline numbers are taken from the original papers; a dash indicates that the corresponding setting was not reported. Among GANs we compare against BigGAN-deep [3] and GigaGAN [21]. For autoregressive and masked models we report MaskGIT [4] and VAR-d30 [40]. The diffusion 18 Preprint and flow baselines are ADM [7], LDM-4 [35], DiT-XL/2 [33], SiT-XL/2 [26], and SiT-XL/2 with REPA [48]. Parameter counts refer to the 256 ×256 configuration unless a resolution-specific model was released. G.2 SCALING ENERGY -BASED MODELS 
+
+A parallel line of work attains scale by learning energy landscapes from predictive targets rather than from negative samples drawn from the model itself. Du et al. [11] assign a scalar energy to each diffusion timestep via denoising score matching, recovering MCMC-based composition but forgo-ing a single global energy. Equilibrium Matching [42] fits a time-invariant equilibrium gradient through a regression objective, defining the energy only implicitly through its gradient field. Its ex-plicit scalar-energy variants (EqM-E) substantially degrade generation quality (FID 73.40 and 75.53 in the B/4 setting). Energy-Based Transformers [12] learn an energy landscape by backpropagat-ing a reconstruction loss through unrolled inner-loop optimization. Energy Matching [1] explicitly parameterizes a scalar potential, but achieves its high-fidelity generation results by combining an optimal-transport objective with contrastive energy learning. Its image generation experiments are limited to 32 ×32 resolution (CIFAR-10 and unconditional ImageNet 32 ×32), so it is not included in Table 1. In contrast, TEM directly parameterizes a single scalar energy and trains it contrastively using only negatives produced by its own MCMC sampler, without a transport or flow-matching objective. Thus, while prior work demonstrates that energy parameterizations can scale when coupled with predictive, transport-based, or reconstruction-style objectives, our results show that an explicit, con-trastively trained EBM can itself scale to ImageNet 256 ×256. 19

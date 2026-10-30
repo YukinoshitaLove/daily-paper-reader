@@ -1,0 +1,864 @@
+Title: Fast and Useful: Adapting Distilled Generators for Visual Learning
+
+URL Source: https://arxiv.org/pdf/2610.32512v2
+
+Published Time: Fri, 30 Oct 2026 03:43:57 GMT
+
+Number of Pages: 30
+
+Markdown Content:
+# Fast and Useful: Adapting Distilled Generators for Visual Learning 
+
+# Patryk Bartkowiak 1,4 Dominik Michels 2,4 S¨ oren Pirk 3,4 Wojciech Pałubicki 1,4 1Adam Mickiewicz University 2KAUST 3Kiel University 4GreenMatterAI Noise 
+
+Released student First-step adapter  
+
+> Limited variety
+
+# 17.1%  
+
+> Broader variety
+
+# 43.8%  
+
+> Real-image accuracy
+> 050%
+
+Figure 1. First-step adaptation restores variety and improves learning from synthetic images. The adapter learns to jump to an intermediate state of the unguided base, replacing the released FLUX.2-klein student’s first three predictions. The unchanged student then finishes generation, requiring two denoiser evaluations instead of four. Fox images show one selected class with matched prompts and noise seeds. ResNet-50 top-1 accuracy on real ImageNet-100 increases from 17.1 ±0.4% to 43.8 ±0.4% after training on 500 generated images per class (mean ± SD). 
+
+# Abstract 
+
+Distilled text-to-image models generate images quickly, but classifiers trained on those images can perform substantially worse than classifiers trained on images from their slower base models. We adapt released distilled generators to pro-duce better training data while retaining fast generation. We fit a low-rank update to the student’s first prediction so that it reaches an intermediate state produced by its unguided base, then disable the update and let the unchanged student finish generation. The base supplies training targets and is absent at inference. Guided targets and shorter jumps give classifiers lower accuracy in our ablations, showing why the state used for supervision matters. Across three generator families, the adapted images train better classifiers than im-ages from the released students. With class-name templates at full ImageNet-1k scale, ResNet-50 top-1 rises from 8.4% to 34.2% for FLUX.2-klein and from 12.7% to 32.1% for SD-Turbo, using two and three denoiser evaluations per im-age, respectively. Fixed adapters also improve results on additional classes, fine-grained datasets, and other learner architectures and training recipes. Template-based adapta-tion remains useful against richer-prompt alternatives, while the benefit of combining adaptation with LLM generation prompts depends on the generator. Adapting a single gener-ation step makes fast generators substantially more useful for training visual models. 
+
+# 1. Introduction 
+
+Synthetic images can expand training sets for computer vi-sion without requiring another round of image collection and annotation. Text prompts provide control over the requested classes and allow datasets to be generated at different scales, supporting both learning from synthetic images alone and supplementing limited real data [2, 16, 32]. Their usefulness depends on what visual models learn from them: a generated dataset must help a classifier recognize real images. Diffusion-based text-to-image models make this approach flexible, but generating every image through many denois-ing steps becomes costly at dataset scale. Distillation com-presses generation into a few predictions, making large syn-thetic datasets faster to produce [33, 40]. That acceleration can come with a loss in the usefulness of the generated im-ages. Adamkiewicz et al . [1] show that classifiers trained on images from released distilled generators can perform worse than classifiers trained on images from their full-step coun-terparts. We aim to retain the speed advantage while making the released student’s images more useful for learning. We study this problem by comparing changes to the generator while holding the classifier training procedure fixed. Lower guidance and richer prompts already improve synthetic-data learning [10, 32], and replacing a distilled model’s first steps with its base can restore sample diver-sity [14]. We measure how these choices affect classification on real images and use the resulting comparisons to con-1arXiv:2610.32512v2 [cs.CV] 29 Oct 2026 struct supervision for a fast student. Additional classifier architectures and training recipes test whether the improve-ment extends beyond the primary learner. Our approach trains a low-rank update to the released student’s first prediction. From initial noise, this predic-tion learns to reach an intermediate state produced by the unguided base. We then disable the update and let the un-changed student finish generation. The base supplies targets during preparation and is absent at inference; the adapted samplers use two denoiser evaluations for FLUX.2-klein and three for SD-Turbo. First-step teacher regression and post-hoc diversity adaptation have precedents [12, 25, 39]. At full ImageNet-1k scale with template prompts, adapta-tion improves classifier accuracy over the previously fixed base-first samplers by +3.5 points on klein and +5.4 on SD-Turbo (Tab. 2). Matched ablations establish how tar-get guidance, jump endpoint, and update placement affect downstream classifier accuracy; comparisons with released models, base-first sampling, and available diversity methods test the resulting adaptation procedure. We evaluate three generator families across datasets, learners, and prompt regimes, and measure preparation and generation costs. Our contributions are: 1. Improving released generators for visual learning. We adapt three distilled generator families and compare them with the released students and base-first hybrids by train-ing classifiers under the same procedure. A public SDA comparison and further adaptation of DP-DMD’s released student test the approach alongside existing diversity methods (Sec. 3). 2. Controlled evidence for the adaptation targets. Chang-ing guidance and replacing early student steps motivate the correction; matched target-guidance, endpoint, and update-placement ablations establish which choices im-prove classifier accuracy (Sec. 4.4 and Tab. 3). 3. Scale and transfer with fixed adapters. Adapters se-lected during development improve classifier accuracy at full ImageNet scale and transfer unchanged to fine-grained datasets. Comparisons across prompts, learners, and real-data availability establish the tested regimes in which adaptation helps (Tabs. 2 and 4 to 6). We will release code to reproduce all experiments and to train and apply the adapter. 
+
+# 2. Related Work 
+
+Synthetic data for visual learning. Text-to-image models can supply images for training classifiers from scratch and supplementing limited real data [2, 16, 32]. The resulting accuracy depends on the generator, dataset size, prompts, and learning procedure. Lower guidance and richer descriptions improve supervised learning from synthetic images [10, 32], while StableRep uses multiple images generated from the same caption as positives for self-supervised representation learning [37]. These approaches establish useful ways to generate and learn from synthetic data. Adamkiewicz et al . [1] identify a complementary problem: images from newer and distilled generators can train weaker classifiers than images from older models. We address this problem by adapting released distilled generators and comparing their images under matched classifier training procedures, with additional learners testing the scope of the improvement. 
+
+Diffusion acceleration and distillation. Latent diffusion and rectified-flow models support text-conditioned genera-tion through iterative sampling [9, 30]. Distillation reduces the number of model evaluations through objectives such as adversarial training, distribution matching, and consis-tency learning [26, 33, 40, 41]. Although these methods enable fast generation, maintaining visual quality does not guarantee that the images remain equally useful for training classifiers [1]. We build on their released students, adapting a single prediction and retaining the student’s unchanged completion steps. This lets us test improvements to synthetic training data without training another distilled generator from its base. 
+
+Diversity preservation and adaptation. Guidance sched-ules and condition annealing adjust the trade-off between fidelity and diversity [21, 31]. Gandikota and Bau [14] re-store diversity by using base-model predictions for the initial steps of a distilled sampler. We evaluate this base-first pro-cedure as an alternative that requires no adapter training but uses the base at inference. Training-based methods also dis-tinguish early structural variation from later refinement. DP-DMD supervises the first student step with a teacher-derived target and trains the remaining steps through distribution matching [39]; CrossDistill assigns trajectory-preserving and distribution-matching objectives to different noise in-tervals in video generation [25]. CrossDistill’s direct-flow variant also regresses the first prediction toward an interme-diate teacher state; our adaptation applies this supervision to a released image student while leaving its completion steps unchanged. Other methods likewise modify distillation ob-jectives to preserve diversity [11, 19, 22, 23]. SDA directly adapts released few-step models with teacher-guided direc-tional alignment, and its Krea-2 release activates the adapter only during early sampling steps [12, 13]. We study how unguided teacher targets and first-prediction adaptation affect classifier accuracy when the released student’s completion steps remain fixed (Tab. S8). 23. Methodology 
+
+## 3.1. Problem and approach 
+
+We adapt a released distilled generator so that classifiers trained on its images perform better on real images. The adaptation uses the corresponding full-step base as a teacher and preserves the released student for the remaining genera-tion steps. We train a low-rank update to the first prediction to approximate an intermediate teacher state, then disable the update and let the student finish. The teacher is needed to prepare training targets but is absent at inference (Fig. 2). 
+
+## 3.2. Constructing the teacher target 
+
+We compare generated datasets through the accuracy of clas-sifiers trained on them, holding prompts, image seeds, and classifier training fixed within each comparison. Reducing base-model guidance improves this accuracy in the tested configurations, motivating targets that retain the base’s text-conditioned prediction without classifier-free guidance am-plification. We call this setting unguided , corresponding to a standard guidance weight of one. The target still depends on the text prompt. For each prompt and initial noise sample, we run the unguided base on a fine sampling grid and save its latent state at a selected noise level. This gives paired supervision: the released student receives the same noise and prompt and learns to predict a jump to that state. We compare guided and unguided teacher targets in the experiments to test this choice directly (Tab. 3). 
+
+## 3.3. Correcting the early generation steps 
+
+The target must also specify how much of the teacher trajec-tory the adapted prediction should replace. Our guidance-window comparisons show that strong guidance during early steps accounts for much of its observed cost to classifier accuracy. Replacing early student predictions with the un-guided base also improves accuracy more than replacing later predictions (Sec. 4.4). These results motivate learning the teacher’s early computation in one jump and reusing the student afterward. We choose the jump endpoint from the released student’s noise levels, allowing the unchanged student to continue on its existing schedule. Endpoint selection uses the ImageNet-100 and 200-class development protocols; a small ImageNet-1k pilot also contributed to method development. The se-lected targets and resulting evaluation counts appear in Tab. 1. The candidate endpoints and retention criteria are specified in Sec. A. Later evaluations use previously fixed adapters and samplers: klein and SD-Turbo at full ImageNet scale, and all four generator families on fine-grained datasets.                    
+
+> Table 1. Teacher targets and adapted sampling schedules. The first prediction jumps to the target; the unchanged student completes generation. NFE counts all denoiser evaluations in the adapted sampler. Flow-model targets use noise level σ; SD-Turbo uses its scheduler timestep t.Student Base teacher Jump endpoint NFE FLUX.2-klein klein base σ= 0 .7175 2SD-Turbo SD 2.1 t= 499 3Z-Image-Turbo Z-Image σ= 0 .8571 7
+
+## 3.4. Training the adapter 
+
+Let vθ (x, σ, c ) denote the released student’s prediction for latent x, noise level σ, and prompt c, with sampling schedule 
+
+1 = σ0 > · · · > σ K = 0 . Starting from initial noise x1, the unguided teacher produces the target x⋆σa (x1, c ). We freeze the released weights and fit low-rank updates ∆W = BA ,initializing B to zero so that training starts from the released model. The adapted first prediction minimizes the squared error between its resulting latent and the teacher target: 
+
+L(∆ W ) = Ex1,c x1 + ( σa − 1) vθ+∆ W (x1, 1, c )
+
+− x⋆σa (x1, c ) 2. (1) This applies established first-step teacher regression [25, 39] to a released student. The expression uses flow-matching coordinates; SD-Turbo uses the corresponding Euler update in its scheduler’s noise coordinate (Eq. (2)). Teacher-state regression trains the adapter, while downstream classifier accuracy guides sampler development and evaluates the gen-erated images. We use rank-32 updates on transformer-block linear lay-ers, or attention-block linear layers for SD-Turbo. We pre-pare 16,000 noise/target pairs from ImageNet-100 class-name templates and train the primary adapters for 3,000 optimization steps. Their noise seeds are disjoint from those used to generate evaluated datasets. The teacher targets are prepared once and reused during optimization; optimizer settings and family-specific sampling grids appear in Sec. A. 
+
+## 3.5. Sampling with the adapted student 
+
+At inference, we activate the adapter for the initial prediction and jump directly to σa. We then disable it and complete the remaining schedule with the released student. When the target lies beyond the original first endpoint, this jump replaces several student steps with one prediction. Only the student and its adapter are loaded during genera-tion. Target preparation and adapter fitting incur a one-time cost, which we report separately from per-image genera-tion time and include in total deployment cost comparisons (Tab. S2). 31 0.88 σa = 0.72 0          
+
+> noise level σ(FLUX.2-klein)
+> student finish (display)
+> unguided base: 34 steps (training only)
+> x⋆
+> σa
+> adapted first step
+> student finish regression ‖̂ xσa−x⋆
+> σa‖2̂
+> xσa
+> released student: 4 steps
+> ●
+> base state at σa
+> + last distilled step
+> ★
+> + adapter (ours) 2 NFE
+> ▲
+> distilled (released) 4 NFE
+> same noise and prompt per column (“hare”)
+> noise x1
+> prompt c
+
+Figure 2. One adapted prediction followed by unchanged student sampling. Left: klein’s released four-step student (orange), its unguided base on a fine grid (blue), and the adapted sampler (violet). We train the first prediction to reach the base state at σa; the unchanged student then finishes in one step, giving two denoiser evaluations without the base at inference. Right: matching noise and hare prompts, completed from the teacher target, by the adapter, or by the released student. Images are selected to illustrate the sampling paths. 
+
+# 4. Experiments 
+
+## 4.1. Experimental setup 
+
+Our primary comparison trains a ResNet-50 [15] from scratch on 500 generated images per ImageNet-100 class (CMC subset [36]) and evaluates top-1 accuracy on the corre-sponding real validation images. Eight photo templates sup-ply class-name prompts, with matching prompts and image seeds across samplers. Classifiers use the same 100-epoch training procedure within each comparison. We evaluate FLUX.2-klein, SD-Turbo, and Z-Image-Turbo against their released students, unguided bases, and base-first samplers, alongside the public SDA adapter and DP-DMD’s released SD3.5-Medium student. Comparisons generate at 512 pixels; a separate DP-DMD check uses its documented 1024-pixel resolution with the unchanged adapter. Classifier hyperpa-rameters, baseline settings, and the broader generator survey appear in Sec. A. ImageNet-100 and the 200-class protocol provide devel-opment results, and the small ImageNet-1k pilot also in-formed method development. Full-scale ImageNet-1k [8] and Food-101, Cars, and Pets evaluations [7, 20, 27] use previously fixed adapters and samplers: klein and SD-Turbo at full ImageNet scale, and all four generator families on fine-grained datasets. The 200-class results include classes absent from adapter training but were also inspected during development (Tab. S1). Unless stated otherwise, tables and error bars report means and standard deviations over three classifier seeds. Primary ImageNet-100 adapter results pool three adapter-training runs with three classifier seeds each; other adapter results use one training run, with exceptions identified in their tables. Accuracy gaps compare mean per-class accura-cies, with paired 95% class-bootstrap intervals after averag-ing classifier runs, conditional on the generated datasets and fitted checkpoints. Four headline sets are regenerated inde-pendently; the ImageNet-100 LLM comparisons use three generated datasets with three classifier seeds each. Separate dataset-mean and classifier SDs appear in Tab. S15. 
+
+## 4.2. Classifier accuracy from adapted images 
+
+On ImageNet-100, adaptation raises classifier accuracy from 17.1% to 43.8% on klein and from 18.3% to 43.7% on SD-Turbo. Z-Image-Turbo’s adapted images reach 35.1%. Fig-ure 3 compares the released students, base-first samplers, adapters, and unguided bases. All three adapters outperform their base-first samplers, although the unguided bases retain higher accuracy in these comparisons. Table 2 reports the 200-class development and full ImageNet results; complete primary accuracies and costs appear in Tab. S6. The SDA comparison uses its documented eight-step Z-Image-Turbo sampler. Its better tested activation sched-ule reaches 25.1%, compared with 35.1% for our adapter. Further adapting DP-DMD’s released student raises accu-racy from 13.9% to 27.3% using the selected deeper tar-get (Fig. 3). This tests whether our correction adds value to DP-DMD’s student; it does not compare independently trained distillation procedures. At its documented 1024-pixel resolution, the unchanged adapter still gains +11.4 points (Tab. S7). FSG, MoNO, and skipping the initial student step also give smaller improvements in the evaluated settings (Tab. 3 and Sec. C.4). Table 2 also reports full ImageNet-1k results. With 1,281 images per class, accuracy rises from 8.4% to 34.2% on klein and from 12.7% to 32.1% on SD-Turbo. At this scale, the adapters also exceed the previously fixed base-first sam-40 10 20 30 40 50                
+
+> Released student Base-fi rst
+> Ours
+> Unguided base 17.1 ± 0.4 39.9 ± 0.3
+> 43.8 ± 0.4
+> 45.08 ± 0.02
+> (a) FLUX.2-klein
+> 010 20 30 40 50
+> Released student Base-fi rst
+> Ours
+> Unguided base 18.3 ± 0.3 36.4 ± 0.9
+> 43.7 ± 0.6
+> 49.8 ± 0.7
+> (b) SD-Turbo
+> 010 20 30 40 50
+> Released student SDA Base-fi rst
+> Ours
+> Unguided base 13.8 ± 0.4 25.1 ± 0.1 32.8 ± 0.9
+> 35.1 ± 0.5
+> 45.6 ± 0.7
+> (c) Z-Image-Turbo: comparison with SDA
+> 010 20 30 40 50
+> DP-DMD
+> DP-DMD + ours
+> Unguided base 13.9 ± 0.2
+> 27.3 ± 0.2
+> 44.9 ± 0.3
+> (d) Adapting DP-DMD's released student
+> ImageNet-100 synthetic-to-real top-1 accuracy (%)
+
+Figure 3. First-step adaptation improves the training value of released fast generators. ResNet-50 top-1 on real ImageNet-100 after training on 500 generated images/class. Adapters exceed released students and base-first sampling (a–c), the tested SDA adapter (c), and the released DP-DMD student when applied on top of it (d). Blue: unguided bases. Error bars: mean ± SD under the reporting convention in Sec. 4.1; DP-DMD plus ours uses one adapter run. Z-Image’s released reference uses SDA’s eight-step schedule; Tab. S6 also reports the nine-step student. Table 2. The gains extend to additional classes and full Ima-geNet scale. ResNet-50 top-1 (%), mean ± SD over three classifier seeds, one adapter run. The 200-class protocol informed develop-ment (500 images/class); ImageNet-1k uses fixed samplers at 1,281 images/class. Bold: best fast sampler. Additional primary results, including ImageNet-100, COCO-target adapters, and costs, are in Tab. S6. Sampler 200 classes ImageNet-1k 
+
+FLUX.2-klein 
+
+Released student 19.1 ±0.0 8.4 ±0.1 
+
+Base-first 43.7 ±0.1 30.8 ±0.1 
+
+Ours 48.6 ±0.3 34.2 ±0.1 
+
+Unguided base, 20 steps 48.1 ±0.2 37.2 ±0.1 
+
+SD-Turbo 
+
+Released student 19.8 ±0.3 12.7 ±0.2 
+
+Base-first 36.0 ±0.2 26.7 ±0.3 
+
+Ours 41.3 ±0.8 32.1 ±0.3 
+
+Unguided base, 30 steps 45.7 ±0.9 44.1 ±0.1 
+
+Z-Image-Turbo 
+
+Released student 13.9 ±0.4 –Base-first 35.3 ±0.3 –Ours 38.2 ±0.3 –
+
+plers by +3.5 points [+2.9, +4.1] on klein and +5.4 [+5.0, +5.8] on SD-Turbo. The gains over released and base-first sampling remain positive on the 900 classes absent from adapter training (Tab. S9). Klein and SD-Turbo recover 90% and 62% of their unguided bases’ accuracy gains over the released students, respectively. Increasing the unadapted klein dataset from 100 to 1,281 images per class produces little change, whereas the adapted generator benefits from the larger dataset (Tab. 2 and Sec. D.1). All dataset sizes use the same number of classifier epochs, so larger sets receive more optimization updates. 
+
+## 4.3. Generation and preparation costs 
+
+We measure generation throughput on one H100 at the recorded batch sizes, including prompt encoding, denoising, and decoding. These measurements exclude model load-ing and writing generated images to storage. The adapted klein sampler takes 0.10 seconds per image, compared with 0.57 for its unguided 20-step base. Across the three pri-mary families, adapted sampling costs match or improve on the released students while increasing classifier accuracy (Fig. 4). Preparing teacher targets and fitting the first klein and SD-Turbo adapters costs 5.7 and 0.9 H100-hours, respectively. At 50,000 generated images, preparation makes adaptation 50.1 0.2 0.5 1 210 20 30 40 50          
+
+> Top-1 accuracy (%) FLUX.2-klein
+> 0.02 0.03 0.05 0.1
+> SD-Turbo
+> 0.3 0.5 12
+> Z-Image-Turbo H100 seconds per image (log scale) Released student Ours Base-fi rst Unguided base
+
+Figure 4. Adaptation improves classifier accuracy while retaining fast generation. ImageNet-100 top-1 against measured H100 seconds/image (log scale); vertical bars show SD. Unguided-base points use 10, 20, and 50 steps for klein, 10 and 30 for SD 2.1, and 50 for Z-Image. The adapted samplers require only the student at inference. Preparation is excluded here and included in Tab. S2; additional operating points appear in Fig. S2. 
+
+more expensive overall than base-first, while the adapter gives higher accuracy and requires no base at inference. With template-prompt throughputs measured on ImageNet-100, adaptation becomes cheaper overall than base-first after approximately 399,000 images for klein and 807,000 for SD-Turbo (Tab. S2). We exclude SDA runtime from the speed comparison because our unmerged implementation does not represent an optimized deployment. 
+
+## 4.4. Evidence for the design choices 
+
+Changing guidance only during early or late generation steps shows that the early part accounts for much of the observed accuracy loss. Likewise, replacing early student steps with the unguided base improves accuracy more than replacing later steps. Detailed guidance-window and base/student comparisons support the early-step design (Fig. S1). The adapter ablations then compare the teacher targets directly (Tab. 3). With the same finer teacher grid on klein, an unguided target gives 43.2%, while a guidance-four target gives 20.1%. SD-Turbo and Z-Image show the same direc-tion of change (Sec. B.2). Stopping the adapted jump at the original first endpoint also underperforms the selected target on klein and SD-Turbo, as do the tested deeper endpoints. Keeping the same first-step-trained adapter active during the remaining sampling steps lowers accuracy. This compari-son tests inference-time activation; it does not evaluate an adapter trained across timesteps. Increasing rank or training every weight gives comparatively small changes. Together, these comparisons support an unguided intermediate target and an update used only for the initial prediction. 
+
+## 4.5. Generalization across datasets and learners 
+
+The ImageNet-trained adapters improve classifiers on Food-101, Cars, and Pets without retraining or changing their sam-pling settings (Tab. 4). Our Z-Image-Turbo adapter exceeds 
+
+Table 3. Target choice matters more than parameter count. 
+
+ImageNet-100 ResNet-50 top-1 (%). Ours and SD-Turbo rank 128 pool three adapter runs; others use one. Klein’s guided-target and endpoint variants use the finer teacher grid (second row); the deeper endpoint is 0.511. Bold: best per column. FSG, MoNO (published basis: four images), and skipping step 1 require no train-ing. “Adapter in every step” reuses the first-step-trained checkpoint throughout the adapted sampling schedule: two evaluations for klein and three for SD-Turbo. variant FLUX.2-klein SD-Turbo ours: unguided, step 1, rank 32 43.8 ±0.4 43.7 ±0.6 
+
+same, finer teacher grid 43.2 ±0.7 –target at guidance 2 31.5 ±0.7 41.2 ±0.9 
+
+target at default guidance 20.1 ±0.4 30.4 ±0.4 
+
+adapter in every step 41.4 ±0.3 38.8 ±0.8 
+
+every weight fine-tuned 43.2 ±1.0 43.4 ±0.3 
+
+rank 8 43.4 ±0.3 43.3 ±0.3 
+
+rank 128 44.1 ±0.4 44.4 ±0.6 
+
+jump to the first level only 32.1 ±0.6 32.2 ±0.4 
+
+jump to a deeper level 40.0 ±0.5 41.2 ±0.7 
+
+FSG 20.7 ±0.7 –MoNO, 4 images per basis 26.8 ±0.3 –MoNO, 32 images per basis 29.9 ±0.3 –skip first step (no training) 31.8 ±0.3 14.4 ±0.7 
+
+distilled model alone 17.1 ±0.4 18.3 ±0.3 
+
+SDA on all three datasets, and our adapter also improves DP-DMD’s released student on each dataset. The class-bootstrap intervals for all these gains lie above zero (Tab. S10). SD-Turbo’s adapter exceeds base-first throughout; klein’s trails base-first on Cars. COCO captions can also replace class-name adaptation prompts (Tabs. S6 and S11). The gains persist with RandAugment, the reimplemented 6Table 4. Adapters transfer unchanged to fine-grained datasets. 
+
+ResNet-50 top-1 (%), 500 generated images/class; mean ± SD over three classifier seeds. Our adapters use one training run. NFE: denoiser evaluations. Bold: best shown per family. Additional references, gaps, and runtimes: Tabs. S10 and S11. Sampler NFE Food-101 Cars Pets 
+
+FLUX.2-klein 
+
+Released 4 10.5 ±0.3 18.9 ±0.4 20.5 ±1.0 
+
+Base-first 4 25.9 ±0.1 38.8 ±0.3 45.3 ±0.5 
+
+Ours 2 30.9 ±0.2 36.2 ±0.2 46.2 ±0.8 
+
+SD-Turbo 
+
+Released 4 10.0 ±0.3 46.9 ±0.4 19.5 ±1.4 
+
+Base-first 4 27.3 ±0.2 64.8 ±0.5 50.6 ±0.9 
+
+Ours 3 31.8 ±0.2 68.3 ±0.2 54.5 ±0.9 
+
+Z-Image-Turbo 
+
+Released 9 9.2 ±0.3 27.6 ±0.3 15.4 ±0.6 
+
+SDA 8 16.8 ±0.3 54.6 ±0.2 37.8 ±0.4 
+
+Ours 7 23.4 ±0.5 60.0 ±0.1 49.4 ±0.9 
+
+DP-DMD’s student 
+
+Released 4 6.9 ±0.2 45.4 ±0.7 12.5 ±0.3 
+
++ ours 3 21.8 ±0.4 56.4 ±0.7 46.6 ±0.8 
+
+Table 5. Gains persist across learner architectures and recipes. 
+
+ImageNet-100 top-1 (%), mean ± sd over three seeds, one adapter run. Learners train from scratch on the same sets. R50: ResNet-50; RA: RandAugment; prior recipe: [1]. Bold: adapted versus released generator. Full references: Tab. S13. learner FLUX.2-klein SD-Turbo Original Adapted Original Adapted R50 + RA 22.0 ±0.3 46.7 ±0.4 23.4 ±0.7 48.0 ±0.6 
+
+Prior recipe 17.9 ±1.0 39.0 ±0.3 21.7 ±1.2 38.6 ±0.5 
+
+ConvNeXt-T 19.9 ±0.2 39.0 ±0.2 20.7 ±0.5 41.8 ±1.4 
+
+ViT-S/16 15.6 ±0.1 26.9 ±0.5 13.8 ±0.4 26.8 ±0.3 
+
+classifier recipe of [1], ConvNeXt-T, and ViT-S/16 (Tab. 5). Each comparison trains released-image and adapted-image classifiers under the same procedure. Their different gain sizes show that the learning recipe affects the magnitude, while the positive results support improvements beyond the primary ResNet-50 setup. Features learned from adapted images also transfer better to additional recognition tasks, and full-scale gains persist on shifted ImageNet test sets (Tabs. S12 and S18). 
+
+## 4.6. Prompt regimes and real-data availability 
+
+Our template-based procedure remains useful against richer-prompt alternatives. At ImageNet-1k with 100 images per class, it exceeds released students using image-free LLM descriptions by +2.7 points for klein and +7.1 for SD-Turbo, and also exceeds base-first with LLM prompts (Tabs. 6 
+
+Table 6. The benefit depends on fitting prompts and evaluation regime. Top: ImageNet-100 gains (points [95% class-bootstrap CI]), generation/fitting prompts, 500 images/class. LLM rows pool three datasets; others use one, each with three classifier seeds. Bot-tom: ImageNet-1k, 100 images/class, one dataset and three classi-fier seeds, versus released students using LLM prompts. Template-based: template fitting/generation. LLM-prompt: LLM generation, fitting selected on ImageNet-100 (LLM for klein, templates for SD-Turbo). One training run per adapter. Bold: interval above zero. Comparison FLUX.2-klein SD-Turbo 
+
+ImageNet-100: adapted − released 
+
+Templates / templates +26.9 [+23.5, +30.4] +25.0 [+21.9, +28.1] 
+
+Captions / templates +6.4 [+4.3, +8.6] +20.7 [+17.7, +23.8] 
+
+LLM / templates +2.1 [+0.2, +4.0] +16.7 [+14.1, +19.4] 
+
+LLM / LLM +5.4 [+3.4, +7.3] +15.6 [+12.9, +18.5] 
+
+ImageNet-1k: vs. released with LLM prompts 
+
+Template-based procedure +2.7 [+2.0, +3.4] +7.1 [+6.3, +7.9] 
+
+LLM-prompt procedure −1.5 [−2.0, −1.0] +6.9 [+6.2, +7.7] 
+
+and S17). These compare complete procedures with dif-ferent generation prompts. Real-image captions also retain gains but require those images (Tab. S14). The LLM-fitted adapters give higher ImageNet-100 accu-racy for klein and lower accuracy for SD-Turbo than their template-fitted counterparts; both perform worse with tem-plate generation (Tab. S16). Under matched LLM prompts on ImageNet-1k, SD-Turbo’s template-trained adapter ex-ceeds released and base-first references, whereas klein’s selected LLM-fitted adapter and post-hoc template-trained variant fall below both. These adapter comparisons retain their directions on the 900 classes outside fitting (Tab. S17). Klein’s unguided 20-step base also falls 2.4 points below its released student, whereas unguided SD 2.1 exceeds SD-Turbo by 1.5 points (Tab. S17). With limited real training data, adding adapted images improves real-only accuracy in the tested mixtures. With the full real ImageNet-1k training set, adding adapted images improves Sketch and R accuracy while slightly lowering in-distribution accuracy. The full results in the supplement delimit the settings in which synthetic augmentation helps (Tab. S18 and Sec. E.4). 
+
+# 5. Discussion 
+
+The teacher target shapes downstream learning. Learn-ing a jump to the selected unguided state gives higher classi-fier accuracy than matching a guided target or retaining the original first endpoint (Tab. 3). Further adapting DP-DMD’s released student also improves classifier accuracy, although a substantial gap to its unguided base remains (Sec. C.4). 7The evaluated comparisons do not isolate the source of that remaining gap. 
+
+The useful choice depends on the generator and prompts. 
+
+Template-based adaptation improves on released and base-first samplers on ImageNet-100 and on their LLM-prompt alternatives at ImageNet-1k with 100 images per class (Fig. 3 and Tab. S17). For klein at this dataset size, we therefore rec-ommend the original adapter with template generation; SD-Turbo benefits from adaptation with either prompt source. Released klein with LLM prompts avoids adapter prepara-tion, and base-first improves its accuracy when the base can be loaded. Captions derived from real images retain gains for both models but require access to those images (Tab. S14). Dataset also matters: base-first exceeds klein’s adapter on Cars (Tab. 4). 
+
+Fast generation and low total cost are separate bene-fits. Once fitted, the adapter improves classifier accuracy at comparable or lower generation time than the released student, without the base at inference (Fig. 4). Preparation adds an initial cost: at 50,000 images, base-first is cheaper overall in the measured klein and SD-Turbo template set-tings, while adaptation gives higher accuracy (Tab. S2). At full ImageNet scale, estimated preparation plus generation costs 41.4 H100-hours for klein’s adapter versus 54.5 for base-first. SD-Turbo’s costs are approximately equal, while adaptation gives higher classifier accuracy in both families (Tabs. 2 and S2). Adaptation is useful when this gain justifies preparation, the adapter can be reused, or inference requires only the student. The unguided base remains an option when its higher accuracy justifies slower sampling. 
+
+Set metrics help diagnose generators. Real-data recall and CLIP Fr´ echet distance track classifier accuracy across the studied configurations. Family-weighting and held-out-family analyses support these set-level diagnostics, with varying predictive performance across families (Tabs. S19 to S21). Shared prompts, seeds, and neighboring settings limit independence. The associations establish neither causality nor reliable classwise prediction; training classi-fiers remains the direct evaluation of usefulness. 
+
+# 6. Limitations & Future Work 
+
+Our method requires a compatible base model to construct targets and an intermediate state that the released student can complete. We select the endpoint empirically from the student’s schedule using downstream classifier results. We do not establish a rule that selects a useful endpoint for a new generator without this evaluation. Developing such a rule, or learning targets that better match the frozen student continuation, could reduce the cost of applying the method to additional generators. The evaluation also has a development boundary. ImageNet-100, the 200-class protocol, and the small ImageNet-1k pilot informed method choices; they are not independent final tests. Full-scale ImageNet-1k and fine-grained evaluations use previously fixed adapters and sam-plers, but classes absent from adapter fitting can still have appeared during development (Tab. S1). Most reported vari-ation concerns classifier training, while adapter-training vari-ation and independent dataset regeneration are measured for subsets of the comparisons. Repeating more compar-isons with independently generated datasets would better characterize their uncertainty. We evaluate classification and feature transfer; detection and segmentation remain untested. Prompt-specific fitting is evaluated with one training run per adapter. The rich-prompt ImageNet-1k evaluation uses 100 images per class and one generated dataset per sampler, so it does not establish the outcome at the full synthetic dataset size. Understanding how prompt distributions interact with the adapted predic-tion and frozen completion steps could improve transfer across prompt regimes. Additional tasks require accuracy and preparation-cost evaluation. Adaptation also inherits the biases and coverage limitations of the released genera-tors. Aggregate classification gains do not establish balanced performance across demographic groups or rare visual con-ditions, which require separate evaluation. 
+
+# 7. Conclusion 
+
+We adapt released distilled generators to produce images that train more accurate visual classifiers. A low-rank update teaches the initial prediction to reach an unguided interme-diate base-model state; the unchanged student then com-pletes generation without the base at inference. Controlled comparisons establish the importance of target guidance, endpoint, and update placement. The improvements extend across three generator families, with fixed klein and SD-Turbo adapters also benefiting full-scale ImageNet training and fine-grained recognition. These results provide a sim-ple way to improve training data from released generators while retaining fast generation. Prompt choice, preparation cost, and inference requirements determine the most useful configuration. 8Supplementary material 
+
+This supplement follows the main paper: protocols, target design, baseline comparisons, generalization, prompt and real-data regimes, and supporting diagnostics. Figures report the additional guidance-window, handoff, baseline, and data-scaling experiments. Tables provide numerical results, reference accuracies, and diagnostic sensitivity checks; the main comparison plots are not reproduced. 
+
+# A. Reproduction and evaluation protocols 
+
+This section specifies dataset roles, classifier training, generator settings, adapter fitting, and cost accounting.              
+
+> Protocol Role Influence on method choices ImageNet-100 Development and reported performance Shared validation images select sampler settings, endpoints, and update design. 200-class protocol Cross-class development evidence Multiple endpoints inspected for klein, SD-Turbo, and Z-Image; supported retaining SD-Turbo timestep 499 over 249. ImageNet-1k 100 images/class, templates Scale pilot Contributed to initial method validation. ImageNet-1k 100 images/class, LLM prompts Fixed-setting prompt evaluation Adapter choice follows the pre-specified ImageNet-100 rule and is frozen before ImageNet-1k classifier training. Classes also appeared in the template-prompt pilot. ImageNet-1k 1,281 images/class Fixed-setting scale evaluation Previously fixed klein/SD-Turbo adapters and samplers; no changes from these results. The 900-class subgroup excludes adapter-training classes. Food-101, Cars, Pets Fixed-setting cross-dataset evaluation Fixed adapters and samplers for all four generator families; no endpoint, rank, or weight changes from these results. Table S1. Later fixed-setting evaluations test choices made during development. Roles in the evaluation sequence. Classes unseen in adapter training can still participate in method development, as in the 200-class protocol. Fixed-setting results evaluate previously selected adapters and samplers; the full-scale 900-class subgroup retains the original 1,000-way predictions (Tab. S9).
+
+## A.1. Datasets, classifiers, and repetition 
+
+Classifier training. The default learner is a ResNet-50 [15] trained from scratch for 100 epochs. We use SGD with Nesterov momentum 0.9, learning rate 0.2 at batch size 256, five warmup epochs followed by cosine decay, weight decay 10 −4, label smoothing 0.1, and bf16 autocast. Training uses random resized crops to 224 pixels and horizontal flips; evaluation resizes to 256 and center-crops to 224. The ViT-S/16 uses AdamW with learning rate 5 · 10 −4, weight decay 0.05, ten warmup epochs, and RandAugment (2, 9). 
+
+Alternative classifier recipe. The recipe of [1], used in Tabs. 5 and S13, uses Adam at 10 −3, batch size 1,024, 80 epochs, CutMix, gradient clipping, and the published augmentations. It selects the checkpoint with lowest loss on a held-out tenth of the generated images. Our primary comparisons use the fixed 100-epoch schedule above. 
+
+Repetitions and reporting. Unless stated otherwise, each generated set is evaluated with three classifier seeds, and tables report their mean and standard deviation. ImageNet-100 results for the three primary adapters and the first-level DP-DMD adapter pool three adapter-training seeds with three classifier seeds each. Transfer evaluations use the first trained adapter. Ablations use one adapter-training seed, except SD-Turbo rank 128, which uses three. Data-scaling evaluations use two classifier seeds, with the exception identified in the scaling caption. We assess generation variability by independently regenerating four headline sets. Top-1 averages test images. Gaps use mean per-class accuracy and paired class-bootstrap intervals after averaging classifier runs. Mean-class and image-averaged accuracy can differ on imbalanced test splits. The intervals condition on the observed datasets and fitted adapters; classifier and adapter runs do not count as independent dataset regenerations. 9Evaluation splits and real-data references. ImageNet classifiers are evaluated on the real validation images of their classes, 50 per class. The default real-data reference draws 500 images per class from the training split. Fine-grained synthetic sets also contain 500 images per class, but evaluation uses each dataset’s test split. Their real-data references use 500 real images per class for Food-101, all 8,144 training images for Cars, and all 3,680 for Pets. These references train for the same number of optimization steps as the generated sets. For representation transfer, we freeze the synthetic-trained ResNet-50, standardize its features, and select the linear probe’s L2 penalty on a held-out tenth of the target training split. Target images train only the probe. 
+
+## A.2. Sampler development and adapter selection 
+
+Development data. Sampler selection and reported ImageNet-100 accuracy use the same 5,000 real validation images. Table S1 distinguishes the development protocols from the later fixed-setting evaluations. In particular, the 200-class protocol and the ImageNet-1k scale pilot informed method development; classes absent from adapter fitting are not necessarily untouched during development. 
+
+Endpoints and rank. For klein, we evaluate target noise levels 0.958, 0.884, 0.7175, and 0.511; for SD-Turbo, timesteps 749, 499, and 249. Subsequent endpoint ablations retain the klein and SD-Turbo choices: no alternative clears the specified replacement criterion of more than 1.5 ImageNet-100 points at no more denoiser evaluations. The conditional 200-class check for such a replacement was therefore not triggered. Rank 32 is retained when within one point of the best rank-8, rank-128, or full-update alternative. For Z-Image, the initial comparison selects 0.857 over 0.913; later targets 0.7895 and 0.7059 raise accuracy by less than one point and reduce its margin over the corresponding base-first sampler, so the reported endpoint is retained. Base guidance and hand-off settings use the tested candidate with highest ImageNet-100 top-1 within the stated role; their candidate sets are specified in the machine-readable manifest. Adapter optimization uses a disjoint 5% of noise/target pairs (at least 64) to measure state-regression error, with a fixed split seed of zero. This held-out error selects between the two full-update learning rates; standard low-rank adapters use the final 3,000-step checkpoint. This pair split is distinct from the downstream real-image validation set used to develop the sampler. The alternative classifier recipe selects its checkpoint on held-out generated images; our default classifier uses the final fixed-epoch model. 
+
+## A.3. Feature metrics and cost measurement 
+
+Feature metrics. DINOv3 features use the ViT-L/16 pretrained on LVD-1689M: the 1,024-dimensional final normalized class token, after bilinear resizing of the short side to 256 and center-cropping to 224 with ImageNet channel normalization. CLIP uses OpenAI ViT-L/14 projected image embeddings (768 dimensions), bicubic resize/crop to 224 and CLIP channel normalization. We L2-normalize both feature types. Precision, recall, density, and coverage use Euclidean distances within each class, with the fifth-nearest-neighbor radius excluding self-distances ( k = 5 ); metrics average over 100 classes with 500 real training and 500 generated images each. Recall is the fraction of real features inside the union of generated-feature balls. Fr´ echet distances use whole-set means and unbiased covariances. FID uses 2,048-dimensional Inception-v3 pool3 features with TensorFlow-FID weights, bicubic resize/crop to 299, and the same 50,000 real training images as reference. Preference metrics use 5,000 evenly spaced images per set: the LAION improved-aesthetic head on normalized CLIP ViT-L/14 embeddings and PickScore v1 scores for image and prompt pairs. 
+
+Timing and amortization. Timings use one H100. The klein and Z-Image students, adapters, and base-first hybrids use batches of eight; SD-Turbo uses 32, while its unguided SD 2.1 base uses 16. Klein/Z-Image run in bfloat16 and SD in float16; the low-rank update is evaluated in float32. Each recorded batch interval starts immediately before the text-to-image pipeline call and ends after CUDA synchronization. It includes prompt encoding, denoising, and VAE decoding, and excludes model loading, image encoding, and writing packs. We average per-image times over the generated images, including the first batch; no separate warm-up batches are discarded. Legacy default-model timings use the first 256 images at the recorded settings. These are measured pipeline throughputs at the stated batch sizes, not batch-one latency or separately optimized hardware limits. FSG timings include its feature optimization. MoNO generates images sequentially and includes noise optimization, generation, and feature-history updates, with prompt encoding amortized over its input batch. Exact batch sizes for the other generators are in the manifest. The cost for M generated images is C(M ) = Cpairs + Cfit + M t image , counting preparation once per released adapter. Klein’s 5.7 H100-hours of preparation amortize against its unguided 20-step base at approximately 44,000 images; SD-Turbo’s 0.9 hours amortize against unguided SD 2.1 at approximately 38,000 images. Against base-first, the corresponding 10 crossovers are approximately 399,000 images for klein and 807,000 for SD-Turbo under template prompts, using ImageNet-100 throughputs. Full-scale ImageNet-1k throughputs instead give approximately 0.4 million and 1.1 million images, respectively. SD-Turbo’s estimate is sensitive to throughput variation because the adapter and base-first times differ little. These estimates use recorded per-image times and job-level preparation costs, assuming constant throughput and counting preparation once. They exclude sampler development and downstream classifier evaluation. They compare total generation costs, not equal-accuracy operating points; adapting the student improves accuracy over its released version without requiring the base at inference. 
+
+Sampler One-time preparation (h) Generation Total Top-1 Base at Targets Fit s/image H100-hours (%) inference 
+
+FLUX.2-klein, ImageNet-100 (total for 50,000 images) 
+
+Released student – – 0.140 1.9 17.1 ±0.4 No Base-first – – 0.152 2.1 39.9 ±0.3 Yes + adapter (first run) 4.6 1.1 0.101 7.1 44.1 ±0.5 No Unguided base, 20 steps – – 0.570 7.9 44.7 ±0.9 Yes 
+
+SD-Turbo / SD 2.1, ImageNet-100 (total for 50,000 images) 
+
+Released student – – 0.029 0.4 18.3 ±0.3 No Base-first – – 0.030 0.4 36.4 ±0.9 Yes + adapter (first run) 0.7 0.2 0.026 1.3 43.3 ±0.2 No Unguided base, 30 steps – – 0.111 1.5 49.8 ±0.7 Yes 
+
+FLUX.2-klein, ImageNet-1k (total for 1,281,000 images) 
+
+Released student – – 0.139 49.6 8.4 ±0.1 No Base-first – – 0.153 54.5 30.8 ±0.1 Yes + adapter (first run) 4.6 1.1 0.101 41.4 34.2 ±0.1 No Unguided base, 20 steps – – 0.571 203.3 37.2 ±0.1 Yes 
+
+SD-Turbo, ImageNet-1k (total for 1,281,000 images) 
+
+Released student – – 0.029 10.3 12.7 ±0.2 No Base-first – – 0.029 10.4 26.7 ±0.3 Yes + adapter (first run) 0.7 0.2 0.026 10.2 32.1 ±0.3 No Table S2. Preparation, generation cost, accuracy, and model requirements define the operating point. Additional preparation and generation on one H100, with ResNet-50 top-1 on each panel’s protocol (mean ± SD over three classifier seeds; the first adapter run). Targets/fit: one-time target construction/optimization in H100-hours; –: no adapter preparation. Total: approximate preparation plus generation for the panel’s image count, excluding classifier training, model loading during generation, and image writing, at the recorded batch sizes. ImageNet-1k panels use throughputs measured on their full-scale sets. Bold: adapter versus released student. These are observed operating points, not equal-accuracy cost comparisons. 
+
+Cost across dataset sizes. Table S3 reports preparation plus generation for template and LLM prompts at three dataset sizes. Fitting on LLM descriptions also requires generating the adaptation description pool; its cost is charged in full to each adapter even though both share it. Construction of generation-prompt pools is excluded for every sampler. The unguided-base LLM estimates reuse template-prompt throughput because those reference samplers were not timed with LLM prompts. 11 Sampler Prompts Prep. h 50k 500k 1.28M N ∗                                                                                                                                              
+
+> BF N∗
+> base
+> FLUX.2-klein
+> released Templates 0.00 1.9 19.4 49.8 ––released LLM 0.00 1.9 19.4 49.8 ––base-first Templates 0.00 2.1 21.1 54.2 ––base-first LLM 0.00 2.1 21.2 54.3 ––template adapter Templates 5.68 7.1 19.7 41.6 399k 44k template adapter LLM 5.68 7.2 20.5 43.5 442k 44k LLM adapter Templates 7.88 9.2 21.6 43.0 531k 60k LLM adapter LLM 7.88 9.2 21.5 42.9 521k 60k Unguided base Templates 0.00 7.9 79.2 202.8 ––Unguided base LLM 0.00 7.9 79.2 202.8 ––
+> SD-Turbo
+> released Templates 0.00 0.4 4.0 10.4 ––released LLM 0.00 0.4 4.1 10.5 ––base-first Templates 0.00 0.4 4.2 10.8 ––base-first LLM 0.00 0.4 4.2 10.6 ––template adapter Templates 0.90 1.3 4.5 10.3 807k 38k template adapter LLM 0.90 1.3 4.6 10.5 1076k 39k LLM adapter Templates 1.16 1.5 4.8 10.6 1072k 50k LLM adapter LLM 1.16 1.5 4.9 10.8 1442k 50k unguided base Templates 0.00 1.5 15.4 39.4 ––unguided base LLM 0.00 1.5 15.4 39.4 ––
+
+Table S3. Cost estimates across dataset sizes from ImageNet-100 throughputs. H100-hours for preparation plus generation, using ImageNet-100 timings with the indicated prompts, constant throughput, and one preparation; 1.28M denotes 1,281,167 images. The ImageNet-1k panels in Tab. S2 instead use throughputs measured on the full-scale sets and 1,281,000 images. N ∗ is the approximate image count at which an adapter becomes cheaper than base-first (BF) or the unguided base. Classifier evaluation and sampler development are excluded. Unguided-base LLM rows reuse template throughput. –: crossover not applicable. 
+
+## A.4. Generation and adapter implementation 
+
+Set manifest. The accompanying machine-readable set-manifest.json fixes the 186 template-prompt sets in the metric study: model and partner, guidance/stage plans, noise schedules, resolution, batch where recorded, prompt/seed rules, classifier seeds, and accuracy/cost observations. The fixed metric-study list is not expanded with later experiments. Accompanying source files provide CSV/JSON result snapshots, per-class accuracies, and scripts to regenerate the rich-prompt, cost, and supporting-contrast tables. The code records the underlying generation configurations and full run results. 
+
+Generator sources. SD 1.5 and SD 2.1 use latent diffusion [30]; SD-Turbo uses adversarial distillation [33]. We evaluate SDXL [28] with Turbo, DMD2, Lightning, and LCM students [24, 26, 33, 40]; FLUX.1-dev and SRPO [5, 34]; FLUX.2-klein 4B [6]; and Z-Image/Z-Image-Turbo [42]. The DP-DMD comparison uses SD3.5-Medium [9, 39]. 
+
+Prompts and seeds. Each image of class k uses template j mod 8 of “a photo of a {} .”, “a close-up photo of a {} .”, “a photo of the {} in its natural setting.”, “a bright photo of a {} .”, “a photo of a small {} .”, “a photo of a large {} .”, “a cropped photo of a {} .” and “a good photo of a {} .”, filled with the class’s first WordNet synonym (a short list of ambiguous names is replaced, e.g . “crane bird”, “movie theater”), and the same image seed across generators. Unless otherwise stated, images are generated at 512 pixels, except SDXL and its DMD2, LCM and Lightning students at their native 1024 (SDXL-Turbo at its native 512; the flow models, native at 1024, at 512), and stored with their short side at 256 pixels. Every controlled pair thus shares its resolution except SDXL against SDXL-Turbo; resolution itself changes training value [2], so that one gap is not read as distillation alone. 
+
+Adapter. Rank-32 low-rank updates ( α = 32 ) on the linear layers of the distilled model’s transformer blocks (on the SD U-Net, the linear layers of its attention blocks), trained with AdamW at 10 −4, 100 warmup steps and cosine decay, 3,000 steps of 8 pairs (16 for SD-Turbo), the low-rank part kept and applied in float32. The teacher state x⋆σa is obtained with the unguided base’s own sampler on a fine grid that contains σa; the pairs use 160 seeds per ImageNet-100 class name, cycling through the eight templates, and none of these seeds is used for an evaluated set. 12 SD-Turbo parameterization. Equation 1 uses flow-matching coordinates. For SD-Turbo, we use its Euler scheduler’s noise coordinate s(t) = p(1 − ¯αt)/¯αt and latents zs = z0 + sϵ , where z0 is the clean latent and ¯αt = Q
+
+> u≤t
+
+(1 − βu). Write 
+
+smax = s(999) and sa = s(499) . Starting from zmax = smax ϵ with ϵ ∼ N (0 , I ), the adapted prediction is 
+
+ˆϵ = ϵθ+∆ W
+
+zmax 
+
+p1 + s2max 
+
+, 999 , c 
+
+!
+
+,
+
+ˆza = zmax + ( sa − smax ) ˆ ϵ, 
+
+LSD = E ∥ˆza − z⋆a∥2.
+
+(2) Here ϵθ is SD-Turbo’s conditional noise-prediction U-Net. To obtain z⋆a, we run the unguided SD 2.1 U-Net in the same Euler pipeline, sharing the initial noise, text encoder, and VAE. The fine grid uses 30 equally spaced timestep intervals from 999 to 499 and 15 from 499 to 249, rounding timesteps to integers; we stop at the selected target. At inference, the adapted call at 999 jumps directly to s(499) . We disable the update and continue the released student at timesteps 499 and 249, ending at zero noise: three U-Net calls total. 
+
+SDA comparison. We evaluate the released zit sda v1.safetensors adapter [13] on Z-Image-Turbo at its docu-mented eight steps. Applying it throughout reaches 25.1 ±0.1, versus 20.9 ±0.2 with activation limited to the first two steps and 13.8 ±0.4 without it (three classifier seeds each). We use the better activation schedule in the main-text comparison. Our implementation applies its full-rank LoKr in float32 without merging, to preserve small updates; its measured runtime is therefore excluded from the main cost plot. 
+
+Baselines. FSG [4] follows its published FLUX.2-klein hyperparameters; its update as written does not move klein’s block-1 features at its learning rate (with feature norms of about 2,000, the update falls below float32 resolution), so we take the same steps with Adam. MoNO [35] rotates the low frequencies of each initial noise against the DINOv2 features of the earlier images of its class, with four images per basis as published or 32. Interval guidance [21] uses the interval published for SD-XL, EDM noise levels (0 .28 , 5.42] , at each model’s default guidance weight. 
+
+## A.5. Data provenance and impact 
+
+We use existing recognition datasets, released generators, and COCO captions; we do not collect a new human-subject dataset. Generated data can inherit the source models’ biases and omit rare visual conditions. Higher aggregate accuracy or recall does not establish demographic fairness or safety in deployment; downstream uses require validation on their intended populations and conditions. The adapter reduces generation cost relative to full-step sampling, but target construction and classifier evaluation add computation. Preparation and per-image generation costs are reported separately. 13 B. Evidence for the teacher target and update placement 
+
+## B.1. Early guidance and base/student handoffs 1.0 0.5 0.0 30 40 50          
+
+> top-1 (%)
+> klein: guidance 4 vs none 1.0 0.5 0.0
+> SD 2.1: guidance 7.5 vs 2
+> switch noise level t (1 = pure noise)
+> guide before switch guide after switch
+> (a) Guidance only above or only below a noise level. 1.0 0.5 0.0 20 30 40
+> top-1 (%)
+> klein: unguided base 1.0 0.5 0.0
+> klein: base at guidance 2
+> hand-off noise level t (1 = pure noise)
+> base first distilled first (b) Hand-offs between the distilled model and the base.
+
+Figure S1. Early guidance and base predictions have larger effects on classifier accuracy. ImageNet-100 ResNet-50 top-1. (a) Guidance applied only above or below a noise level: klein at guidance 4 versus none, SD 2.1 at 7.5 versus 2. Early-only guidance incurs most of the loss; late-only guidance preserves most of the value. (b) Handoffs between the base and student on klein’s 50-step base schedule, with the base unguided (left) or at guidance 2 (right). Base-first uses the base above the switch level and the student below it; base-last reverses them. Early base steps restore value that late base steps cannot. 
+
+Guidance windows locate the loss. Guiding only the first 10 of 50 FLUX.2-klein steps costs 17.5 of the 21.4 points lost with full-trajectory guidance. Guiding only after step 20, below noise 0.89, preserves unguided value (+0.3; Fig. S1a). For SD 2.1, guidance 7.5 in the first 9 of 30 steps, followed by guidance 2, costs 16.5 of the 19.5 points lost with guidance 7.5 throughout, relative to guidance 2. These comparisons locate much of the measured loss in the early sampling steps. 
+
+Correcting the beginning restores value; correcting the end does little. On the base’s 50-step schedule, unguided klein followed by its student at noise 0.85 reaches 43.5; reversing their order reaches 26.1 (Fig. S1b). On the distilled four-step schedule, replacing the first two predictions with the unguided base raises klein from 17.1 to 39.9 and SD-Turbo from 18.3 to 36.4. This extends the diversity asymmetry of [14] to training value. Completing a fine-grid base state at the student’s first level reaches 32.8 on klein and 32.5 on SD-Turbo; stopping at its second level reaches 43.5 and 47.1. These comparisons identify an early interval where replacing student predictions changes classifier accuracy for the specified generator, prompts, and student completion. Successful recovery requires compatibility with the remaining student trajectory (Sec. 3). 
+
+Diversity-oriented settings do not guarantee recovery. Published interval guidance [21], transferred without retuning, reaches 45.9 on klein but only 40.7 on SD 2.1, versus 49.8 unguided. The transferred interval still applies guidance within SD 2.1’s sensitive early range, illustrating why a guidance schedule’s effect on training value depends on which noise levels it covers. We report the transferred interval settings in Sec. A. 
+
+## B.2. Target design and stability 
+
+Stability across adapter seeds. Each primary adapter is trained three times. ImageNet-100 accuracy ranges are 43.6–44.1, 43.3–44.0, and 35.1–35.2 for klein, SD-Turbo, and Z-Image, respectively. 
+
+Independent dataset regeneration. Table S4 compares the four headline sets with one fresh generation of each, using new initial noise and unchanged sampler settings, prompts, and adapter weights. The largest change in mean accuracy is 1.2 points, for the released SD-Turbo; the adapter’s advantage remains large in both families. Each row contains two generated datasets evaluated with three classifier seeds apiece. This check separates dataset regeneration from classifier initialization, but two realizations do not estimate the full variance over generated datasets. 14 Sampler Original set Regenerated set FLUX.2-klein, released 17.1 ±0.4 17.2 ±0.4                 
+
+> FLUX.2-klein + adapter 44.1 ±0.5 44.4 ±0.5
+> SD-Turbo, released 18.3 ±0.3 17.1 ±0.7
+> SD-Turbo + adapter 43.3 ±0.2 43.9 ±0.1
+> Table S4. The adapter gains persist after regenerating the training images. ImageNet-100 ResNet-50 top-1 (mean ±sd over three classifier seeds for each generated set), using 500 images per class. Original and regenerated sets use different initial noise with the same prompt construction. Adapters use fixed weights from their first training run; variation across these two datasets is distinct from the classifier-seed standard deviations shown.
+
+Guided targets forfeit much of the gain. With the base’s default guidance applied at every target integration step, as in DP-DMD’s released teacher implementation, the adapter loses 23.1 points ([20.2, 26.2]) on klein and 13.2 ([10.5, 16.1]) on SD-Turbo. It retains only 11% and 48% of the unguided-target gain. Completing the guided teacher states with the distilled model gives 23.6 and 30.5; the guided-target adapters perform at or below those references. On 200 classes, their losses relative to the standard adapters are 25.4 and 8.7 points. The same direction holds on Z-Image: the default-guidance target costs 18.8 ([16.4, 21.3]) points, 18.1 on 200 classes, and retains 11% of the gain. This is consistent with 1.x-Distill’s motivation for removing high-noise teacher guidance to preserve layouts [22], but evaluates a different outcome. In all three families, the default-guidance targets also retain at most 32% of the Vendi gain and 25% of the recall gain (first training runs). Thus the guided targets lose diversity and training value together. 
+
+The target must span the consequential early interval. Ending at the student’s original first level reaches only 32.1 on klein and 32.2 on SD-Turbo, retaining 57% and 55% of the full gain. Those results resemble completion from the base’s own states at the same levels (32.8 and 32.5); a later distilled step still traverses the sensitive interval. Vendi gains are similarly limited (22% and 39%). Deeper is not always better: 40.0 and 41.2 for deeper klein and SD-Turbo jumps fall below the selected targets. These comparisons support the selected intermediate target over either the original first endpoint or the deepest tested endpoint; they do not define a universal structural threshold. 
+
+Seedwise target correspondence. The adapter preserves target content for individual seeds (Fig. 2). In DINOv3 space, an adapted image is more similar to the completed teacher state from its own initial noise than to states from other noise. The cosine-similarity advantage is 0.32 for klein, compared with 0.27 for base-first and 0.05 for the distilled model. Corresponding SD-Turbo values are 0.33, 0.27, and 0.08. This correspondence supports the interpretation that the adapter learns the target trajectory while the aggregate diversity comparisons alone do not identify how that correspondence arises. 
+
+# C. Additional baseline and operating-point comparisons 
+
+## C.1. Guidance and distillation across generator families 
+
+The primary families’ guided, unguided, and distilled references are reported numerically in Tab. S6. Table S5 adds SD 1.5, SDXL, and FLUX.1-dev without redrawing the main comparison. 15 Family Setting Steps Pixels Top-1 (%) SD 1.5 Base, guidance 7.5 30 512 32.9 ±0.5                                               
+
+> Base, guidance 2 30 512 52.1 ±0.4
+> SDXL Base, guidance 5 30 1024 28.6 ±0.3
+> Base, guidance 2 30 1024 32.0 ±1.3
+> Turbo 1512 12.9 ±0.5
+> DMD2 41024 18.1 ±0.4
+> Lightning 41024 20.2 ±0.2
+> LCM, guidance 8 41024 18.1 ±0.2
+> FLUX.1-dev Guidance 3.5 28 512 12.6 ±0.3
+> Guidance 1 28 512 30.6 ±0.5
+> SRPO, guidance 3.5 28 512 15.7 ±0.3
+> Table S5. Guidance and post-training effects in additional generator families. ImageNet-100 ResNet-50 top-1 (mean ±sd over three classifier seeds), using class-name templates. Steps and generation resolution are shown for every setting; stored images are resized as in Sec. A. Bold: best tested setting per family. SDXL-Turbo’s different resolution prevents attributing its entire gap to distillation.
+
+Guidance settings are model-specific. Removing guidance improves the tested klein and Z-Image bases, while reducing guidance to 2 improves SD 1.5, SD 2.1, and SDXL. SD 2.1 reaches 49.5, compared with 30.0 at guidance 7.5. For FLUX.1-dev, the conditioning input encodes distilled guidance rather than an additional unconditional model evaluation. Its change from 3.5 to 1 also improves classifier accuracy. These comparisons support changing guidance in the studied configurations; they do not identify one universally optimal weight. 
+
+Post-training need not reduce training value. The evaluated distilled releases perform at or below their tested guided bases. The four SDXL students in Tab. S5 cover adversarial, distribution-matching, progressive, and consistency objectives [24, 26, 33, 40]. Three use the base’s resolution, so resolution alone cannot explain that pattern. By contrast, SRPO improves on FLUX.1-dev by +3.1 (Tab. S23). The observed deficit is therefore not an inevitable consequence of generator post-training. 16 C.2. Additional generation-cost comparisons 0 10 20 30 40 50 Top-1 accuracy (%) Default-guided base Interval-guided base FSG MoNO, 4 / basis MoNO, 32 / basis Skip fi rst step Ours 
+
+FLUX.2-klein    
+
+> 0.03 0.1 13
+
+H100 s/image (log) 
+
+> 2.822 2.016 0.156 0.519 0.626 0.112 0.101
+
+0 10 20 30 40 50 Top-1 accuracy (%) Default-guided base Interval-guided base Skip fi rst step Ours 
+
+SD 2.1 / SD-Turbo    
+
+> 0.03 0.1 13
+
+H100 s/image (log) 
+
+> 0.196 0.174 0.026 0.026
+
+Figure S2. Additional baselines offer different accuracy and cost tradeoffs. ImageNet-100 ResNet-50 top-1 (left, mean ± sd) and H100 seconds/image (right, logarithmic scale). Adapters pool three training runs with three classifier seeds each; other settings use three classifier seeds. Default and interval guidance apply to the base; FSG, MoNO, and skipping the first step apply to the released student. MoNO uses four or 32 earlier images per basis. Ours is repeated as a reference; released-student, base-first, and unguided-base comparisons are in Fig. 4. Times include the training-free methods’ optimization but exclude adapter preparation (Tab. S2); implementation details are in Sec. A. 
+
+Figure S2 isolates the operating points omitted from the main cost figure. Transferred interval guidance performs well on klein but remains below unguided sampling on SD 2.1. FSG, both MoNO basis sizes, and skipping the first step remain below the klein adapter. Skipping the first SD-Turbo step does not improve on the released student. These results concern the transferred implementations and settings described in Sec. A, not optimized limits for each method. 
+
+## C.3. Additional primary results and alternative adaptation prompts 
+
+Table S6 reports additional primary comparisons, including inference costs and adapters fitted using COCO captions instead of class-name templates. The additional unguided-base references for the 200-class and full ImageNet-1k protocols are reported in Tab. 2. 17 family sampler NFE s/img ImageNet-100 200 classes ImageNet-1k FLUX.2-klein distilled, 4 steps 4 0.14 17.1 ±0.4 19.1 ±0.0 8.4 ±0.1 
+
+base-first 4 0.15 39.9 ±0.3 43.7 ±0.1 30.8 ±0.1 
+
++ adapter (ours) 2 0.10 43.8 ±0.4 48.6 ±0.3 34.2 ±0.1 
+
+trained on COCO captions 2 0.10 45.0 ±0.5 48.5 ±0.2 –base, no guidance 50 1.38 45.1 ±0.0 48.2 ±0.1 –base, no guidance, 20 steps 20 0.57 44.7 ±0.9 48.1 ±0.2 37.2 ±0.1 
+
+base, default guidance 100 2.82 23.6 ±0.5 27.0 ±0.2 –SD-Turbo distilled, 4 steps 4 0.03 18.3 ±0.3 19.8 ±0.3 12.7 ±0.2 
+
+base-first 4 0.03 36.4 ±0.9 36.0 ±0.2 26.7 ±0.3 
+
++ adapter (ours) 3 0.03 43.7 ±0.6 41.3 ±0.8 32.1 ±0.3 
+
+trained on COCO captions 3 0.03 42.4 ±1.3 41.0 ±1.0 –base, no guidance 30 0.11 49.8 ±0.7 45.7 ±0.9 44.1 ±0.1 
+
+base, default guidance 60 0.20 30.0 ±0.1 31.5 ±0.3 –Z-Image-Turbo distilled, 9 steps 9 0.37 14.0 ±0.0 13.9 ±0.4 –base-first 9 0.37 32.8 ±0.9 35.3 ±0.3 –+ adapter (ours) 7 0.30 35.1 ±0.5 38.2 ±0.3 –base, no guidance 50 1.92 45.6 ±0.7 – –base, default guidance 100 3.78 17.6 ±0.3 – –Table S6. Adapting the first prediction improves classifier accuracy at student sampling cost. Synthetic-only ResNet-50 top-1 (%). Primary ImageNet-100 adapters pool three training runs; other adapter results use one. Columns: ImageNet-100 and 200-class development (186 classes unseen during adaptation), and full ImageNet-1k with fixed samplers; images/class: 500, 500, and 1,281. Indented: adapters trained on 16,000 COCO captions instead of class-name templates. NFE: denoiser evaluations; s/img: H100 seconds/image. Bold: best fast sampler per family and protocol. 
+
+## C.4. DP-DMD’s released student 
+
+Sampler Pixels NFE s/img ImageNet-100 200 classes SD3.5-Medium, guidance 3.5 512 56 0.613 21.1 ±0.5 25.1 ±0.4 
+
+SD3.5-Medium, no guidance 512 28 0.326 44.9 ±0.3 44.7 ±0.4 
+
+DP-DMD’s student 512 4 0.071 13.9 ±0.2 15.3 ±0.3 
+
+base-first, first level 512 4 0.091 15.8 ±0.1 17.5 ±0.4 
+
++ adapter, first level 512 4 0.083 21.6 ±0.3 24.2 ±0.1 
+
++ adapter, second level 512 3 0.072 27.3 ±0.2 –DP-DMD’s student 1024 4 0.266 15.8 ±0.6 –+ adapter, second level 1024 3 0.238 27.2 ±0.6 –Table S7. Our adapter on DP-DMD’s released SD3.5-Medium student. Top-1 (%, mean ± sd over three classifier seeds; the first-level adapter on ImageNet-100 pools three training runs) of a ResNet-50 trained from scratch on 500 generated images per class. The student runs its own four-step schedule at guidance 1; its first level is 0.858 and its second 0.602. Base-first uses one unguided teacher prediction to the first student level, followed by three student predictions; adapter targets use fine-grid teacher integration. All sets at 512 pixels in the first block, 1024 in the last two rows; the same adapter weights are used at both resolutions. NFE and s/img as in Tab. S6. Bold: best fast sampler per protocol. 
+
+DP-DMD [39] regresses its student’s first step onto the teacher’s state at guidance 3.5 and trains the later steps by distribution matching. Its released SD3.5-Medium student falls 7.2 points below the guided teacher ([5.5, 8.9]), while removing guidance raises the teacher by 23.8 points (Tab. S7). Our adapter, fitted on top of the student toward the unguided teacher, adds +7.7 ([+6.2, +9.3]) at the student’s first level and +13.4 ([+11.1, +15.7]) at its second, and exceeds base-first at the first level by +5.9 ([+4.4, +7.4]; +6.7 on 200 classes). It recovers 25% and 43% of what the unguided teacher adds over the student. Base-first reaches 15.8 after one unguided teacher prediction to the first student level and three student predictions. Our adapter instead learns from a teacher state obtained by fine-grid integration. The comparison therefore establishes an advantage over this coarse base-first sampler, but does not isolate the effects of teacher integration, hand-off mismatch, and student continuation. 18 Documented resolution. At DP-DMD’s documented 1024-pixel resolution, the unchanged adapter fitted at 512 pixels adds +11.4 ImageNet-100 points ([+9.1, +13.8]; Tab. S7). The student’s noise schedule is unchanged because its scheduler uses a static shift. Increasing resolution changes the released student’s accuracy by +1.9 points ([+0.8, +3.0]) and the adapted student’s by −0.1 ([ −1.7, +1.6]). No adapter weights or sampling endpoints are adjusted for this comparison. 
+
+## C.5. Relation to earlier distillation and adaptation methods               
+
+> Method Starting point Supervision Trained sampling steps Base at inference Reported evaluation DP-DMD [39] Teacher-to-student distillation Teacher-derived first-step target; distribution matching afterward First and remaining steps No Image quality and diversity CrossDistill [25] Teacher-to-student distillation High-noise trajectory preservation; low-noise distribution matching High- and low-noise stages No Video quality and diversity SDA [13] Released image student Teacher-guided directional alignment with self-reference Adapter trained across sampling noise levels No Image diversity Ours Released image student Regression to an unguided intermediate teacher state First prediction; remaining steps unchanged No Synthetic-to-real classifier accuracy
+
+Table S8. First-step supervision and post-hoc adaptation are precedents for our procedure. CrossDistill’s direct-flow variant regresses the first prediction to an intermediate teacher state; its default uses consistency supervision. The SDA row describes the Z-Image-Turbo release evaluated here; adapter activation schedules differ across SDA releases. All four methods generate without the base at inference. Our comparisons test downstream classifier accuracy when adapting a released student while retaining its unchanged completion steps. Evaluation columns summarize the cited releases’ reported tests, not the possible uses of each method. 
+
+# D. Dataset scale and learner generalization 
+
+## D.1. Dataset scale and additional classes 
+
+Full-scale transfer beyond adapter-training classes. Restricting the saved full-scale ImageNet-1k evaluation to the 900 classes outside ImageNet-100 retains the large adapter gains and the adapter’s advantage over base-first (Tab. S9). We keep the original 1,000-way predictions and average per-class accuracies over those 900 classes, rather than restrict the classifier’s output space. Each classifier was trained on generated images of all 1,000 classes; the adapter was trained on ImageNet-100 prompts only. All 1,000 classes appeared in the earlier scale pilot; this subgroup evaluates fixed-setting scale transfer beyond adapter fitting. The accuracy-gap fractions reported in Sec. 4 use (Aadapter − Astudent )/(Abase − Astudent ), with A the accuracy on the matched protocol and the base sampled without guidance. 
+
+Generator Released Base-first + adapter Over released [95% CI] Over base-first [95% CI] FLUX.2-klein 8.6 ±0.1 31.0 ±0.1 34.6 ±0.1 
+
++26.0 
+
+> [+24.8, +27.3]
+
++3.6 
+
+> [+3.0, +4.3]
+
+SD-Turbo 12.9 ±0.2 26.8 ±0.3 32.2 ±0.3 
+
++19.3 
+
+> [+18.3, +20.3]
+
++5.4 
+
+> [+4.9, +5.8]
+
+Table S9. Full-scale gains persist outside the adapter’s training classes. ImageNet-1k top-1 (%) on the 900 classes outside ImageNet-100, keeping all 1,000 classifier outputs. Mean ± SD over three classifier seeds, one adapter run. Gaps compare the adapter with each reference using paired 95% class-bootstrap intervals after averaging classifier runs; intervals condition on the observed datasets and fitted checkpoints. Bold: best shown per family. Training uses 1,281 generated images per class for all 1,000 classes. 
+
+19 100 300 500 1,300 3,000 
+
+generated images per class 
+
+> 20 30 40 50
+> top-1 (%)
+> distilled + adapter (ours) base, no guidance
+
+Figure S3. Adaptation improves accuracy more than increasing the released model’s dataset size. Top-1 (%, ImageNet-100) of a ResNet-50 trained from scratch on 100 to 3,000 images per class from distilled FLUX.2-klein and from the same model with the adapter, 100 epochs at every size, mean ± sd over two classifier seeds (three for the adapter at 500). The sizes are nested subsets of one 3,000-per-class set per sampler, with every prompt template equally represented. Blue: the unguided base at 500 per class. 
+
+Increasing the ImageNet-100 set from 100 to 3,000 images per class raises distilled FLUX.2-klein from 12.6 to 19.5 (Fig. S3); with the adapter, classifier accuracy reaches 24.4 with 100 images per class and 57.0 with 3,000. All sizes use 100 epochs. Larger datasets therefore receive more optimization steps; this comparison measures data scaling under a fixed-epoch protocol rather than fixed training compute. At ImageNet-1k scale the distilled model’s curve is flat: classifier accuracy is 8.4 at 1,281 images per class and 8.4 at 100, while the adapted model’s accuracy rises from 18.6 to 34.2 (Tab. 2). At 100 images per class on all 1,000 ImageNet classes, klein’s adapter reaches 18.6, compared with 17.6 for the unguided base (+1.1, [+0.7, +1.4]). SD-Turbo’s adapter reaches 19.1, compared with 18.8 for unguided SD 2.1 (+0.4, [ −0.2, +0.9]). 
+
+## D.2. Additional generator comparisons on fine-grained datasets 
+
+The SDA and DP-DMD comparisons use the same ImageNet-100 adapters and sampling settings on Food-101, Cars, and Pets. Prompts and image seeds are matched within each dataset. The released Z-Image-Turbo uses nine steps, SDA eight, and our adapter seven denoiser evaluations; these schedules are identified in Tab. 4. Adding our adapter to DP-DMD measures an improvement to its released student, rather than a comparison between independently trained distillation procedures. 
+
+Mean-class accuracy gain [95% CI] Food-101 Cars Pets SDA − released Z-Image-Turbo +7.7 [+5.7, +9.6] +27.1 [+24.9, +29.4] +22.3 [+18.6, +26.3] 
+
+Ours − released Z-Image-Turbo +14.2 [+11.3, +17.0] +32.4 [+29.8, +34.9] +33.9 [+27.9, +40.0] 
+
+Ours − SDA +6.5 [+4.3, +8.8] +5.3 [+3.9, +6.7] +11.6 [+7.6, +15.3] 
+
+DP-DMD + ours − DP-DMD +15.0 [+12.6, +17.6] +10.8 [+9.0, +12.7] +34.1 [+28.9, +39.3] 
+
+H100 seconds/image NFE Food-101 Cars Pets Z-Image-Turbo, released 9 0.369 0.370 0.369 + SDA 8 0.706 0.707 0.705 + ours 7 0.295 0.294 0.293 DP-DMD’s student 4 0.071 0.072 0.071 + ours 3 0.073 0.072 0.073 Table S10. Our adapter exceeds SDA and improves DP-DMD’s student across three datasets. Upper block: mean-class accuracy gains in points [paired 95% class-bootstrap CI], after averaging three classifier seeds; bold gains have intervals above zero. Gaps weight classes equally, while top-1 in Tab. 4 weights test images. Each arm uses one generated set; adapted arms use one fixed checkpoint. Lower block: measured H100 seconds/image at the recorded batch sizes. SDA uses an unmerged float32 LoKr, so its runtime is not an optimized deployment comparison. 
+
+All twelve class-bootstrap intervals in Tab. S10 lie above zero. Both SDA and our adapter exceed the released Z-Image-Turbo sampler, our adapter exceeds SDA, and the fixed DP-DMD adapter improves its released student on each dataset. These 20 intervals condition on the generated sets and fitted adapters; they do not estimate variation across independent regenerations or adapter-training runs. 
+
+Training images Food-101 Cars Pets FLUX.2-klein, COCO targets 31.8 ±0.6 33.0 ±0.5 –FLUX.2-klein, unguided base 29.8 ±0.2 33.7 ±0.9 47.4 ±0.3 
+
+SD-Turbo, COCO targets 31.3 ±0.7 67.8 ±0.6 –SD 2.1, unguided base 37.3 ±0.2 69.6 ±0.0 65.5 ±0.6 
+
+Real training images 79.3 ±0.3 87.0 ±0.2 64.1 ±0.7 
+
+Table S11. Additional references and COCO-target adapters for fine-grained recognition. ResNet-50 top-1 (%, mean ± SD over three classifier seeds). COCO-target adapters use their first training run; unguided bases use 20 steps for klein and 30 for SD 2.1. Generated sets contain 500 images/class. Real references use 500 images/class for Food-101, all 8,144 training images for Cars, and all 3,680 for Pets, with matched classifier-training steps. –: not evaluated. Primary sampler results are in Tab. 4. 
+
+## D.3. Transfer of learned representations 
+
+training source Food-101 Cars Pets IN-900 
+
+FLUX.2-klein 
+
+distilled 31.9 ±0.4 11.9 ±0.6 38.5 ±0.2 15.3 ±0.1 
+
++ adapter (ours) 45.8 ±0.8 24.7 ±1.4 67.0 ±0.2 30.3 ±0.3 
+
+base, no guidance 45.1 ±0.3 23.7 ±0.1 65.9 ±0.4 30.1 ±0.1 
+
+SD-Turbo 
+
+distilled 33.7 ±0.9 14.0 ±1.1 40.4 ±0.8 16.8 ±0.2 
+
++ adapter (ours) 47.7 ±0.3 24.8 ±0.3 63.0 ±0.7 28.7 ±0.4 
+
+SD 2.1, no guidance 51.0 ±0.7 28.6 ±0.6 67.9 ±0.3 33.3 ±0.5 
+
+real, 500 per class 50.3 ±0.9 24.4 ±1.0 70.1 ±0.5 33.4 ±0.5 
+
+Table S12. Corrected images teach transferable representations. Linear-probe top-1 (%) on real target data, using frozen ResNet-50 features learned on generated ImageNet-100 images; mean ± sd over three backbone seeds, one adapter run. IN-900: the 900 classes outside ImageNet-100. Target supervision trains only the probe. Bold: adapted versus matched released generator. 
+
+The learned representations transfer. We freeze each ImageNet-100 classifier and fit a linear probe on Food-101, Cars, Pets, and the 900 remaining ImageNet classes (Tab. S12). Adapter-trained features gain 10.7–28.5 points over features learned from the distilled releases. Klein’s adapted images produce features with accuracy comparable to its unguided base across all four targets, while requiring only two denoiser evaluations per image. Only the probe sees target-dataset training images; its protocol is in Sec. A. 
+
+## D.4. Reference accuracies for other learners 
+
+The released-student and adapter comparisons are in Tab. 5. Table S13 supplies their unguided-base and real-data references without repeating those rows. All five learners use matched generated sets; the adapter comparisons in Tab. 5 use the first trained adapter, as do the set metrics in Tab. S22. 
+
+training set R50 R50 + RandAugment Prior recipe ConvNeXt-T ViT-S FLUX.2-klein base, no guidance 45.1 ±0.0 47.8 ±0.2 41.1 ±0.5 39.1 ±0.8 25.4 ±0.2 
+
+SD 2.1, no guidance 49.8 ±0.7 52.8 ±0.8 39.7 ±0.3 42.4 ±2.4 22.9 ±0.2 
+
+real images, 500 per class 77.1 ±0.2 80.3 ±0.2 68.1 ±0.9 72.3 ±0.3 53.8 ±0.4 
+
+Table S13. Unguided-base and real-data references for the learner comparison. ImageNet-100 top-1 (mean ± sd over three classifier seeds), using 500 images per class. Columns match the primary ResNet-50, ResNet-50 with RandAugment (2, 9), the reimplemented recipe of [1], ConvNeXt-T (AdamW, RandAugment), and ViT-S/16. Released-student and adapter results under the four alternative learners are in Tab. 5; primary ResNet-50 results for the matched single-adapter sets are in Tab. S22. 
+
+21 E. Prompt regimes, real-data availability, and shifted tests 
+
+## E.1. Rich captions                                                                                                       
+
+> sampler templates captions LLM prompts SD 1.5, guidance 7.5 32.9 ±0.5 42.2 ±0.7 –SD 1.5, guidance 2 52.1 ±0.4 57.3 ±0.8 50.2 ±0.4
+> SD 2.1, guidance 7.5 30.0 ±0.1 43.5 ±1.6 –SD 2.1, guidance 2 49.5 ±0.3 57.2 ±0.3 50.3 ±0.1
+> SD 2.1, no guidance 49.8 ±0.7 53.5 ±0.4 –SD-Turbo, 1 step 15.8 ±0.4 38.3 ±0.4 31.4 ±0.5
+> SD-Turbo, 4 steps 18.3 ±0.3 32.4 ±0.2 29.6 ±0.7
+> SD-Turbo, base-first 36.4 ±0.9 42.8 ±0.5 37.6 ±0.6
+> SD-Turbo + adapter 43.3 ±0.2 53.2 ±0.3 45.8 ±0.5
+> SDXL, guidance 5 28.6 ±0.3 42.7 ±0.5 –SDXL-Turbo 12.9 ±0.5 40.5 ±1.0 –klein base, guidance 4 23.6 ±0.5 55.1 ±1.7 –klein base, guidance 2 34.8 ±0.7 61.6 ±1.2 –klein base, no guidance 45.1 ±0.0 63.0 ±1.3 42.9 ±0.7
+> FLUX.2-klein 17.1 ±0.4 55.0 ±0.8 37.9 ±0.2
+> FLUX.2-klein, base-first 39.9 ±0.3 60.8 ±0.2 43.1 ±0.6
+> FLUX.2-klein + adapter 44.1 ±0.5 61.5 ±0.4 39.6 ±0.3
+> Table S14. Real-image captions improve every evaluated sampler. Top-1 on ImageNet-100 with the eight class-name templates, with captions of real training images, and with LLM-written class descriptions as prompts (one generated set per cell, mean ±SD over three classifier seeds; –: not run). Bold: best prompt source per sampler.
+
+Both rich-prompt regimes use Qwen2.5-VL-7B-Instruct [3]. Real-image captions request 5–6 sentences describing image content and viewpoint; image-free descriptions request 3–4 sentences from class names and seeded scene/viewpoint hints. Captions provide more specific content and layout information than class-name templates. Using them as generation prompts raises every evaluated set, particularly the distilled models (Tab. S14), and shrinks the gaps: with captions, guidance 7.5 against 2 costs SD 2.1 13.8 points (19.5 with templates), distillation costs FLUX.2-klein 8.0 points against its unguided base (27.9), and SDXL’s distillation gap all but closes ( −2.2 [ −4.9, +0.6], against −15.6 with templates). The adapters (their first training runs) keep 81% and 98% of the unguided bases’ gains under captions (Tab. S14). LLM-written descriptions raise the distilled models as well and leave FLUX.2-klein 5.0 points below its unguided base; there the SD-Turbo adapter keeps 78% of its base’s gain and klein’s 35%. These single-set comparisons transfer the same template-trained adapter to different prompts. The replicated LLM-description evaluation below separately tests the adaptation prompt source. Real-image-caption-specific adapters are not evaluated; the COCO-caption adapters are a separate test of adaptation prompts. 
+
+Operating points under richer prompts. The prompt-matched comparisons in Tab. S14 retain both the adapter’s benefit and the competitive alternatives. For klein in the single-set comparison of Tab. S14, base-first has the highest observed accuracy, while the template-trained adapter uses two student evaluations and the released model avoids adapter preparation. SD-Turbo retains substantial adapter gains under both rich-prompt regimes (Tab. 6). These image-free descriptions use class names and seeded scene/viewpoint hints; real-image captions require access to training images. Preparation and inference requirements are compared separately in Tab. S2. 
+
+## E.2. Fitting adapters on image-free LLM descriptions 
+
+We fit one additional adapter per generator on 16,000 image-free descriptions, 160 per ImageNet-100 class. Rank, endpoint, optimizer, training steps, and inference schedule match the template-trained adapter. Each description is paired with one initial noise sample; the template targets instead use 20 noises for each of eight templates. Klein uses the four-anchor teacher grid examined in the target ablations; SD-Turbo’s teacher grid is unchanged. Adaptation descriptions have no exact duplicates in the evaluation pools, and their noise seeds are disjoint from generation seeds. 22 Three evaluation datasets use independently sampled descriptions and noise, with prompts and noise matched across samplers within each dataset. Every generated dataset trains three classifier seeds. Each adapter is a single training run. Table S15 separates within-dataset classifier SD from the SD of dataset means. The latter still includes classifier noise. Pooled paired class-bootstrap intervals average all nine runs first; they condition on the three generated datasets and fitted checkpoints, without covering adapter-training variation or resampling dataset realizations. 
+
+Sampler Mean Classifier SD Dataset-mean SD Set 1 Set 2 Set 3 
+
+FLUX.2-klein 
+
+Released 37.1 0.26 0.71 37.9 36.5 37.0 Base-first 42.2 2.39 1.43 43.1 40.6 43.0 Template-fitted 39.2 0.55 0.61 39.6 39.5 38.5 LLM-fitted 42.5 0.69 0.70 43.1 42.7 41.7 
+
+SD-Turbo 
+
+Released 29.2 0.71 0.38 29.6 29.1 28.9 Base-first 37.9 0.68 0.26 37.6 38.1 37.9 Template-fitted 45.9 0.60 0.27 45.8 45.7 46.2 LLM-fitted 44.9 0.39 0.22 44.9 45.0 44.6 Table S15. Independent prompt and noise draws test the repeatability of the comparisons. ImageNet-100 ResNet-50 top-1 (%), 500 generated images/class, LLM generation prompts. Mean: nine classifier runs across three generated datasets. Classifier SD pools within-dataset variation; dataset-mean SD uses the three means and still contains classifier variation. Set columns give means of three classifier seeds. Adapted arms use one training run; every run is retained. Adapter comparison FLUX.2-klein SD-Turbo 
+
+LLM generation prompts: three datasets, three classifier seeds each 
+
+LLM-fitted − template-fitted +3.3 [+2.4, +4.2] −1.1 [−1.6, −0.5] 
+
+LLM-fitted − released +5.4 [+3.4, +7.3] +15.6 [+12.9, +18.5] 
+
+LLM-fitted − base-first +0.3 [−0.7, +1.3] +7.0 [+5.6, +8.3] 
+
+Template-fitted − released +2.1 [+0.2, +4.0] +16.7 [+14.1, +19.4] 
+
+Template-fitted − base-first −3.0 [−4.2, −1.9] +8.0 [+6.6, +9.5] 
+
+Template generation prompts: one dataset, three classifier seeds 
+
+LLM-fitted − template-fitted −1.4 [−2.8, −0.1] −1.1 [−2.0, −0.2] 
+
+Table S16. The two generators favor different fitting prompts on ImageNet-100. Accuracy differences in points [paired 95% class-bootstrap CI]. Upper block averages three generated datasets and three classifier seeds each; lower block uses template generation prompts and one dataset. Each adapter uses one training run. The first row compares LLM-fitted with template-fitted adapters. Bold: interval above zero. 
+
+The LLM-fitted klein adapter improves on the template-trained adapter on every dataset, but has no resolved advantage over base-first (Tab. S16). The template-trained SD-Turbo adapter remains better under both prompt styles. The preferred fitted adapter therefore depends on the generator and generation prompts in these comparisons. 
+
+Classifier-run sensitivity. One klein base-first classifier trains poorly on the second dataset, ending at 35.9% versus 43.3% and 42.5% for the other seeds on the same images. The primary analysis retains it because no exclusion rule was specified. A post-hoc sensitivity analysis omitting that run changes the LLM-fitted-adapter minus base-first gap from +0.3 ([ −0.7, +1.3]) to 
+
+−0.5 ([ −1.5, +0.6]) points; both leave the advantage unresolved. The template-trained adapter remains below base-first. This sensitivity is not used to select an adapter. 
+
+## E.3. Frozen-adapter evaluation with LLM prompts on ImageNet-1k 
+
+For each generator, we select the adapter with higher pooled ImageNet-100 accuracy under LLM prompts: the LLM-fitted klein adapter and the template-trained SD-Turbo adapter. The selection rule is specified before the comparisons, and the choices are recorded before any ImageNet-1k classifier training. Endpoints, ranks, and sampling schedules remain fixed. The scale evaluation uses 100 images for each of 1,000 classes, one generated dataset per sampler, and three classifier seeds; it does not evaluate the 1,281-images/class regime. 23 Sampler Generation prompts NFE Top-1 vs. LLM released vs. LLM base-first                                                                                             
+
+> FLUX.2-klein
+> Released LLM 416.0 ±0.4 ––Base-first LLM 416.9 ±0.2 +0.9 [+0.4, +1.3] –Original adapter Templates 218.6 ±0.0 +2.7 [+2.0, +3.4] +1.8 [+1.2, +2.4]
+> LLM-fitted adapter LLM 214.5 ±0.2 −1.5 [−2.0, −1.0] −2.4 [−2.8, −2.0]
+> Template fit (post hoc) LLM 212.6 ±0.4 −3.3 [−3.9, −2.8] −4.2 [−4.7, −3.8]
+> Unguided klein base LLM 20 13.5 ±0.1 −2.4 [−3.0, −1.9] −3.3 [−3.8, −2.9]
+> SD-Turbo
+> Released LLM 412.0 ±0.1 ––Base-first LLM 413.7 ±0.4 +1.7 [+1.1, +2.4] –Original adapter Templates 319.1 ±0.1 +7.1 [+6.3, +7.9] +5.4 [+4.8, +6.0]
+> Template-fitted adapter LLM 318.9 ±0.4 +6.9 [+6.2, +7.7] +5.2 [+4.8, +5.6]
+> Unguided SD 2.1 LLM 30 13.5 ±0.1 +1.5 [+0.8, +2.3] −0.2 [−0.8, +0.3]
+> Table S17. The original template-based adapters remain useful against richer-prompt alternatives. ImageNet-1k ResNet-50 top-1 (%, mean ±SD over three classifier seeds on one generated dataset), 100 images/class. NFE counts denoiser evaluations. Differences in points [paired 95% class-bootstrap CI] compare each procedure with the released or base-first sampler using LLM prompts. Template rows change both adaptation and generation prompts relative to these references. The primary LLM rows use the fitting source selected on ImageNet-100 and frozen before this evaluation. Klein’s additional template-fit row is post hoc. Unguided-base rows are follow-up comparisons added after the adapter evaluation. Every adapter uses one training run. Bold: interval above zero.
+
+The original template-based adapters exceed the released and base-first samplers using LLM descriptions for both generators (Tab. S17). These end-to-end comparisons change the generation prompts as well as the sampler. Under matched LLM generation prompts, the selected SD-Turbo adapter improves on both references, while the selected klein adapter falls below both. On the 900 classes outside adapter fitting, their gains over the released students are −1.6 ([ −2.1, −1.0]) for klein and +6.9 ([+6.1, +7.7]) for SD-Turbo, retaining 1,000-way predictions. Those classes appeared in the earlier template-prompt development pilot. 
+
+Post-hoc template-adapter check. We additionally evaluate klein’s original template-trained adapter under the same ImageNet-1k LLM prompts, seeds, and classifier protocol. This comparison is specified after inspecting the primary scale results. It gives −3.3 points ([ −3.9, −2.8]) against the released student and −4.2 ([ −4.7, −3.8]) against base-first. On the 900 classes outside adapter fitting, its gain over the released student is −3.4 ([ −4.0, −2.9]). The LLM-fitted adapter remains better than the template-trained one by +1.9 points ([+1.6, +2.2]), so the development rule selects the better of the two tested adapters. Nevertheless, neither improves on the released student under these generation prompts. This identifies a limit for the tested klein adapters at 100 images per class; it does not explain its cause or establish the outcome at 1,281 images per class. 
+
+Follow-up teacher and data-size checks. The unguided-base comparisons use the same ImageNet-1k LLM prompts, image seeds, and classifier protocol as the adapter evaluation (Tab. S17). These full-base samplers differ from the adapters’ fine-grid intermediate targets followed by student completion, so the comparisons do not isolate the cause of klein’s loss. On ImageNet-100 with LLM generation prompts, the LLM-fitted klein adapter’s gap to the released student changes from 
+
+−4.6 points [ −6.2, −3.0] at 100 images per class to +5.2 [+3.0, +7.5] at 500. This comparison uses one generated dataset per sampler and its 100-image-per-class subset, three classifier seeds, and the same fitted adapter. Both sizes use 100 training epochs, so the larger sets also receive more optimizer updates. The reversal shows that the failure does not require 1,000 classes, but does not separate the effects of dataset size and optimization budget. 
+
+## E.4. Augmenting real training data 
+
+Benefits with limited real data. At 500 real images per class, adding adapted images improves accuracy over both real-only training and augmentation with released-student images. Released klein images provide no resolved improvement over the matched real-only reference, whereas base-first images improve it. With only 50 real images per class, the real-only reference reaches 34.0%. The adapter’s advantage over released-student images grows to +12.1 points for klein and +13.1 for SD-Turbo, and adapted images also outperform unguided-base images. Paired differences and uncertainty are collected in Tab. S23. 24 At full real-data scale. Adding adapted images to the full real ImageNet-1k training set improves ImageNet-Sketch and ImageNet-R accuracy while slightly lowering in-distribution accuracy. Adding released klein images instead lowers all three accuracies. Adapted images therefore provide the better synthetic augmentation in this comparison, with the benefit over real-only training concentrated on the shifted test sets (Tabs. S18 and S23). 
+
+## E.5. Accuracy on shifted test sets 
+
+training set in distribution V2 Sketch R A
+
+ImageNet-100, generated only 
+
+real images, 500 per class 77.1 ±0.2 66.1 ±1.4 21.1 ±1.1 30.8 ±1.1 4.3 ±0.7 
+
+FLUX.2-klein, distilled 17.1 ±0.4 15.4 ±0.8 5.0 ±0.1 6.8 ±0.5 0.5 ±0.2 
+
+base-first 39.9 ±0.3 34.9 ±0.2 16.3 ±0.4 22.6 ±0.3 2.8 ±0.1 
+
++ adapter (ours) 43.8 ±0.4 37.4 ±0.9 22.5 ±0.7 27.9 ±0.8 3.6 ±0.4 
+
+base, no guidance 45.1 ±0.0 37.4 ±1.0 23.0 ±0.7 30.3 ±1.8 3.7 ±0.4 
+
+SD-Turbo, distilled 18.3 ±0.3 14.9 ±0.4 4.9 ±0.4 4.6 ±0.5 2.2 ±0.5 
+
+base-first 36.4 ±0.9 28.8 ±1.4 11.1 ±0.6 13.7 ±0.1 3.8 ±0.4 
+
++ adapter (ours) 43.7 ±0.6 36.8 ±1.4 12.7 ±1.4 16.4 ±0.4 2.6 ±0.4 
+
+SD 2.1, no guidance 49.8 ±0.7 41.0 ±0.6 18.6 ±1.8 26.4 ±0.7 2.8 ±0.3 
+
+Z-Image-Turbo, distilled 14.0 ±0.0 12.0 ±0.3 5.7 ±0.4 6.0 ±0.1 0.9 ±0.1 
+
++ adapter (ours) 35.1 ±0.5 30.0 ±1.2 12.9 ±0.6 13.2 ±0.6 2.1 ±0.5 
+
+ImageNet-100, 500 real + 500 generated 
+
+real only, trained as long 78.8 ±0.0 67.0 ±0.9 21.6 ±0.4 31.0 ±0.9 3.8 ±0.7 
+
++ FLUX.2-klein, distilled 78.7 ±0.4 67.8 ±1.6 23.7 ±0.6 33.3 ±0.9 5.1 ±0.3 
+
++ FLUX.2-klein adapter 80.4 ±0.1 70.1 ±1.6 31.8 ±0.8 38.6 ±1.3 5.1 ±0.5 
+
++ SD-Turbo, distilled 79.3 ±0.2 69.0 ±0.8 25.9 ±0.9 33.9 ±0.9 5.1 ±0.5 
+
++ SD-Turbo adapter 82.2 ±0.3 70.1 ±0.9 29.0 ±0.3 36.9 ±0.5 4.9 ±0.4 
+
+ImageNet-1k, 1,281 per class 
+
+FLUX.2-klein, distilled 8.4 ±0.1 7.1 ±0.1 2.2 ±0.1 1.8 ±0.1 0.1 ±0.0 
+
++ adapter (ours) 34.2 ±0.1 29.0 ±0.1 13.6 ±0.1 15.0 ±0.0 1.3 ±0.1 
+
+SD-Turbo, distilled 12.7 ±0.2 10.5 ±0.1 2.9 ±0.2 4.2 ±0.0 0.5 ±0.1 
+
++ adapter (ours) 32.1 ±0.3 27.1 ±0.4 7.4 ±0.1 10.1 ±0.1 1.2 ±0.1 
+
+ImageNet-1k, all 1.28M real + 1.28M generated 
+
+real only, trained as long 76.7 ±0.2 65.2 ±0.3 24.4 ±0.1 25.4 ±0.2 2.5 ±0.1 
+
++ FLUX.2-klein, distilled 76.0 ±0.0 64.5 ±0.2 24.0 ±0.5 24.8 ±0.5 1.7 ±0.1 
+
++ FLUX.2-klein adapter 76.5 ±0.2 65.0 ±0.2 27.7 ±0.6 27.9 ±0.4 2.6 ±0.1 
+
+Table S18. Classifier accuracy on in-distribution and shifted test sets. Top-1 (%, mean ± sd over classifier runs; the adapters on ImageNet-100 pool three training runs of three seeds) of the ResNet-50 classifiers of the main text on their own validation images (in distribution) and on ImageNet-V2, -Sketch, -R and -A restricted to their classes, with the argmax over all of the classifier’s classes. On ImageNet-100, V2 and Sketch cover all 100 classes, R 19 and A 15; on ImageNet-1k, V2 and Sketch cover all 1,000, R and A 200 each. Last block: all 1,281,167 real ImageNet-1k training images alone for 200 epochs, or with 1.28M generated images for 100 epochs (the same number of updates). 
+
+We evaluate the saved classifiers on ImageNet-V2 [29], -Sketch [38], -R [17], and -A [18] without retraining (Tab. S18). The evaluation reproduces each classifier’s validation accuracy before its numbers are kept. Gaps in the main text are paired differences of per-class top-1 with 95% bootstrap intervals over the classes a set covers. 
+
+# F. Diagnostic metrics and their scope 
+
+We compare the fixed collection of 186 template-prompt sets with real images in feature space. These diagnostics support Sec. 5; they neither determine the adapter objective nor establish causal mediation. Later evaluations do not expand this collection. 25 F.1. Metric comparisons and collection sensitivity 
+
+metric within families pooled FLUX.2-klein SD 2.1 Z-Image SDXL held-out family recall, DINOv3 +0.87 [+0.81, +0.93] +0.91 +0.95 +0.91 +0.97 +0.20 +0.85 recall, CLIP +0.86 [+0.79, +0.91] +0.89 +0.94 +0.86 +0.98 +0.24 +0.83 Fr´ echet distance, CLIP −0.86 [−0.91, −0.79] −0.88 −0.92 −0.85 −0.98 −0.44 +0.84 Fr´ echet distance, DINOv3 −0.74 [−0.82, −0.63] −0.72 −0.90 −0.60 −0.98 −0.05 +0.62 coverage, DINOv3 +0.30 [+0.15, +0.45] +0.03 +0.34 +0.22 +0.76 +0.21 −0.28 coverage, CLIP +0.63 [+0.52, +0.72] +0.60 +0.75 +0.51 +0.82 +0.22 +0.45 precision, DINOv3 −0.57 [−0.69, −0.42] −0.58 −0.61 −0.47 −0.97 −0.26 +0.49 density, DINOv3 −0.59 [−0.70, −0.45] −0.57 −0.64 −0.49 −0.93 −0.23 +0.44 Vendi, DINOv3 +0.78 [+0.68, +0.86] +0.82 +0.83 +0.78 +0.99 +0.21 +0.78 Vendi, CLIP +0.76 [+0.65, +0.83] +0.79 +0.84 +0.68 +0.98 +0.28 +0.73 FID (Inception) −0.66 [−0.76, −0.55] −0.60 −0.83 −0.38 −0.91 −0.54 +0.47 Inception Score −0.34 [−0.48, −0.17] −0.48 −0.44 −0.25 −0.36 +0.17 +0.38 recognizability −0.54 [−0.66, −0.39] −0.43 −0.65 −0.41 −0.87 −0.01 +0.21 frozen DINOv3, linear probe +0.69 [+0.58, +0.76] +0.41 +0.65 +0.77 +0.73 +0.59 +0.13 frozen DINOv3, k-NN +0.33 [+0.18, +0.46] +0.21 +0.42 +0.04 +0.73 +0.63 +0.02 contrast −0.49 [−0.59, −0.36] −0.40 −0.48 −0.63 −0.18 −0.14 +0.24 sharpness −0.30 [−0.42, −0.16] +0.01 −0.40 −0.49 +0.74 +0.48 −0.42 saturation −0.32 [−0.43, −0.18] −0.37 −0.36 −0.36 +0.50 −0.35 +0.31 colorfulness −0.41 [−0.52, −0.28] −0.36 −0.64 −0.23 +0.15 −0.24 +0.27 high-frequency share +0.01 [−0.15, +0.15] +0.25 +0.06 −0.41 +0.66 +0.66 +0.27 spectral slope +0.08 [−0.08, +0.23] +0.27 +0.18 −0.24 +0.67 +0.42 +0.32 aesthetic score −0.46 [−0.58, −0.31] −0.32 −0.56 −0.35 −0.90 +0.26 +0.09 PickScore −0.55 [−0.69, −0.39] −0.59 −0.67 −0.43 −0.49 −0.21 +0.58 aesthetic score given recall +0.26 [+0.08, +0.39] 
+
+PickScore given recall +0.11 [−0.10, +0.30] 
+
+Table S19. Set metrics against training value. Spearman correlations with ResNet-50 top-1 on the 186 template-prompt ImageNet-100 sets: family-centered ranks [95% configuration-bootstrap CI], pooled ranks, and within-family ranks (at least eight sets). Distances favor negative correlations. Held-out family: correlation of out-of-fold monotone predictions with top-1, pooled across families; positive values favor either metric direction. Bottom: partial correlations given DINOv3 recall. 
+
+DINOv3 recall, CLIP recall, and CLIP Fr´ echet distance have similar aggregate associations with accuracy, with overlapping family-centered intervals (Tab. S19). Coverage, Vendi, and FID are weaker; recognizability, Inception Score, and preference scores correlate negatively with accuracy. 
+
+Ranking protocol and limits. Within family f , we transform metric and accuracy ranks to (rank f −(nf + 1) /2) /n f and correlate the concatenated ranks. Intervals use 10,000 within-family bootstrap resamples of sets (seed zero). For held-out-family prediction, we fit isotonic regression on the other families, choosing its direction from their Spearman sign. Tied inputs are averaged with multiplicity weights; predictions interpolate linearly between knots and clip at endpoints. We refit in each bootstrap resample and correlate held-out predictions with accuracy within families and pooled across families (Tab. S20). This tests ranking, not calibration; SDXL and FLUX.1-dev remain uncertain. The bootstrap retains unequal family sizes and does not account for shared prompts, image seeds, neighboring sampling plans, or the choice of configuration collection. The intervals condition on this collection; held-out-family checks assess transfer only across the studied families. 26 Held-out family sets ρ [95% CI] FLUX.2-klein 89 +0.94 [+0.90, +0.97] 
+
+SD 2.1 / SD-Turbo 64 +0.90 [+0.82, +0.94] 
+
+Z-Image 13 +0.97 [+0.84, +1.00] 
+
+SDXL 12 +0.21 [−0.68, +0.79] 
+
+FLUX.1-dev 6 +0.43 [−0.78, +1.00] 
+
+Pooled predictions 186 +0.85 [+0.79, +0.88] 
+
+Table S20. Recall’s ranking precision varies across held-out families. Spearman correlation of predicted and observed ImageNet-100 top-1 [95% family-stratified set-bootstrap CI]. Each isotonic fit excludes the held-out family’s outcomes. Rows require five sets; SD 1.5 has two and contributes only to the pooled evaluation. 
+
+Equal-family sensitivity. We compare family-centered ranks with the mean within-family Spearman correlation on the same 178 sets from klein, SD 2.1, SDXL, and Z-Image (Tab. S21). Distances are negated; both summaries use the same 10,000 paired within-family bootstrap resamples. CLIP Fr´ echet distance has the largest equal-family point estimate, but its paired difference from DINOv3 recall, +0.04 (95% CI [ −0.10, +0.21]), does not establish an ordering. Equal weighting retains the configuration-dependence limitations above. 
+
+Metric Family-centered Equal-family DINOv3 recall +0.89 [+0.83, +0.93] +0.76 [+0.55, +0.90] 
+
+CLIP recall +0.87 [+0.80, +0.91] +0.75 [+0.54, +0.89] 
+
+−CLIP Fr´ echet +0.87 [+0.80, +0.92] +0.80 [+0.61, +0.91] 
+
+−FID +0.66 [+0.54, +0.75] +0.67 [+0.46, +0.80] 
+
+Table S21. Recall and CLIP Fr´ echet distance remain useful under equal family weight. Ranking summaries [95% configuration-bootstrap CI] on 178 sets from four families with at least eight sets. Left: concatenated centered ranks; right: equally weighted within-family Spearman correlations. Distance signs are reversed. Bold: largest point estimate. SD 1.5 (two sets) and FLUX.1-dev (six) remain in the original 186-set analysis. 
+
+## F.2. Adapted-set diagnostics 
+
+sampler top-1 FID aesthetic PickScore recognized recall 
+
+FLUX.2-klein 
+
+distilled 17.1 ±0.4 47.6 5.28 22.06 0.83 0.009 + adapter (ours) 44.1 ±0.5 34.8 4.80 20.25 0.66 0.275 base, no guidance 45.1 ±0.0 33.0 4.81 20.12 0.61 0.492 base, default guidance 23.6 ±0.5 42.6 5.28 21.79 0.79 0.037 
+
+SD-Turbo 
+
+distilled 18.3 ±0.3 37.5 5.35 21.62 0.88 0.017 + adapter (ours) 43.3 ±0.2 30.2 5.21 20.94 0.80 0.164 SD 2.1, no guidance 49.8 ±0.7 50.2 5.01 19.72 0.60 0.331 SD 2.1, default guidance 30.0 ±0.1 28.0 5.44 21.46 0.91 0.039 
+
+Z-Image-Turbo 
+
+distilled 14.0 ±0.0 56.2 5.28 19.66 0.89 0.003 + adapter (ours) 35.2 ±0.6 24.9 5.19 21.54 0.87 0.081 Z-Image, no guidance 45.6 ±0.7 29.4 4.92 18.56 0.69 0.386 Z-Image, default guidance 17.6 ±0.3 34.6 5.34 19.32 0.89 0.033 Table S22. Training-value gains do not require higher preference scores. ImageNet-100 top-1 (%, mean ± sd over three classifier seeds) and metrics for sets of 500 images per class. FID and DINOv3 recall use real training images; lower FID is better. LAION aesthetic score and PickScore favor higher values. Recognized: fraction assigned to the intended class among the 100 by a pretrained ImageNet ResNet-50. Adapters use their first training runs; Tab. S6 pools three. 
+
+Adaptation improves FID in all three families while reducing recognizability in all three (Tab. S22). 27 Class-level limits. For the first fitted klein and SD-Turbo adapters, classwise recall changes correlate inconsistently with accuracy gains (+0.21 [0.00, +0.40] and −0.21 [ −0.39, −0.01], respectively). The set-level association does not provide a reliable class-level explanation. 
+
+# G. Supporting accuracy contrasts 
+
+Comparison Gain 95% CI 
+
+ImageNet-100: generator and dataset-size comparisons 
+
+SRPO versus FLUX.1-dev +3.1 [+1.6, +4.7] FLUX.2-klein: adapter versus base-first +3.9 [+2.2, +5.7] SD-Turbo: adapter versus base-first +7.3 [+5.3, +9.3] Z-Image-Turbo: adapter versus base-first +2.4 [+1.4, +3.4] FLUX.2-klein: 100 adapted versus 3,000 released images/class +4.9 [+2.2, +7.6] 
+
+ImageNet-100: 500 real images/class, synthetic augmentation 
+
+SD 1.5: guidance 2 versus 7.5 +0.6 [+0.1, +1.2] klein: base-first versus released +2.0 [+1.4, +2.7] klein: released augmentation versus real-only −0.1 [−0.7, +0.5] klein: base-first augmentation versus real-only +1.9 [+1.2, +2.7] klein: adapted versus released augmentation +1.8 [+1.1, +2.5] SD-Turbo: adapted versus released augmentation +2.9 [+2.1, +3.6] klein: adapted augmentation versus real-only +1.7 [+0.9, +2.5] SD-Turbo: adapted augmentation versus real-only +3.4 [+2.6, +4.2] 
+
+ImageNet-100: 50 real images/class, synthetic augmentation 
+
+klein: adapted versus released augmentation +12.1 [+10.3, +14.1] SD-Turbo: adapted versus released augmentation +13.1 [+11.7, +14.6] klein: adapted versus unguided-base augmentation +1.9 [+0.8, +3.1] SD-Turbo: adapted versus unguided-base augmentation +3.0 [+1.8, +4.2] 
+
+ImageNet-1k: full real-data training, klein augmentation 
+
+Adapted versus real-only: in distribution −0.2 [−0.4, 0.0] Released versus real-only: in distribution −0.7 [−0.9, −0.5] Adapted versus released: in distribution +0.5 [+0.3, +0.7] Adapted versus real-only: ImageNet-Sketch +3.3 [+2.9, +3.7] Adapted versus real-only: ImageNet-R +2.5 [+2.0, +3.0] Released versus real-only: ImageNet-Sketch −0.4 [−0.7, −0.1] Released versus real-only: ImageNet-R −0.5 [−0.9, −0.2] Table S23. Paired intervals for generator, data-scaling, and augmentation comparisons. Accuracy differences in points [paired 95% class-bootstrap CI] after averaging classifier runs. Original ImageNet-100 adapter/base-first comparisons pool three adapter-training runs; augmentation comparisons use one adapter run. Each set uses three classifier seeds, except the data-scaling comparison, which uses two. Augmentation comparisons match classifier-training steps and use the test set named in the row; otherwise evaluation is in distribution. Bold: interval above zero. These are existing estimates supporting Secs. 4, D.1 and E.4. 
+
+28 LLM Usage Statement 
+
+We used Claude Code (Opus 5.5) to assist with implement-ing experiment and analysis code, and GPT-6.1-Sol to revise manuscript wording and presentation. Qwen2.5-VL-7B-Instruct generated the experimental image captions and class descriptions, as described in the supplementary material. The authors reviewed the resulting code and text and take responsibility for the reported results and conclusions. 
+
+# References 
+
+[1] Krzysztof Adamkiewicz, Brian B. Moser, Stanislav Frolov, Tobias Christian Nauen, Federico Raue, and Andreas Den-gel. When pretty isn’t useful: Investigating why modern text-to-image models fail as reliable training data generators. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 36660–36669, 2026. 1, 2, 7, 9, 21 [2] Shekoofeh Azizi, Simon Kornblith, Chitwan Saharia, Mo-hammad Norouzi, and David J. Fleet. Synthetic data from diffusion models improves ImageNet classification. Transac-tions on Machine Learning Research , 2023. 1, 2, 12 [3] Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge, Sibo Song, Kai Dang, Peng Wang, Shijie Wang, Jun Tang, Humen Zhong, Yuanzhi Zhu, Mingkun Yang, Zhaohai Li, Jianqiang Wan, Pengfei Wang, Wei Ding, Zheren Fu, Yiheng Xu, Jiabo Ye, Xi Zhang, Tianbao Xie, Zesen Cheng, Hang Zhang, Zhibo Yang, Haiyang Xu, and Junyang Lin. Qwen2.5-VL technical report. arXiv preprint arXiv:2502.13923 , 2025. 22 [4] Pradhaan S Bhat, Rishubh Parihar, Abhijnya Bhat, and R. Venkatesh Babu. Don’t settle at the mode! Mitigating diversity collapse in pretrained flow models via feature self-guidance. In Proceedings of the European Conference on Computer Vision (ECCV) , 2026. 13 [5] Black Forest Labs. FLUX. https://github.com/ black-forest-labs/flux , 2024. 12 [6] Black Forest Labs. FLUX.2 [klein]: Towards interac-tive visual intelligence. https : / / bfl . ai / blog / flux2- klein- towards- interactive- visual-intelligence , 2026. 12 [7] Lukas Bossard, Matthieu Guillaumin, and Luc Van Gool. Food-101 – mining discriminative components with random forests. In Proceedings of the European Conference on Com-puter Vision (ECCV) , pages 446–461, 2014. 4 [8] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. ImageNet: A large-scale hierarchical image database. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 248–255, 2009. 4 [9] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim En-tezari, Jonas M¨ uller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, Dustin Podell, Tim Dockhorn, Zion English, and Robin Rombach. Scaling rectified flow transformers for high-resolution image synthesis. In Proceed-ings of the International Conference on Machine Learning (ICML) , pages 12606–12633, 2024. 2, 12 [10] Lijie Fan, Kaifeng Chen, Dilip Krishnan, Dina Katabi, Phillip Isola, and Yonglong Tian. Scaling laws of synthetic images for model training ... for now. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 7382–7392, 2024. 1, 2 [11] Xiangyu Fan, Zesong Qiu, Zhuguanyu Wu, Fanzhou Wang, Zhiqian Lin, Tianxiang Ren, Dahua Lin, Ruihao Gong, and Lei Yang. Phased DMD: Few-step distribution matching distillation via score matching within subintervals. In Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 41667–41676, 2026. 2[12] Fok. Teacher-guided semantic directional alignment (SDA) for restoring diversity in few-step distilled models. Model card, https : / / huggingface . co / F16 / krea2 -turbo-sda , released August 2026, 2026. 2 [13] Fok. Teacher-guided semantic directional alignment (SDA) for restoring diversity in few-step distilled models: Z-image-turbo release. Model card, https://huggingface.co/ F16/z-image-turbo-sda , 2026. 2, 13, 19 [14] Rohit Gandikota and David Bau. Distilling diversity and con-trol in diffusion models. In Proceedings of the IEEE/CVF Win-ter Conference on Applications of Computer Vision (WACV) ,pages 1304–1313, 2026. 1, 2, 14 [15] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image recognition. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 770–778, 2016. 4, 9 [16] Ruifei He, Shuyang Sun, Xin Yu, Chuhui Xue, Wenqing Zhang, Philip Torr, Song Bai, and Xiaojuan Qi. Is synthetic data from generative models ready for image recognition? In International Conference on Learning Representations (ICLR) , 2023. 1, 2 [17] Dan Hendrycks, Steven Basart, Norman Mu, Saurav Kada-vath, Frank Wang, Evan Dorundo, Rahul Desai, Tyler Zhu, Samyak Parajuli, Mike Guo, Dawn Song, Jacob Steinhardt, and Justin Gilmer. The many faces of robustness: A critical analysis of out-of-distribution generalization. In Proceed-ings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 8340–8349, 2021. 25 [18] Dan Hendrycks, Kevin Zhao, Steven Basart, Jacob Steinhardt, and Dawn Song. Natural adversarial examples. In Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 15262–15271, 2021. 25 [19] Huayang Huang, Ruoyu Wang, Jinhui Zhao, Wei Deng, Daiguo Zhou, Jian Luan, Yu Wu, and Ye Zhu. Restoring ini-tial noise sensitivity in text-to-image distillation via geometric alignment. In Proceedings of the International Conference on Machine Learning (ICML) , pages 47871–47890, 2026. 2 [20] Jonathan Krause, Michael Stark, Jia Deng, and Li Fei-Fei. 3D object representations for fine-grained categorization. In Pro-ceedings of the IEEE International Conference on Computer Vision (ICCV) Workshops , pages 554–561, 2013. 4 [21] Tuomas Kynk¨ a¨ anniemi, Miika Aittala, Tero Karras, Samuli Laine, Timo Aila, and Jaakko Lehtinen. Applying guidance in a limited interval improves sample and distribution quality in diffusion models. In Advances in Neural Information 
+
+29 Processing Systems (NeurIPS) , pages 122458–122483, 2024. 2, 13, 14 [22] Haoyu Li, Tingyan Wen, Lin Qi, Zhe Wu, Yihuang Chen, Xing Zhou, Lifei Zhu, Xueqian Wang, and Kai Zhang. 1.x-Distill: Breaking the diversity, quality, and efficiency bar-rier in distribution matching distillation. arXiv preprint arXiv:2604.04018 , 2026. 2, 15 [23] Zian Li, Litong Gong, Borui Liao, Pengfei Liu, Xinyu Wang, Xinyuan Wei, Yifan Gao, Tiezheng Ge, and Muhan Zhang. DUET: A diversity-quality duet of distillation experts for two-step video generation. arXiv preprint arXiv:2608.09637 ,2026. 2 [24] Shanchuan Lin, Anran Wang, and Xiao Yang. SDXL-Lightning: Progressive adversarial diffusion distillation. 
+
+arXiv preprint arXiv:2402.13929 , 2024. 12, 16 [25] Yuxi Liu, Haoyu Li, Yixiang Cai, Tengxu Sun, Zekun Zhang, Baole Ai, Ang Wang, Jiamang Wang, Lin Qu, Kun Yuan, and Kai Zhang. CrossDistill: Balancing quality and diversity via trajectory-level hybrid few-step distillation. arXiv preprint arXiv:2609.14725 , 2026. 2, 3, 19 [26] Simian Luo, Yiqin Tan, Longbo Huang, Jian Li, and Hang Zhao. Latent consistency models: Synthesizing high-resolution images with few-step inference. arXiv preprint arXiv:2310.04378 , 2023. 2, 12, 16 [27] Omkar M Parkhi, Andrea Vedaldi, Andrew Zisserman, and C. V. Jawahar. Cats and dogs. In Proceedings of the IEEE Con-ference on Computer Vision and Pattern Recognition (CVPR) ,pages 3498–3505, 2012. 4 [28] Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas M¨ uller, Joe Penna, and Robin Rombach. SDXL: Improving latent diffusion models for high-resolution image synthesis. In International Conference on Learning Representations (ICLR) , 2024. 12 [29] Benjamin Recht, Rebecca Roelofs, Ludwig Schmidt, and Vaishaal Shankar. Do ImageNet classifiers generalize to Im-ageNet? In Proceedings of the International Conference on Machine Learning (ICML) , pages 5389–5400, 2019. 25 [30] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 10684–10695, 2022. 2, 12 [31] Seyedmorteza Sadat, Jakob Buhmann, Derek Bradley, Ot-mar Hilliges, and Romann M. Weber. CADS: Unleashing the diversity of diffusion models through condition-annealed sampling. In International Conference on Learning Repre-sentations (ICLR) , 2024. 2 [32] Mert B¨ ulent Sarıyıldız, Karteek Alahari, Diane Larlus, and Yannis Kalantidis. Fake it till you make it: Learning transfer-able representations from synthetic ImageNet clones. In Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 8011–8021, 2023. 1, 2[33] Axel Sauer, Dominik Lorenz, Andreas Blattmann, and Robin Rombach. Adversarial diffusion distillation. In Proceedings of the European Conference on Computer Vision (ECCV) ,pages 87–103, 2024. 1, 2, 12, 16 [34] Xiangwei Shen, Zhimin Li, Zhantao Yang, Shiyi Zhang, Ying-fang Zhang, Donghao Li, Chunyu Wang, Qinglin Lu, and Yansong Tang. Directly aligning the full diffusion trajec-tory with fine-grained human preference. arXiv preprint arXiv:2509.06942 , 2025. 12 [35] Qitan Shi, Cheng Jin, Ziyuan Liu, and Yuantao Gu. Manifold-constrained noise optimization for diverse diffusion sampling. 
+
+arXiv preprint arXiv:2607.23937 , 2026. 13 [36] Yonglong Tian, Dilip Krishnan, and Phillip Isola. Contrastive multiview coding. In Proceedings of the European Confer-ence on Computer Vision (ECCV) , pages 776–794, 2020. 4 [37] Yonglong Tian, Lijie Fan, Phillip Isola, Huiwen Chang, and Dilip Krishnan. StableRep: Synthetic images from text-to-image models make strong visual representation learn-ers. In Advances in Neural Information Processing Systems (NeurIPS) , pages 48382–48402, 2023. 2 [38] Haohan Wang, Songwei Ge, Zachary Lipton, and Eric Xing. Learning robust global representations by penalizing local pre-dictive power. In Advances in Neural Information Processing Systems (NeurIPS) , 2019. 25 [39] Tianhe Wu, Ruibin Li, Lei Zhang, and Kede Ma. Diversity-preserved distribution matching distillation for fast visual synthesis. In Proceedings of the International Conference on Machine Learning (ICML) , pages 136351–136369, 2026. 2, 3, 12, 18, 19 [40] Tianwei Yin, Micha¨ el Gharbi, Taesung Park, Richard Zhang, Eli Shechtman, Fr´ edo Durand, and William T. Freeman. Im-proved distribution matching distillation for fast image syn-thesis. In Advances in Neural Information Processing Systems (NeurIPS) , pages 47455–47487, 2024. 1, 2, 12, 16 [41] Tianwei Yin, Micha¨ el Gharbi, Richard Zhang, Eli Shechtman, Fr´ edo Durand, William T. Freeman, and Taesung Park. One-step diffusion with distribution matching distillation. In Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 6613–6623, 2024. 2 [42] Z-Image Team, Huanqia Cai, Sihan Cao, Ruoyi Du, Peng Gao, Aiming Hao, Steven Hoi, Zhaohui Hou, Shijie Huang, Dengyang Jiang, Yuming Jiang, Xin Jin, Liangchen Li, Zhen Li, Zhong-Yu Li, David Liu, Dongyang Liu, Qilong Wu, Feng Yu, Zechao Zhan, Chi Zhang, Shifeng Zhang, Ruikai Zhou, and Shilin Zhou. Z-Image: An efficient image generation foundation model with single-stream diffusion transformer. 
+
+arXiv preprint arXiv:2511.22699 , 2025. 12 
+
+30
