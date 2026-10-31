@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-30</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-31</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 17 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>6</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-30 23:32:29 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-31 22:43:33 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今天共梳理 17 篇论文，其中精读 6 篇、速读 11 篇，重点关注超分辨率与扩散模型两条主线。最值得看的是两篇 9.0 分精读：基于涨落的荧光超分辨流匹配，以及面向手机长焦的统一退化建模超分；速读中扩散先验加速 MRI、蒸馏多样性修复也值得跟进。普通读者可先读这两篇精读的摘要和图，再按需查阅速读中的扩散采样技巧。</p>
+<p>今日扫完17篇论文，精读6篇、速读11篇，主线聚焦视频超分与多图生成。</p>
+<p>最值得看的是9.0分的《Residual Motion Splatting》连续时空视频超分和《DeCoRL》多图组合强化学习，速读可补8.0分的《Visual Autoregressive Generation with Next Token Imagination》。</p>
+<p>普通读者建议先读两篇9分精读抓方法框架，再用三篇8分速读扩展生成与扩散方向视野。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -81,7 +83,7 @@
     <strong class="dpr-home-dashboard-count">6 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Flow Matching for Fluctuation-Based Fluorescence Super-Resolution">Flow Matching for Fluctuation-Based Fluorescence Super-Resolution</span></li><li><span class="dpr-home-dashboard-paper-title" title="UniTele: Learning Device-Conditioned Degradations for Unified Smartphone Telephoto Super-Resolution">UniTele: Learning Device-Conditioned Degradations for Unified Smartphone Telephoto Super-Resolution</span></li><li><span class="dpr-home-dashboard-paper-title" title="Concept Acupuncturist: An Efficient and Precise Concept Erasure Method for Diffusion Models via Sparse Autoencoders">Concept Acupuncturist: An Efficient and Precise Concept Erasure Method for Diffusion Models via Sparse Autoencoders</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Residual Motion Splatting for Continuous Space-Time Video Super-Resolution">Residual Motion Splatting for Continuous Space-Time Video Super-Resolution</span></li><li><span class="dpr-home-dashboard-paper-title" title="DeCoRL: Decomposed Consistency Reinforcement Learning for Multi-Image Composition">DeCoRL: Decomposed Consistency Reinforcement Learning for Multi-Image Composition</span></li><li><span class="dpr-home-dashboard-paper-title" title="EditAgent: Rethinking Agentic Image Editing">EditAgent: Rethinking Agentic Image Editing</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>6</strong></span></div>
 </section>
@@ -94,7 +96,7 @@
     <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Cascaded Posterior Sampling With Diffusion Priors for highly Accelerated MRI">Cascaded Posterior Sampling With Diffusion Priors for highly Accelerated MRI</span></li><li><span class="dpr-home-dashboard-paper-title" title="A First-Step Bias Restores Lost Diversity in Diffusion Model Distillation">A First-Step Bias Restores Lost Diversity in Diffusion Model Distillation</span></li><li><span class="dpr-home-dashboard-paper-title" title="The Noise Plane: A Diffusion Bridge Across Exponent and Dispersion">The Noise Plane: A Diffusion Bridge Across Exponent and Dispersion</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Visual Autoregressive Generation with Next Token Imagination">Visual Autoregressive Generation with Next Token Imagination</span></li><li><span class="dpr-home-dashboard-paper-title" title="Efficient Covariance-Aware Vicinal Latent Diffusion for Continuous Conditional Image Generation">Efficient Covariance-Aware Vicinal Latent Diffusion for Continuous Conditional Image Generation</span></li><li><span class="dpr-home-dashboard-paper-title" title="AegisFlow: Training-Free Non-Myopic Path-Safe Guided Flow Matching">AegisFlow: Training-Free Non-Myopic Path-Safe Guided Flow Matching</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>11</strong></span></div>
 </section>

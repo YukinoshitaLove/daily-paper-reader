@@ -1,0 +1,3365 @@
+SREdit: Scene Response Guided Appearance Editing for Projection
+Mapping
+Yuqiao Xia
+*
+Yuchen Deng
+†
+Ziheng Chang
+‡
+Bingyao Huang
+§
+College of Computer and Information Science, Southwest University, Chongqing, China
+Setup
+Response-guided 
+sampling
+Native
+ sampling
+Frozen Image Editor
+Response map
+Scene
+Blue Porcelain
+Ink Wash
+Painted Wood
+Tropical Style
+Forest Elf
+Halloween Style
+Makeup
+Material
+Clothing
+Makeup
+Material
+Clothing
+(b) Prompt-guided Editing  (Captured)
+(c) Reference-guided Editing  (Captured)
+Compensation
+(a) Overview
+Figure 1: SREdit for response-guided appearance editing in projection mapping. (a) Given a calibrated projector–camera
+setup, SREdit estimates a scene response map from the reconstructed scene. During early sampling, the source appearance
+preserves registration with the physical object, while the scene response map adapts the amount of editing across surface regions.
+The image editor then completes the remaining sampling steps. Downstream projector compensation converts the edited target
+into a compensation image for physical projection. (b) Camera-captured results of text-guided editing show diverse changes in
+style and appearance. (c) Camera-captured results of reference-guided editing demonstrate localized makeup and clothing edits,
+as well as material transfer. All results in (b) and (c) are captured from physical projections. The labels in (b) and (c) are abbreviated
+prompts; the full prompts are listed in Table S1 in the supplementary material.
+ABSTRACT
+Projection-based appearance editing changes selected visual at-
+tributes of a physical object through projection mapping (PM). To
+display a desired appearance, PM typically uses projector compen-
+sation, which computes a projector input that counteracts the geo-
+metric and photometric distortions of the scene. Compensation can
+only approximate this appearance within the available projection
+range, and it cannot revise the appearance itself. Pretrained LLM-
+based image editors provide a direct way to produce the desired
+appearance from a text prompt or reference image; projector com-
+pensation can then attempt to reproduce the edited result through
+projection. However, these editors do not have an accurate mea-
+sure of the scene geometry or scene response. Therefore, their out-
+puts may contain geometric misalignment, inconsistent shading, or
+changes outside the available projection range, which downstream
+projector compensation cannot correct. To address this problem,
+we introduce SREdit, an efficient response-guided framework for
+projection-based appearance editing. SREdit estimates a scene re-
+sponse map from the reconstructed scene that reflects how strongly
+projected illumination can affect different surface regions. SREdit
+uses the source appearance to constrain the early sampling process
+and preserve registration with the fixed physical object, while the
+scene response map adapts the amount of editing across surface
+regions. Experiments across two pretrained image editors show
+*e-mail: swuxyq@gmail.com
+†e-mail: swudyc714@email.swu.edu.cn
+‡e-mail: chang1213x@gmail.com
+§e-mail: bhuang@swu.edu.cn. Corresponding author.
+that SREdit improves projected appearance quality and reproduc-
+tion fidelity. It adds less than one second per image with negligible
+VRAM overhead. Participants also consistently preferred the re-
+sults produced with SREdit in our user study.
+Index Terms:
+Projection mapping, spatial augmented reality,
+projector–camera systems, image editing
+1
+INTRODUCTION
+Projection-based appearance editing changes selected visual at-
+tributes of a physical object through projection. Most projection-
+mapping research instead assumes that a desired appearance is al-
+ready available and focuses on reproducing it through projector
+compensation, which counteracts the geometric and photometric
+effects of the surface and projector–camera setup [6,19,28]. Com-
+pensation can approximate this appearance only within the avail-
+able projection range and does not create the appearance itself. A
+user who wants to edit an existing object must therefore prepare this
+desired appearance separately. Pretrained LLM-based image edi-
+tors provide a direct way to produce the desired appearance from a
+text prompt or reference image; projector compensation can then
+attempt to reproduce the edited result through projection.
+This
+pipeline reduces the need to prepare projection content manually,
+but it also exposes a mismatch between image editing and physical
+projection. However, these editors do not have an accurate mea-
+sure of the scene geometry or scene response. Here, scene response
+describes how strongly projected illumination can affect different
+surface regions. Without this information, the edited target may
+contain geometric misalignment, inconsistent shading, or changes
+1
+arXiv:2610.32792v1  [cs.CV]  23 Oct 2026
+
+
+outside the available projection range, all of which should be ad-
+dressed during editing because downstream projector compensation
+cannot revise the target itself.
+Existing approaches can incorporate scene-related constraints
+through test-time gradient-based guidance or optimization [13,39].
+They require gradients during generation, which adds computation
+and memory on top of the generator for each edit. Other methods
+inject geometry through additional control modules [46, 66], but
+each module must be paired with a compatible model architecture,
+and many pretrained image editors do not provide such modules.
+These restrictions make it difficult to apply the same scene-related
+control across different editors.
+To address this problem, we introduce SREdit, an efficient
+response-guided framework for projection-based appearance edit-
+ing (Fig. 1). SREdit estimates a scene response map from the re-
+constructed scene that reflects how strongly projected illumination
+can affect different surface regions, and introduces this information
+into the editing process through response-guided sampling. During
+sampling, SREdit uses the source appearance to constrain the early
+sampling process and preserve registration with the fixed physical
+object, and adapts the amount of change according to the scene
+response, preserving lower response regions more strongly while
+allowing greater changes in higher response regions. It requires no
+additional training or control module for the image editor and does
+not backpropagate through the editor during generation. Down-
+stream projector compensation remains unchanged.
+Experiments across two pretrained image editors show that
+SREdit improves projected appearance quality and reproduction fi-
+delity while requiring little additional computation and memory.
+Participants also consistently preferred the results produced with
+SREdit in our user study. Our contributions are:
+• To the best of our knowledge, SREdit is the first framework
+to incorporate scene response into pretrained image editing
+for projection mapping, while separating appearance editing
+from downstream projector compensation.
+• We introduce response-guided sampling, which uses a scene
+response map estimated from the reconstructed scene to adapt
+the amount of change across surface regions without back-
+propagating through the editor during generation.
+• SREdit requires no additional training or control module for
+the image editor and is evaluated with two pretrained image
+editors across six physical setups. Our experiments demon-
+strate improved projected appearance quality and reproduc-
+tion fidelity with little additional computation and memory.
+2
+RELATED WORK
+2.1
+Projection mapping and appearance editing
+Projection mapping (PM) alters the perceived appearance of physi-
+cal surfaces by superimposing projected imagery, and prior surveys
+have reviewed its geometric, photometric, hardware, and applica-
+tion aspects [6,19,28]. Projection has been used to augment picto-
+rial artwork [5], guide artists using traditional media and tools [16],
+manipulate perceived softness [51], augment physical avatars with
+projected shading [3], and dynamically alter the appearance of hu-
+man faces [4]. Dynamic PM further extended these effects to de-
+forming non-rigid surfaces [47], markerless planar surfaces [29],
+human arms with skin deformation [50], and articulated hands [15].
+More recent systems address registration and display conditions in
+PM. Peng et al. [49] combine high-speed facial tracking with a lens-
+shift coaxial projector–camera setup to reduce misalignment in dy-
+namic facial projection. Okamoto et al. [48] use a dense synthetic-
+aperture projector array to suppress interaction shadows in table-
+top workspaces, and Kusuyama et al. [32] combine a large-aperture
+projector with a coaxial residual projector to balance shadow sup-
+pression and deblurring. In brightly illuminated environments, Ya-
+sui et al. [62] support PM with mixed-light-field projection, and Fu-
+jimura et al. [17] maintain projection contrast with target-excluding
+light-field illumination. These systems demonstrate a broad range
+of appearance changes on physical targets. However, the projected
+content or desired effect is usually pre-authored or produced by an
+application-specific authoring and tracking pipeline.
+Once a desired appearance is specified, projector compensation
+computes a projector input that counteracts geometric and pho-
+tometric distortions.
+Practical and robust approaches simplified
+projector–camera calibration [10] and improved compensation un-
+der nonlinear device responses [18], steep surface-reflectance vari-
+ations [45], and cooperative multi-projector configurations [53].
+Perceptually motivated compensation exploits chromatic adaptation
+and perceptual anchoring [27], while related work on non-negative
+image synthesis accounts for the fact that projection can add
+light but cannot directly remove light from a physical scene [41].
+Learning-based methods subsequently formulated photometric [23]
+or full [26] projector compensation as end-to-end learning prob-
+lems, with related work addressing projection deblurring [30] and
+high-resolution compensation [57]. More recently, Li et al. [35]
+generalize full compensation to unseen projection surfaces, illumi-
+nation conditions, and projector–camera poses without fine-tuning
+or retraining. Together, these methods formulate the inverse prob-
+lem of computing a projector input for a prescribed camera-view
+appearance.
+The complementary forward problem is commonly studied in
+projector–camera systems (ProCams) as relighting or project-and-
+capture simulation. Given a projector input and a physical scene,
+it predicts the image observed by the camera. Early methods rep-
+resented this relationship through light transport matrices, with ef-
+ficient approximations developed for complex light transport [55].
+Learned ProCams models subsequently combined geometric and
+photometric mappings for relighting, compensation, and shape re-
+construction [24], while neural reflectance fields enabled view-
+agnostic projection mapping [14].
+Since these learned models
+are differentiable, they can also serve as simulators for optimiz-
+ing projector inputs. For example, Huang and Ling [25] optimize
+projector-based adversarial attacks through a learned project-and-
+capture network, PCNet.
+More recently, Li et al. [36] formu-
+late ProCams simulation through differentiable path tracing, while
+Deng et al. [12] represent surface geometry and material with 2D
+Gaussians and jointly estimate the ProCams mappings through dif-
+ferentiable physically based rendering. These models make it pos-
+sible to evaluate a projection result and optimize projector inputs in
+a computational space, but the semantic appearance to be displayed
+must still be supplied externally.
+Vision–language models have also been applied to projected
+scenes. Cao et al. [9] distinguish the physical scene from projected
+content for projection-aware captioning. This work addresses se-
+mantic understanding rather than projection content creation. Com-
+plementary work has introduced generative models into the cre-
+ation of projected appearances. Erel et al. [14] use a 2D genera-
+tive model to define consistent appearances across multiple views
+and optimize the projected texture through a neural reflectance
+field. Deng et al. [12] use generated or edited images as desired
+targets for a Gaussian-based ProCams model.
+Deng et al. [13]
+combine language-guided style transfer with learned compensa-
+tion and project-and-capture simulation; projection-consistency,
+compensation-saturation, and projection-saturation losses are then
+used to update the style-transfer model. However, LAPIG is not
+adapted to 3D scenes.
+Liu et al. [39] inject gamut, depth, and
+edge priors into cooperative generation and use bounded numeri-
+cal optimization for multi-projector compensation in the adversar-
+ial setting. These methods reduce manual preparation of projection
+2
+
+
+content, but mainly formulate the task as target generation, surface
+adaptation, or projector-input optimization. Our problem begins
+with the observed scene and seeks to edit its appearance under the
+current physical setup while preserving registration with the physi-
+cal object.
+2.2
+Image editing and conditional control
+Image editing provides a direct interface for deriving a desired ap-
+pearance from an image of the current scene. Early diffusion-based
+methods support image guides, written instructions, or visual exem-
+plars [7, 44, 61], while recent unified models cover broader editing
+tasks and interleaved image–text conditions [21, 60, 65]. The edit-
+ing variants of Qwen-Image and LongCat-Image further provide the
+pretrained image editors used in our experiments [43, 58]. A cen-
+tral requirement of these methods is to apply the requested change
+while preserving source content that should remain unchanged. Ex-
+isting approaches control cross-attention, infer edit masks, inject
+source features and self-attention maps, or retrieve source content
+through mutual attention [8, 11, 22, 54]. Kulikov et al. [31] con-
+struct an ordinary differential equation (ODE) that directly maps
+between source and target distributions without source inversion or
+per-image optimization. Zhang et al. [68] formulate image editing
+as in-context generation with parameter-efficient LoRA-MoE tun-
+ing. These methods derive their controls from images, text, masks,
+or internal model features rather than the calibrated physical setup.
+They therefore provide no direct mechanism for adapting the edit
+to spatial variations in scene response.
+Another line of work edits a reconstructed NeRF or 3D Gaussian
+scene to maintain consistency across rendered views [20,33,56,59].
+These methods update and optimize the reconstruction for each
+edit, which can be time-consuming. We instead keep the recon-
+structed physical scene fixed and use it to control editing of the
+target appearance in the camera view before projection.
+Conditional control can be introduced through trained modules
+or by modifying the sampling process. Zhang et al. [66] and Mou et
+al. [46] train additional branches or adapters for spatial conditions
+such as edges, depth, segmentation, and pose while keeping the
+original generator frozen. Yu et al. [64] and Ye et al. [63] instead
+guide sampling with energy functions or target predictors without
+training another conditional generator, but require target evaluation
+and gradients during inference. Avrahami et al. [1, 2] and Lug-
+mayr et al. [40] likewise require no additional training and apply
+the user’s edit only within a specified image region. Levin and
+Fried [34] use a user-provided change map to assign different edit
+strengths to pixels or regions without external-loss optimization. In
+these methods, the user specifies which regions should change and
+by how much, whereas our scene response map describes the rela-
+tive effect of direct projector illumination at each surface location.
+Unlike the physically guided PM pipelines discussed above [13,
+39], SREdit applies the same response-guided sampling rule to two
+pretrained image editors without updating their parameters, adding
+an additional control module, or backpropagating a physical loss
+during editing.
+3
+METHOD
+3.1
+Problem formulation
+Given a fixed physical scene, a calibrated projector–camera setup, a
+target camera view, and an editing condition cedit, our goal is to edit
+the target object’s appearance according to cedit and reproduce the
+resulting appearance as closely as possible through physical projec-
+tion from the target view.
+The condition contains a text prompt and may include a refer-
+ence image when supported by the editor. We separate the task into
+two stages. First, the image editor produces a camera-space edited
+target from the observed object. Second, projector compensation
+computes a compensation image whose captured result approaches
+that target. SREdit changes how the edited target is produced and
+keeps downstream projector compensation separate.
+We assume access to a trained and frozen Gaussian-based dif-
+ferentiable scene renderer [12] Rφ, which maps a projector input
+Ip to its camera-space appearance ˆIc = Rφ(Ip). The parameters
+φ collect the reconstructed scene and calibrated projector–camera
+setup. Given a uniform gray projector pattern Igray
+p
+, we define the
+corresponding camera-space source appearance as
+Isrc := Rφ
+ Igray
+p
+
+.
+(1)
+A pretrained and frozen image editor Eθ takes Isrc and cedit as
+conditions, iteratively samples a latent state from initial noise, and
+decodes the final state into a camera-space target
+Inative
+d
+= Eθ (Isrc,cedit).
+(2)
+The pretrained image editor does not have an accurate measure of
+the scene response of the physical setup. We therefore derive a
+scene response map M from the renderer and use the source appear-
+ance as a reference during early sampling, as illustrated in Fig. 2.
+The source appearance limits spatial deviations from the observed
+object, while M adapts the strength of this constraint across surface
+regions. Together, they preserve registration and establish coarse
+color and shading according to the local scene response, while leav-
+ing the remaining steps free to refine the details required by the edit.
+With an early control ratio r and a control strength S, the edited tar-
+get is written as
+Id = Ectrl
+θ (Isrc,cedit;M,r,S).
+(3)
+After obtaining the edited target, we perform projector compensa-
+tion by iteratively refining a compensation image using the frozen
+renderer:
+ˆI∗
+p = argmin
+ˆIp
+Lcomp
+ Rφ(ˆIp),Id
+
+.
+(4)
+Iterative refinement optimizes only the compensation image, which
+is then used as the projector input. Gradients from Lcomp are not
+passed to the image editor. Thus, the complete task is summarized
+as
+(Isrc,M,cedit) −→Id −→ˆI∗
+p.
+(5)
+3.2
+Scene response map
+The renderer explicitly models the direct contribution of projector
+illumination at each reconstructed surface point. Suppressing the
+color-channel notation, the direct contribution at xs is
+Cp(ωo,xs) = f(ωo,ω p,xs)Lp(ω p,xs)
+ ω p ·ns
+
+,
+(6)
+where ω p and ωo denote the directions from xs toward the projector
+and camera, respectively; ns is the surface normal, f is the surface
+bidirectional reflectance distribution function (BRDF), and Lp is the
+incident projector illumination. For a camera pixel u observing xs
+and color channel c, we write the corresponding direct contribution
+as
+Cp,c(u) = Bc(u)Lp,c(u),
+Bc(u) = fc(ωo,ω p,xs)
+ ω p ·ns
+
+.
+(7)
+We refer to Bc(u) as the channelwise direct-response factor. It is
+evaluated from the surface appearance, normal, projector direction,
+and viewing direction, and describes how strongly a local change in
+projector illumination affects the direct camera-space contribution.
+Response-guided sampling requires a scalar spatial weighting
+rather than a channel-dependent factor. We therefore average Bc
+over the three color channels to obtain the scalar response R:
+R(u) = 1
+3
+3
+∑
+c=1
+Bc(u).
+(8)
+3
+
+
+“Transform the toy’s entire 
+surface into soft knitted 
+yarn, with visible stitches, 
+woven patterns, and a fluffy 
+wool texture.”
+Scene response 𝑀
+Encoder
+Our generation
+Ours captured
+Compensation image
+Native generation
+Native captured
+Compensation image
+Response guided
+Initial 
+noise ε
+Native refinement
+ 
+𝑝= 𝑟
+Response-guided trajectory { ᵢ}
+𝐳
+Native sampling trajectory ( = 0)
+𝑆
+Figure 2: Method overview. The pretrained image editor does not have an accurate measure of the scene response of the physical setup. During
+the first r portion of sampling, SREdit uses the source appearance to preserve registration with the physical object, while the scene response
+map adapts the amount of editing across surface regions. Regions with lower response retain more of the source appearance, whereas regions
+with higher response allow larger changes. The image editor then completes the remaining sampling steps. Finally, projector compensation
+uses iterative refinement to obtain a compensation image for physical projection.
+Lower response
+Higher response
+ₚ
+𝜔
+ₛ
+𝑛
+ₒ
+𝜔
+Figure 3: Scene response map construction.
+We evaluate the
+channelwise direct-response factor Bc(u). Channel averaging gives
+R(u), which is normalized over the reconstructed-object support Ω
+to form M. The insets show representative regions with lower and
+higher response.
+We then normalize the scalar response within the reconstructed-
+object support Ω. Let Rmin
+Ω
+and Rmax
+Ω
+denote the extrema of R over
+this region. The scene response map is defined as
+M(u) =
+
+
+
+
+
+R(u)−Rmin
+Ω
+Rmax
+Ω
+−Rmin
+Ω
+,
+u ∈Ω,
+0,
+u /∈Ω.
+(9)
+The construction and spatial interpretation of the scene response
+map are illustrated in Fig. 3.
+The map in Eq. (9) records the normalized spatial distribution
+of the scalar response within the target view. Larger values in-
+dicate stronger response, whereas smaller values indicate weaker
+response. We later use 1−M to distribute the latent correction spa-
+tially and use S to control its overall strength. The map is applied
+to the latent update rather than passed to the image editor as an
+additional image condition; outside Ω, it is set to zero.
+3.3
+Response-guided sampling
+We formulate response-guided sampling for the deterministic first-
+order Euler solver used by flow-matching editors [38]. Let {σi}N
+i=0
+denote the decreasing noise schedule, where σ0 = 1 corresponds to
+the initial noise and σN = 0 to the final data state. At each step, the
+frozen image editor predicts a conditional velocity from the current
+latent, source appearance, and editing condition. The correspond-
+ing Euler update is
+ezi+1 = zi +(σi+1 −σi)vθ (zi,σi;Isrc,cedit),
+(10)
+where vθ is the velocity predicted by the frozen editing model and
+ezi+1 is the latent produced by the Euler step. SREdit leaves the
+velocity prediction and Euler update unchanged and applies its cor-
+rection only afterward.
+We reuse the latent representation zsrc of the source appearance
+and the initial noise ε of the current sampling run. Directly correct-
+ing an intermediate latent toward zsrc would mix states at different
+noise levels. We therefore construct a source anchor at each noise
+level by interpolating zsrc with the initial noise:
+ai = (1−σi)zsrc +σiε.
+(11)
+It follows that a0 = ε and aN = zsrc. The sequence {ai}N
+i=0 therefore
+provides a source anchor at the noise level corresponding to each
+sampling state, without introducing an additional inversion trajec-
+tory. During early sampling, the source anchor limits spatial devi-
+ations from the source appearance and helps preserve registration
+with the fixed physical object.
+Applying the correction throughout the complete trajectory
+would repeatedly pull the latent toward the source anchor. At high
+control strength, this can drive the final result back toward the orig-
+inal source appearance and suppress the requested edit. We there-
+fore restrict the correction to the early sampling stage and leave
+the remaining steps to the pretrained image editor.
+To keep its
+total temporal weight consistent under different solver discretiza-
+tions, we parameterize the control schedule by normalized denois-
+ing progress. For the i-th scheduler state, we define
+pi =
+i−1
+∑
+j=0
+ σ j −σj+1
+
+N−1
+∑
+j=0
+ σ j −σj+1
+.
+(12)
+Under the endpoint convention above, this reduces to pi = 1 −σi.
+4
+
+
+1 −𝑤𝑖𝑢
+Global 
+strength
+Scene response 𝑀
+𝑤𝑖𝑢
+Temporal weighting
+𝑧𝑖+1
+MMDiT
+MMDiT
+Scheduler
+𝑧𝑖
+ǁ𝑧𝑖+1
+𝑧src
+Initial noise ε
+𝑎𝑖
+𝑎𝑖+1
+𝑎𝑖+2
+Figure 4: Response-guided sampling. At one sampling step, the
+Euler update produces ezi+1, while ai+1 provides the source anchor at
+the same noise level. The scene response map, control strength, and
+temporal weight determine wi(u), which moves the updated latent
+toward the source anchor.
+Given an early control ratio r ∈(0,1], we use the normalized half-
+cosine kernel
+kr(p) =
+
+
+
+
+
+1
+r
+h
+1+cos
+π p
+r
+i
+,
+0 ≤p ≤r,
+0,
+r < p ≤1,
+(13)
+and assign the i-th solver interval the integrated temporal weight
+mi =
+Z pi+1
+pi
+kr(p)dp.
+(14)
+Because the kernel integrates to one, ∑N−1
+i=0 mi = 1, irrespective of
+how the same sigma range is discretized. The schedule concentrates
+the correction toward the source anchor in the early denoising stage,
+where registration, coarse color, and shading are stabilized accord-
+ing to the local scene response, and turns it off afterward to leave
+later steps more freedom to refine details required by the edit.
+After the Euler update in Eq. (10), we resize M to the latent spa-
+tial resolution and combine it with the temporal weight mi and the
+control strength S to obtain
+wi(u) = 1−exp[−S(1−M(u))mi].
+(15)
+The post-step latent is then corrected toward the source anchor at
+the same next scheduler state:
+zi+1(u) = ezi+1(u)+wi(u)[ai+1(u)−ezi+1(u)].
+(16)
+The complete update of one controlled solver step is illustrated in
+Fig. 4.
+Using ai+1 keeps the source anchor synchronized with the state
+reached by the Euler step. The exponential form bounds wi(u) in
+[0,1): regions with lower response receive stronger correction to-
+ward the source anchor, whereas regions with higher response re-
+tain more freedom to follow the editing request. Once the progress
+exceeds r, mi = 0, and the pretrained image editor completes the
+remaining sampling steps. The source appearance and editing con-
+dition remain unchanged throughout sampling.
+4
+EXPERIMENTS
+We organize the evaluation around two comparisons.
+First, we
+compare the complete SREdit pipeline with the language-guided
+projection-mapping methods Nepmap [14] and LAPIG [13]. Sec-
+ond, we evaluate Qwen-Image-Edit-2511 [58] and LongCat-Image-
+Edit [43], hereafter Qwen and LongCat.
+We refer to the origi-
+nal Qwen and LongCat sampling pipelines followed by the same
+downstream projector compensation as Native-Qwen and Native-
+LongCat. SREdit-Qwen and SREdit-LongCat differ from their cor-
+responding Native versions only by response-guided sampling. Ev-
+ery projector input is physically projected and captured by the cam-
+era. We measure target reproduction and agreement with the editing
+request, conduct a user study, and ablate the scene response map,
+early control ratio r, and control strength S.
+4.1
+Experimental settings
+4.1.1
+Physical setup
+Our projector–camera system consists of an O.B.E C3 Air pro-
+jector and a Nikon D3200 camera. For each scene, the projector
+and camera poses, together with the camera settings, remain fixed
+throughout data acquisition. All experiments are conducted using
+an NVIDIA A100 GPU with 64 GB of memory.
+4.1.2
+Implementation details
+We implement Nepmap and LAPIG following their published
+pipelines. Nepmap optimizes the projector input through its learned
+neural reflectance field, whereas LAPIG performs test-time opti-
+mization using InstructPix2Pix [7], CompenNeSt [26], and PC-
+Net [25]. For our object-centered scenes, we restrict the LAPIG
+losses to the segmented object region and leave all other param-
+eters unchanged. The public ConPhyG release [39] provides the
+gamut-network component but not the complete generation and
+multi-projector pipeline. We therefore exclude it from the quan-
+titative comparison because the full method cannot be faithfully re-
+produced.
+We use the Gaussian-based differentiable scene renderer [12]
+and iterative refinement for projector compensation. The renderer
+remains frozen during appearance editing, and iterative refinement
+optimizes only the compensation image used as the projector input.
+Qwen and LongCat use 40 and 50 sampling steps, respectively,
+and receive the same editing request. Within each editor, Native
+and SREdit use the same source appearance and iterative refine-
+ment. Because Nepmap and LAPIG use different conditioning in-
+terfaces, we adapt their prompts while preserving the same target
+concept. The prompts used for the representative qualitative results
+are provided in the supplementary material.
+We fix r = 0.2,S = 2.5 for Qwen and r = 0.2,S = 3.0 for Long-
+Cat according to the result quality on a separate setup that is not
+used for evaluation. These settings remain unchanged in the main
+comparison and scene response map ablation.
+4.1.3
+Evaluation metrics
+We evaluate reproduction fidelity using peak signal-to-noise ra-
+tio (PSNR), structural similarity index measure (SSIM), learned
+perceptual image patch similarity (LPIPS) [67], and CIEDE2000
+color difference (∆E) [42] between the intended appearance of
+each method and its camera-captured result within the object re-
+gion. Since the intended appearances produced by different meth-
+ods may vary in complexity, these image-based metrics measure
+how faithfully each method reproduces its own target rather than di-
+rectly measuring editing quality. Contrastive Language-Image Pre-
+training (CLIP) [52] and the image-text matching score of Boot-
+strapping Language-Image Pre-training (BLIP-ITM) [37] measure
+agreement between the captured result and the requested appear-
+ance; all methods are evaluated using the same concise target de-
+scription. We also report wall-clock generation time and peak video
+random-access memory (VRAM).
+4.2
+Comparison with baselines
+Table 1 reports the numerical comparison, while Fig. 5 shows rep-
+resentative intended appearances and their camera-captured results.
+Nepmap and LAPIG are prior projection-mapping methods, while
+5
+
+
+Scene 
+Nepmap 
+LAPIG 
+Native-Qwen
+Native-LongCat
+SREdit-Qwen
+SREdit-LongCat
+Prompt ：Give the toy an oil-painted-statue-style doll appearance, with rich layered colors and visible painterly brush textures, 
+while preserving the original shape and silhouette.
+Prompt ：Give the toy a painted-wood doll appearance, with warm colors and bold hand-painted floral patterns, while preserving 
+the original shape and silhouette.
+Figure 5: Real-projection comparisons. Results are shown for an oil-painted-statue edit (top) and a painted-wood edit (bottom). The upper
+and lower rows show generated targets and camera-captured results, respectively. Red and blue boxes indicate enlarged regions for comparing
+local texture and color reproduction. The prompts for these representative comparisons and additional qualitative results are provided in the
+supplementary material.
+each Native/SREdit pair uses the same image editor and down-
+stream projector compensation. The image-based metrics charac-
+terize the reproduction of each method’s own target and are there-
+fore interpreted together with the qualitative results.
+CLIP and
+BLIP-ITM provide complementary measures of agreement with the
+requested appearance.
+Among
+the
+prior
+projection-mapping
+baselines,
+Nepmap
+achieves a relatively high SSIM of 0.5962 and PSNR of
+19.1512 dB. As shown in Fig. 5, however, its generated appear-
+ances mainly contain smooth and low-frequency variations, which
+are comparatively easy to reproduce under projection. The result-
+ing SSIM therefore does not necessarily indicate a more convinc-
+ing edit: fine-grained material details are limited, and the captured
+appearance remains visually less consistent with the requested ef-
+fect. LAPIG, which was originally developed for 2D projection
+surfaces, exhibits noticeable geometric misalignment when applied
+to a three-dimensional object, including misaligned contours and
+displaced appearance elements.
+The Native variants produce recognizable edits, but their in-
+tended appearances often contain bright highlights, saturated col-
+ors, and fine changes that are attenuated or clipped after projection.
+Native-LongCat also introduces clear geometric misalignment in
+several cases. Because projector compensation cannot revise an al-
+ready misaligned target, this error persists in the camera-captured
+result. In contrast, the corresponding SREdit-LongCat results re-
+main registered with the physical object and do not exhibit the same
+mismatch in the cases shown.
+Compared with the corresponding Native variant, SREdit im-
+proves all six quality metrics for both image editors. Relative to
+Native-LongCat, it increases PSNR by 5.9392 dB, reduces LPIPS
+by 0.1053, and raises CLIP by 1.88. For Qwen, it increases PSNR
+by 4.8027 dB, reduces ∆E by 5.6617, and raises BLIP-ITM by 6.16.
+The source anchor helps preserve registration with the fixed phys-
+ical object during early sampling, while the scene response map
+retains more of the observed surface color and shading in regions
+with lower response. The captured results still preserve local tex-
+6
+
+
+Table 1: Performance and efficiency under real projection. PSNR, SSIM, LPIPS, and ∆E are computed between the intended appearance
+of each method and its camera-captured result. CLIP and BLIP-ITM measure agreement with the requested appearance. Results are averaged
+over 18 prompts from six setups. Time is the wall-clock time required to generate one image, and VRAM is the peak allocated GPU memory
+during image generation. We use bold and underline to highlight the best and second-best results, respectively.
+Method
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+∆E ↓
+CLIP ↑
+BLIP-ITM ↑
+Time (s/image) ↓
+VRAM (GiB) ↓
+Nepmap [14]
+19.1512
+0.5962
+0.3885
+9.8198
+29.79
+59.72
+8.70
+7.68
+LAPIG [13]†
+13.4033
+0.3163
+0.4189
+17.4810
+28.41
+48.06
+9.08
+5.60
+Native-LongCat [43]
+14.7231
+0.3721
+0.3369
+14.5425
+30.56
+91.66
+58.50
+29.73
+SREdit-LongCat
+20.6623
+0.5432
+0.2316
+8.2552
+32.44
+92.62
+59.10
+29.73
+Native-Qwen [58]
+16.5086
+0.3608
+0.3571
+13.7814
+31.61
+88.61
+88.37
+57.94
+SREdit-Qwen
+21.3113
+0.5690
+0.2559
+8.1197
+32.10
+94.77
+89.10
+57.95
+† 2D surface stylization method.
+Table 4: Scene response map ablation. For each image editor, the results are averaged over the same 18 cases from six setups. We use
+r = 0.2,S = 2.5 for Qwen and r = 0.2,S = 3.0 for LongCat. We use bold and underline to highlight the best and second-best results, respectively.
+Method
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+∆E ↓
+CLIP ↑
+BLIP-ITM ↑
+SREdit-Qwen
+21.3113
+0.5690
+0.2559
+8.1197
+32.10
+94.77
+SREdit-LongCat
+20.6623
+0.5432
+0.2316
+8.2552
+32.44
+92.62
+Uniform-Qwen
+21.9647
+0.6129
+0.2398
+7.4097
+31.07
+93.63
+Uniform-LongCat
+20.9145
+0.5487
+0.2286
+7.9873
+31.73
+90.16
+Table 2: User study. Pairwise perceptual evaluation with 20 partic-
+ipants over 36 cases. Values for text alignment, artifacts, realism,
+and overall preference are the percentages of judgments favoring
+SREdit over the corresponding Native version. For visible misalign-
+ment, entries report the percentages judged free of misalignment for
+SREdit/Native, respectively.
+Metric
+All cases
+Qwen
+LongCat
+Text alignment
+65.4%
+61.4%
+69.4%
+Fewer artifacts
+72.8%
+63.9%
+81.7%
+Realism
+75.0%
+68.1%
+81.9%
+No misalignment
+96.5%/80.4%
+96.4%/90.3%
+96.7%/70.6%
+Overall preference
+72.4%
+65.3%
+79.4%
+ture required by the editing request. This observation agrees with
+the improvements in both reproduction and semantic metrics.
+The absolute runtime and memory usage of Qwen and LongCat
+are higher than those of Nepmap and LAPIG because the image
+editors are substantially larger. Within each comparison using the
+same image editor, SREdit changes the measured runtime by less
+than one second and adds negligible VRAM overhead.
+4.2.1
+User study
+The study was approved by the institutional ethics review board
+prior to data collection. We conducted a pairwise user study with
+20 participants (10 female and 10 male, aged 18–24), nine of whom
+reported a background in image processing, computer graphics, or
+computer vision. Each participant evaluated 36 pairs of camera-
+captured results, comprising 18 Qwen and 18 LongCat compar-
+isons, and compared the SREdit and Native versions of the same
+image editor. Each pair was shown with the editing request, and the
+left–right order varied across cases. Participants used a four-level
+forced-choice scale to judge text alignment, visible artifacts, light-
+ing and surface realism, and overall preference. They also assessed
+each result separately for visible misalignment. Table 2 reports the
+preference and rates of visible misalignment. The complete ques-
+tionnaire and additional study details are provided in the supple-
+mentary material.
+Across 720 judgments, SREdit achieved an overall preference
+Table 3: Reference-guided editing. Quantitative comparison over
+12 cases from four physical setups. Metrics are computed between
+each intended appearance and its camera-captured result within the
+foreground object mask and averaged over all cases. The better re-
+sult for each metric is shown in bold.
+Method
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+∆E ↓
+Native-Qwen
+18.5257
+0.6675
+0.1159
+10.6841
+SREdit-Qwen
+21.7335
+0.7358
+0.0965
+7.6941
+rate of 72.4%. After aggregating repeated judgments by partic-
+ipant, this preference remained significantly above chance (two-
+sided sign test with Holm correction, p < 0.001).
+In addition,
+96.5% of SREdit results were judged free of visible misalignment,
+compared with 80.4% for the Native versions.
+4.3
+Reference-guided editing
+We further evaluate SREdit for reference-guided appearance edit-
+ing, where an additional image specifies the desired object appear-
+ance. The LongCat implementation used in our experiments does
+not accept an additional reference image, whereas Qwen supports
+multi-image conditioning directly. We therefore conduct this ex-
+periment only with Qwen. We test three reference-guided edits on
+each of four physical setups, yielding 12 cases.
+Fig. 6 compares Native-Qwen with SREdit-Qwen. Both meth-
+ods use the same source and reference images.
+Native-Qwen generally follows the reference but sometimes al-
+ters regions unrelated to the requested edit. It also tends to intro-
+duce saturated colors, strong highlights, and synthesized shading.
+These changes may conflict with the fixed object geometry or ex-
+ceed the available projection range at the corresponding surface
+region. After projection, this appears as geometric misalignment,
+clipped highlights, or color shifts. SREdit retains more of the ob-
+served surface color and shading in regions with lower response
+while allowing stronger changes in regions with higher response.
+The captured results therefore preserve registration with the phys-
+ical object more consistently and exhibit fewer color and shading
+artifacts.
+Table 3 reports the quantitative results.
+SREdit improves all
+7
+
+
+Reference
+Scene
+Generated
+(Native-Qwen)
+Captured 
+(Native-Qwen)
+Generated
+(SREdit-Qwen)
+ Captured
+(SREdit-Qwen)
+Figure 6: Reference-guided qualitative results. Appearance editing using Qwen. The first two columns show the reference and source scene.
+The remaining columns show the intended and camera-captured appearances produced by Native-Qwen and SREdit-Qwen. The top row uses
+Chinese opera face painting as the reference for makeup transfer, whereas the bottom row uses emerald as the reference material for material
+replacement. Marked regions are enlarged for local comparison.
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+0.1
+0.2
+0.3
+0.5
+SREdit-Qwen (Captured)
+SREdit-LongCat (Captured)
+Figure 7: Control-parameter ablation. All results are physical projector–camera captures. Top: complete r-by-S parameter grids for both image
+editors. Bottom: mean CLIP and LPIPS for SREdit-Qwen and SREdit-LongCat over 18 cases (six setups, three prompts each). Dots mark
+measured settings, contours show interpolated trends, and red stars mark the best measured setting in each plot.
+four reproduction metrics; for example, PSNR increases from
+18.5257 dB to 21.7335 dB. This indicates that the targets produced
+with response-guided sampling can be reproduced more faithfully
+by the physical projection system.
+4.4
+Ablation studies
+We compare the scene response map with a Uniform variant. Uni-
+form replaces the complete map with the mean over the complete
+image, applying the same response value throughout the image. All
+other settings are identical to those used by SREdit. The aggregate
+8
+
+
+Scene
+SREdit-Qwen
+SREdit-LongCat
+Uniform-LongCat
+Uniform-Qwen
+Figure 8: Scene response map ablation. Camera-captured results
+under real projection.
+Uniform replaces the scene response map
+with its mean while retaining the paired r and S values. Insets show
+unedited patches that retain the source color under Uniform; SREdit
+shows fewer such patches.
+quantitative comparison is shown in Table 4, with qualitative results
+in Fig. 8.
+Uniform favors more conservative edits and therefore obtains
+higher reproduction scores, whereas the scene response map im-
+proves CLIP and BLIP-ITM for both image editors.
+As shown in Fig. 8, however, a uniform control weight does
+not produce a spatially uniform perceptual edit because the resid-
+ual between the Euler-updated latent and the source anchor varies
+across spatial locations. In the camera-captured results, Uniform
+therefore leaves unedited patches that retain the source color while
+suppressing editable content elsewhere. The scene response map
+preserves regions with lower response more coherently and leaves
+regions with higher response greater freedom to realize the re-
+quested appearance. This spatial weighting by the response map
+produces fewer unedited patches in these examples, consistent with
+the higher semantic agreement measured by CLIP and BLIP-ITM.
+We next examine the influence of the early control ratio r and
+the control strength S. Fig. 7 shows the complete parameter grid for
+both image editors and summarizes the corresponding quantitative
+trends over all 18 cases from six setups.
+The two parameters control complementary aspects of response-
+guided sampling. The control strength S determines the overall
+magnitude of correction toward the source anchor, whereas r de-
+termines how its normalized temporal weight is distributed over the
+early sampling stage. A smaller r concentrates the control in the
+earliest steps, while a larger r distributes it over a longer portion of
+the sampling trajectory. Thus, changing r redistributes the control
+without changing its total control weight.
+As shown in Fig. 7, a small S provides limited guidance regard-
+less of r, and the results remain closer to those of the correspond-
+ing Native version. Increasing S strengthens source preservation,
+particularly in regions with lower response, and generally reduces
+geometric misalignment and appearance variations that are difficult
+to reproduce under projection. With a relatively small r, the control
+is concentrated at the beginning of sampling. This stabilizes regis-
+tration, coarse color, and shading early, while leaving more of the
+sampling trajectory for texture refinement.
+The influence of r becomes more visible as S increases. Extend-
+ing the controlled stage keeps the source-anchor correction active
+over a longer portion of the sampling trajectory, but an overly large
+r combined with a strong S may suppress local texture and shad-
+ing details. For both editors, the four reproduction metrics improve
+monotonically with S at every r and are best at r = 0.5,S = 3.0,
+which also gives the lowest CLIP score in the grid. In practice, we
+recommend keeping r around 0.2 and adjusting S: increase it when
+the captured result shows misalignment or clipped highlights, and
+decrease it when the requested texture is weakened.
+Additional qualitative results for the parameter sweep and per-
+setup metric heatmaps are provided in the supplementary material.
+5
+DISCUSSION
+5.1
+Limitations and future work
+Editing and reproduction trade-off. The early control ratio r and
+control strength S determine the balance between physical repro-
+duction and the semantic and textural richness of the edit.
+In-
+creasing S or extending the controlled portion of sampling tends
+to preserve registration and the observed surface appearance, but
+may weaken the requested texture. Weaker or shorter control leaves
+more freedom for the image editor, but may produce changes that
+are difficult to reproduce through projection. Because the scene re-
+sponse differs across physical setups, a single parameter pair cannot
+provide the preferred balance in every case.
+Fig. 9 shows this trade-off under a fixed setting: registration is
+retained, but part of the requested texture is weakened and spatially
+uneven. The preferred parameters therefore depend on whether the
+user prioritizes closer physical reproduction or a semantically richer
+edit. Future work may select r and S automatically for each setup
+and editing request.
+Computational requirements. SREdit does not train or fine-tune
+the image editor, attach an additional control module, or backprop-
+agate gradients through the editor during generation. Nevertheless,
+the pretrained image editors are large and still dominate the run-
+time and memory requirements of the complete pipeline. Future
+work should examine how response-guided sampling can be used
+with lighter image editors.
+Soft constraint.
+Response-guided sampling acts as a soft con-
+straint: it biases the edit according to the relative scene response
+but does not explicitly exclude all appearances that are difficult to
+reproduce. Under extreme surface colors, a large difference be-
+tween the source and requested appearances, or overly strong con-
+trol, sampling may approach a degenerate solution in which the re-
+quested texture is completely suppressed. Future work should seek
+an efficient hard constraint that prevents this failure without gradi-
+ent computation or an additional model during generation.
+Give the toy a 
+woodcarving 
+appearance, with 
+carved wood grain, 
+sculpted chisel marks, 
+and natural wooden 
+textures, while 
+preserving the original 
+shape and silhouette. 
+Prompt
+Scene
+SREdit-Qwen
+(Generated)
+SREdit-Qwen
+(Captured)
+Figure 9: Failure case. This result uses r = 0.2 and S = 2.5. Although
+it remains registered with the physical object, parts of the requested
+wood texture are weakened or spatially uneven in the intended and
+camera-captured appearances.
+6
+CONCLUSION
+In this paper, we introduced SREdit, an efficient response-guided
+framework that incorporates scene response into pretrained image
+editing for projection mapping while separating appearance edit-
+ing from downstream projector compensation. SREdit estimates a
+scene response map from the reconstructed scene that reflects how
+strongly projected illumination can affect different surface regions.
+During early sampling, it uses the source appearance to preserve
+registration with the physical object and adapts the amount of edit-
+ing according to the scene response. SREdit requires no additional
+9
+
+
+training or control module for the image editor, does not back-
+propagate through the editor during generation, and leaves down-
+stream projector compensation unchanged. Experiments with two
+pretrained image editors across six physical setups show consistent
+improvements in projected appearance quality and reproduction fi-
+delity. Response-guided sampling adds less than one second to im-
+age generation with negligible VRAM overhead, and participants
+preferred SREdit in 72.4% of the user-study comparisons. These
+results show that scene response can guide pretrained image edit-
+ing before projector compensation with little additional cost.
+REFERENCES
+[1] O. Avrahami, O. Fried, and D. Lischinski. Blended Latent Diffusion.
+ACM TOG, 42(4):149:1–149:11, 2023. 3
+[2] O. Avrahami, D. Lischinski, and O. Fried. Blended Diffusion for text-
+driven editing of natural images. In CVPR, pp. 18208–18218, 2022.
+3
+[3] A. Bermano, P. Br¨uschweiler, A. Grundh¨ofer, D. Iwai, B. Bickel, and
+M. H. Gross. Augmenting physical avatars using projector-based illu-
+mination. ACM TOG, 32(6):189:1–189:10, 2013. 2
+[4] A. H. Bermano, M. Billeter, D. Iwai, and A. Grundh¨ofer. Makeup
+Lamps: Live augmentation of human faces via projection. Computer
+Graphics Forum, 36(2):311–323, 2017. 2
+[5] O. Bimber, F. Coriand, A. Kleppe, E. Bruns, S. Zollmann, and T. Lan-
+glotz. Superimposing pictorial artwork with projected imagery. IEEE
+MultiMedia, 12(1):16–26, 2005. 2
+[6] O. Bimber, D. Iwai, G. Wetzstein, and A. Grundh¨ofer. The visual
+computing of projector-camera systems. Computer Graphics Forum,
+27(8):2219–2245, 2008. 1, 2
+[7] T. Brooks, A. Holynski, and A. A. Efros. InstructPix2Pix: Learning to
+follow image editing instructions. In CVPR, pp. 18392–18402, 2023.
+3, 5
+[8] M. Cao, X. Wang, Z. Qi, Y. Shan, X. Qie, and Y. Zheng. MasaCtrl:
+Tuning-free mutual self-attention control for consistent image synthe-
+sis and editing. In ICCV, pp. 22560–22570, 2023. 3
+[9] Z. Cao, Y. Deng, H. Ling, and B. Huang. ProCap: Projection-aware
+captioning for spatial augmented reality. In IEEE VR, pp. 22–32, 2026.
+2
+[10] X. Chen, X. Yang, S. Xiao, and M. Li. A practical radiometric com-
+pensation method for projector-based augmentation. In IEEE ISMAR,
+pp. 155–156, 2008. 2
+[11] G. Couairon, J. Verbeek, H. Schwenk, and M. Cord.
+DiffEdit:
+Diffusion-based semantic image editing with mask guidance. In ICLR,
+2023. 3
+[12] Q. Deng, J. Li, H. Ling, and B. Huang.
+GS-ProCams: Gaussian
+splatting-based projector-camera systems. IEEE TVCG, 31(11):9845–
+9855, 2025. 2, 3, 5
+[13] Y. Deng, H. Ling, and B. Huang. LAPIG: Language guided projec-
+tor image generation with surface adaptation and stylization. IEEE
+TVCG, 31(5):2515–2524, 2025. 2, 3, 5, 7
+[14] Y. Erel, D. Iwai, and A. H. Bermano. Neural projection mapping using
+reflectance fields. IEEE TVCG, 29(11):4339–4349, 2023. 2, 5, 7
+[15] Y. Erel, O. Kozlovsky-Mordenfeld, D. Iwai, K. Sato, and A. H.
+Bermano.
+Casper DPM: Cascaded perceptual dynamic projection
+mapping onto hands. In SIGGRAPH Asia. ACM, 2024. 2
+[16] M. Flagg and J. M. Rehg. Projector-guided painting. In ACM UIST,
+pp. 235–244, 2006. 2
+[17] K. Fujimura, H. Kusuyama, M. Takeuchi, and D. Iwai. High-contrast
+projection mapping under light field illumination with LED display
+and aperiodic lens array. IEEE TVCG, 32(5):4250–4259, 2026. 2
+[18] A. Grundh¨ofer and D. Iwai. Robust, error-tolerant photometric pro-
+jector compensation. IEEE TIP, 24(12):5086–5099, 2015. 2
+[19] A. Grundh¨ofer and D. Iwai. Recent advances in projection mapping
+algorithms, hardware and applications. Computer Graphics Forum,
+37(2):653–675, 2018. 1, 2
+[20] A. Haque, M. Tancik, A. A. Efros, A. Holynski, and A. Kanazawa.
+Instruct-NeRF2NeRF: Editing 3D scenes with instructions. In ICCV,
+pp. 19740–19750, 2023. 3
+[21] R. He, Y. Cheng, T. Hang, Z. Li, Y. Xu, Z. Yin, S. Zhang, W. Dai,
+P. Du, A. Ma, C. Wang, Q. Lu, J. Han, and J. Dai. Re-Align: Struc-
+tured reasoning-guided alignment for in-context image generation and
+editing. In CVPR, pp. 9051–9062, 2026. 3
+[22] A. Hertz, R. Mokady, J. Tenenbaum, K. Aberman, Y. Pritch, and
+D. Cohen-Or. Prompt-to-Prompt image editing with cross-attention
+control. In ICLR, 2023. 3
+[23] B. Huang and H. Ling. End-to-end projector photometric compensa-
+tion. In CVPR, 2019. 2
+[24] B. Huang and H. Ling. DeProCams: Simultaneous relighting, com-
+pensation and shape reconstruction for projector-camera systems.
+IEEE TVCG, 27(5):2725–2735, 2021. 2
+[25] B. Huang and H. Ling. SPAA: Stealthy projector-based adversarial
+attacks on deep image classifiers. In IEEE VR, pp. 534–542, 2022. 2,
+5
+[26] B. Huang, T. Sun, and H. Ling. End-to-end full projector compensa-
+tion. IEEE TPAMI, 44(6):2953–2967, 2022. 2, 5
+[27] T.-H. Huang, T.-C. Wang, and H. H. Chen. Radiometric compensation
+of images projected on non-white surfaces by exploiting chromatic
+adaptation and perceptual anchoring. IEEE TIP, 26(1):147–159, 2017.
+2
+[28] D. Iwai. Projection mapping technologies: A review of current trends
+and future directions. Proceedings of the Japan Academy, Series B,
+100(3):234–251, 2024. 1, 2
+[29] S. Kagami and K. Hashimoto. Animated Stickies: Fast video pro-
+jection mapping onto a markerless plane through a direct closed-loop
+alignment. IEEE TVCG, 25(11):3094–3104, 2019. 2
+[30] Y. Kageyama, M. Isogawa, D. Iwai, and K. Sato. ProDebNet: projec-
+tor deblurring using a convolutional neural network. Optics Express,
+28(14):20391–20403, 2020. 2
+[31] V. Kulikov, M. Kleiner, I. Huberman-Spiegelglas, and T. Michaeli.
+FlowEdit: Inversion-free text-based editing using pre-trained flow
+models. In ICCV, pp. 19721–19730, 2025. 3
+[32] H. Kusuyama, Y. Kageyama, D. Iwai, and K. Sato. A multi-aperture
+coaxial projector balancing shadow suppression and deblurring. IEEE
+TVCG, 30(11):7031–7041, 2024. 2
+[33] D. I. Lee, H. Park, J. Seo, E. Park, H. Park, H. D. Baek, S. Shin,
+S. Kim, and S. Kim.
+EditSplat: Multi-view fusion and attention-
+guided optimization for view-consistent 3D scene editing with 3D
+Gaussian splatting. In CVPR, pp. 11135–11145, 2025. 3
+[34] E. Levin and O. Fried. Differential Diffusion: Giving each pixel its
+strength. Computer Graphics Forum, 44(2):e70040, 2025. 3
+[35] H. Li, Q. Deng, J. Li, H. Ling, and B. Huang. Setup-independent full
+projector compensation. IEEE TVCG, 32(5):3189–3199, 2026. 2
+[36] J. Li, Q. Deng, H. Ling, and B. Huang. DPCS: Path tracing-based
+differentiable projector-camera systems. IEEE TVCG, 31(5):3666–
+3676, 2025. 2
+[37] J. Li, D. Li, C. Xiong, and S. Hoi. BLIP: Bootstrapping language-
+image pre-training for unified vision-language understanding and gen-
+eration. In ICML, vol. 162 of Proceedings of Machine Learning Re-
+search, pp. 12888–12900. PMLR, 2022. 5
+[38] Y. Lipman, R. T. Q. Chen, H. Ben-Hamu, M. Nickel, and M. Le. Flow
+matching for generative modeling. In ICLR, 2023. 4
+[39] X. Liu, Y. Li, J. Xiang, P. Tang, and C. Wang. Physically-guided image
+generation for multi-projection mapping. arXiv:2606.22477, 2026. 2,
+3, 5
+[40] A. Lugmayr, M. Danelljan, A. Romero, F. Yu, R. Timofte, and
+L. Van Gool. RePaint: Inpainting using denoising diffusion proba-
+bilistic models. In CVPR, pp. 11451–11461, 2022. 3
+[41] K. Luo, G. Yang, W. Xian, H. Haraldsson, B. Hariharan, and S. Be-
+longie. Stay Positive: Non-negative image synthesis for augmented
+reality. In CVPR, pp. 10050–10060, 2021. 2
+[42] M. R. Luo, G. Cui, and B. Rigg. The development of the CIE 2000
+colour-difference formula: CIEDE2000. Color Research & Applica-
+tion, 26(5):340–350, 2001. 5
+[43] Meituan LongCat Team, H. Ma, H. Tan, J. Huang, J. Wu, J.-Y. He,
+L. Gao, S. Xiao, X. Wei, X. Ma, X. Cai, Y. Guan, and J. Hu. LongCat-
+Image technical report. arXiv:2512.07584, 2025. 3, 5, 7
+[44] C. Meng, Y. He, Y. Song, J. Song, J. Wu, J.-Y. Zhu, and S. Ermon.
+SDEdit: Guided image synthesis and editing with stochastic differen-
+10
+
+
+tial equations. In ICLR, 2022. 3
+[45] S. Mihara, D. Iwai, and K. Sato. Artifact reduction in radiometric
+compensation of projector-camera systems for steep reflectance vari-
+ations. IEEE TCSVT, 24(9):1631–1638, 2014. 2
+[46] C. Mou, X. Wang, L. Xie, Y. Wu, J. Zhang, Z. Qi, and Y. Shan. T2I-
+Adapter: Learning adapters to dig out more controllable ability for
+text-to-image diffusion models. In AAAI, pp. 4296–4304, 2024. 2, 3
+[47] G. Narita, Y. Watanabe, and M. Ishikawa. Dynamic projection map-
+ping onto deforming non-rigid surface using deformable dot cluster
+marker. IEEE TVCG, 23(3):1235–1248, 2017. 2
+[48] T. Okamoto, M. Takeuchi, M. Sawayama, and D. Iwai. Shadowless
+projection mapping for tabletop workspaces with synthetic aperture
+projector. IEEE TVCG, 32(5):3033–3043, 2026. 2
+[49] H.-L. Peng, K. Sato, S. Nakagawa, and Y. Watanabe. Perceptually-
+aligned dynamic facial projection mapping by high-speed face-
+tracking method and lens-shift co-axial setup.
+IEEE TVCG,
+31(10):6824–6838, 2025. 2
+[50] H.-L. Peng and Y. Watanabe. High-speed human arm projection map-
+ping with skin deformation. In SIGGRAPH Asia 2020 Emerging Tech-
+nologies, 2020. 2
+[51] P. Punpongsanon, D. Iwai, and K. Sato. SoftAR: Visually manipu-
+lating haptic softness perception in spatial augmented reality. IEEE
+TVCG, 21(11):1279–1288, 2015. 2
+[52] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal,
+G. Sastry, A. Askell, P. Mishkin, J. Clark, G. Krueger, and I. Sutskever.
+Learning transferable visual models from natural language supervi-
+sion.
+In ICML, vol. 139 of Proceedings of Machine Learning Re-
+search, pp. 8748–8763. PMLR, 2021. 5
+[53] J. Tsukamoto, D. Iwai, and K. Kashima. Radiometric compensation
+for cooperative distributed multi-projection system through 2-DOF
+distributed control. IEEE TVCG, 21(11):1221–1229, 2015. 2
+[54] N. Tumanyan, M. Geyer, S. Bagon, and T. Dekel. Plug-and-play dif-
+fusion features for text-driven image-to-image translation. In CVPR,
+pp. 1921–1930, 2023. 3
+[55] J. Wang, Y. Dong, X. Tong, Z. Lin, and B. Guo. Kernel Nystr¨om
+method for light transport. ACM Trans. Graph., 28(3), 2009. 2
+[56] J. Wang, J. Fang, X. Zhang, L. Xie, and Q. Tian. GaussianEditor:
+Editing 3D Gaussians delicately with text instructions. In CVPR, pp.
+20902–20911, 2024. 3
+[57] Y. Wang, H. Ling, and B. Huang. CompenHR: Efficient full compen-
+sation for high-resolution projector. In IEEE VR, pp. 135–145, 2023.
+2
+[58] C. Wu, J. Li, J. Zhou, J. Lin, K. Gao, K. Yan, S.-M. Yin, S. Bai,
+X. Xu, Y. Chen, Y. Chen, Z. Tang, Z. Zhang, Z. Wang, A. Yang, B. Yu,
+C. Cheng, D. Liu, D. Li, H. Zhang, H. Meng, H. Wei, J. Ni, K. Chen,
+K. Cao, L. Peng, L. Qu, M. Wu, P. Wang, S. Yu, T. Wen, W. Feng,
+X. Xu, Y. Wang, Y. Zhang, Y. Zhu, Y. Wu, Y. Cai, and Z. Liu. Qwen-
+Image technical report. arXiv:2508.02324, 2025. 3, 5, 7
+[59] J. Wu, J.-W. Bian, X. Li, G. Wang, I. Reid, P. Torr, and V. A.
+Prisacariu. GaussCtrl: Multi-view consistent text-driven 3D Gaussian
+splatting editing. In ECCV, pp. 55–71, 2024. 3
+[60] S. Xiao, Y. Wang, J. Zhou, H. Yuan, X. Xing, R. Yan, C. Li, S. Wang,
+T. Huang, and Z. Liu. OmniGen: Unified image generation. In CVPR,
+pp. 13294–13304, 2025. 3
+[61] B. Yang, S. Gu, B. Zhang, T. Zhang, X. Chen, X. Sun, D. Chen, and
+F. Wen. Paint by Example: Exemplar-based image editing with diffu-
+sion models. In CVPR, pp. 18381–18391, 2023. 3
+[62] M. Yasui, R. Iwataki, M. Ishikawa, and Y. Watanabe. Projection map-
+ping with a brightly lit surrounding using a mixed light field approach.
+IEEE TVCG, 30(5):2217–2227, 2024. 2
+[63] H. Ye, H. Lin, J. Han, M. Xu, S. Liu, Y. Liang, J. Ma, J. Zou, and
+S. Ermon. TFG: Unified training-free guidance for diffusion models.
+In NeurIPS, vol. 37, pp. 22370–22417, 2024. 3
+[64] J. Yu, Y. Wang, C. Zhao, B. Ghanem, and J. Zhang.
+FreeDoM:
+Training-free energy-guided conditional diffusion model. In ICCV,
+pp. 23174–23184, 2023. 3
+[65] Q. Yu, W. Chow, Z. Yue, K. Pan, Y. Wu, X. Wan, J. Li, S. Tang,
+H. Zhang, and Y. Zhuang. AnyEdit: Mastering unified high-quality
+image editing for any idea. In CVPR, pp. 26125–26135, 2025. 3
+[66] L. Zhang, A. Rao, and M. Agrawala. Adding conditional control to
+text-to-image diffusion models. In ICCV, pp. 3836–3847, 2023. 2, 3
+[67] R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang. The
+unreasonable effectiveness of deep features as a perceptual metric. In
+CVPR, 2018. 5
+[68] Z. Zhang, J. Xie, Y. Lu, Z. Yang, and Y. Yang. Enabling instructional
+image editing with in-context generation in large scale diffusion trans-
+former. In NeurIPS, vol. 38, Main Conference, pp. 139195–139227,
+2025. 3
+11
+
+
+SREdit: Scene Response Guided Appearance Editing for Projection
+Mapping
+—
+Supplementary Materials
+—
+A
+INTRODUCTION
+In this supplementary material, we present additional qualitative comparisons and parameter ablations across six physical setups and di-
+verse text prompts. Figures S1–S20 include both generated appearances and camera-captured projection results, providing a more complete
+evaluation of SREdit under real projection. We further provide the complete user study protocol and all 36 comparison trials.
+B
+EXPERIMENTAL CONFIGURATION
+Configuration
+Setting
+Physical system
+O.B.E C3 Air projector and Nikon D3200 camera. The projector and camera poses and the camera settings
+remain fixed within each setup.
+Compute
+AMD EPYC 7642 CPU and NVIDIA A100 GPU with 64 GB of available memory.
+Image editors
+Qwen-Image-Edit-2511 (Qwen) with 40 sampling steps and LongCat-Image-Edit (LongCat) with 50 sam-
+pling steps.
+Main parameters
+Qwen uses r = 0.2 and S = 2.5; LongCat uses r = 0.2 and S = 3.0.
+Parameter sweep
+r ∈{0.1,0.2,0.3,0.5} and S ∈{0.5,1.0,1.5,2.0,2.5,3.0}.
+Projection pipeline
+The Gaussian-based differentiable scene renderer remains frozen, while iterative refinement updates only
+the compensation image.
+Evaluation
+Six physical setups and 18 text prompts. PSNR, SSIM, LPIPS, and ∆E are computed within the object
+region; CLIP and BLIP-ITM measure agreement with the target description.
+Comparison protocol. All reported projection results are obtained by physically projecting the compensation image and capturing the result
+with the camera. For each image editor, the Native and SREdit versions use the same source appearance, editing request, number of sampling
+steps, and compensation procedure. Qwen and LongCat receive the same editing request for each case. For Nepmap and LAPIG, we adapt
+the request to the input format required by each method while retaining the same target appearance.
+Scene response map construction. For each reconstructed object, we evaluate the channelwise direct-response factor, average it across the
+three color channels, and normalize it over the reconstructed-object support to obtain the scene response map used during editing. The map
+is computed once for each setup and remains fixed across its editing requests.
+Ablation protocol. The parameter study evaluates every combination of the listed r and S values using both generated appearances and
+camera-captured results. In the scene response map ablation, the uniform map takes the mean over the complete scene response map and
+assigns it to every image location. The image editor, sampling schedule, control parameters, and compensation procedure remain unchanged.
+C
+USER STUDY CONFIGURATION
+Configuration
+Setting
+Participants
+20 participants (10 female and 10 male), aged 18–24 (mean 20.25, SD 1.37); nine reported a background
+in image processing, computer graphics, or computer vision.
+Study design
+Anonymous, within-subject pairwise comparison conducted online.
+Trials
+36 camera-captured comparison pairs: 18 Qwen cases and 18 LongCat cases.
+Compared results
+the Native and SREdit versions, displayed anonymously as A and B; their positions were randomized and
+recorded for every trial.
+Evaluation criteria
+Text alignment, artifacts, lighting and surface realism, visible misalignment, and overall preference.
+Responses
+Four-level forced choice for comparative questions; visible misalignment was judged separately for A and
+B as present or absent.
+Participation was voluntary and anonymous. Before beginning the study, participants reviewed the study information and provided informed
+consent. Comparative responses were mapped back to the method shown on each side before aggregation. The complete instructions and all
+36 formal trials are provided at the end of this supplementary material.
+D
+REPRESENTATIVE MAIN AND ABLATION RESULTS
+Main comparisons. The following pages present ten representative cases. Each comparison includes the generated appearances and the
+corresponding camera-captured projection results.
+Parameter ablations. Each main comparison is paired with the generated and captured r-by-S grids for Qwen and LongCat, together with
+the corresponding metric heat maps.
+12
+
+
+Figure S1: Qualitative comparison for Case 1. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.26
+0.30
+0.34
+0.38
+0.42
+0.46
+0.20
+0.25
+0.30
+0.35
+0.40
+0.45
+0.50
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+27.6
+28.9
+28.9
+28.9
+30.2
+30.2
+30.2
+30.2
+31.5
+31.5
+32.8
+32.8
+34.1
+34.1
+35.4
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.20
+0.23
+0.26
+0.29
+0.32
+0.20
+0.25
+0.30
+0.35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+27.6
+27.6
+28.9
+30.2
+30.2
+31.5
+31.5
+32.8
+32.8
+32.8
+34.1
+34.1
+34.1
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+Figure S2: Parameter ablation for Case 1. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+13
+
+
+Figure S3: Qualitative comparison for Case 2. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.19
+0.22
+0.25
+0.28
+0.31
+0.15
+0.20
+0.25
+0.30
+0.35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+30.9
+31.4
+31.4
+31.4
+32.
+32.0
+32.0
+32.6
+32.6
+32 6
+32.6
+30
+31
+32
+33
+34
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.21
+0.23
+0.23
+0.25
+0.25
+0.27
+0.29
+0.20
+0.25
+0.30
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+28.4
+29.3
+29.
+30.1
+30.1
+31.0
+31.0
+31.0
+31.9
+32.7
+28
+29
+30
+31
+32
+33
+34
+Figure S4: Parameter ablation for Case 2. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+14
+
+
+Figure S5: Qualitative comparison for Case 3. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.21
+0.22
+0.24
+0.26
+0.27
+0.20
+0.25
+0.30
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+30.4
+31.0
+31.6
+31.6
+32.1
+32.1
+32.7
+29
+30
+31
+32
+33
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.17
+0.20
+0.23
+0.26
+0.29
+0.32
+0.20
+0.25
+0.30
+0.35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+28.3
+28.
+29.1
+29.1
+29.1
+29.1
+30.0
+30.0
+30.0
+30.0
+30.9
+31.7
+27
+28
+29
+30
+31
+32
+33
+Figure S6: Parameter ablation for Case 3. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+15
+
+
+Figure S7: Qualitative comparison for Case 4. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.24
+0.26
+0.29
+0.32
+0.34
+0.20
+0.25
+0.30
+0.35
+0.40
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+29.9
+30.4
+30.4
+31.0
+31.0
+31.6
+31 6
+29
+30
+31
+32
+33
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.24
+0.29
+0.33
+0.37
+0.42
+0.20
+0.25
+0.30
+0.35
+0.40
+0.45
+0.50
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+28.8
+28.8
+28.8
+28.8
+28.8
+29.5
+29.5
+30.2
+30.9
+27
+28
+29
+30
+31
+32
+Figure S8: Parameter ablation for Case 4. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+16
+
+
+Figure S9: Qualitative comparison for Case 5. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.31
+0.31
+0.33
+0.35
+0.37
+0.30
+0.35
+0.40
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+33.4
+34.0
+34.0
+34.0
+34.6
+34.6
+35.1
+35.1
+35.7
+32
+33
+34
+35
+36
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.29
+0.31
+0.31
+0.33
+0.33
+0.35
+0.35
+0.37
+0.30
+0.35
+0.40
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+31.7
+31.7
+31.7
+32.9
+32.
+32.9
+32.9
+32.9
+34.0
+34.0
+35.1
+36.3
+30
+31
+32
+33
+34
+35
+36
+37
+38
+Figure S10: Parameter ablation for Case 5. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+17
+
+
+Figure S11: Qualitative comparison for Case 6. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.28
+0.29
+0.30
+0.31
+0.31
+0.30
+0.35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+31.4
+31.4
+31 4
+32.1
+32.1
+32.1
+32.8
+32.
+32.8
+33.5
+33.5
+33.5
+34.2
+34.2
+34.9
+34.9
+35.6
+31
+32
+33
+34
+35
+36
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.30
+0.30
+0.30
+0.31
+0.31
+0.32
+0.30
+0.35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+30.3
+30.3
+31.1
+31.1
+31.1
+32.0
+32.0
+32.0
+32.0
+32.9
+32.9
+32.9
+33.7
+29
+30
+31
+32
+33
+34
+35
+Figure S12: Parameter ablation for Case 6. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+18
+
+
+Figure S13: Qualitative comparison for Case 7. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.21
+0.22
+0.24
+0.26
+0.27
+0.20
+0.25
+0.30
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+30.1
+30.8
+31.
+31.5
+31.5
+32.2
+32.2
+32.9
+33.6
+29
+30
+31
+32
+33
+34
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.23
+0.27
+0.30
+0.33
+0.37
+0.20
+0.25
+0.30
+0.35
+0.40
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+34.1
+34.1
+34.8
+34.8
+34.8
+35.5
+35.5
+35.5
+36.2
+36.9
+33
+34
+35
+36
+37
+38
+Figure S14: Parameter ablation for Case 7. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+19
+
+
+Figure S15: Qualitative comparison for Case 8. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.25
+0.27
+0.29
+0.31
+0.33
+0.25
+0.30
+0.35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+30.4
+30.4
+31.1
+31.1
+31.1
+31.1
+31.8
+31.8
+31.8
+31.8
+32.5
+33.2
+33.9
+30
+31
+32
+33
+34
+35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.24
+0.27
+0.31
+0.35
+0.38
+0.20
+0.25
+0.30
+0.35
+0.40
+0.45
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+29.
+30.6
+32.0
+33.4
+33.4
+33.4
+34.9
+34.9
+34.9
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+Figure S16: Parameter ablation for Case 8. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+20
+
+
+Figure S17: Qualitative comparison for Case 9. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.19
+0.19
+0.19
+0.2
+0.2
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+32 4
+33.0
+33.6
+34.1
+34.1
+31
+32
+33
+34
+35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.20
+0.20
+0.22
+0.22
+0.23
+0.24
+0.26
+0.20
+0.25
+0.30
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+31.2
+31.6
+32.1
+32.1
+32.1
+32.
+32.5
+32.5
+32.9
+32.9
+33.4
+33 4
+33 4
+33.4
+33.4
+33.8
+31
+32
+33
+34
+Figure S18: Parameter ablation for Case 9. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+21
+
+
+Figure S19: Qualitative comparison for Case 10. SREdit uses (r,S) = (0.2,2.5) for Qwen and (0.2,3.0) for LongCat. The upper and lower rows
+show generated appearances and camera-captured projection results, respectively.
+SREdit-Qwen (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Generated)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+SREdit-Qwen (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+0.1
+0.2
+0.3
+0.5
+SREdit-LongCat (Captured)
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+S
+r
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — LPIPS ↓
+0.2
+0.24
+0.26
+0.28
+0.31
+0.20
+0.25
+0.30
+0.35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+Qwen — CLIP score ↑
+33.1
+33.5
+33.5
+33.9
+33.9
+33.9
+34.4
+4.4
+34.4
+34.8
+32
+33
+34
+35
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — LPIPS ↓
+0.21
+0.26
+0.31
+0.36
+0.41
+0.41
+0.15
+0.20
+0.25
+0.30
+0.35
+0.40
+0.45
+0.50
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Source-attraction strength S
+0.1
+0.2
+0.3
+0.4
+0.5
+Early-control ratio r
+LongCat — CLIP score ↑
+27.7
+9.1
+30.6
+32.0
+32.0
+33.4
+33.4
+33.4
+34.9
+34.9
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+Figure S20: Parameter ablation for Case 10. Columns vary S, while rows vary r. The upper and lower matrices show generated and camera-
+captured results, respectively, and the bottom plots report LPIPS and CLIP over the same parameter grid.
+22
+
+
+E
+PROMPTS FOR REPRESENTATIVE COMPARISONS
+Table S1 first lists the prompts used in the main paper, namely the full prompts for the abbreviated labels in Fig. 1 and the prompts for the
+two comparisons in Fig. 5, followed by those used for Cases 1–10 in the supplementary results. The reference-guided results in Fig. 6 use the
+same prompts as Fig. 1(c), where Picture 1 is the source appearance and Picture 2 is the reference image. The wording, capitalization, and
+punctuation are reported exactly as used for each method.
+Table S1: Editing prompts. Prompts used in Fig. 1 and in the representative
+main-paper and supplementary comparisons.
+Comparison
+Methods
+Prompt
+Prompts used in the main paper
+Fig. 1(b), text-guided editing
+Blue Porcelain
+SREdit
+Give the toy a blue-and-white porcelain-style doll appearance, with an antique ceramic glaze and classic
+cobalt-blue patterns, while preserving the original shape and silhouette.
+Ink Wash
+SREdit
+Give the toy an ink-wash-style doll appearance, with pale monochrome tones and flowing ink gradients,
+while preserving the original shape and silhouette.
+Painted Wood
+SREdit
+Give the toy a painted-wood doll appearance, with warm colors and bold hand-painted floral patterns,
+while preserving the original shape and silhouette.
+Tropical Style
+SREdit
+Give the toy a tropical outfit-style doll appearance, with vibrant island colors and bold floral patterns,
+while preserving the original shape and silhouette.
+Forest Elf
+SREdit
+Give the toy a forest-elf-style doll appearance, with earthy green tones and softly glowing leaf patterns,
+while preserving the original shape and silhouette.
+Halloween Style
+SREdit
+Give the toy a Halloween outfit-style doll appearance, with orange-black tones and spooky decorative
+patterns, while preserving the original shape and silhouette.
+Fig. 1(c) and Fig. 6, reference-guided editing
+Makeup
+SREdit
+Apply the facial makeup from Picture 2 onto the doll in Picture 1.
+Material
+SREdit
+Change the entire body of the doll in Picture 1 to the texture and material from Picture 2.
+Clothing
+SREdit
+Change the clothing material and texture of the doll in Picture 1 to the material and texture from Picture
+2.
+Main comparison
+(top)
+SREdit
+Give the toy an oil-painted-statue-style doll appearance, with rich layered colors and visible painterly
+brush textures, while preserving the original shape and silhouette.
+Nepmap
+an oil-painted-statue-style doll with rich layered colors and visible painterly brush textures
+LAPIG
+give the toy an oil-painted-statue-style doll appearance, with rich layered colors and visible painterly
+brush textures, while preserving the original shape and silhouette
+Main comparison
+(bottom)
+SREdit
+Give the toy a painted-wood doll appearance, with warm colors and bold hand-painted floral patterns,
+while preserving the original shape and silhouette.
+Nepmap
+a painted-wood doll with warm colors and bold hand-painted floral patterns
+LAPIG
+give the toy a painted-wood doll appearance, with warm colors and bold hand-painted floral patterns,
+while preserving the original shape and silhouette
+Prompts used in the supplementary results
+Case 1
+SREdit
+Transform the toy’s entire surface into worn and aged newspaper material, with faded printed text, yel-
+lowed paper, wrinkles, torn edges, and visible creases.
+Nepmap
+a toy covered in worn old newspaper, with faded printed text, yellowed paper, wrinkles, creases, and torn
+edges
+LAPIG
+Turn the toy into worn old newspaper material with faded printed text, yellowed paper, wrinkles, creases,
+and torn edges.
+Case 2
+SREdit
+Transform the toy’s entire surface into soft knitted yarn, with visible stitches, woven patterns, and a fluffy
+wool texture.
+Nepmap
+a toy made of soft knitted yarn, with visible stitches, woven patterns, and a fluffy wool texture
+LAPIG
+Turn the toy into soft knitted yarn with visible stitches, woven patterns, and a fluffy wool texture.
+Case 3
+SREdit
+apply an aged bronze finish with subtle turquoise patina to the toy’s existing surface
+Nepmap
+a toy with an aged bronze surface and subtle turquoise patina
+LAPIG
+change the toy surface into an aged bronze finish with subtle turquoise patina
+Case 4
+SREdit
+Transform the toy’s entire surface into aged marble overgrown with moss, with visible stone veining,
+weathered cracks, damp stains, soft green moss patches, and a cold sculptural finish.
+Nepmap
+a toy with an aged marble surface overgrown with moss, visible stone veining, weathered cracks, damp
+stains, soft green moss patches, and a cold sculptural finish
+LAPIG
+turn the toy surface into aged marble overgrown with moss, with visible stone veining, weathered cracks,
+damp stains, soft green moss patches, and a cold sculptural finish
+Continued on the next page.
+23
+
+
+Table S1 continued from the previous page.
+Comparison
+Methods
+Prompt
+Case 5
+SREdit
+Give the toy a coral-reef ocean-style doll appearance, with vivid ocean colors and organic coral patterns,
+including subtle seashell textures on the face, while preserving the original shape and silhouette.
+Nepmap
+a coral-reef ocean-style doll with vivid ocean colors and organic coral patterns, including subtle seashell
+textures on the face
+LAPIG
+give the toy a coral-reef ocean-style doll appearance, with vivid ocean colors and organic coral patterns,
+including subtle seashell textures on the face, while preserving the original shape and silhouette
+Case 6
+SREdit
+Give the toy a jungle-style doll appearance, with lush green tones and organic jungle patterns, includ-
+ing vine and branch textures on the face, and wood, leaf, and vine textures across the surface, while
+preserving the original shape and silhouette.
+Nepmap
+a jungle-style doll with lush green tones and organic jungle patterns, including vine and branch textures
+on the face, and wood, leaf, and vine textures across the surface
+LAPIG
+give the toy a jungle-style doll appearance, with lush green tones and organic jungle patterns, includ-
+ing vine and branch textures on the face, and wood, leaf, and vine textures across the surface, while
+preserving the original shape and silhouette
+Case 7
+SREdit
+Give the toy a blue-and-white porcelain-style doll appearance, with an antique ceramic glaze and classic
+cobalt-blue patterns, while preserving the original shape and silhouette.
+Nepmap
+a blue-and-white porcelain-style doll with an antique ceramic glaze and classic cobalt-blue patterns
+LAPIG
+give the toy a blue-and-white porcelain-style doll appearance, with an antique ceramic glaze and classic
+cobalt-blue patterns, while preserving the original shape and silhouette
+Case 8
+SREdit
+Give the toy a Halloween outfit-style doll appearance, with orange-black tones and spooky decorative
+patterns, while preserving the original shape and silhouette.
+Nepmap
+a Halloween outfit-style doll with orange-black tones and spooky decorative patterns
+LAPIG
+give the toy a Halloween outfit-style doll appearance, with orange-black tones and spooky decorative
+patterns, while preserving the original shape and silhouette
+Case 9
+SREdit
+Give the toy a Tang-sancai ceramic-figurine-style doll appearance, with amber-green-white glaze colors
+and flowing ceramic textures, while preserving the original shape and silhouette.
+Nepmap
+a Tang-sancai ceramic-figurine-style doll with amber-green-white glaze colors and flowing ceramic tex-
+tures
+LAPIG
+give the toy a Tang-sancai ceramic-figurine-style doll appearance, with amber-green-white glaze colors
+and flowing ceramic textures, while preserving the original shape and silhouette
+Case 10
+SREdit
+Give the toy a Ji-Gong-inspired doll appearance, with rustic brown-red tones and patchwork robe pat-
+terns, while preserving the original shape and silhouette.
+Nepmap
+a Ji-Gong-inspired doll with rustic brown-red tones and patchwork robe patterns
+LAPIG
+give the toy a Ji-Gong-inspired doll appearance, with rustic brown-red tones and patchwork robe patterns,
+while preserving the original shape and silhouette
+F
+USER STUDY QUESTIONNAIRE
+F.1
+Instructions
+Participants were told that each comparison concerned an edited appearance physically projected onto a real object and photographed by a
+camera. For each trial, they were asked to consider the text instruction, the source object, and the two captured results as a whole. They were
+also informed that the two methods were anonymous, that the A/B positions carried no meaning, and that there were no correct answers.
+F.2
+Interface and questions
+Each trial showed the source object, the text instruction, and two anonymous projection results labeled A and B. The assignment of the SREdit
+and corresponding Native versions to A or B was randomized and recorded for each trial. Participants answered the following five questions:
+1. Text alignment: which result better matched the requested appearance?
+2. Artifacts: which result showed fewer visible artifacts, such as abnormal color leakage or bleed-through inside the object region?
+3. Lighting and surface realism: which result showed more natural illumination and surface appearance, with fewer abnormal highlights
+or discontinuous shading?
+4. Visible misalignment: did each result show visible misalignment, such as texture crossing the object boundary or object parts appearing
+at implausible locations?
+5. Overall preference: which result was preferable when all of the above aspects were considered together?
+Text alignment, artifacts, realism, and overall preference used a four-level forced-choice scale: “A is much better,” “A is slightly better,”
+“B is slightly better,” and “B is much better.” Visible misalignment was judged separately for A and B as either present or absent.
+Comparative responses were converted to the method shown on each side before aggregation, so the reported preference rate always
+denotes the proportion of judgments favoring SREdit. The 36 formal trials are reproduced below in their presentation order; practice trials
+are not included in the analysis.
+24
+
+
+F.3
+All main trials
+The 36 main comparisons are shown in their presentation order.
+Each panel contains the source object and the two anonymous re-
+sults A and B, with the A/B order preserved from the study. The
+corresponding text instruction is given in the caption.
+Figure S21: Trial 1 (Qwen): “Give the toy a blue-and-white porcelain-style
+doll appearance, with an antique ceramic glaze and classic cobalt-blue
+patterns, while preserving the original shape and silhouette.”
+Figure S22: Trial 2 (Qwen): “Give the toy a coral-reef ocean-style doll
+appearance, with vivid ocean colors and organic coral patterns, including
+subtle seashell textures on the face, while preserving the original shape and
+silhouette.”
+Figure S23: Trial 3 (LongCat): “Give the toy a painted-wood doll
+appearance, with warm colors and bold hand-painted floral patterns, while
+preserving the original shape and silhouette.”
+Figure S24: Trial 4 (Qwen): “Transform the toy’s entire surface into a
+Frankenstein-style stitched patchwork material, with mismatched green
+fabric pieces, visible seams, rough stitches, uneven patches, and a
+handmade monster-like look.”
+Figure S25: Trial 5 (Qwen): “Transform the toy’s entire surface into aged
+marble overgrown with moss, with visible stone veining, weathered cracks,
+damp stains, soft green moss patches, and a cold sculptural finish.”
+Figure S26: Trial 6 (LongCat): “Give the toy a Tang-sancai
+ceramic-figurine-style doll appearance, with amber-green-white glaze
+colors and flowing ceramic textures, while preserving the original shape
+and silhouette.”
+Figure S27: Trial 7 (LongCat): “Transform the toy’s entire surface into a
+battle-worn metallic robot material, with exposed chrome, dark steel plates,
+mechanical joints, and glowing red cybernetic eyes.”
+Figure S28: Trial 8 (LongCat): “Give the toy a Halloween outfit-style doll
+appearance, with orange-black tones and spooky decorative patterns, while
+preserving the original shape and silhouette.”
+Figure S29: Trial 9 (Qwen): “Give the toy a Ji-Gong-inspired doll
+appearance, with rustic brown-red tones and patchwork robe patterns,
+while preserving the original shape and silhouette.”
+25
+
+
+Figure S30: Trial 10 (Qwen): “Transform the toy’s entire surface into soft
+knitted yarn, with visible stitches, woven patterns, and a fluffy wool
+texture.”
+Figure S31: Trial 11 (Qwen): “Give the toy an oil-painted-statue-style doll
+appearance, with rich layered colors and visible painterly brush textures,
+while preserving the original shape and silhouette.”
+Figure S32: Trial 12 (LongCat): “Transform the toy’s entire surface into
+worn and aged newspaper material, with faded printed text, yellowed
+paper, wrinkles, torn edges, and visible creases.”
+Figure S33: Trial 13 (Qwen): “Give the toy a painted-wood doll
+appearance, with warm colors and bold hand-painted floral patterns, while
+preserving the original shape and silhouette.”
+Figure S34: Trial 14 (Qwen): “Transform the toy’s entire surface into a
+battle-worn metallic robot material, with exposed chrome, dark steel plates,
+mechanical joints, and glowing red cybernetic eyes.”
+Figure S35: Trial 15 (LongCat): “Give the toy a woodcarving appearance,
+with carved wood grain, sculpted chisel marks, and natural wooden
+textures, while preserving the original shape and silhouette.”
+Figure S36: Trial 16 (Qwen): “Transform the toy’s entire surface into worn
+and aged newspaper material, with faded printed text, yellowed paper,
+wrinkles, torn edges, and visible creases.”
+Figure S37: Trial 17 (LongCat): “Transform the toy’s entire surface into
+soft knitted yarn, with visible stitches, woven patterns, and a fluffy wool
+texture.”
+Figure S38: Trial 18 (Qwen): “Give the toy a jungle-style doll appearance,
+with lush green tones and organic jungle patterns, including vine and
+branch textures on the face, and wood, leaf, and vine textures across the
+surface, while preserving the original shape and silhouette.”
+Figure S39: Trial 19 (Qwen): “apply an aged bronze finish with subtle
+turquoise patina to the toy’s existing surface”
+26
+
+
+Figure S40: Trial 20 (LongCat): “Transform the toy’s entire surface into
+layered colored wax, with broad flowing bands of red, yellow, blue, and
+pink, glossy hardened textures, visible wax ridges, and rich reflective
+shading.”
+Figure S41: Trial 21 (LongCat): “Transform the toy’s entire surface into
+aged cracked ceramic, with an ivory-white glaze, clearly visible dark
+crackle lines, worn stains, chipped paint textures, and glossy ceramic
+highlights.”
+Figure S42: Trial 22 (LongCat): “Give the toy a blue-and-white
+porcelain-style doll appearance, with an antique ceramic glaze and classic
+cobalt-blue patterns, while preserving the original shape and silhouette.”
+Figure S43: Trial 23 (LongCat): “Transform the toy’s entire surface into a
+Frankenstein-style stitched patchwork material, with mismatched green
+fabric pieces, visible seams, rough stitches, uneven patches, and a
+handmade monster-like look.”
+Figure S44: Trial 24 (Qwen): “Give the toy a woodcarving appearance,
+with carved wood grain, sculpted chisel marks, and natural wooden
+textures, while preserving the original shape and silhouette.”
+Figure S45: Trial 25 (LongCat): “Transform the toy’s entire surface into
+aged carved wood, with rich dark wood grain, visible hand-carved patterns,
+worn edges, subtle cracks, and a handcrafted sculptural finish.”
+Figure S46: Trial 26 (Qwen): “Give the toy a Tang-sancai
+ceramic-figurine-style doll appearance, with amber-green-white glaze
+colors and flowing ceramic textures, while preserving the original shape
+and silhouette.”
+Figure S47: Trial 27 (LongCat): “Give the toy an oil-painted-statue-style
+doll appearance, with rich layered colors and visible painterly brush
+textures, while preserving the original shape and silhouette.”
+Figure S48: Trial 28 (LongCat): “apply an aged bronze finish with subtle
+turquoise patina to the toy’s existing surface”
+27
+
+
+Figure S49: Trial 29 (LongCat): “Give the toy a Ji-Gong-inspired doll
+appearance, with rustic brown-red tones and patchwork robe patterns,
+while preserving the original shape and silhouette.”
+Figure S50: Trial 30 (Qwen): “Transform the toy’s entire surface into
+layered colored wax, with broad flowing bands of red, yellow, blue, and
+pink, glossy hardened textures, visible wax ridges, and rich reflective
+shading.”
+Figure S51: Trial 31 (LongCat): “Give the toy a coral-reef ocean-style doll
+appearance, with vivid ocean colors and organic coral patterns, including
+subtle seashell textures on the face, while preserving the original shape and
+silhouette.”
+Figure S52: Trial 32 (LongCat): “Transform the toy’s entire surface into
+aged marble overgrown with moss, with visible stone veining, weathered
+cracks, damp stains, soft green moss patches, and a cold sculptural finish.”
+Figure S53: Trial 33 (Qwen): “Transform the toy’s entire surface into aged
+carved wood, with rich dark wood grain, visible hand-carved patterns,
+worn edges, subtle cracks, and a handcrafted sculptural finish.”
+Figure S54: Trial 34 (Qwen): “Give the toy a Halloween outfit-style doll
+appearance, with orange-black tones and spooky decorative patterns, while
+preserving the original shape and silhouette.”
+Figure S55: Trial 35 (Qwen): “Transform the toy’s entire surface into aged
+cracked ceramic, with an ivory-white glaze, clearly visible dark crackle
+lines, worn stains, chipped paint textures, and glossy ceramic highlights.”
+Figure S56: Trial 36 (LongCat): “Give the toy a jungle-style doll
+appearance, with lush green tones and organic jungle patterns, including
+vine and branch textures on the face, and wood, leaf, and vine textures
+across the surface, while preserving the original shape and silhouette.”
+28

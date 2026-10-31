@@ -1,0 +1,1555 @@
+Title: Efficient Covariance-Aware Vicinal Latent Diffusion for Continuous Conditional Image Generation
+
+URL Source: https://arxiv.org/pdf/2610.39277v1
+
+Published Time: Fri, 30 Oct 2026 02:39:29 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+> 1
+
+# Efficient Covariance-Aware Vicinal Latent Diffusion for Continuous Conditional Image Generation 
+
+Xin Ding, Shuo Huang, Zhenglong Ding, Sen Zhang, Nenglun Chen, Peibei Cao, Yongwei Wang, and Fei Wu 
+
+Abstract —Continuous Conditional Generative Modeling (CCGM) aims to synthesize high-dimensional data conditioned on continuously valued scalar labels. However, existing continuous diffusion models face severe data sparsity under imbalanced and long-tailed label distributions, which can lead to visual artifacts and condition inconsistency. Moreover, inference-time classifier-free guidance and dense pixel-space integration introduce substantial sampling overhead, limiting practical deployment. To address these challenges, we propose CAViLD, an efficient latent diffusion framework for continuous conditional generation. CAViLD first constructs a purified condition-aware latent space through density-adaptive vicinal learning, auxiliary semantic regularization, and NIQE-guided negative data augmentation. It then internalizes the conditional guidance direction through an EMA teacher, enabling single-branch conditional inference, and introduces covariance-aware progressive distillation for label-dependent probability-flow ODEs, supporting sampling down to four NFEs. Experiments on RC-49, UTKFace, and Steering Angle demonstrate a favorable trade-off among generation fidelity, continuous condition consistency, and sampling efficiency. 
+
+Index Terms —Continuous Conditional Generation, Latent Diffusion Models, Negative Data Augmentation, Model-Guidance, Progressive Distillation 
+
+I. I NTRODUCTION 
+
+Continuous conditional generative modeling (CCGM) aims to learn high-dimensional distributions conditioned on continu-ous scalar labels, such as viewpoints, ages, steering angles, and physical parameters [1]–[3]. It supports engineering inverse design [4]–[6], remote-sensing and hyperspectral generation [7]–[9], and point-cloud or continuously controllable image syn-thesis [10], [11]. More broadly, recent studies have emphasized the importance of information representation, transformation, and organization in the design of intelligent systems [12]–[14]. Unlike discrete class conditioning, exact continuous labels are sparsely observed in finite datasets, making local conditional distributions difficult to estimate, particularly in long-tailed regions [1], [3], [15]. 
+
+This work was supported in part by the National Natural Science Foundation of China (Grant No. 62306147, 62676198, 62303231, 62306144, 62676197, U24A20326, 62502442, 62501293), the Basic Research Program of Jiangsu (Grant No. BK20241901, BK20250724), Jiangsu Supplementary Funds of National Major Talent Project (2022-2024) (Grant No. R2024PT03), and the Startup Foundation for Introducing Talent of NUIST (Grant No. 2024r056). Xin Ding, Shuo Huang, Zhenglong Ding (Corresponding Author), Sen Zhang, Nenglun Chen, and Peibei Cao are affiliated with the School of Artificial Intelligence/School of Future Technology, Nanjing University of Information Science & Technology (NUIST), Nanjing, China (e-mail: {dingxin, 202512492768, zlding, senzhang, chennenglun, 003970 }@nuist.edu.cn). Yongwei Wang is affiliated with College of Media, Zhejiang University, Hangzhou, China (e-mail: yongwei.wang@zju.edu.cn). Fei Wu is affiliated with College of Artificial Intelligence, Zhejiang University, Hangzhou, China (e-mail: wufei@zju.edu.cn). 
+
+Fig. 1: Quality–efficiency comparison on Steering Angle at 64 × 64 .The axes denote sampling throughput and SFID, while marker size indicates aggregate peak GPU memory. CAViLD achieves a favorable trade-off among the evaluated diffusion-based CCGM methods. 
+
+Recent methods, including CCDM [3] and its matrix-form extension iCCDM [16], improve continuous conditional generation through label-dependent diffusion processes and covariance schedules. Although iCCDM reformulates DDPM-style diffusion [17], [18] within the EDM paradigm [19], both methods perform iterative reverse diffusion in pixel space, resulting in higher computational cost than latent diffusion models [5], [20]. This limitation grows at higher resolutions and restricts deployment. Moving continuous conditional diffusion into latent space raises three challenges. First, standard conditional autoencoders do not explicitly address sparse-label neighborhoods and may learn unreliable latent representations [15], [21]. Second, Classifier-Free Guidance (CFG) requires conditional and un-conditional denoiser evaluations at each solver step, while large guidance scales may introduce artifacts or reduce diversity [22]– [24]. Third, few-step distillation methods are mainly developed for isotropic diffusion [25], [26] and do not explicitly account for the label-dependent anisotropic covariance of matrix-form continuous diffusion [16]. Efficient latent CCGM therefore requires jointly addressing representation quality, conditional guidance, and trajectory compression. To this end, we propose CAViLD , a Covariance-Aware Vicinal Latent Diffusion framework with internalized guidance for continuous conditional generation, building upon the arXiv:2610.39277v1 [cs.CV] 29 Oct 2026 2
+
+matrix-form formulation of iCCDM [16]. First, we learn a compact conditional latent space using a Conditional Variational Autoencoder (CVAE) [21]. Density-aware vicinal learning [15] improves sample coverage in sparse label regions, while NIQE-guided Negative Data Augmentation (NDA) [11] provides explicit supervision against low-quality reconstruction modes. Second, we incorporate Model-Guidance (MG) [27] into matrix-form latent diffusion. During training, an exponential moving average teacher transfers the conditional–unconditional guidance direction into the denoising target. The trained model requires one conditional denoiser evaluation per solver step, eliminating the additional unconditional forward pass used by inference-time CFG. Third, we introduce covariance-aware progressive distillation for the probability-flow ODE [28], [29]. A condition-dependent precision-weighted objective accounts for the anisotropic covariance, and step-halving [25] compresses the trajectory to four NFEs. Experiments on RC-49, UTKFace, and Steering Angle show a favorable trade-off among generation quality, label consistency, and sampling efficiency. Compared with prior CcGAN-, CCDM-, and iCCDM-based approaches [1]–[3], [11], [15], [16], the framework jointly studies continuous conditional latent representation, CFG-free single-branch inference, and covariance-aware few-step sampling. Our main contributions are summarized as follows:  
+
+> •
+
+Continuous conditional latent diffusion. We formulate matrix-form continuous conditional diffusion in a com-pact CVAE latent space and adapt density-aware vicinal learning and NIQE-guided NDA to improve representation quality under imbalanced labels.  
+
+> •
+
+Model-guided denoising. We transfer the conditional guidance direction into the training target, eliminating the additional unconditional denoiser evaluation required by inference-time CFG.  
+
+> •
+
+Covariance-aware few-step distillation. We derive a precision-weighted progressive distillation objective for label-dependent probability-flow ODEs, supporting sam-pling down to four NFEs. II. R ELATED WORK 
+
+A. Continuous Conditional Image Generation 
+
+Conditional image synthesis is well established for discrete categories [30], [31] or text prompts [20], [32], whereas extending it to Continuous Conditional Generative Modeling (CCGM) with continuously valued scalar attributes y ∈ R, such as design parameters and aspect angles [4], [7], introduces a fundamental data-sparsity problem. In a finite regression dataset, few or no observations may share an exact target label, making direct estimation of the local conditional distribution unreliable, especially in long-tailed regions [2], [3], [15]. CcGANs address this issue through vicinal empirical losses that borrow information from neighboring labels [1], [2]; Dual-NDA [11] and CcGAN-AVAR [15] further improve negative supervision and density-adaptive neighborhood construction. Diffusion alternatives, including CcDPM [5], CCDM [3], and iCCDM [16], replace adversarial optimization with iterative denoising. In particular, CCDM introduces label-dependent perturbation, while iCCDM reformulates it using a matrix-form covariance Σ(t, y ) and anisotropic diffusion dynamics. Nevertheless, long-tailed labels can still cause condition mis-alignment, and pixel-space simulation remains computationally expensive. Latent modeling reduces the per-step computational cost by performing diffusion in a compact representation space [20]. However, in continuous conditional generation, latent compression must preserve both reconstruction fidelity and fine-grained condition semantics, particularly in sparsely sampled or imbalanced label regions where the learned representation may otherwise become unreliable [15], [21]. 
+
+B. Classifier-Free Guidance and Distillation 
+
+Conditional diffusion commonly employs classifier guidance [33] or Classifier-Free Guidance (CFG) [22], with CFG ex-trapolating conditional predictions away from an unconditional baseline. Evaluating both the conditional denoiser Dθ (zt, t, y )
+
+and its unconditional counterpart Dθ (zt, t, ∅) at each integration point approximately doubles the network evaluations. Moreover, large CFG scales may move sampling trajectories away from the learned manifold, producing mode collapse, oversaturation, artifacts, or diversity loss [23], [24]. Model-Guidance (MG) [27] avoids the inference-time uncon-ditional branch by internalizing the conditional–unconditional direction into the training objective. Sampling acceleration has also been studied through implicit sampling [34], high-order guided solvers [35], consistency modeling [36], and progressive distillation [25]. The latter trains a student to reproduce two consecutive teacher transitions with one step. However, these methods are generally developed for scalar or isotropic noise schedules and do not account for the continuous, condition-dependent anisotropic geometry Σ(t, y ). This motivates a covariance-aware model-guided distillation formulation. III. M ETHOD 
+
+To improve the generation quality and sampling efficiency of iCCDM [16], we extend its matrix-form continuous conditional diffusion framework from pixel space to a compact latent space. We retain the label-dependent covariance formulation, matrix-form probability-flow dynamics, covariance embedding, and denoiser preconditioning of iCCDM, while adapting its density-aware hard-vicinity principle to latent-space construc-tion. Relative to this backbone, CAViLD introduces three extensions: a purified condition-aware CVAE latent space, internalized model guidance for single-branch conditional inference, and covariance-aware progressive distillation for few-step sampling. Specifically, the CVAE is first trained and frozen; an EMA teacher then transfers the conditional–null guidance direction into the latent denoiser; finally, the resulting single-branch model is progressively distilled using covariance-aware endpoint matching. Figure 2 summarizes the framework, with detailed derivations provided in Appendices A–E. 
+
+A. A Purified Continuous Conditional Latent Space 
+
+Let S = {(xi, y i)}Ndata  
+
+> i=1
+
+, where xi ∈ RC×H×W and yi ∈ R.A conditional encoder qϕ(z | x, y ) and decoder Gψ (z, y ) are 3Training Data 
+
+Stage Ⅰ 
+
+Purified Vicinal Latent Space CVAE Encoder 
+
+> Vicinal Sampling Auxiliary Regressor NIQE-guided NDA
+> Latent zNoise Cond y EMA Teacher Online Denoiser conditional Null-reference
+> Reference Guidance MG Loss
+
+Stage Ⅱ 
+
+Model-Guided Latent Diffusion 
+
+Stage Ⅲ 
+
+Hybrid Distillation 
+
+··· ··· ··· 
+
+> 32 steps 16 steps 8 steps 4 steps
+> Target Sampler
+
+CVAE Decoder 
+
+Condition y 
+
+> Generate Data
+> Update
+> Euler Euler Cov-ratio
+> Adapted / integrated components Proposed components
+
+Fig. 2: Overview of CAViLD. Yellow blocks denote adapted or integrated components, while orange blocks denote the proposed components. Unhighlighted blocks represent standard pipeline elements. 
+
+trained first and then frozen. We use the reparameterization 
+
+z = μϕ(x, y ) + sϕ(x, y ) ⊙ ξ, ξ ∼ N (0 , I ), where sϕ(x, y ) = exp   12 log vϕ(x, y ) is the posterior standard deviation. The de-coder Gψ parameterizes the conditional likelihood pψ (x | z, y ).The base CVAE objective follows the standard conditional ELBO [21] formulation. However, conventional minibatch training under an imbalanced continuous label distribution undersamples sparse regions. We therefore use density-adaptive vicinal resampling to modify the empirical frequency with which observed training pairs are presented, without changing the per-sample ELBO form. 
+
+Condition modulation. The scalar label is embedded as 
+
+ey = MLP( y). After normalization in each residual block, Zero-Initialized Decoupled Feature Modulation is applied as 
+
+bhℓ = hℓ ⊙ (1 + γℓ) + βℓ,
+
+γℓ
+
+βℓ
+
+
+
+= W mℓ ey + bmℓ .
+
+We initialize W mℓ = 0 and bmℓ = 0 , such that γℓ = βℓ = 0 at initialization and the modulation reduces to an identity mapping. The label-dependent scale and shift are learned during training, improving optimization stability in sparse label regions. 
+
+Adaptive vicinal resampling. Exact-label observations are rare for continuous conditions. We therefore sample a base label uniformly from the set of distinct observed labels, denoted by Ytrain , and perturb it with Gaussian noise: 
+
+y0 ∼ Unif( Ytrain ),ηKDE ∼ N (0 , σ 2KDE ), y⋆ = y0 + ηKDE .σKDE is determined adaptively following CcGAN-AVAR [15]. Following the adaptive hard-support vicinity strategy, we construct a symmetric neighborhood around each query label 
+
+y⋆. For a candidate radius r ≥ 0, define 
+
+Nr (y⋆) = {i ∈ { 1, . . . , N data } : |yi − y⋆| ≤ r} ,
+
+which contains the source examples whose observed labels lie within distance r of y⋆. Given a prescribed minimum neighborhood size NAV , we choose the smallest radius that contains at least NAV source examples: 
+
+κ(y⋆) = min {r ≥ 0 : |N r (y⋆)| ≥ NAV } . (1) The resulting adaptive neighborhood is then defined as 
+
+N (y⋆) = Nκ(y⋆)(y⋆).
+
+Thus, the neighborhood contracts in densely sampled label regions and expands in sparse regions so as to maintain a sufficient local source population. The corresponding hard vicinal indicator is 
+
+Wi,y ⋆ = 1{| yi−y⋆|≤ κ(y⋆)}. (2) Since Wi,y ⋆ is binary, we define ¯Wi,y ⋆ = Wi,y ⋆ /|N (y⋆)| as the uniform sampling probability over the adaptive neighborhood. Thus, source examples inside the neighborhood receive equal sampling probability, whereas examples outside the neighbor-hood receive zero probability. The query label y⋆ is used only for neighborhood construc-tion and source resampling. The source pair retains its observed label yi, which is used as the condition for the CVAE: 
+
+z(i) ∼ qϕ(z | xi, y i), bxi = Gψ (z(i), y i).
+
+We use Ey⋆ to denote expectation over the query-label sampling procedure defined above. The reconstruction and KL objectives are 
+
+Lv 
+
+> rec
+
+= Ey⋆
+
+> Ndata
+
+X
+
+> i=1
+
+¯Wi,y ⋆ Eqϕ(z|xi,y i)
+
+h
+
+LMSE 
+
+ xi, G ψ (z, y i)
+
++ λperc Lperc 
+
+ xi, G ψ (z, y i)i
+
+,
+
+Lv 
+
+> KL
+
+= Ey⋆
+
+> Ndata
+
+X
+
+> i=1
+
+¯Wi,y ⋆ KL( qϕ(z | xi, y i) ∥ N (0 , I )) .
+
+Theorem 1 (Bias–variance trade-off) . Under the assumptions detailed in Appendix A, the mean-squared error of the vicinal 4
+
+estimator is bounded by the sum of a neighborhood-induced bias term and an inverse-effective-sample-size variance term. 
+
+The bound favors local neighborhoods in dense regions and wider label neighborhoods in sparse regions; detailed assumptions and proof are given in Appendix A. 
+
+Semantic anchoring and negative purification. For each source pair selected by adaptive vicinal resampling, a frozen regressor RωR penalizes semantic deviation between the reconstruction and its observed label: 
+
+Laux = Ey⋆, i ∼Unif( N (y⋆)) [|RωR (bxi) − yi| − ϵaux ]+ ,
+
+where [u]+ = max( u, 0) , ϵ aux is a tolerance margin and RωR
+
+remains frozen throughout CVAE training. The negative replay buffer is constructed and periodically refreshed during CVAE training using NIQE-based quality filtering. Specifically, low-quality reconstructions identified by NIQE ranking are used to update the negative buffer 
+
+Qbad = {(˜ xj , ˜yj )}Nbad  
+
+> j=1
+
+.
+
+During each discriminator update, a minibatch is uniformly sampled from Qbad and treated as additional negative examples. To distinguish adversarial reweighting from the indicator 
+
+Wi,y ⋆ , we define the distance-aware confidence weight 
+
+αi,y ⋆ = exp 
+
+
+
+− (yi − y⋆)2
+
+κ(y⋆)2
+
+
+
+.
+
+With the logistic losses ℓ1(s) = − log ρ(s), ℓ0(s) =
+
+− log[1 − ρ(s)] , where ρ(s) = 1 /(1 + exp( −s)) denotes the sigmoid function. Hereafter, Ey⋆,i denotes expectation over the query-label sampling procedure and i ∼ Unif( N (y⋆)) . The discriminator objectives are 
+
+LvD = Ey⋆,i 
+
+αi,y ⋆
+
+ℓ1
+
+ Dω (xi, y i) + ℓ0
+
+ Dω (sg[ bxi], y i)  ,
+
+LD = LvD + λnda E(ex, ey)∼Qbad 
+
+ℓ0
+
+ Dω (ex, ey) . (3) The CVAE objective is 
+
+LCVAE = Lv 
+
+> rec
+
++ λKL Lv 
+
+> KL
+
++ λaux Laux 
+
++ λadv Ey⋆,i [αi,y ⋆ ℓ1(Dω (bxi, y i))] . (4) During alternating optimization, Dω is updated using Eq. (3), whereas (ϕ, ψ ) are updated using Eq. (4) with Dω fixed. The auxiliary regressor RωR remains frozen. Since no generator-side NDA repulsion is used, Qbad affects the CVAE only indirectly through the adversarial objective. 
+
+B. Matrix-Form Model-Guided Latent Diffusion 
+
+Condition-dependent corruption. Following iCCDM [16], we adopt its condition-dependent covariance embedding in the latent space. The embedding network hν is trained using the procedure of iCCDM, with output dimension adjusted to the latent dimension dz = Cz Hz Wz , and is frozen during diffusion training. We define the positive covariance embedding as 
+
+aν (y) = exp[ −hν (y)] ∈ Rdz
+
+> >0
+
+,
+
+and use the diagonal covariance 
+
+Kσ (y) = σ2I + λcov σ Diag( aν (y)) . (5) The Stage-II training pairs follow the adaptive vicinal resampling defined in Section III-A. Specifically, a query label 
+
+y⋆ is generated as described previously, and a source index is sampled uniformly from its adaptive neighborhood: 
+
+i ∼ Unif( N (y⋆)) .
+
+The selected source image xi is encoded by the frozen CVAE using its observed label yi. For diffusion modeling, we rescale the sampled CVAE latent by a scalar c > 0 to approximately normalize its empirical scale, define the scaled clean latent as 
+
+z0 = c [μϕ(xi, y i) + sϕ(xi, y i) ⊙ ξ] , ξ ∼ N (0 , I ). (6) Here, the observed label yi is used for source encoding, whereas the query label y⋆ determines the diffusion condition and the label-dependent corruption covariance. Hereafter, y
+
+denotes the Stage-II query label y⋆, while yi denotes the observed label of the sampled source. The above sampling procedure induces the vicinal clean-latent distribution 
+
+pv 
+
+> 0
+
+(z0 | y) = 
+
+> Ndata
+
+X
+
+> i=1
+
+¯Wi,y qϕ,c (z0 | xi, y i),
+
+where qϕ,c denotes the distribution of the scaled latent z0 = cz 
+
+induced by qϕ(z | xi, y i).The forward perturbation is 
+
+zσ = z0 + Kσ (y)1/2ϵ, ϵ ∼ N (0 , I ). (7) 
+
+Matrix preconditioning. We further adopt the matrix preconditioning of iCCDM [16], replacing the image-space covariance with the latent covariance in Eq. (5). For matrix preconditioning, we adopt Sz = s2 
+
+> z
+
+I with sz = 0 .5 for the scaled latent representation. The denoiser is parameterized as 
+
+Dθ (zσ , σ, y ) = Cskip zσ + Cout Fθ
+
+ Cin zσ , 14 log σ, e y
+
+ ,
+
+where 
+
+Cin =  s2 
+
+> z
+
+I + Kσ (y)−1/2,Cskip = s2
+
+> z
+
+ s2 
+
+> z
+
+I + Kσ (y)−1,Cout = sz Kσ (y)1/2 s2 
+
+> z
+
+I + Kσ (y)−1/2.
+
+(8) For σ > 0, the preconditioning precision is 
+
+Wσ,y = C−2out = s−2 
+
+> z
+
+I + Kσ (y)−1. (9) Matrix operations are element-wise because Kσ (y) is diagonal. For the null prediction, Fθ receives the normalized noisy latent, noise level, and null embedding e∅. The requested geometry is retained through external preconditioning; neither y nor Kσ (y)
+
+is a separate input to Fθ .
+
+Internalizing model guidance. Condition dropout with probability pdrop is used to jointly train conditional and null-conditioned predictions. To construct the model-guidance target, the EMA teacher is evaluated twice on the same preconstructed noisy latent zσ , at the same noise level σ and requested label 
+
+y: once through the conditional branch and once through the null-conditioning mechanism. We denote the latter prediction by D(y)¯θ (zσ , σ, ∅). Here ∅ indicates that the explicit condition is suppressed, whereas the superscript (y) indicates that the 5
+
+reference prediction is associated with the same requested label and noisy state as the conditional prediction. For a fixed requested label y, define 
+
+Dc = D¯θ (zσ , σ, y ),D(y) 
+
+> ∅
+
+= D(y)¯θ (zσ , σ, ∅),
+
+∆ref ¯θ = Dc − D(y) 
+
+> ∅
+
+.
+
+Following the operational two-branch guidance rule used by matrix-form continuous conditional diffusion, we define 
+
+Dguide = Dc +wMG ∆ref ¯θ = (1+ wMG )Dc −wMG D(y) 
+
+> ∅
+
+. (10) Under the CFG parameterization DCFG = D∅ + γ(Dc − D∅),
+
+γ = 1 + wMG matches the reference two-branch coefficients, without implying exact CFG equivalence of the trained single branch. For label-independent corruption and a globally label-marginal null denoiser, Eq. (10) recovers the standard CFG clean-prediction identity. Under label-dependent corruption, 
+
+D(y) 
+
+> ∅
+
+instead serves as a null-conditioned reference under the fixed geometry Kσ (y), rather than the exact global-marginal denoiser. We train the conditional branch to absorb this reference guidance direction. Let ¯θ be an exponential moving average (EMA) of θ. With this evolving teacher, wMG is an empirical training coefficient. After warm-up, we construct the target 
+
+zMG 0 = z0 + wMG sg 
+
+h
+
+D¯θ (zσ , σ, y ) − D(y)¯θ (zσ , σ, ∅)
+
+i
+
+, (11) and set zMG 0 = z0 during warm-up. The clean sample anchors the target, the EMA difference supplies a reference-guidance direction, and stop-gradient blocks gradient flow through the EMA teacher for every online-model update. For a positive-definite matrix W , we use the weighted norm 
+
+∥u∥2 
+
+> W
+
+= uTW u . Let Ec and E∅ denote expectations under the corruption in Eq. (7) and zσ = z0 + σϵ , respectively, including the remaining Stage-II sampling. Both branches retain the requested preconditioning. The training objective is 
+
+Ldiff = (1 − pdrop )Ec
+
+h
+
+Dθ (zσ , σ, y ) − zMG 0 
+
+> 2
+> W1/2
+> σ,y
+
+i
+
++ pdrop E∅
+
+h
+
+(s−2 
+
+> z
+
++ σ−2)1/2
+
+· D(y) 
+
+> θ
+
+(zσ , σ, ∅) − zMG 0
+
+> 22
+
+i
+
+.
+
+(12) The model-guidance coefficient is activated after warm-up according to 
+
+wMG (s) = 
+
+(
+
+0, s ≤ swarm ,wMG , s > s warm ,
+
+where s denotes the optimization step. Before swarm , the model is trained with the clean target z0; afterwards, the EMA prediction difference is incorporated into zMG 0 . Warm-up delays reference guidance until after initial clean-target training. Eq. (12) trains both online branches toward the same model-guided target using their respective inputs. At inference, only the conditional prediction is retained. 
+
+Single-branch model-guided sampling. For the corruption process in Eq. (7), define the clean-latent posterior mean as 
+
+D∗(zσ , σ, y ) = E[z0 | zσ , σ, y ].
+
+The corresponding conditional PF-ODE [28], [29] is 
+
+dz σ
+
+dσ = Bσ,y 
+
+zσ − D∗(zσ , σ, y ), Bσ,y = 12 K′ 
+
+> σ
+
+(y)Kσ (y)−1.
+
+(13) After training, let DMG ¯θ denote the conditional prediction of the EMA denoiser obtained after model-guided training. Replacing 
+
+D∗ by this prediction yields the guided sampling ODE 
+
+dz σ
+
+dσ = Bσ,y 
+
+zσ − DMG ¯θ (zσ , σ, y ) . (14) Equation (14) does not claim exact preservation of the original conditional marginals after guidance. For Kσ = σ2I, Bσ,y =
+
+I/σ , recovering the standard EDM ODE. At a sufficiently large σmax , the corruption covariance dominates the clean-latent covariance, motivating the boundary approximation 
+
+pσmax (z | y) ≈ N (0 , K σmax (y)) .
+
+We therefore initialize zσmax ∼ N (0 , K σmax (y)) and integrate Eq. (14) backward toward the clean boundary σ = 0 , without evaluating the vector field at the singular endpoint. The resulting latent is decoded as bx = Gψ (z0/c, y ).Each vector-field evaluation uses exactly one conditional denoiser call. For an M -evaluation solver, standard two-branch CFG requires approximately 2M denoiser evaluations, whereas the model-guided field requires M . This saving is orthogonal to latent-space compression: the CVAE reduces the cost of each evaluation, while model guidance removes the additional null-conditioned forward pass at each integration point. 
+
+C. Hybrid Step-Halving Distillation 
+
+Model guidance removes the unconditional inference pass, but a conventional ODE solver still evaluates the conditional denoiser many times. We therefore distill the already model-guided, single-branch teacher; no unconditional prediction is reintroduced during distillation. 
+
+a) Euler-based distillation from 32 to 8 steps: Let 
+
+σ0 = σmax > σ 1 > · · · > σ N = 0 
+
+be the N -step teacher schedule, where N ∈ { 32 , 16 } for the two distillation stages. We sample an index k ∈ { 0, 2, . . . , N −
+
+2} and distill the two teacher transitions from σk to σk+2 into one student transition. We train on forward-corrupted states zσk constructed by Eq. (7) at σ = σk, where z0 is obtained from the sampled source pair. At each optimization step, an EMA N -step teacher, evaluated under stop-gradient, applies two fine solver transitions to produce 
+
+zTσk+2 = Φ ¯θN (zσk ; σk → σk+1 → σk+2 , y ) . (15) Let 
+
+∆k = σk+2 − σk < 0, Bk = Bσk ,y .
+
+We invert one coarse Euler transition of Eq. (14) and obtain the endpoint-matching denoised-prediction target 
+
+D† 
+
+> k
+
+= zσk − B−1
+
+> k
+
+zTσk+2 − zσk
+
+∆k
+
+= zσk − 2Kσk (y) K′ 
+
+> σk
+
+(y)−1 zTσk+2 − zσk
+
+∆k
+
+.
+
+(16) 6
+
+Theorem 2 (Euler endpoint consistency) . For σk > 0, the target D† 
+
+> k
+
+in Eq. (16) is the unique prediction whose one-step Euler transition reaches the two-step teacher endpoint zTσk+2 .
+
+The proof is provided in Appendix E. The N/ 2-step student is initialized from the preceding-stage checkpoint and minimizes 
+
+Ldistill 
+
+= Ek, (z0,y ),ϵ W 1/2 
+
+> σk,y
+
+
+
+DθN/ 2 (zσk , σ k, y ) − sg[ D†
+
+> k
+
+]
+
+ 22
+
+.
+
+(17) The precision Wσk ,y rescales prediction residuals, while endpoint consistency follows from D†
+
+> k
+
+. We apply this Euler-based endpoint distillation successively as 32 → 16 → 8.
+
+b) Final covariance-ratio distillation from 8 to 4 steps: 
+
+For the 8 → 4 stage, we use a covariance-ratio transition on the four-step schedule. For two noise levels σa > σ b, define 
+
+Ra→b(y) =  Kσb (y)Kσa (y)−11/2 ,
+
+where the inverse and square root are evaluated elementwise because Kσ (y) is diagonal. The corresponding deterministic transition is 
+
+Ψϑ (zσa ; σa → σb, y )= Dϑ(zσa , σ a, y ) + Ra→b(y) [ zσa − Dϑ(zσa , σ a, y )] . (18) For final stage, we retain the trained 8-step denoiser but switch its teacher rollout from Euler to the covariance-ratio rule: 
+
+zTσk+2 = Ψ ¯θ8
+
+ Ψ¯θ8 (zσk ; σk → σk+1 , y ) ; σk+1 → σk+2 , y  .
+
+(19) Let 
+
+Rk = Rk→k+2 (y) =  Kσk+2 (y)Kσk (y)−11/2 .
+
+Equating one coarse student transition with the two-step teacher endpoint and solving for the denoised prediction gives 
+
+D† 
+
+> k, ratio
+
+= ( I − Rk)−1 
+
+zTσk+2 − Rkzσk
+
+
+
+. (20) 
+
+Theorem 3 (Covariance-ratio endpoint consistency) . Under the monotone diagonal covariance schedule in Eq. (5), I − Rk
+
+is nonsingular, and D† 
+
+> k, ratio
+
+uniquely matches the two-step covariance-ratio teacher endpoint in Eq. (19) .
+
+The 4-step student is trained with Eq. (17) after replacing 
+
+D† 
+
+> k
+
+by D†
+
+> k, ratio
+
+.The covariance-ratio transition is first-order consistent with the guided latent ODE because 
+
+Rσ→σ+∆ σ (y) = I + ∆ σB σ,y + O(∆ σ2).
+
+It analytically accounts for the covariance scaling while holding the denoised prediction fixed over each transition. At inference, the 4-step student uses the same coarse covariance-ratio update in Eq. (18). Each transition evaluates the single conditional denoiser exactly once; hence the final sampler requires four conditional NFEs, followed by one CVAE decode. The complete hybrid distillation schedule is therefore 
+
+32 Euler 
+
+−−−→ 16 Euler 
+
+−−−→ 8 covariance ratio 
+
+−−−−−−−−→ 4.
+
+Appendix E provides the endpoint-consistency and local-consistency derivations. The overall training procedure is summarized in Algorithms 1–3, with the four-step sampling procedure described in Appendix F. IV. E XPERIMENTS 
+
+To comprehensively evaluate the effectiveness and efficiency of our proposed CAViLD framework, we conduct extensive experiments on standard continuous conditional generative modeling benchmarks. We investigate three aspects: generation fidelity and continuous label consistency, sampling efficiency, and the quality of the learned latent representation under imbalanced continuous conditions. 
+
+A. Experimental Setup 
+
+Datasets. We evaluate our proposed CAViLD on three widely used continuous conditional generative modeling benchmarks following previous CCGM protocols [2], [16]. These datasets cover diverse continuous control scenarios, including object pose manipulation, age-conditioned face synthesis, and au-tonomous driving, with image resolutions ranging from 64 × 64 
+
+to 256 × 256 .
+
+Fig. 3: Effect of NDA on CVAE reconstruction quality. CVAE+NDA achieves lower NIQE across most steering-angle conditions. 
+
+RC-49 [2] is a pose-controlled image generation benchmark containing chair images conditioned on continuous azimuth angles. It is widely adopted for evaluating continuous viewpoint-conditioned generation. UTKFace [40] consists of RGB face images with continuous age labels ranging from 1 to 60 years. The naturally imbal-anced age distribution makes it a challenging benchmark for evaluating continuous label consistency and robustness. The Steering Angle dataset [41], [42], preprocessed following Ding et al. [2], contains real-world driving images conditioned on continuous steering angles. It provides a practical physical control scenario with complex visual variations and non-uniform continuous label distributions. 
+
+TABLE IV: MG vs. CFG under 32-step sampling.                                        
+
+> Dataset Guidance NFEs ↓img/s ↑SFID ↓Div. ↑LS ↓
+> Steering CFG 64 23.46 0.257 1.072 5.504 MG (Ours) 32 44.62 0.272 1.053 3.950 RC-49 CFG 64 38.66 0.045 3.708 1.040 MG (Ours) 32 59.34 0.049 3.697 0.944 UTKFace CFG 64 36.60 0.360 1.154 5.219 MG (Ours) 32 54.13 0.350 1.217 5.195 7
+
+TABLE I: Quantitative comparison of image generation performance under low-to-medium resolutions ( ≤ 128 × 128 ). Arrows ( ↑ / ↓) present the preferred optimization directions. For the primary quality metric (SFID), the best results are highlighted in bold and the second-best in underlined. Evaluation profiles corrupted by severe training pathologies (e.g., severe label inconsistency or mode collapse) are denoted in red. 
+
+Dataset Condition Framework Method SFID ↓ NIQE ↓ Diversity ↑ LS ↓ img/sec ↑ Mem(GiB) ↓
+
+RC-49 
+
+(64 ×64) Text Diffusion SD 3 Medium (ICML’24) [32] 1.215 1.996 2.272 28.726 1.90 19.74 FLUX.1 (arXiv’25) [37] 0.515 2.330 2.512 12.751 3.87 42.08 Qwen-Image (arXiv’25) [38] 1.132 2.436 2.470 27.757 9.58 56.91 MIRO (ICML’26) [39] 2.956 3.146 0.791 10.66 1.19 6.53 Continuous GAN CcGAN (T-PAMI’23) [2] 0.126 1.809 3.451 2.655 6243.06 2.62 Dual-NDA (AAAI’24) [11] 0.148 1.808 3.344 2.211 6243.06 2.62 CcGAN-AVAR (arXiv’25) [15] 0.042 1.734 3.723 1.270 4162.04 3.71 Diffusion CcDPM (AAAI’24) [5] 0.970 2.153 3.581 24.174 2.92 5.07 CCDM (TMM’26) [3] 0.049 2.086 3.698 1.074 2.92 5.53 iCCDM (arXiv’26) [16] 0.049 1.718 3.696 0.813 12.67 3.69 
+
+CAViLD (Ours) 0.048 2.078 3.706 1.068 370.72 2.46 
+
+UTKFace 
+
+(64 ×64) Text Diffusion SD 3 Medium (ICML’24) [32] 2.012 2.068 0.426 5.452 1.50 19.74 FLUX.1 (arXiv’25) [37] 0.816 1.915 0.713 9.174 3.80 42.08 Qwen-Image (arXiv’25) [38] 1.973 2.135 1.051 10.770 9.37 56.90 MIRO (ICML’26) [39] 4.763 2.193 1.108 10.888 1.19 6.28 Continuous GAN CcGAN (T-PAMI’23) [2] 0.413 1.733 1.329 8.240 5555.56 2.44 Dual-NDA (AAAI’24) [11] 0.396 1.678 1.298 6.765 5555.56 2.44 CcGAN-AVAR (arXiv’25) [15] 0.356 1.691 1.278 6.696 4166.67 3.71 Diffusion CcDPM (AAAI’24) [5] 0.466 1.560 1.211 6.868 2.10 5.70 CCDM (TMM’26) [3] 0.363 1.542 1.184 6.164 2.10 6.14 iCCDM (arXiv’26) [16] 0.353 1.561 1.146 5.788 11.13 4.94 
+
+CAViLD (Ours) 0.344 1.611 1.206 5.608 355.48 2.53 
+
+UTKFace 
+
+(128 ×128) Text Diffusion SD 3 Medium (ICML’24) [32] 1.582 1.901 0.396 5.019 1.43 19.74 FLUX.1 (arXiv’25) [37] 0.643 1.748 0.661 9.281 3.95 42.08 Qwen-Image (arXiv’25) [38] 1.517 1.653 0.971 9.731 9.73 59.33 MIRO (ICML’26) [39] 3.590 2.069 0.691 12.001 1.20 6.28 Continuous GAN CcGAN (T-PAMI’23) [2] 0.367 1.113 1.199 7.747 1282.05 7.58 Dual-NDA (AAAI’24) [11] 0.361 1.081 1.257 6.310 1282.05 7.58 CcGAN-AVAR (arXiv’25) [15] 0.297 1.173 1.251 6.586 1190.48 11.57 Diffusion CcDPM (AAAI’24) [5] 0.529 1.114 1.195 7.933 1.12 17.91 CCDM (TMM’26) [3] 0.319 1.077 1.178 6.359 1.12 19.52 iCCDM (arXiv’26) [16] 0.294 1.048 1.225 5.823 2.85 5.04 
+
+CAViLD (Ours) 0.284 1.088 1.131 5.869 25.72 5.10 
+
+Steering Angle 
+
+(64 ×64) Text Diffusion SD 3 Medium (ICML’24) [32] 4.007 1.685 0.833 19.885 1.42 19.74 FLUX.1 (arXiv’25) [37] 1.795 1.766 1.416 19.911 3.83 42.08 Qwen-Image (arXiv’25) [38] 2.557 2.259 1.357 20.734 9.56 56.9 MIRO (ICML’26) [39] 3.497 2.689 0.962 32.621 1.18 6.53 Continuous GAN CcGAN (T-PAMI’23) [2] 1.334 1.784 1.234 14.807 3086.42 2.50 Dual-NDA (AAAI’24) [11] 1.114 1.738 1.251 11.809 3086.42 2.50 CcGAN-AVAR (arXiv’25) [15] 0.809 1.800 1.204 6.963 1157.41 3.86 Diffusion CcDPM (AAAI’24) [5] 0.939 1.761 1.150 10.999 3.33 2.28 CCDM (TMM’26) [3] 0.742 1.778 1.088 5.823 3.33 2.74 iCCDM (arXiv’26) [16] 0.501 1.700 1.093 4.891 12.82 4.94 
+
+CAViLD (Ours) 0.358 1.724 1.048 5.596 609.76 1.46 
+
+Steering Angle 
+
+(128 ×128) Text Diffusion SD 3 Medium (ICML’24) [32] 4.191 4.071 0.512 20.072 1.48 19.74 FLUX.1 (arXiv’25) [37] 1.676 3.090 1.072 20.526 3.86 42.08 Qwen-Image (arXiv’25) [38] 2.910 3.749 1.062 18.455 9.68 59.34 MIRO (ICML’26) [39] 3.869 4.784 0.977 29.707 1.14 6.53 Continuous GAN CcGAN (T-PAMI’23) [2] 1.689 2.411 1.088 18.438 1543.21 7.58 Dual-NDA (AAAI’24) [11] 1.390 2.135 1.133 14.099 1543.21 7.58 CcGAN-AVAR (arXiv’25) [15] 0.888 2.288 1.123 7.507 1207.73 11.57 Diffusion CcDPM (AAAI’24) [5] 1.285 1.989 1.203 18.325 1.23 5.27 CCDM (TMM’26) [3] 0.987 1.977 1.118 11.829 1.23 6.83 iCCDM (arXiv’26) [16] 0.742 1.973 1.007 5.652 2.75 5.04 
+
+CAViLD (Ours) 0.316 2.584 0.969 5.170 42.65 5.16 
+
+Evaluation Metrics. Following CCGM protocols [2], [16], we evaluate performance using SFID, NIQE, Diversity, and Label Score (LS), which measure conditional fidelity, percep-tual quality, intra-condition variation, and label consistency, respectively. We report inference throughput in images per second (img/sec) and aggregate peak GPU memory in GiB, measured on a workstation equipped with NVIDIA RTX 4090 GPUs. Models exceeding single-GPU memory capacity are 8
+
+TABLE II: Average quality and efficiency of high-resolution generated images ( ≥ 192 × 192 ). Arrows ( ↑ / ↓) indicate the preferred optimization directions. For the primary quality metric (SFID), the best results are highlighted in bold and the second-best in underlined. Evaluation profiles corrupted by severe training pathologies (e.g., severe label inconsistency or mode collapse) are denoted in red. 
+
+Dataset Condition Framework Method SFID ↓ NIQE ↓ Diversity ↑ LS ↓ img/sec ↑ Mem(GiB) ↓
+
+UTKFace 
+
+(192 ×192) Text Diffusion SD 3 Medium (ICML’24) [32] 1.682 2.436 0.383 5.188 1.48 20.98 FLUX.1 (arXiv’25) [37] 0.771 2.499 0.602 9.191 3.96 42.08 Qwen-Image (arXiv’25) [38] 1.617 1.909 0.943 9.868 9.64 62.43 MIRO (ICML’26) [39] 3.774 2.197 1.036 11.026 1.19 6.28 Continuous GAN CcGAN (T-PAMI’23) [2] 0.499 1.661 1.207 7.885 617.28 18.18 Dual-NDA (AAAI’24) [11] 0.487 1.483 1.201 6.730 617.28 18.18 CcGAN-AVAR (arXiv’25) [15] 0.435 1.588 1.187 6.377 1111.11 13.18 Diffusion CcDPM (AAAI’24) [5] 0.970 1.522 1.187 11.224 0.80 19.93 CCDM (TMM’26) [3] 0.467 1.242 1.148 7.336 0.80 22.99 iCCDM (arXiv’26) [16] 0.433 1.850 1.210 6.323 1.25 10.87 
+
+CAViLD (Ours) 0.424 1.892 1.193 5.664 26.57 10.63 
+
+UTKFace 
+
+(256 ×256) Text Diffusion SD 3 Medium (ICML’24) [32] 0.906 1.524 0.454 5.850 1.45 24.23 FLUX.1 (arXiv’25) [37] 0.369 1.576 0.614 9.010 3.93 42.08 Qwen-Image (arXiv’25) [38] 0.953 1.362 0.980 10.941 9.82 65.8 MIRO (ICML’26) [39] 1.848 2.467 1.066 9.249 1.15 6.53 Continuous GAN CcGAN (T-PAMI’23) [2] 0.347 1.308 1.053 6.010 580.62 22.29 Dual-NDA (AAAI’24) [11] 0.319 1.381 1.216 5.712 580.62 22.29 CcGAN-AVAR (arXiv’25) [15] 0.196 1.347 1.219 5.798 609.43 17.32 Diffusion CcDPM (AAAI’24) [5] 0.559 1.552 0.854 12.121 0.30 15.67 CCDM (TMM’26) [3] 0.268 1.364 1.121 7.555 0.30 21.75 iCCDM (arXiv’26) [16] 0.218 1.207 1.142 6.199 0.69 18.35 
+
+CAViLD (Ours) 0.196 1.289 1.105 5.778 23.57 16.22 
+
+Steering Angle 
+
+(256 ×256) Text Diffusion SD 3 Medium (ICML’24) [32] 1.859 1.595 0.907 19.806 1.51 24.23 FLUX.1 (arXiv’25) [37] 0.945 2.353 1.078 17.228 3.93 42.08 Qwen-Image (arXiv’25) [38] 1.383 2.525 1.001 16.034 9.82 65.82 MIRO (ICML’26) [39] 1.965 1.804 0.802 27.598 1.15 6.53 Continuous GAN CcGAN (T-PAMI’23) [2] 0.984 1.999 1.054 8.399 539.16 13.63 Dual-NDA (AAAI’24) [11] 0.967 1.834 0.951 8.338 539.16 13.63 CcGAN-AVAR (arXiv’25) [15] 0.683 1.966 1.113 4.958 620.54 17.32 Diffusion CcDPM (AAAI’24) [5] 1.217 1.748 1.330 29.239 0.30 16.30 CCDM (TMM’26) [3] 0.902 1.616 1.151 23.057 0.30 21.75 iCCDM (arXiv’26) [16] 0.582 1.390 0.981 4.743 0.69 18.35 
+
+CAViLD (Ours) 0.371 1.519 0.978 3.450 23.79 16.22 TABLE III: Ablation of core components and acceleration strategies on the Steering Angle ( 64 × 64 ) dataset. ‘NFEs’ denotes the number of function evaluations, and ‘img/sec’ denotes sampling throughput.                                          
+
+> Configurations NFEs ↓img/sec ↑SFID ↓LS ↓
+> Baseline (iCCDM) [16] 64 12.82 0.501 4.891 + CVAE (no Laux )64 26.83 0.270 5.805 + Aux. Regularization 64 23.46 0.257 5.504 + Model-Guidance (MG) 32 44.62 0.272 3.950 + Distillation (16) 16 81.84 0.412 5.246 + Distillation (8) 8139.66 0.369 4.038 + Distillation (4) 4609.76 0.358 5.596 + Distillation (2) 2840.36 0.576 12.039
+
+distributed across multiple GPUs, with memory usage summed over all participating devices. 
+
+TABLE V: NDA ablation for 128 × 128 latent diffusion. 
+
+Dataset Configuration SFID ↓ NIQE ↓
+
+UTKFace Baseline (w/o NDA) 0.286 1.422 NDA 0.275 1.180 Steering Angle Baseline (w/o NDA) 0.371 2.817 NDA 0.316 2.584 
+
+Compared Methods. We include text-to-image diffusion models as baselines: SD 3 Medium [32], FLUX.1 [37], [43], Qwen-Image [38], and MIRO [39], fine-tuned on bench-marks, comparing with GAN-based CCGM methods: CcGAN (SVDL+ILI) [2], Dual-NDA [11], and CcGAN-AVAR [15], and diffusion-based CCGM methods: CcDPM [5], CCDM [3] and iCCDM [16]. We extend diffusion-based CCGM with latent manifold purification, Model-Guidance, and progressive distillation for efficient sampling. 
+
+TABLE VI: Cross-dataset comparison on 64 × 64 benchmarks. NFEs indicate the number of function evaluations. 
+
+Dataset Method NFEs ↓ img/s ↑ SFID ↓ Div. ↑ LS ↓
+
+Steering Angle LCM 4 472.64 0.886 0.923 8.257 PCM 4 368.61 0.695 0.909 4.343 Ours-2 2 840.36 0.576 1.133 12.039 Ours-4 4 609.76 0.358 1.048 5.596 RC-49 LCM 4 766.35 0.151 3.498 2.074 PCM 4 1107.22 0.469 2.714 1.626 Ours-4 4 1577.19 0.114 3.565 1.848 Ours-8 8 1119.83 0.056 3.685 1.518 Ours-16 16 370.72 0.048 3.706 1.068 UTKFace LCM 4 671.89 1.478 0.602 3.482 PCM 4 5172.40 0.952 0.873 4.473 Ours-4 4 1472.39 0.770 0.787 4.046 Ours-16 16 355.48 0.344 1.206 5.608 9
+
+Implementation Setup. 
+
+The CVAE-based latent manifold is first trained with the proposed purification strategy and then frozen for diffusion training. The latent spatial compression factor is selected according to the image resolution, using either 4× or 8×
+
+compression. Unless otherwise specified, the shared diffusion and optimization settings follow iCCDM [16]. For auxiliary semantic regularization, continuous labels are min–max normalized to [0 , 1] . We use dataset-independent settings across all experiments, with λaux = 1 .0 and ϵaux =0.05 , where ϵaux corresponds to a tolerance of 5% of the normalized label range. For adaptive vicinal modeling, NAV is selected per dataset according to its continuous label distribution, following CcGAN-AVAR [15]. NDA uses the worst 20% of NIQE-ranked reconstructions as negatives and follows the Dual-NDA penalty configuration [11]. During diffusion training, an EMA teacher with decay 0.9999 provides Model-Guidance targets. The coefficient wMG is an empirical training parameter, distinct from the inference-time CFG scale. The algebraic correspondence in Eq. (10) does not imply matched guidance strength for the reported MG and CFG configurations. For efficient sampling, the 32-step teacher is progressively distilled down to a 4-step student [25]. For the text-to-image baselines, we fine-tune checkpoints of SD 3 Medium, FLUX.1, Qwen-Image, and MIRO using LoRA [44] on the corresponding RGB datasets under the same evaluation protocol. 
+
+B. Experimental Results 
+
+We evaluate CAViLD on eight experimental settings covering three continuous conditional generation benchmarks with resolutions ranging from 64 × 64 to 256 × 256 . Quantitative comparisons are summarized in Tables I and II. 
+
+Overall Performance. CAViLD achieves competitive or superior performance across most experimental settings, demon-strating the effectiveness of latent-space modeling, Model-Guidance, and progressive distillation for continuous condi-tional generation. Compared with pixel-space diffusion baselines, CAViLD substantially improves sampling efficiency while preserving generation fidelity. For example, on Steering Angle 64 × 64 ,our method achieves an SFID of 0.358 with 609.76 img/sec, providing a significant acceleration over iCCDM. On UTKFace 
+
+64 × 64 , CAViLD further improves SFID from 0.353 (iCCDM) to 0.344 while achieving much higher throughput. The framework also scales well to higher resolutions. On UTKFace 256 × 256 , CAViLD achieves an SFID of 0.196, matching the strongest competitors while retaining diffusion-based controllability. On Steering Angle 256 ×256 , it obtains an SFID of 0.371 and the best Label Score among diffusion-based methods, indicating strong continuous condition adherence. Compared with GAN- and diffusion-based CCGM baselines, CAViLD offers a favorable quality–efficiency balance while substantially reducing iterative sampling cost. Overall, these results demonstrate an effective trade-off among generation fidelity, continuous condition controllability, and practical sampling efficiency. 
+
+C. Ablation Study 
+
+In addition to the main comparisons, we conduct ablation studies on Steering Angle and UTKFace to evaluate latent-space modeling, vicinal learning, auxiliary regularization, Model-Guidance (MG), progressive distillation, and Negative Data Augmentation (NDA). Table III shows that introducing the CVAE latent representation substantially improves both generation quality and sampling efficiency over pixel-space iCCDM, while auxiliary regularization further improves label consistency. Additional CVAE-level results in Appendix B further directly isolate the effect of vicinal learning on representation quality and label consistency. MG reduces the required NFEs by internalizing the guidance direction during training, and progressive distillation compresses the sampler from 32 to 4 steps while maintaining overall competitive quality. Further reducing the sampler to 2 steps causes clear degradation in SFID and Label Score, indicating the limit of trajectory compression. Table IV confirms that MG achieves comparable or better conditional generation with fewer NFEs than Classifier-Free Guidance, while Table VI shows a favorable quality–efficiency trade-off over LCM [45] and PCM [46]. Finally, Table V shows that NDA improves generation quality at 128 ×128 . These combined results support the joint use of the proposed components in CAViLD, with the final configurations selected primarily according to SFID and sampling efficiency. V. C ONCLUSION 
+
+In this paper, we propose CAViLD, a latent diffusion frame-work for efficient continuous conditional image generation. By transferring the generation process from pixel space to a purified CVAE latent space, CAViLD improves the quality and condition awareness of the learned latent representation under sparse and imbalanced conditions. Furthermore, Model-Guidance is incorporated into the training process to eliminate the additional unconditional inference required by conventional classifier-free guidance, while progressive distillation further accelerates sampling. Extensive experiments on RC-49, UTKFace, and Steering Angle datasets with resolutions up to 256 × 256 demonstrate that CAViLD achieves a favorable balance between generation fidelity, continuous condition consistency, and sampling effi-ciency. These results validate the effectiveness of latent-space modeling, guidance-aware training, and trajectory distillation for scalable continuous conditional image generation. REFERENCES [1] X. Ding, Y. Wang, Z. Xu, W. J. Welch, and Z. J. Wang, “CcGAN: Continuous conditional generative adversarial networks for image generation,” in International Conference on Learning Representations ,2021. [2] ——, “Continuous conditional generative adversarial networks: Novel empirical losses and label input mechanisms,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 45, no. 7, pp. 8143–8158, 2023. [3] X. Ding, Y. Wang, K. Zhang, and Z. J. Wang, “CCDM: Continuous conditional diffusion models for image generation,” IEEE Transactions on Multimedia , 2026. [4] A. Heyrani Nobari, W. Chen, and F. Ahmed, “PcDGAN: A continuous conditional diverse generative adversarial network for inverse design,” in Proceedings of the 27th ACM SIGKDD Conference on Knowledge Discovery & Data Mining , 2021, pp. 606–616. 10 
+
+[5] Y. Zhao, P. Zhang, G. Sun, Z. Yang, J. Chen, and Y. Wang, “CcDPM: A continuous conditional diffusion probabilistic model for inverse design,” in Proceedings of the AAAI Conference on Artificial Intelligence , vol. 38, no. 15, 2024, pp. 17 033–17 041. [6] X. Fang, H.-S. Shen, and H. Wang, “Diverse 3D auxetic unit cell inverse design with deep learning,” Applied Physics Reviews , vol. 10, no. 3, 2023. [7] Y. Giry-Fouquet, A. Baussard, C. Enderli, and T. Porges, “SAR image synthesis with GAN and continuous aspect angle and class constraints,” in European Conference on Synthetic Aperture Radar , 2022, pp. 1–6. [8] Z. Shi, X. Ding, P. Ding, C. Yang, R. Huang, and X. Song, “Regression-oriented knowledge distillation for lightweight ship orientation angle prediction with optical remote sensing images,” Signal, Image and Video Processing , vol. 19, no. 14, p. 1247, 2025. [9] Y. Zhu, H. Su, P. Xu, Y. Xu, Y. Wang, C.-H. Dong, J. Lu, Z. Le, X. Yang, Q. Xuan et al. , “Data augmentation using continuous conditional generative adversarial networks for regression and its application to improved spectral sensing,” Optics Express , vol. 31, no. 23, pp. 37 722– 37 739, 2023. [10] L. T. Triess, A. B¨ uhler, D. Peter, F. B. Flohr, and M. Z¨ ollner, “Point cloud generation with continuous conditioning,” in International Conference on Artificial Intelligence and Statistics , 2022, pp. 4462–4481. [11] X. Ding, Y. Wang, and Z. Xu, “Turning waste into wealth: Leveraging low-quality samples for enhancing continuous conditional generative adversarial networks,” in Proceedings of the AAAI Conference on Artificial Intelligence , vol. 38, no. 10, 2024, pp. 11 802–11 810. [12] J. Xu, Z. Liu, S. Wang, T. Zheng, Y. Wang, Y. Wang, and Y. Dang, “Foun-dations and applications of information systems dynamics,” Engineering ,vol. 27, pp. 254–265, 2023. [13] B. He, Y. Guo, Y. Zhu, L. Tong, B. Kong, K. Wang, C. Sun, H. Li, F. Huang, L. Wu et al. , “From signal to knowledge: The diagnostic value of raw data in the artificial intelligence prediction of human data for the first time,” Engineering , vol. 34, pp. 60–69, 2024. [14] Q. Zheng, H. Liu, X. Zhang, C. Yan, X. Cao, T. Gong, Y.-J. Liu, B. Shi, Z. Peng, X. Fan et al. , “Machine memory intelligence: Inspired by human memory mechanisms,” Engineering , 2025. [15] X. Ding, Y. Chen, Y. Wang, K. Zhang, S. Zhang, P. Cao, and X. Wang, “Imbalance-robust and sampling-efficient continuous conditional GANs via adaptive vicinity and auxiliary regularization,” arXiv preprint arXiv:2508.01725 , 2026. [16] X. Ding, Y. Chen, S. Zhang, K. Zhang, N. Chen, P. Cao, Y. Wang, and F. Wu, “Enhancing diffusion-based quantitatively controllable image generation via matrix-form edm and adaptive vicinal training,” arXiv preprint arXiv:2602.02114 , 2026. [17] J. Ho, A. Jain, and P. Abbeel, “Denoising diffusion probabilistic models,” 
+
+Advances in Neural Information Processing Systems , vol. 33, pp. 6840– 6851, 2020. [18] A. Q. Nichol and P. Dhariwal, “Improved denoising diffusion probabilistic models,” in Proceedings of the 38th International Conference on Machine Learning , 2021, pp. 8162–8171. [19] T. Karras, M. Aittala, T. Aila, and S. Laine, “Elucidating the design space of diffusion-based generative models,” Advances in neural information processing systems , vol. 35, pp. 26 565–26 577, 2022. [20] R. Rombach, A. Blattmann, D. Lorenz, P. Esser, and B. Ommer, “High-resolution image synthesis with latent diffusion models,” in 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2022, pp. 10 684–10 695. [21] K. Sohn, H. Lee, and X. Yan, “Learning structured output represen-tation using deep conditional generative models,” Advances in neural information processing systems , vol. 28, 2015. [22] J. Ho and T. Salimans, “Classifier-free diffusion guidance,” in NeurIPS 2021 Workshop on Deep Generative Models and Downstream Applica-tions , 2021. [23] H. Chung, J. Kim, G. Y. Park, H. Nam, and J. C. Ye, “Cfg++: Manifold-constrained classifier free guidance for diffusion models,” in International Conference on Learning Representations , vol. 2025, 2025, pp. 30 824– 30 850. [24] S. Sadat, O. Hilliges, and R. M. Weber, “Eliminating oversaturation and artifacts of high guidance scales in diffusion models,” in The Thirteenth International Conference on Learning Representations , 2024. [25] T. Salimans and J. Ho, “Progressive distillation for fast sampling of diffusion models,” arXiv preprint arXiv:2202.00512 , 2022. [26] T. Yin, M. Gharbi, T. Park, R. Zhang, E. Shechtman, F. Durand, and W. T. Freeman, “Improved distribution matching distillation for fast image synthesis,” in The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. [27] Z. Tang, J. Bao, D. Chen, and B. Guo, “Diffusion models without classifier-free guidance,” arXiv preprint arXiv:2502.12154 , 2025. [28] Y. Song, J. Sohl-Dickstein, D. P. Kingma, A. Kumar, S. Ermon, and B. Poole, “Score-based generative modeling through stochastic differential equations,” in International Conference on Learning Representations ,2021. [29] S. Chen, S. Chewi, H. Lee, Y. Li, J. Lu, and A. Salim, “The probability flow ode is provably fast,” Advances in Neural Information Processing Systems , vol. 36, pp. 68 552–68 575, 2023. [30] M. Mirza and S. Osindero, “Conditional generative adversarial nets,” 
+
+arXiv preprint arXiv:1411.1784 , 2014. [31] A. Odena, C. Olah, and J. Shlens, “Conditional image synthesis with auxiliary classifier gans,” in International conference on machine learning .PMLR, 2017, pp. 2642–2651. [32] P. Esser, S. Kulal, A. Blattmann, R. Entezari, J. M¨ uller, H. Saini, Y. Levi, D. Lorenz, A. Sauer, F. Boesel et al. , “Scaling rectified flow transformers for high-resolution image synthesis,” in Forty-first international conference on machine learning , 2024. [33] P. Dhariwal and A. Nichol, “Diffusion models beat GANs on image synthesis,” Advances in Neural Information Processing Systems , vol. 34, pp. 8780–8794, 2021. [34] J. Song, C. Meng, and S. Ermon, “Denoising diffusion implicit models,” in International Conference on Learning Representations , 2021. [35] C. Lu, Y. Zhou, F. Bao, J. Chen, C. Li, and J. Zhu, “DPM-solver++: Fast solver for guided sampling of diffusion probabilistic models,” arXiv preprint arXiv:2211.01095 , 2022. [36] Y. Song and P. Dhariwal, “Improved techniques for training consistency models,” in International Conference on Learning Representations , vol. 2024, 2024, pp. 15 078–15 097. [37] B. F. Labs, S. Batifol, A. Blattmann, F. Boesel, S. Consul, C. Diagne, T. Dockhorn, J. English, Z. English, P. Esser, S. Kulal, K. Lacey, Y. Levi, C. Li, D. Lorenz, J. M¨ uller, D. Podell, R. Rombach, H. Saini, A. Sauer, and L. Smith, “Flux.1 kontext: Flow matching for in-context image generation and editing in latent space,” 2025. [Online]. Available: https://arxiv.org/abs/2506.15742 [38] C. Wu, J. Li, J. Zhou, J. Lin, K. Gao, K. Yan, S.-m. Yin, S. Bai, X. Xu, Y. Chen et al. , “Qwen-image technical report,” arXiv preprint arXiv:2508.02324 , 2025. [39] N. Dufour, L. Degeorge, A. Ghosh, V. Kalogeiton, and D. Picard, “Miro: Multi-reward conditioned pretraining improves t2i quality and efficiency,” 
+
+arXiv preprint arXiv:2510.25897 , 2025. [40] Z. Zhang, Y. Song, and H. Qi, “Age progression/regression by conditional adversarial autoencoder,” in Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , 2017, pp. 5810–5818. [41] S. Chen, “The Steering Angle dataset @ONLINE,” https://github.com/ SullyChen/driving-datasets, 2018. [42] ——, “How a high school junior made a self-driving car? @ONLINE,” https://towardsdatascience.com/ how-a-high-school-junior-made-a-self-driving-car-705fa9b6e860, 2018. [43] B. F. Labs, “Flux,” https://github.com/black-forest-labs/flux, 2024. [44] E. J. Hu, yelong shen, P. Wallis, Z. Allen-Zhu, Y. Li, S. Wang, L. Wang, and W. Chen, “LoRA: Low-Rank adaptation of large language models,” in International Conference on Learning Representations , 2022. [45] S. Luo, Y. Tan, L. Huang, J. Li, and H. Zhao, “Latent consistency models: Synthesizing high-resolution images with few-step inference,” 
+
+arXiv preprint arXiv:2310.04378 , 2023. [46] F.-Y. Wang, Z. Huang, A. W. Bergman, D. Shen, P. Gao, M. Lingelbach, K. Sun, W. Bian, G. Song, Y. Liu et al. , “Phased consistency models,” 
+
+Advances in neural information processing systems , vol. 37, pp. 83 951– 84 009, 2024. 11 
+
+APPENDIX AVICINAL RISK BOUND 
+
+This appendix supplies the statistical argument for Sec-tion III-A. All expectations are conditioned on the observed labels {yi}Ndata  
+
+> i=1
+
+and parameters Θ independent of the evaluated samples. To include the CVAE reparameterization noise, define 
+
+ℓΘ(x, y ) = Eξ [ℓΘ(x, y ; ξ)] .
+
+Let Py be the conditional image distribution. Define the conditional risk 
+
+R(y) = EX∼Py [ℓΘ(X, y )] .
+
+For a query label y⋆, define its vicinal approximation and empirical estimator as 
+
+Rv (y⋆) = X
+
+> i
+
+¯Wi,y ⋆ R(yi),
+
+bRv (y⋆) = X
+
+> i
+
+¯Wi,y ⋆ ℓΘ(Xi, y i), Xi ∼ Pyi .
+
+The effective sample size associated with the normalized vicinal weights is 
+
+Neff (y⋆) = X
+
+> i
+
+¯W 2
+
+> i,y ⋆
+
+!−1
+
+.
+
+Detailed assumptions and bound. Assume that the conditional risk is label-Lipschitz: 
+
+|R (y′) − R (y)| ≤ L|y′ − y|.
+
+If the Xi are conditionally independent and 
+
+Var Pyi [ℓΘ(Xi, y i)] ≤ σ2 
+
+> ℓ
+
+,
+
+then 
+
+E
+
+h  bRv (y⋆) − R (y⋆)2i
+
+≤ L2 X
+
+> i
+
+¯Wi,y ⋆ |yi − y⋆|
+
+!2
+
++ σ2
+
+> ℓ
+
+Neff (y⋆)
+
+≤ L2κ(y⋆)2 + σ2
+
+> ℓ
+
+|N (y⋆)| ≤ L2κ(y⋆)2 + σ2
+
+> ℓ
+
+NAV 
+
+.
+
+(21) 
+
+Proof of Theorem 1. Because P 
+
+> i
+
+¯Wi,y ⋆ = 1, the label-Lipschitz assumption gives 
+
+|R v (y⋆) − R (y⋆)| ≤ X
+
+> i
+
+¯Wi,y ⋆ |R (yi) − R (y⋆)|≤ L X
+
+> i
+
+¯Wi,y ⋆ |yi − y⋆|. (22) Moreover, conditional independence implies 
+
+Var   bRv (y⋆) = X
+
+> i
+
+¯W 2 
+
+> i,y ⋆
+
+Var Pyi
+
+ℓΘ(Xi, y i)
+
+≤ σ2
+
+> ℓ
+
+X
+
+> i
+
+¯W 2 
+
+> i,y ⋆
+
+= σ2
+
+> ℓ
+
+Neff (y⋆) . (23) Finally, E[ bRv (y⋆) − R v (y⋆)] = 0; hence the cross term vanishes in the bias–variance decomposition. Substitution of Eqs. (22) and (23) proves Eq. (21). The first term increases with neighborhood width, whereas the second decreases as the weights spread over more examples. The bound therefore provides a bias–variance motivation for the adaptive neighborhood in Eq. (1): dense regions favor locality, while sparse regions generally require wider label neighborhoods for fixed NAV .In implementation, drawing I ∼ Cat( { ¯Wi,y ⋆ }) gives 
+
+EI
+
+ℓΘ(XI , y I ) = X
+
+> i
+
+¯Wi,y ⋆ ℓΘ(Xi, y i).
+
+Thus categorical neighbor sampling is an unbiased Monte Carlo estimator of the fully weighted vicinal objective characterized above, while introducing the ordinary stochastic variance associated with minibatch optimization. APPENDIX BABLATION STUDY ON PURIFIED CVAE L ATENT -S PACE 
+
+LEARNING 
+
+We compare latent diffusion pipelines using CVAEs trained under different vicinal-sampling and auxiliary-regularization settings on Steering Angle. The reported metrics evaluate the quality and label consistency of the final generated images. 
+
+Fig. 4: Label consistency comparison between the standard CVAE and the proposed Vicinal CVAE on Steering Angle. Vicinal sampling achieves lower Label Scores across most conditions, particularly in sparse extreme-angle regions. TABLE VII: Ablation of vicinal learning and auxiliary regularization in the 64 × 64 CVAE on Steering Angle.               
+
+> Dataset Configuration SFID ↓LS ↓Diversity ↑
+> Steering Angle CVAE w/o vicinal 0.260 6.890 1.065 CVAE w/ vicinal 0.255 5.749 1.023 CVAE w/ vicinal & Laux 0.257 5.504 1.072
+
+APPENDIX CMATRIX SCORE , P ROBABILITY -F LOW ODE, AND MODEL 
+
+GUIDANCE 
+
+Following the notation in the main text, we omit the superscript v from the vicinal latent distributions and posterior means. Hence, all conditional densities and posterior means in this appendix are understood with respect to the vicinal latent distribution induced by the Stage-II sampling procedure. For compactness, write 
+
+K = Kσ (y), z = zσ .12 
+
+For every fixed requested condition y, we assume that Kσ (y)
+
+is continuously differentiable in σ and satisfies 
+
+Kσ (y) ≻ 0, K′ 
+
+> σ
+
+(y) ⪰ 0, K0(y) = 0 , σ > 0.
+
+All matrix square roots below denote principal symmetric square roots. For the diagonal covariance schedule used in the main text, 
+
+Kσ (y) = σ2I + λcov σ Diag  aν (y),
+
+these conditions hold for λcov ≥ 0 and aν (y) > 0. Because 
+
+Kσ (y) is diagonal, all matrix functions reduce to coordinate-wise operations. 
+
+A. Matrix score and probability-flow ODE 
+
+The corrupted density is the Gaussian convolution 
+
+pσ (z | y) = 
+
+Z
+
+p0(z0 | y)N (z; z0, K ) dz 0.
+
+Define the exact clean-latent posterior mean associated with this vicinal conditional distribution as 
+
+D∗(z, σ, y ) = E [z0 | z, σ, y ] .
+
+Since K is independent of z, differentiation under the integral gives 
+
+∇z pσ (z | y) = 
+
+Z
+
+p0(z0 | y)N (z; z0, K )K−1(z0 − z) dz 0
+
+= pσ (z | y)K−1 (D∗(z, σ, y ) − z) .
+
+Dividing by pσ (z | y) yields the matrix-form Tweedie identity 
+
+∇z log pσ (z | y) = Kσ (y)−1 (D∗(z, σ, y ) − z) , (24) This matrix-form Tweedie identity will be used below to derive Eq. (13). An additive Gaussian path with covariance Kσ (y) is gener-ated by the forward SDE 
+
+dz σ = ( K′ 
+
+> σ
+
+(y)) 1/2 dW σ .
+
+Indeed, integrating the instantaneous covariance from 0 to σ
+
+gives Z σ
+
+> 0
+
+K′
+
+> u
+
+(y) du = Kσ (y) − K0(y) = Kσ (y).
+
+Because K′ 
+
+> σ
+
+(y) is independent of z, the corresponding Fokker–Planck equation is 
+
+∂σ pσ = 12 ∇z · (K′ 
+
+> σ
+
+(y)∇z pσ ) . (25) Consider the deterministic velocity field 
+
+vσ (z, y ) = − 12 K′ 
+
+> σ
+
+(y)∇z log pσ (z | y). (26) It satisfies 
+
+−∇ z · (pσ vσ ) = 12 ∇z · (pσ K′ 
+
+> σ
+
+(y)∇z log pσ )= 12 ∇z · (K′ 
+
+> σ
+
+(y)∇z pσ ) ,
+
+which agrees with Eq. (25). Substituting Eq. (24) into Eq. (26) gives 
+
+vσ (z, y ) = 12 K′ 
+
+> σ
+
+(y)Kσ (y)−1 (z − D∗(z, σ, y )) .
+
+Therefore, the exact probability-flow ODE associated with the vicinal conditional latent distribution is 
+
+dz σ
+
+dσ = Bσ,y (zσ − D∗(zσ , σ, y )) , Bσ,y = 12 K′ 
+
+> σ
+
+(y)Kσ (y)−1.
+
+This establishes Eq. (13) in the main text. Replacing D∗ by the learned model-guided denoiser yields the operational guided sampling field in Eq. (14). This replacement does not, in general, preserve the unguided vicinal conditional marginals exactly. To clarify the large-noise boundary approximation, define 
+
+m0(y) = E[z0 | y], S0(y) = Cov( z0 | y).
+
+The corrupted latent has mean m0(y) and covariance S0(y) + 
+
+Kσ (y). Consequently, if the scaled clean latents are approxi-mately centered and 
+
+Kσmax (y)−1/2S0(y)Kσmax (y)−1/2
+
+> 2
+
+≪ 1,
+
+then the additive Gaussian component dominates the clean-latent variability, motivating 
+
+pσmax (z | y) ≈ N (0 , K σmax (y)) .
+
+B. Model-guidance target and normalized branchwise regres-sion 
+
+For model guidance, the conditional and null-conditioned teacher branches are evaluated using the same noisy state, noise level, and requested covariance geometry Kσ (y). We write 
+
+∆ref ¯θ = D¯θ (zσ , σ, y ) − D(y)¯θ (zσ , σ, ∅).
+
+The superscript (y) indicates that the explicit condition embed-ding is replaced by the null embedding e∅, while the covariance and preconditioning geometry associated with the requested label y remains fixed. Because the corruption geometry depends on y, the null-conditioned branch is not identified with the exact denoiser of a globally label-marginal noisy density. It is instead an opera-tional reference regression function under the fixed requested geometry. Consequently, Eq. (10) defines the operational two-branch teacher prediction used to construct the target 
+
+zMG 0 = z0 + wMG sg ∆ref ¯θ
+
+ .
+
+This is equivalent to Eq. (11). During each online-model update, the teacher is fixed. We analyze ideal branch functions with the label representation and normalization statistics held fixed. Let (Z0, Z σ , Y ) follow the corresponding Stage-II sampling distributions. For σ > 0,define 
+
+U = Cin (σ, Y )Zσ , T = ZMG 0 ,H = Cout (σ, Y )−1T − Cskip (σ, Y )Zσ
+
+.
+
+Assume 0 < p drop < 1, distinguishable conditional and null embeddings, finite weighted second moments, and that eY
+
+determines Y on the training support. Let fc(u, σ, e ) and f∅(u, σ ) denote the normalized outputs of 
+
+Fθ . Output normalization gives the conditional loss metric Cout 13 
+
+and the null loss metric (s−2 
+
+> z
+
++ σ−2)1/2C2out . The conditional metric is determined by the available inputs, and the scalar null factor depends only on σ. Hence, over freely varying branch functions, the population optima are unique almost surely: 
+
+f opt  
+
+> c
+
+(u, σ, e ) = Ec[H | U = u, σ, e Y = e],f opt  
+
+> ∅
+
+(u, σ ) =  E∅[C2out | U = u, σ ]−1
+
+· E∅[C2out H | U = u, σ ].
+
+Here Cout = Cout (σ, Y ) inside the expectations. Returning through Eq. (8), the null prediction is 
+
+Dopt ,(y)  
+
+> ∅
+
+(z, σ ) = Cskip (σ, y )z
+
++ Cout (σ, y )f opt 
+
+> ∅
+
+ Cin (σ, y )z, σ .
+
+Under the stated information-sufficiency assumption, the con-ditional denoiser optimum reduces to 
+
+Dopt  
+
+> c
+
+(z, σ, y ) = D∗(z, σ, y ) + wMG ∆ref ¯θ ,
+
+where wMG is its active value, including zero during warm-up. Attaining both function-space optima requires joint realizabil-ity by the shared network; finite capacity and optimization may introduce error. This analysis does not establish convergence of the coupled online–EMA dynamics. The null prediction remains an operational reference, not necessarily the exact global label-marginal denoiser. APPENDIX DMATRIX PRECONDITIONING AND LOSS WEIGHT 
+
+Consider the local Gaussian preconditioning approximation 
+
+z0 ∼ N (0 , S z ), z = z0 + ε, ε ∼ N (0 , K σ ),
+
+where Sz and Kσ are diagonal and therefore commute. Gaussian conditioning gives 
+
+E[z0 | z] = Sz (Sz + Kσ )−1z, 
+
+which motivates Cskip in Eq. (8). The input standard deviation is (Sz + Kσ )1/2, so Cin = ( Sz + Kσ )−1/2 normalizes each coordinate. The covariance of the residual z0 − Cskip z is 
+
+Cov( z0 − Cskip z) = Sz − Sz (Sz + Kσ )−1Sz
+
+= Sz Kσ (Sz + Kσ )−1 = C2out .
+
+Consequently, C−1out (z0 − Cskip z) has identity covariance un-der the local Gaussian approximation. Whitening the clean-prediction residual therefore uses its inverse covariance, 
+
+C−2out = ( Sz + Kσ )( Sz Kσ )−1 = S−1 
+
+> z
+
++ K−1 
+
+> σ
+
+,
+
+setting Sz = s2 
+
+> z
+
+I as in the main text gives C−2out = s−2 
+
+> z
+
+I +K−1 
+
+> σ
+
+,
+
+which recovers Wσ,y in Eq. (9). Stage-II uses the square root of the corruption precision as its squared-error metric, whereas distillation uses the full precision. For retained condi-tions, their Euclidean-norm multipliers are W 1/4 
+
+> σ,y
+
+and W 1/2 
+
+> σ,y
+
+,respectively. For dropped Stage-II conditions, the multiplier is 
+
+(s−2 
+
+> z
+
++ σ−2)1/4I.APPENDIX EENDPOINT -C ONSISTENT STEP HALVING 
+
+We prove endpoint consistency for the two transition rules in our hybrid distillation schedule: 
+
+32 Euler 
+
+−−−→ 16 Euler 
+
+−−−→ 8 covariance ratio 
+
+−−−−−−−−−−→ 4.
+
+Teacher subscripts denote rollout schedules; stages inherit online/EMA checkpoint states. The EMA teacher is updated from the student every 10 optimization steps. All results condition on the current teacher, held fixed during target construction. 
+
+A. Euler-Based Distillation 
+
+For the proof of Theorem 2, let 
+
+Bk = 12 K′ 
+
+> σk
+
+(y)Kσk (y)−1, ∆k = σk+2 − σk < 0,
+
+where N ∈ { 32 , 16 } and k ∈ { 0, 2, . . . , N − 2}. For σk > 0,Eq. (5) implies that Kσk (y) and K′ 
+
+> σk
+
+(y) are positive diagonal operators, and hence Bk is nonsingular. 
+
+Proof of Theorem 2. For an arbitrary clean-latent prediction 
+
+D, the coarse Euler map is 
+
+ΨE 
+
+> k
+
+(D) = zσk + ∆ kBk (zσk − D) .
+
+Solving ΨE 
+
+> k
+
+(D) = zTσk+2 gives 
+
+D = zσk − B−1
+
+> k
+
+zTσk+2 − zσk
+
+∆k
+
+= D†
+
+> k
+
+.
+
+The solution is unique because ∆k̸ = 0 and Bk is nonsingular. Moreover, 
+
+B−1 
+
+> k
+
+= 2 Kσk (y) K′ 
+
+> σk
+
+(y)−1,
+
+which gives Eq. (16). Direct substitution then yields ΨE 
+
+> k
+
+(D†
+
+> k
+
+) = 
+
+zTσk+2 .Fix y and a positive-noise interval bounded away from zero. Hold the current EMA teacher fixed, and assume that its vector field and first derivatives are bounded on the relevant state region. When all three teacher noise levels lie in this interval, the two Euler transitions give 
+
+zTσk+2 − zσk
+
+∆k
+
+= Bk
+
+zσk − D¯θN (zσk , σ k, y ) + O(|∆k|).
+
+Since B−1 
+
+> k
+
+is bounded on this interval, substitution into the Euler target gives 
+
+D† 
+
+> k
+
+= D¯θN (zσk , σ k, y ) + O(|∆k|).
+
+Thus, refinement within this interval recovers the current teacher prediction. This argument excludes zero-noise terminal steps; their exact algebraic endpoint matching remains valid. 14 
+
+B. Final Covariance-Ratio Distillation 
+
+For the 8 → 4 stage, define 
+
+Rk =  Kσk+2 (y)Kσk (y)−11/2 .
+
+Because Kσ (y) is diagonal, all square roots and inverses are evaluated elementwise. 
+
+Proof of Theorem 3. The corresponding coarse transition is 
+
+ΨR 
+
+> k
+
+(D) = D + Rk(zσk − D)= Rkzσk + ( I − Rk)D. 
+
+Solving ΨR 
+
+> k
+
+(D) = zTσk+2 gives 
+
+D = ( I − Rk)−1 
+
+zTσk+2 − Rkzσk
+
+
+
+= D†
+
+> k, ratio
+
+.
+
+The solution is unique by the nonsingularity of I − Rk, and direct substitution proves 
+
+ΨR
+
+> k
+
+
+
+D†
+
+> k, ratio
+
+
+
+= zTσk+2 .
+
+Since the diagonal entries of Kσ (y) decrease when σ
+
+decreases along the reverse schedule, the entries of Rk lie in [0 , 1) ; hence I − Rk is nonsingular. Fix y and restrict σa, σ b to a positive-noise interval bounded away from zero. Let σb = σa + ∆ σ.Taylor expansion gives 
+
+Ra→b(y) =  Kσb (y)Kσa (y)−11/2
+
+= I + 12 ∆σ K ′ 
+
+> σa
+
+(y)Kσa (y)−1 + O(∆ σ2)= I + ∆ σB σa,y + O(∆ σ2).
+
+Consequently, 
+
+Ψϑ
+
+ zσa ; σa → σb, y 
+
+= zσa + ∆ σB σa,y 
+
+zσa − Dϑ(zσa , σ a, y ) + O(∆ σ2).
+
+giving first-order local consistency with the field defined by 
+
+Dϑ away from zero noise. At the terminal step, Ra→0(y) = 0 ,so the update directly returns the denoiser prediction. Finally, since Wσk ,y ≻ 0 in Eq. (17), it reweights the coordinate-wise optimization errors without altering the point-wise zero-loss targets D† 
+
+> k
+
+and D†
+
+> k, ratio
+
+. The distilled schedules are nested subsets of the original 32-step schedule: 
+
+S16 = {σ(32) 2j }16 
+
+> j=0
+
+, S8 = {σ(32) 4j }8
+
+> j=0
+
+, S4 = {σ(32) 8j }4
+
+> j=0
+
+,
+
+where σ(32)  
+
+> j
+
+denotes the j-th noise level of the 32-step schedule. At each stage, one student transition spans two teacher transitions and reproduces their endpoint when its prediction matches the constructed target exactly. The final four-step sampler applies four covariance-ratio transitions, each requiring a single conditional denoiser evaluation. It therefore requires four conditional NFEs in total, followed by one CVAE decoding operation. APPENDIX FOVERALL TRAINING AND SAMPLING PROCEDURE 
+
+Algorithm 1 Purified Vicinal Latent-Space Learning 
+
+Require: Data S = {(xi, y i)}Ndata  
+
+> i=1
+
+; frozen regressor RωR ; vicinity size NAV .
+
+Ensure: Frozen encoder qϕ and decoder Gψ . 
+
+> 1:
+
+Initialize Qbad ← ∅ . 
+
+> 2:
+
+for each CVAE training iteration do  
+
+> 3:
+
+Sample y⋆; compute its neighborhood and weights via Eqs. (1) and (2); draw i ∼ Cat( { ¯Wi,y ⋆ }). 
+
+> 4:
+
+Encode z(i) ∼ qϕ(z | xi, y i); reconstruct bxi = Gψ (z(i), y i). 
+
+> 5:
+
+Update Dω via Eq. (3).  
+
+> 6:
+
+Update (ϕ, ψ ) via Eq. (4).  
+
+> 7:
+
+Periodically refresh Qbad with the worst NIQE-ranked recon-structions.  
+
+> 8:
+
+end for  
+
+> 9:
+
+Freeze qϕ and Gψ . 
+
+> 10:
+
+return qϕ and Gψ .
+
+Algorithm 2 Matrix-Form Model-Guided Diffusion Training 
+
+Require: Data S; frozen encoder qϕ and covariance network hν ;noise schedule; pdrop , wMG , swarm , βEMA .
+
+Ensure: Online/EMA checkpoint and EMA denoiser DθN . 
+
+> 1:
+
+Initialize Dθ and EMA teacher D¯θ ← Dθ . 
+
+> 2:
+
+for each diffusion training iteration s do  
+
+> 3:
+
+Sample (y⋆, i ) via Section III-A; set y = y⋆. 
+
+> 4:
+
+Construct z0 via Eq. (6).  
+
+> 5:
+
+Sample σ and a dropout mask; form zσ . 
+
+> 6:
+
+if s ≤ swarm then  
+
+> 7:
+
+Set zMG 0 = z0. 
+
+> 8:
+
+else  
+
+> 9:
+
+Construct zMG 0 via Eq. (11).  
+
+> 10:
+
+end if  
+
+> 11:
+
+Update θ via Eq. (12) using the same mask.  
+
+> 12:
+
+EMA update: ¯θ ← βEMA ¯θ + (1 − βEMA )θ. 
+
+> 13:
+
+end for  
+
+> 14:
+
+Set DθN ← D¯θ . 
+
+> 15:
+
+return DθN and (θ, ¯θ).
+
+Algorithm 3 Hybrid Step-Halving Distillation 
+
+Require: Data S; frozen encoder qϕ and covariance network hν ;Stage-II online/EMA checkpoint; N = 32 and its noise schedule. 
+
+Ensure: Four-step EMA denoiser Dθ4 . 
+
+> 1:
+
+Start from the N -step checkpoint.  
+
+> 2:
+
+for M = N, N/ 2, . . . , 16 do  
+
+> 3:
+
+Restore the student and EMA teacher from the preceding checkpoint’s online and EMA states.  
+
+> 4:
+
+for each distillation iteration do  
+
+> 5:
+
+Sample (z0, y ) and k ∈ { 0, 2, . . . , M − 2}; construct zσk
+
+via Eq. (7).  
+
+> 6:
+
+Compute the teacher endpoint via Eq. (15).  
+
+> 7:
+
+Compute D† 
+
+> k
+
+via Eq. (16).  
+
+> 8:
+
+Update DθM/ 2 via Eq. (17); update EMA.  
+
+> 9:
+
+end for  
+
+> 10:
+
+Carry both online and EMA states to the next stage.  
+
+> 11:
+
+end for  
+
+> 12:
+
+Load eight-step online/EMA states; teacher rollouts: Eq. (18).  
+
+> 13:
+
+for each final distillation iteration do  
+
+> 14:
+
+Sample (z0, y ) and k ∈ { 0, 2, 4, 6}; construct zσk via Eq. (7).  
+
+> 15:
+
+Compute the teacher endpoint via Eq. (19).  
+
+> 16:
+
+Compute D† 
+
+> k, ratio
+
+via Eq. (20).  
+
+> 17:
+
+Update Dθ4 via Eq. (17) with target D†
+
+> k, ratio
+
+; update EMA.  
+
+> 18:
+
+end for  
+
+> 19:
+
+return the final EMA denoiser as Dθ4 .
