@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-31</span>
+      <span class="dpr-home-dashboard-kicker">2026-11-01</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 17 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 13 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>6</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>2</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-31 22:43:33 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-11-01 22:48:00 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日扫完17篇论文，精读6篇、速读11篇，主线聚焦视频超分与多图生成。</p>
-<p>最值得看的是9.0分的《Residual Motion Splatting》连续时空视频超分和《DeCoRL》多图组合强化学习，速读可补8.0分的《Visual Autoregressive Generation with Next Token Imagination》。</p>
-<p>普通读者建议先读两篇9分精读抓方法框架，再用三篇8分速读扩展生成与扩散方向视野。</p>
+<p>今日共筛出 13 篇论文，精读 2 篇（均为 8.0 分）：一篇讲层级扩散实现镜头可控的自回归视频生成，另一篇是 V-CAPE 产品图编辑的视觉一致性评估。</p>
+<p>最值得看的是视频生成中的“镜头可控”和图像编辑中的“一致性打分”这两个方向；速读中“空间冻结让步缓存留在低误差区”的工程技巧也值得留意。</p>
+<p>普通读者可先读这两篇 8 分精读，建立对可控生成和一致性评估的认识，再按需查看速读里的缓存加速与提示词编辑方法。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">6 篇</strong>
+    <strong class="dpr-home-dashboard-count">2 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Residual Motion Splatting for Continuous Space-Time Video Super-Resolution">Residual Motion Splatting for Continuous Space-Time Video Super-Resolution</span></li><li><span class="dpr-home-dashboard-paper-title" title="DeCoRL: Decomposed Consistency Reinforcement Learning for Multi-Image Composition">DeCoRL: Decomposed Consistency Reinforcement Learning for Multi-Image Composition</span></li><li><span class="dpr-home-dashboard-paper-title" title="EditAgent: Rethinking Agentic Image Editing">EditAgent: Rethinking Agentic Image Editing</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Hierarchical Diffusion for Camera-controlled Autoregressive Video Generation">Hierarchical Diffusion for Camera-controlled Autoregressive Video Generation</span></li><li><span class="dpr-home-dashboard-paper-title" title="V-CAPE: Visual Consistency Assessment for Product Image Editing">V-CAPE: Visual Consistency Assessment for Product Image Editing</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>6</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>2</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,7 +96,7 @@
     <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Visual Autoregressive Generation with Next Token Imagination">Visual Autoregressive Generation with Next Token Imagination</span></li><li><span class="dpr-home-dashboard-paper-title" title="Efficient Covariance-Aware Vicinal Latent Diffusion for Continuous Conditional Image Generation">Efficient Covariance-Aware Vicinal Latent Diffusion for Continuous Conditional Image Generation</span></li><li><span class="dpr-home-dashboard-paper-title" title="AegisFlow: Training-Free Non-Myopic Path-Safe Guided Flow Matching">AegisFlow: Training-Free Non-Myopic Path-Safe Guided Flow Matching</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Freeze What Is Settled, Cache What Is Smooth: Spatial Freezing Keeps Step Caching in Its Low-Error Regime">Freeze What Is Settled, Cache What Is Smooth: Spatial Freezing Keeps Step Caching in Its Low-Error Regime</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Structural Feedback to Prompt Policies: Learning Faithful Text-to-Image Prompt Editors">From Structural Feedback to Prompt Policies: Learning Faithful Text-to-Image Prompt Editors</span></li><li><span class="dpr-home-dashboard-paper-title" title="PolyGandr: Steering Generative Models via Spatial Navigation through Latent Space">PolyGandr: Steering Generative Models via Spatial Navigation through Latent Space</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">real-ir <strong>11</strong></span></div>
 </section>

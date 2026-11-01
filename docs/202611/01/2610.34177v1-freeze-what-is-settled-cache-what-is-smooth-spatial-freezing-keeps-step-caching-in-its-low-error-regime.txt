@@ -1,0 +1,1127 @@
+Freeze What Is Settled, Cache What Is Smooth:
+Spatial Freezing Keeps Step Caching in Its
+Low-Error Regime
+Baiyan Li
+Lancaster University
+Beijing Jiaotong University
+libaiyan@bjtu.edu.cn
+Ganxuan Yang
+Lancaster University
+Beijing Jiaotong University
+23722069@bjtu.edu.cn
+Abstract—Instruction-based image editors built on diffusion
+transformers run tens of denoising steps. Training-free acceler-
+ation either reuses features across steps (step caching) or stops
+computing the regions an edit leaves untouched (region freezing),
+and the two have been combined before. We ask how a high
+speed-up target should be split between them. On Qwen-Image-
+2.1, freezing does more than remove tokens: it lowers the cost of
+every step, so the step cache can reach the same overall speed-
+up with a conservative threshold that keeps its error small. A
+per-step cost model fitted on development runs predicts held-
+out latency with a median error of 4.0% and reproduces the
+speed ceilings of the region methods we re-implemented (2.73×
+predicted vs. 2.70× measured for RegionE). Driving frozen tokens
+to the model’s one-step x0 estimate beats returning them to the
+reference image on every development sample, and in 90% of
+measured cases the composed error stays below the sum of the
+two individual errors. The resulting method, FreezePlan, keeps
+five full steps and gives the rest of the budget to TaylorSeer.
+On a pre-registered test split it runs 5.05× faster end to end at
+29.8 dB PSNR to the original output, with no significant drop
+in a VLM judge score; TaylorSeer at 5.02× reaches 23.5 dB.
+The curve extends to 5.99× at 28.0 dB. Swapping in the region
+selectors of prior methods under our schedule lowers median
+PSNR by only 0.5–0.6 dB, which places the gain in the schedule
+and budget split rather than in the selector.
+Index Terms—image editing, diffusion transformers, inference
+acceleration, feature caching, token freezing
+I. INTRODUCTION
+Diffusion-transformer editors such as FLUX.1 Kontext [1],
+Qwen-Image [2] and Qwen-Image-2.1 [3] follow free-form
+instructions with high fidelity, but every edit runs tens of de-
+noising steps. On one RTX 4090, a 1024-pixel edit with Qwen-
+Image-2.1 takes 24.5 s over 40 steps, and a full transformer
+step costs about 0.58 s. Training-free acceleration follows two
+routes. Step caching [4]–[14] reuses or extrapolates features
+across steps. Region freezing [15], [16] exploits the fact that
+an edit usually changes a small part of the image and stops
+computing the rest.
+Editing has both spatial and temporal redundancy, and prior
+work already exploits the two together. EEdit [17] combines
+spatial locality with step skipping for inversion-based editing,
+RegionE [16] couples region partition, region K/V caching
+and velocity caching, and SpotEdit [15] stacks its region
+skipping with TeaCache and TaylorSeer. Budget-constrained
+scheduling has precedents as well: BudCache [18] searches
+step-level caching policies under a fixed number of function
+evaluations, and ProCache [19] searches constrained caching
+schedules with selective token computation. None of these
+works explains how the errors and costs of freezing and
+caching interact, and that interaction decides how a high
+speed-up target should be split between them.
+On Qwen-Image-2.1 both routes fall short beyond about
+4× (Table II). TaylorSeer drops from 32.8 dB at 4.1× to
+23.5 dB at 5.0× (SSIM 0.97→0.71), and the region methods
+we re-implemented with their original schedules stop at 2.70×
+(RegionE) and 3.90× (SpotEdit) even with TaylorSeer added.
+Other works report higher speed-ups on other models, e.g.,
+6.24× for HyCa [13] on Qwen-Image and up to 10× for
+SpecEdit [20], under different quality protocols or acceleration
+mechanisms.
+We treat high-speed-up editing as a computation-budget
+split under a fidelity constraint and make three observations.
+(i) Under Euler sampling, a frozen token driven toward a fixed
+target reaches it exactly (Prop. 1); its error is set by the target,
+and the model’s one-step x0 estimate is a better target than
+the reference image. (ii) A linear per-step cost model explains
+real latency; the number of full steps sets the speed ceiling,
+and freezing lowers the cost of every other step. (iii) For
+the same overall speed-up, the step cache can therefore use
+a conservative threshold, and in 90% of measured cases the
+composed error stays below the sum of the individual errors.
+Our contributions are:
+• A per-step cost model, validated out of sample, that
+explains the speed ceilings of the region methods we re-
+implemented and motivates spending few full steps and
+a conservative cache (Sec. III-C).
+• Measurements of frozen-token targets and composed er-
+rors (Secs. III-B, III-D).
+• FreezePlan (Fig. 1), which computes only active tokens
+on the native prefix KV cache of Qwen-Image-2.1 and
+outperforms every tested method that reaches 5–6× on a
+pre-registered test split. A schedule-matched comparison
+attributes the gain to the schedule rather than to the region
+arXiv:2610.34177v1  [cs.CV]  25 Oct 2026
+
+
+selector (Sec. IV).
+II. RELATED WORK
+Step caching. DeepCache [4], FORA [5] and ∆-DiT [6]
+reuse features of neighbouring steps; TeaCache [7] and DB-
+Cache [14] decide adaptively when to reuse; ToCa [8] and
+DuCa [9] select tokens; TaylorSeer [10], FoCa [11] and Fre-
+qCa [12] forecast instead of copying; HyCa [13] assigns dif-
+ferent solvers to different feature dimensions. These methods
+improve the cache operator. We leave the operator unchanged
+and reduce the share of the speed-up it must deliver, so
+stronger operators are complementary.
+Budget-constrained schedules. BudCache [18] and Pro-
+Cache [19] allocate a budget along the step axis. We study
+how a second axis, spatial freezing, moves the operating point
+of the step axis.
+Region-aware editing. SpotEdit [15] selects regions with a
+perceptual score, returns frozen regions to the reference and re-
+decides at fixed steps. RegionE [16] partitions with a one-step
+x0 estimate, drives frozen regions to that estimate, keeps their
+K/V and caches velocities of the edited region. EEdit [17]
+targets inversion-based editing; SpecEdit [20] uses dynamic
+resolution. Our frozen-token target and K/V retention follow
+RegionE; we differ in the analysis and in the schedule it leads
+to. RAS [21], HSA [22] and HetCache [23] likewise keep K/V
+of inactive tokens in generation.
+Fewer steps and distillation. Fewer steps or step distil-
+lation [24]–[26] change the sampling trajectory and hence
+the output; we compare against fewer steps and discuss the
+difference in Sec. IV-D.
+III. ANALYSIS AND METHOD
+A. Preliminaries
+Rectified-flow models [27], [28] write xσ = (1−σ)x0 +σϵ
+and predict the velocity vθ(xσ, σ) ≈ϵ −x0. Euler sampling
+over σ0 = 1 > · · · > σK = 0 (K = 40) updates xk+1 = xk +
+(σk+1−σk) vθ(xk, σk), and the one-step estimate is ˆx0(σk) =
+xk −σkvθ. We denote the 40-step output by x∗
+0. Qwen-Image-
+2.1 is block-causal: the instruction and the reference image are
+encoded once into a prefix KV cache, and each step processes
+only the target tokens. A region method splits target tokens
+into an active set A (fraction ρ) and a frozen set F.
+B. Frozen tokens reach their anchor
+Proposition 1. Let token i be frozen from step k0 with a fixed
+anchor ci and velocity v = (xk −ci)/σk. Then xk −ci =
+(σk/σk0)(xk0 −ci) for k ≥k0, so xK = ci.
+Proof. xk+1 −ci = (xk −ci) (1 + (σk+1 −σk)/σk) =
+(σk+1/σk)(xk −ci); telescope and use σK = 0.
+□
+The statement concerns latents and a fixed anchor. While
+frozen, a token’s trajectory depends only on its start, its anchor
+and the noise schedule, not on how active tokens are computed
+or cached. At an intermediate refresh step r (σr̸ = 0) the token
+has not reached ci; FreezePlan then sets a new anchor ˆx0(σr)
+and holds it to the end, so xK = ˆx0(σr), which does depend
+TABLE I
+SPEED CEILINGS IMPLIED BY EQ. (1) (ALL NON-FULL STEPS FREE) AND
+THE HIGHEST MEASURED SPEED-UP ON THE TEST SPLIT.
+Schedule
+Full steps
+Ceiling
+Measured max.
+RegionE [16]
+13
+2.73×
+2.70× (+TS)
+SpotEdit [15]
+7
+4.45×
+3.90× (+TS)
+FreezePlan
+5
+5.62×
+5.48×
+FreezePlan (no refresh)
+4
+6.48×
+5.99×
+on the cached trajectory before r. Frozen K/V still influence
+active tokens, and VAE decoding mixes neighbouring latents.
+Choosing the anchor. Returning frozen tokens to the ref-
+erence (SpotEdit) leaves an error x∗
+0 −ref that does not shrink
+with the decision step, because the dense model itself slightly
+re-renders unedited regions. Driving them to ˆx0(στ) (RegionE)
+leaves ˆx0(στ) −x∗
+0, which shrinks as τ grows. On the truly
+unchanged tokens of 44 development samples (Fig. 2), the x0
+anchor is better on every sample and every decision step; at
+τ = 4 it reduces latent error by 5.2 dB and raises the decoded
+PSNR of the unchanged region to the dense output from 29.0
+to 32.7 dB. Taking the estimate later (a refresh) helps further
+(34.7 dB at step 16). Mixing the two anchors per frequency
+band gains at most 0.7 dB, and extrapolating the x0 trajectory
+in σ is 4–56 dB worse because the trajectory first drifts and
+then converges. The price is fidelity to the input in unchanged
+regions (29.9 vs. 33.3 dB for the reference anchor), which
+equals that of the dense model itself (29.7 dB).
+C. A per-step cost model
+We model the end-to-end time of one edit as
+T = Tfix + nfull C + ncomp (¯ρ C + o) + ncache c,
+(1)
+where nfull, ncomp and ncache count full steps, compact steps
+over active tokens and cached steps, ¯ρ is the mean active
+fraction, and Tfix covers text encoding and VAE. A least-
+squares fit on 968 development runs (22 configurations ×
+44 samples) gives Tfix = 1.48 s, C = 0.575 s, o = 0.005 s
+and c = 0.012 s (R2 = 0.997). Without refitting, the model
+predicts the 1056 runs of the test split, including configurations
+absent from the development set (fewer steps, SpotEdit+TS,
+RegionE+TS), with a median absolute time error of 4.0% (90th
+percentile 7.9%).
+Setting every non-full step to zero cost gives a speed ceiling
+that depends only on nfull (Table I), in the spirit of Amdahl’s
+law [29]. RegionE’s schedule (9 warm-up, 1 forced refresh,
+3 smoothing steps) has 13 full steps and a predicted ceiling
+of 2.73×; with TaylorSeer we measure 2.70×. SpotEdit keeps
+7 full steps and also decodes for its perceptual selector; its
+ceiling is 4.45× and we measure 3.90×. The limit comes from
+the original schedules rather than from region freezing itself;
+under our schedule the same selectors exceed 5× (Sec. IV-C).
+D. Composed errors and the budget split
+Freezing lowers the cost of compact and cached steps, so
+a given threshold δ yields a higher speed-up, and a given
+
+
+(a) Denoising schedule (40 steps)
+dense steps 𝑘< 𝜏
+compact steps: active tokens only, step cache on top
+decide once at 𝜏
+refresh at 𝑟
+all tokens computed
+active tokens computed
+active tokens, cached step (DBCache + TaylorSeer)
+(b) One compact step
+target tokens
+(blue: active edit region)
+denoising
+active token: model step
+anchor 𝑐= ˆ𝑥0(𝜎𝜏)
+frozen token: 𝑣= (𝑥−𝑐)/𝜎,
+ends exactly at 𝑐(Prop. 1)
+attention context (prefix KV cache)
+text reference frozen K/V
+active tokens (Q, K, V)
+attend
+frozen K/V appended once
+per decision / refresh
+Fig. 1. FreezePlan (Sec. III-E). (a) Schedule: τ full steps, one region decision, compact steps over active tokens with step caching, one optional refresh. (b)
+In a compact step, frozen tokens move straight to their anchor c = ˆx0(στ) and their K/V is appended once to the prefix cache that active tokens attend to.
+The cached-step pattern in (a) is illustrative.
+0
+10
+20
+30
+step k of the estimate ̂x0(σk)
+0
+10
+20
+30
+40
+error reduction vs. ref. (dB)
+better than the reference
+on 44/44 samples at every k
+k=4: +5.2 dB
+(a) x0-anchor vs. reference anchor
+30
+35
+PSNR (dB)
+ref.̂
+x0@4
+@6
+@16
+@22
+dense vs. input
+vs. dense
+vs. input
+29.0
+32.7
+33.6
+34.7
+35.4
+(b) unchanged region, pixels
+Fig. 2. Frozen-token anchor (development set, unchanged tokens). (a) Latent
+error reduction of the x0 anchor over the reference anchor vs. the step of
+the estimate (median and IQR over 44 samples). (b) Decoded PSNR of the
+unchanged region to the dense output and to the input.
+speed-up needs a smaller δ. On the development set, reaching
+5× requires δ = 0.8 for TaylorSeer alone (24.0 dB) but only
+δ = 0.3 when composed with freezing (31.0 dB; Fig. 3b).
+This helps only if the two errors do not amplify each other.
+For 30 development samples in which tokens were frozen, two
+refresh settings and three thresholds, we measured the MSE of
+freezing alone, caching alone (same δ) and the composition.
+In 90% of the 180 cases the composed MSE is below the
+sum of the individual ones (95% CI 86–94%, bootstrapped
+over samples); the median ratio is 0.76 (CI 0.68–0.81). All 18
+exceptions occur at δ = 0.3, 15 of them with an early refresh
+at step 16, exceeding the bound by 1.5 dB in the median. We
+treat this as an empirical regularity over the tested range rather
+than a general bound. The exceptions point to an interaction
+between a refresh and the Taylor extrapolation across it.
+20
+30
+40
+additive bound (dB)
+20
+25
+30
+35
+40
+measured (dB)
+90% of 180 above:
+better than the sum
+(a) errors add at most
+δ=0.12
+δ=0.3
+δ=0.5
+0.25
+0.50
+0.75
+cache threshold δ
+2
+3
+4
+5
+6
+speed-up (×)
+41
+32
+30
+24
+34
+30
+30
+×5
+(b) same δ, more speed
+TaylorSeer
+FreezePlan+TS
+Fig. 3. Composition on the development set. (a) Measured composed PSNR
+vs. the PSNR implied by summing the individual MSEs; 90% of points lie
+above the diagonal. (b) Speed-up vs. cache threshold δ; labels give PSNR.
+With freezing, 5× is reached at δ = 0.3.
+E. FreezePlan
+Fig. 1 summarizes the schedule and one compact step.
+Decision. The first τ = 4 steps run in full. For each token
+we average ∥ˆx0 −ref∥over them; tokens above the median
+plus 2×MAD become active and the active set is dilated by
+one token. If the median distance exceeds 0.5 (a global edit),
+nothing is frozen (fallback). Freezing. Frozen tokens follow
+Prop. 1 toward ˆx0(στ−1); their K/V is appended once to the
+prefix cache. Refresh. One full step at r = 21 renews the
+anchors and the appended K/V; it is optional (Sec. IV-C).
+Caching. Active tokens use DBCache (F1B0) with first-order
+TaylorSeer at δ = 0.3; our implementation reproduces the
+official cache-dit [14] outputs bit-for-bit. Execution. Active
+tokens are gathered into a compact sequence, so the trans-
+
+
+TABLE II
+TEST SPLIT B (44 SAMPLES, PRE-REGISTERED). MEDIANS; ∆VLM:
+MEAN PAIRED DIFFERENCE TO THE DENSE OUTPUT WITH 95% CI.
+†FASTEST SETTING THE METHOD REACHES.
+Method
+Speed↑PSNR↑Edit↑SSIM↑
+∆VLM
+TaylorSeer δ=0.8
+5.02×
+23.45
+19.71
+0.707
+−1.59 [−1.93,−1.25]
+TaylorSeer δ=1.0
+5.66×
+19.39
+17.11
+0.522
+−4.11 [−4.67,−3.53]
+DBCache δ=0.8
+5.03×
+23.33
+19.65
+0.700
+−1.67 [−2.01,−1.33]
+6 steps
+5.17×
+22.22
+17.51
+0.869
+−0.23 [−0.38,−0.10]
+SpotEdit+TS†
+3.90×
+26.14
+20.00
+0.884
+−0.44 [−0.78,−0.17]
+RegionE+TS†
+2.70×
+32.93
+27.60
+0.960
++0.12 [−0.10,+0.47]
+FreezePlan
+5.05×
+29.77
+24.61
+0.930
+−0.06 [−0.15,+0.01]
+FreezePlan, no refresh 5.53×
+29.56
+24.44
+0.917
+−0.11 [−0.20,−0.02]
++ δ=0.5
+5.99×
+28.02
+22.24
+0.893
+−0.12 [−0.21,−0.02]
+former processes only them. All of τ, r, the selection rule and
+δ were chosen on the development set. The final choice, the
+composed configuration with the highest PSNR among those
+measured at ≥5×, was fixed before test split B was generated.
+IV. EXPERIMENTS
+A. Setup
+We use Qwen-Image-2.1 [3] (40 steps, CFG=1, 1024 px,
+bf16) on one RTX 4090 and the English part of GEdit-
+Bench [30] (11 edit types). Within each type, samples are
+ordered by the SHA-1 of their key and fixed positions form
+disjoint splits of 44 samples: development (all design choices),
+test A and test B (main). Configurations and pass criteria of
+each test split were written to a hashed contract before any
+output was generated; one earlier test run with a different
+selection rule was stopped at 12/43 samples because its con-
+figuration could not reach 5× (Appendix H). We report PSNR
+and SSIM [31] to the 40-step output (also on truly changed
+tokens), the GEdit VIEScore prompts [30], [32] judged by
+Qwen3-VL-8B [33] as a paired difference to the dense out-
+put with bootstrap 95% CIs (∆VLM), and the median real
+end-to-end speed-up measured with CUDA events. Baselines
+are TaylorSeer and DBCache with official cache-dit settings
+(δ = 0.3–1.0), fewer steps (8/7/6), and SpotEdit and RegionE
+ported from their official code with TaylorSeer as the step
+cache; every baseline is pushed to the highest speed it reaches.
+Each sample is generated once with a fixed seed (20261023),
+shared by all methods. All runs use one RTX 4090 (48 GB);
+the test split takes about 2.3 GPU-hours for 24 configurations
+and 1.4 more for VLM judging.
+B. Main results
+Table II and Fig. 4 test whether FreezePlan outperforms
+the methods able to reach 5×. At nearly equal speed (5.05×
+vs. 5.02×), FreezePlan is 6.3 dB above TaylorSeer and keeps
+the edited region 4.9 dB higher; against the TaylorSeer curve
+interpolated at 5.53× the margin is 9.3 dB. ∆VLM shows no
+significant drop for FreezePlan (−0.06, CI [−0.15, +0.01]);
+this is not a proof of equivalence. DBCache and fewer steps
+give the same picture in PSNR. Neither region method reaches
+5× with its original schedule (Table I): RegionE+TS stops
+2
+4
+6
+real end-to-end speed-up (×)
+20.0
+22.5
+25.0
+27.5
+30.0
+32.5
+PSNR vs. dense (dB)
+Fewer steps
+DBCache
+TaylorSeer
+SpotEdit
+RegionE
+FreezePlan
+≥5× regime
+(a) fidelity to the dense output
+2
+4
+6
+real end-to-end speed-up (×)
+−4
+−3
+−2
+−1
+0
+VLM score − dense
+FreezePlan
+(b) VLM judge (GEdit VIEScore)
+Fewer steps
+DBCache
+TaylorSeer
+SpotEdit
+RegionE
+FreezePlan (ours)
+Fig. 4. Speed–fidelity on test split B. (a) PSNR to the dense output vs. real
+speed-up; (b) ∆VLM. Shaded: the ≥5× regime.
+TABLE III
+TOP: REGION SELECTORS UNDER THE SCHEDULE AND CACHE OF
+FREEZEPLAN (POST HOC). BOTTOM: ONE COMPONENT REMOVED AT A
+TIME. TEST SPLIT B; ρ: MEAN FRACTION OF TOKENS COMPUTED PER
+STEP.
+Variant
+Speed
+PSNR
+ρ
+∆VLM
+FreezePlan selector
+5.03×
+29.77
+0.41
+−0.06
+RegionE selector [16]
+5.23×
+29.29
+0.31
++0.05
+SpotEdit selector [15]
+5.01×
+29.14
+0.43
+−0.16
+reference anchor (SpotEdit-style)
+5.06×
+27.84
+0.41
+−0.40
+no frozen K/V
+5.15×
+29.02
+0.41
+−0.21
+no global fallback
+5.11×
+28.84
+0.37
+−0.15
+random active set
+5.07×
+28.65
+0.41
+−0.18
+at 2.70× with higher fidelity than FreezePlan (32.9 dB), and
+SpotEdit+TS stops at 3.90× with lower fidelity (26.1 dB). On
+test split A, an earlier version of FreezePlan (reference anchor,
+no refresh, DBCache) was 7.8 dB above TaylorSeer at 5.56×
+with ∆VLM −0.21; this supports the same direction on inde-
+pendent samples but does not validate the final configuration.
+C. Schedule-matched selectors and ablations
+To separate the schedule from the region selector, we kept
+the schedule and cache of FreezePlan fixed and swapped
+only the selector (Table III, top; a post-hoc comparison, not
+pre-registered). All three selectors exceed 5×. Their median
+PSNR is 0.5–0.6 dB below that of FreezePlan, and the paired
+per-sample difference is 0.26 dB (95% CI 0.08–0.46) against
+RegionE and 0.29 dB (0.08–0.73) against SpotEdit. RegionE’s
+partition freezes more tokens and runs faster, so it lies close
+to the same speed–fidelity curve. ∆VLM differences between
+selectors are not significant. The gain of FreezePlan therefore
+comes mainly from the schedule and budget split, not from
+the selector. Removing one component at a time (Table III,
+bottom) shows that the x0 anchor matters most; the refresh is
+a speed–fidelity knob rather than a requirement: dropping it
+trades 0.21 dB for 9.5% more speed.
+D. Relation to fewer steps
+Six steps reach 5.17× at 22.2 dB but lose only 0.23 VLM
+points: a shorter trajectory yields a different yet plausible
+image. We target reproducing the output the original model
+
+
+produces for a given input and seed, on which FreezePlan is
+7.4 dB better; it is also slightly better in ∆VLM (+0.17, CI
+[+0.05, +0.30]). The two approaches are orthogonal and can
+be combined.
+E. Qualitative results
+Fig. 5 shows an edit on an original anime illustration
+that is not part of GEdit-Bench. We generated five such
+illustrations with Qwen-Image-2.1 and edited them with the
+configurations of split B; the figure shows the one with the
+smallest gain of FreezePlan over the speed-matched baselines.
+Flat colour regions make step-caching artefacts easy to see:
+at 5×, TaylorSeer and DBCache turn the cake into noise,
+while FreezePlan matches the dense output. Appendix K
+shows all five illustrations and split-B samples chosen at fixed
+percentiles of the PSNR gain.
+V. LIMITATIONS
+(1) The fallback fired on 11/44 test samples (25%), where
+FreezePlan is slightly below TaylorSeer at the same threshold
+(details and a fix in Appendix I). (2) Newly added small
+objects occasionally show faint ghosting near the frozen
+boundary; we have not quantified it. (3) All results are on
+Qwen-Image-2.1 and rely on its prefix KV cache; the cost
+coefficients are specific to one GPU. (4) The x0 anchor lets
+unedited regions follow the dense model’s slight re-rendering
+instead of copying the input. (5) Each test split has 44 samples
+generated with one seed, the VLM judge is a local 8B model
+rather than a commercial one, and the selector comparison of
+Sec. IV-C was added after the test results were known.
+VI. CONCLUSION
+On
+Qwen-Image-2.1,
+the
+region
+methods
+we
+re-
+implemented are capped by the full steps in their schedules,
+and step caching alone crosses its error knee at high speed-
+ups. Spending few full steps and handing the rest of the
+budget to a conservative cache, FreezePlan reaches 5.05× at
+29.8 dB on a pre-registered split with no significant VLM
+drop, and the schedule-matched comparison locates the gain
+in the schedule and budget split.
+REFERENCES
+[1] Black Forest Labs, S. Batifol, A. Blattmann, F. Boesel, S. Consul,
+C. Diagne, T. Dockhorn, J. English, Z. English, P. Esser, S. Kulal,
+K. Lacey, Y. Levi, C. Li, D. Lorenz, J. M¨uller, D. Podell, R. Rombach,
+H. Saini, A. Sauer, and L. Smith, “FLUX.1 Kontext: Flow Matching
+for In-Context Image Generation and Editing in Latent Space,” arXiv
+preprint arXiv:2506.15742, 2025.
+[2] C. Wu, J. Li, J. Zhou, J. Lin, K. Gao, K. Yan, S. ming Yin, S. Bai,
+X. Xu, Y. Chen, Y. Chen, Z. Tang, Z. Zhang, Z. Wang, A. Yang, B. Yu,
+C. Cheng, D. Liu, D. Li, H. Zhang, H. Meng, H. Wei, J. Ni, K. Chen,
+K. Cao, L. Peng, L. Qu, M. Wu, P. Wang, S. Yu, T. Wen, W. Feng, X. Xu,
+Y. Wang, Y. Zhang, Y. Zhu, Y. Wu, Y. Cai, and Z. Liu, “Qwen-Image
+Technical Report,” arXiv preprint arXiv:2508.02324, 2025.
+[3] Qwen
+Team,
+“Qwen-image-2.1,”
+https://huggingface.co/Qwen/
+Qwen-Image-2.1, 2026, revision d26bb61.
+[4] X. Ma, G. Fang, and X. Wang, “DeepCache: Accelerating Diffusion
+Models for Free,” arXiv preprint arXiv:2312.00858, 2023.
+[5] P. Selvaraju, T. Ding, T. Chen, I. Zharkov, and L. Liang, “FORA: Fast-
+Forward Caching in Diffusion Transformer Acceleration,” arXiv preprint
+arXiv:2407.01425, 2024.
+[6] P. Chen, M. Shen, P. Ye, J. Cao, C. Tu, C.-S. Bouganis, Y. Zhao, and
+T. Chen, “∆-DiT: A Training-Free Acceleration Method Tailored for
+Diffusion Transformers,” arXiv preprint arXiv:2406.01125, 2024.
+[7] F. Liu, S. Zhang, X. Wang, Y. Wei, H. Qiu, Y. Zhao, Y. Zhang, Q. Ye,
+and F. Wan, “Timestep Embedding Tells: It’s Time to Cache for Video
+Diffusion Model,” arXiv preprint arXiv:2411.19108, 2024.
+[8] C. Zou, X. Liu, T. Liu, S. Huang, and L. Zhang, “Accelerating Dif-
+fusion Transformers with Token-wise Feature Caching,” arXiv preprint
+arXiv:2410.05317, 2024.
+[9] C. Zou, S. Zheng, E. Zhang, R. Guo, H. Xu, Z. Shi, C. He, X. Hu,
+and L. Zhang, “Rethinking Token-wise Feature Caching: Accelerating
+Diffusion Transformers with Dual Feature Caching,” arXiv preprint
+arXiv:2412.18911, 2024.
+[10] J. Liu, C. Zou, Y. Lyu, J. Chen, and L. Zhang, “From Reusing to
+Forecasting: Accelerating Diffusion Models with TaylorSeers,” arXiv
+preprint arXiv:2503.06923, 2025.
+[11] S. Zheng, L. Feng, X. Wang, Q. Zhou, P. Cai, C. Zou, J. Liu, Y. Lin,
+J. Chen, Y. Ma, and L. Zhang, “Forecast then Calibrate: Feature
+Caching as ODE for Efficient Diffusion Transformers,” arXiv preprint
+arXiv:2508.16211, 2025.
+[12] J. Liu, P. Cai, Q. Zhou, Y. Lin, D. Kong, B. Huang, Y. Pan,
+H. Xu, C. Zou, J. Tang, S. Zheng, and L. Zhang, “FreqCa: Acceler-
+ating Diffusion Models via Frequency-Aware Caching,” arXiv preprint
+arXiv:2510.08669, 2025.
+[13] S. Zheng, G. Chen, Q. Zhou, Y. Lin, L. He, C. Zou, P. Cai, J. Liu, and
+L. Zhang, “Let Features Decide Their Own Solvers: Hybrid Feature
+Caching for Diffusion Transformers,” arXiv preprint arXiv:2510.04188,
+2025, ICLR 2026.
+[14] vipshop, “cache-dit: A pytorch-native inference engine with cache,
+parallelism, quantization and cpu offload for dits,” https://github.com/
+vipshop/cache-dit, 2025, commit f6f9ca3.
+[15] Z. Qin, Z. Tan, Z. Wang, S. Liu, and X. Wang, “SpotEdit: Se-
+lective Region Editing in Diffusion Transformers,” arXiv preprint
+arXiv:2512.22323, 2025.
+[16] P. Chen, X. Zeng, M. Zhao, M. Shen, P. Ye, B. Xiang, Z. Wang,
+W. Cheng, G. Yu, and T. Chen, “RegionE: Adaptive Region-Aware Gen-
+eration for Efficient Image Editing,” arXiv preprint arXiv:2510.25590,
+2025.
+[17] Z. Yan, Y. Ma, C. Zou, W. Chen, Q. Chen, and L. Zhang, “EEdit:
+Rethinking the Spatial and Temporal Redundancy for Efficient Image
+Editing,” arXiv preprint arXiv:2503.10270, 2025.
+[18] M. Lei, T. Zhao, L. Yuan, and C. Zhang, “Budget-Constrained Step-
+Level Diffusion Caching,” arXiv preprint arXiv:2606.13496, 2026,
+ICML 2026.
+[19] F. Cao, Y. Chen, Z. You, and W. Luo, “ProCache: Constraint-Aware
+Feature Caching with Selective Computation for Diffusion Transformer
+Acceleration,” arXiv preprint arXiv:2512.17298, 2025, AAAI 2026.
+[20] Z. Yan, S. Zheng, H. Qin, X. Tu, Y. Wang, J. Liu, J. Ren, Y. Lin, P. Cai,
+J. Ren, X. Zhang, and L. Zhang, “SpecEdit: Training-Free Acceleration
+for Diffusion based Image Editing via Semantic Locking,” arXiv preprint
+arXiv:2605.02152, 2026.
+[21] Z. Liu, Y. Yang, C. Zhang, Y. Zhang, L. Qiu, Y. You, and Y. Yang,
+“Region-Adaptive Sampling for Diffusion Transformers,” arXiv preprint
+arXiv:2502.10389, 2025.
+[22] E. Chu and V. M. Patel, “Not All Tokens Need 40 Steps: Heterogeneous
+Step Allocation in Diffusion Transformers for Efficient Video Genera-
+tion,” arXiv preprint arXiv:2605.06892, 2026.
+[23] T. Liu, Y. Lu, L. Zhang, C. Cai, J. Gao, Y. Wang, K.-H. Yap, and L.-P.
+Chau, “Accelerating Diffusion-based Video Editing via Heterogeneous
+Caching: Beyond Full Computing at Sampled Denoising Timestep,”
+arXiv preprint arXiv:2603.24260, 2026.
+[24] S. Luo, Y. Tan, L. Huang, J. Li, and H. Zhao, “Latent Consistency Mod-
+els: Synthesizing High-Resolution Images with Few-Step Inference,”
+arXiv preprint arXiv:2310.04378, 2023.
+[25] A. Sauer, D. Lorenz, A. Blattmann, and R. Rombach, “Adversarial
+Diffusion Distillation,” arXiv preprint arXiv:2311.17042, 2023.
+[26] T. Yin, M. Gharbi, R. Zhang, E. Shechtman, F. Durand, W. T. Freeman,
+and T. Park, “One-step Diffusion with Distribution Matching Distilla-
+tion,” arXiv preprint arXiv:2311.18828, 2023.
+[27] Y. Lipman, R. T. Q. Chen, H. Ben-Hamu, M. Nickel, and M. Le, “Flow
+Matching for Generative Modeling,” arXiv preprint arXiv:2210.02747,
+2022.
+
+
+cup → cake
+Input
+1.00×
+Dense (40 steps)
+5.11× · 28.5 dB
+FreezePlan (ours)
+5.04× · 20.9 dB
+TaylorSeer
+5.04× · 20.8 dB
+DBCache
+4.62× · 26.7 dB
+7 steps
+3.85× · 27.8 dB
+SpotEdit+TS
+2.72× · 29.5 dB
+RegionE+TS
+Fig. 5. “Replace the cup in her hands with a slice of strawberry cake” on an original anime illustration (outside the benchmark), at about 5× real speed-up.
+Labels: speed-up · PSNR to the 40-step output; bottom row: crop of the edited region. Step caching alone (TaylorSeer, DBCache) breaks down; fewer steps
+give a plausible but different cake; the re-implemented region methods (SpotEdit, RegionE, both with TaylorSeer) cannot reach this speed with their schedules.
+FreezePlan (5.11×) matches the dense output.
+[28] X. Liu, C. Gong, and Q. Liu, “Flow Straight and Fast: Learning
+to Generate and Transfer Data with Rectified Flow,” arXiv preprint
+arXiv:2209.03003, 2022.
+[29] G. M. Amdahl, “Validity of the single processor approach to achieving
+large scale computing capabilities,” in Proceedings of the April 18-20,
+1967, spring joint computer conference on - AFIPS ’67 (Spring), ser.
+AFIPS ’67 (Spring).
+ACM Press, 1967, p. 483. [Online]. Available:
+http://dx.doi.org/10.1145/1465482.1465560
+[30] S. Liu, Y. Han, P. Xing, F. Yin, R. Wang, W. Cheng, J. Liao, Y. Wang,
+H. Fu, C. Han, G. Li, Y. Peng, Q. Sun, J. Wu, Y. Cai, Z. Ge, R. Ming,
+L. Xia, X. Zeng, Y. Zhu, B. Jiao, X. Zhang, G. Yu, and D. Jiang,
+“Step1X-Edit: A Practical Framework for General Image Editing,” arXiv
+preprint arXiv:2504.17761, 2025.
+[31] Z. Wang, A. Bovik, H. Sheikh, and E. Simoncelli, “Image quality
+assessment:
+from
+error
+visibility
+to
+structural
+similarity,”
+IEEE
+Transactions on Image Processing, vol. 13, no. 4, p. 600–612, Apr.
+2004. [Online]. Available: http://dx.doi.org/10.1109/TIP.2003.819861
+[32] M. Ku, D. Jiang, C. Wei, X. Yue, and W. Chen, “VIEScore: Towards
+Explainable Metrics for Conditional Image Synthesis Evaluation,” arXiv
+preprint arXiv:2312.14867, 2023.
+[33] S. Bai, Y. Cai, R. Chen, K. Chen, X. Chen, Z. Cheng, L. Deng, W. Ding,
+C. Gao, C. Ge, W. Ge, Z. Guo, Q. Huang, J. Huang, F. Huang, B. Hui,
+S. Jiang, Z. Li, M. Li, M. Li, K. Li, Z. Lin, J. Lin, X. Liu, J. Liu, C. Liu,
+Y. Liu, D. Liu, S. Liu, D. Lu, R. Luo, C. Lv, R. Men, L. Meng, X. Ren,
+X. Ren, S. Song, Y. Sun, J. Tang, J. Tu, J. Wan, P. Wang, P. Wang,
+Q. Wang, Y. Wang, T. Xie, Y. Xu, H. Xu, J. Xu, Z. Yang, M. Yang,
+J. Yang, A. Yang, B. Yu, F. Zhang, H. Zhang, X. Zhang, B. Zheng,
+H. Zhong, J. Zhou, F. Zhou, J. Zhou, Y. Zhu, and K. Zhu, “Qwen3-VL
+Technical Report,” arXiv preprint arXiv:2511.21631, 2025.
+APPENDIX A
+CONVENTIONS
+Data labels: [dev] development split, [A] test split A, [B]
+test split B (main, pre-registered), [A6] post-hoc selector
+comparison on split B. All numbers are medians over samples
+unless stated; PSNR and SSIM are measured against the 40-
+step output of the same run; identical outputs (infinite PSNR)
+are counted as 100 dB.
+APPENDIX B
+SCOPE OF PROPOSITION 1
+For a token frozen at step k0 with a fixed anchor c,
+xk −c = (σk/σk0)(xk0 −c) for all k ≥k0. The frozen
+trajectory is therefore fixed by its start, its anchor and the
+noise schedule; computation and caching of active tokens
+do not enter it. The token reaches c only if the anchor is
+held until σK = 0. At a refresh step r the token is still at
+c + (σr/σk0)(xk0 −c); the full step there computes a new
+anchor ˆx0(σr), which FreezePlan holds to the end. That anchor
+is computed on a trajectory shaped by the earlier cached steps,
+so the final frozen latent depends on the cache before r. Frozen
+K/V also enter the attention of active tokens, and the VAE
+decoder mixes neighbouring latents, so pixel errors are not
+strictly separable. Sec. III-B claims only that between refreshes
+the frozen latents do not depend on the concurrent cache.
+APPENDIX C
+EXCEPTIONS TO ERROR ADDITIVITY [DEV]
+We measured 180 cases: 30 samples in which tokens were
+frozen, refresh at step 16 or 21, and δ ∈{0.12, 0.3, 0.5}. For
+each case we compare the composed MSE with the sum of the
+MSE of freezing alone and of TaylorSeer alone at the same δ.
+TABLE IV
+COMPOSED MSE RELATIVE TO THE ADDITIVE BOUND (180 CASES). CIS
+BOOTSTRAP OVER SAMPLES.
+Share of cases below the bound
+90% (95% CI 86–94%)
+Median ratio composed / bound
+0.76 (95% CI 0.68–0.81)
+Exceptions
+18 (all at δ = 0.3)
+with refresh at step 16 / 21
+15 / 3
+distinct samples
+15 of 30
+Excess over the bound (median / max.)
+1.5 / 4.0 dB
+Cache share of the bound (exceptions / others)
+0.56 / 0.40
+The exceptions concentrate where the cache error is relatively
+large and the refresh is early. A plausible cause is that
+the Taylor derivative straddles the refresh, mixing features
+computed with stale frozen K/V and with refreshed ones. We
+have not verified this mechanism; a direct test would reset the
+TaylorSeer history at the refresh. The later refresh (r = 21)
+used by FreezePlan is less affected.
+
+
+APPENDIX D
+COST MODEL
+Eq. (1) was fitted by least squares on 968 development runs
+(Tfix = 1.48 s, C = 0.575 s, o = 0.005 s, c = 0.012 s; R2 =
+0.997; median absolute time error 2.2%, 90th percentile 6.4%).
+Table V applies the same coefficients to test split B without
+refitting.
+TABLE V
+OUT-OF-SAMPLE PREDICTION ON SPLIT B (1056 RUNS).
+CONFIGURATIONS MARKED * DO NOT APPEAR IN THE DEVELOPMENT SET.
+Configuration
+Measured
+Predicted
+Time error
+TaylorSeer δ = 0.3 / 0.8 / 1.0 4.09 / 5.02 / 5.66× 4.15 / 5.14 / 5.84×
+1.3–2.3%
+8 / 7 / 6 steps*
+4.15 / 4.61 / 5.17× 4.03 / 4.45 / 4.97×
+3.4–4.5%
+RegionE+TS*
+2.66–2.70×
+2.61–2.64×
+2.5%
+SpotEdit+TS*
+3.81–3.90×
+4.09–4.16×
+6.4%
+FreezePlan+TS (all variants)
+5.05–5.99×
+4.78–5.59×
+4.9–6.0%
+All 1056 runs
+median 4.0%, P90 7.9%
+Two biases are systematic and explicable. The model under-
+predicts the speed of composed configurations by about 6%,
+because the cost of a compact step does not scale exactly
+linearly with the active fraction. It over-predicts SpotEdit by
+about 7%, because the decode needed by its perceptual selector
+is not modelled. All runs used one RTX 4090; the coefficients
+are hardware-specific, but the structural conclusion (full steps
+set the ceiling) is not.
+APPENDIX E
+REFRESH AS A SPEED–FIDELITY KNOB
+On split B, FreezePlan with a refresh reaches 5.05× at
+29.77 dB and without it 5.53× at 29.56 dB; both lie on the
+speed–fidelity front. On the development set the refresh adds
+2.1 dB when no step cache is used (35.1 vs. 33.0 dB), so its
+benefit shrinks once the cache error dominates.
+APPENDIX F
+ALTERNATIVES THAT DID NOT WORK [DEV]
+• Per-band anchor mixing: the optimal weights on the x0
+anchor are 1.02–1.16 in every frequency band, and the
+gain over the plain x0 anchor is at most 0.7 dB.
+• Extrapolating ˆx0(σ) to σ = 0 with polynomials over
+the warm-up steps is 4–56 dB worse than the reference
+anchor; the x0 trajectory drifts before it converges.
+• Partial refresh: the error of the x0 anchor is spread out
+(the worst 10% of tokens carry 17% of it), and decision-
+time predictors correlate weakly with it (Spearman ≤
+0.38). Refreshing 30% of tokens recovers 1.0 dB versus
+3.8 dB for a full refresh.
+APPENDIX G
+WHY THE RE-IMPLEMENTED REGION METHODS STAY
+BELOW 5×
+RegionE. Its schedule keeps 13 full steps (9 warm-up, 1
+forced update, 3 smoothing steps; rescaled from its 28-step
+setting). The cost model caps it at 2.73×; we measure 2.70×
+with TaylorSeer. With its own AVDCache, raising the cache
+threshold from 0.03 to 0.1 or 0.2 produced identical outputs:
+the official rule recomputes every step at which the decay ratio
+γ(1 −∆σ) is at least 1, independently of the threshold.
+SpotEdit. Its schedule keeps 7 full steps (4 initial steps and
+resets at 10, 18, 25) and decodes at each decision for its LPIPS
+selector; the ceiling is 4.45× and we measure 3.90×.
+Schedule-matched comparison [A6]. Under the sched-
+ule and cache of FreezePlan, both selectors exceed 5×
+(Table III). Their ∆VLM to the dense output is +0.05
+[−0.17, +0.41] (RegionE) and −0.16 [−0.32, −0.02] (SpotE-
+dit), against −0.06 [−0.15, +0.01] for FreezePlan; the paired
+differences to FreezePlan are −0.11 [−0.46, +0.09] and +0.09
+[−0.01, +0.22], neither significant. A reference anchor under
+the same schedule costs 1.9 dB (Table III, bottom).
+APPENDIX H
+PROTOCOL, AMENDMENTS AND THE STOPPED RUN
+Contracts. For each test split, sample list, configurations
+and pass criteria were written to a JSON contract whose SHA-
+256 was recorded before generation.
+Amendments, all recorded before the affected analysis: A1,
+infinite PSNR is counted as 100 dB in medians; A2, compar-
+isons against SpotEdit points use the nearest faster measured
+point instead of interpolation; A3, competitor coverage was
+extended on split A (TaylorSeer above 4.4×, fewer steps);
+A5, on split B a local-edit-only analysis was added after 6 of
+44 samples, as secondary to the registered all-sample gates;
+C1, the development analysis script dropped infinite PSNR
+values contrary to A1 and was corrected before the automatic
+configuration choice, which did not change.
+Stopped run (GEdit positions 12–15). Its configuration
+was selected by a rule that ranked region-only quality and
+chose a decision step τ = 6. With seven non-cacheable steps,
+its composition with TaylorSeer peaked near 4.4× on local
+edits, so the ≥5× regime could not be tested, and the run was
+stopped at 12 of 43 samples. Partial results on its local edits:
+region-only 2.14× at 38.6 dB; with TaylorSeer δ = 0.8, 4.37×
+at 26.5 dB versus 5.04× at 23.9 dB for TaylorSeer alone;
+RegionE 2.42× at 38.8 dB and, with AVDCache threshold 0.1
+or 0.2, an identical 2.52× at 35.3 dB.
+Reproducibility. The in-path TaylorSeer equals the official
+cache-dit output bit-for-bit at four thresholds on all 44 samples
+of split A. On Qwen-Image-2.1, cache-dit’s calibrator counter
+runs two steps behind the denoising step, because the step-
+0 reference-extraction pass enters the cached blocks; we re-
+produce this offset. Re-running the dense model on split A
+reproduced 39 of 44 outputs exactly; the other five differ at
+68–70 dB PSNR (at most 2 grey levels), which we attribute to
+non-deterministic GPU kernels.
+RegionE port. AVDCache factors γ are published for 28
+steps only; we refit them on the development trajectories as
+mean norm ratios divided by (1−∆σ). Velocity reuse follows
+the official code (last computed velocity times the current
+ratio), which differs from the cumulative product written in
+the paper.
+
+
+APPENDIX I
+GLOBAL EDITS AND THE FALLBACK [B]
+The fallback fired on 11/44 split-B samples (25%), mostly
+style and background changes. It depends on the measured x0
+distance, not on the edit category: motion and portrait edits,
+although “global” in GEdit-Bench, never triggered it and froze
+about 63% of tokens.
+TABLE VI
+FALLBACK RATE AND ACTIVE FRACTION ON SPLIT B.
+Subset
+Samples
+Fallback
+ρ (no fallback)
+Global categories
+20
+9 (style 4/4, background 4/4, tone 1/4)
+0.37
+Local categories
+24
+2 (colour 1, text 1)
+0.40
+All
+44
+11 (25%)
+0.38
+On the 11 fallback samples, FreezePlan (δ = 0.3) reaches
+4.07× at 25.1 dB, against 4.09× at 26.4 dB for TaylorSeer at
+the same threshold and 5.02× at 19.8 dB at a similar speed.
+With nothing frozen, FreezePlan differs from TaylorSeer only
+by the refresh step, so the 1.3 dB gap most likely comes from
+the refresh interrupting the Taylor extrapolation; the exceptions
+to error additivity (Appendix C; 15 of 18 with a refresh
+at step 16) point the same way. Skipping the refresh when
+the fallback fires is a straightforward fix that we have not
+evaluated, since it would change the pre-registered configu-
+ration. On the 11 global-category samples without fallback,
+FreezePlan reaches 5.13× at 31.1 dB against 5.01× at 24.1 dB
+for TaylorSeer δ = 0.8. By category group: local, FreezePlan
+5.07×/31.1 dB (∆VLM −0.02) vs. TaylorSeer 5.02×/24.4 dB;
+global, 4.96×/28.7 dB vs. 5.02×/22.5 dB.
+APPENDIX J
+FEWER STEPS ON BOTH TEST SPLITS
+On split A (early FreezePlan version), 10/8/7/6 steps
+give
+3.47/4.16/4.61/5.18×
+at
+26.2/25.3/24.6/23.7 dB
+with
+∆VLM +0.02/−0.02/−0.10/−0.17. On split B, 8/7/6 steps
+give
+4.15/4.61/5.17×
+at
+23.5/23.0/22.2 dB
+with
+∆VLM
+−0.21/−0.27/−0.23. At a similar speed, six steps lose 4.3 dB
+to the early FreezePlan version on split A and 7.4 dB to the
+final version on split B in fidelity to the original output, while
+staying close to the original in the VLM judge.
+APPENDIX K
+QUALITATIVE RESULTS
+Figure 6 shows split-B samples chosen by a fixed rule:
+among local edits with freezing, the samples at the 25th,
+50th and 75th percentile of the PSNR gain of FreezePlan
+over the speed-matched baselines, plus the median global-edit
+sample. Figure 7 shows all five original anime illustrations,
+generated with Qwen-Image-2.1 from text descriptions of
+original characters and edited with the configurations of split
+B; they are not part of any benchmark. Over the speed-matched
+baselines, FreezePlan gains 7.6–10.3 dB on them.
+Ghosting. In the split-B “add a tennis ball” sample (second
+row of Fig. 6), FreezePlan shows a faint second ball near the
+frozen boundary. We have not quantified how often this occurs.
+APPENDIX L
+RELATION TO HYCA, BUDCACHE AND PROCACHE
+HyCa (ICLR 2026) assigns different extrapolation solvers
+to different feature dimensions and reports 6.24× on Qwen-
+Image and Qwen-Image-Edit. It improves the step-cache op-
+erator and could replace TaylorSeer inside FreezePlan. We
+did not port it to the prefix KV cache of Qwen-Image-2.1;
+its reported numbers use other models, quality criteria and
+samples and are not directly comparable to ours. BudCache
+(ICML 2026) searches step-level caching policies under a fixed
+number of function evaluations (up to about 3.7× on FLUX.1
+and Wan2.1), and ProCache (AAAI 2026) searches constrained
+caching schedules with selective token computation (up to
+about 2.9×). Both allocate the budget along the step axis.
+We study how spatial freezing shifts the operating point of
+that axis, so these schedulers could serve as the temporal
+component of FreezePlan.
+
+
+subject-replace
+Input
+1.00×
+Dense (40 steps)
+4.93× · 24.5 dB
+FreezePlan (ours)
+5.03× · 21.1 dB
+TaylorSeer
+5.03× · 21.1 dB
+DBCache
+5.18× · 18.2 dB
+6 steps
+3.92× · 24.6 dB
+SpotEdit+TS
+2.69× · 25.7 dB
+RegionE+TS
+subject-add
+1.00×
+5.21× · 31.3 dB
+5.02× · 25.7 dB
+5.03× · 25.6 dB
+5.16× · 25.2 dB
+3.82× · 28.4 dB
+2.72× · 38.9 dB
+material alter
+1.00×
+5.13× · 29.9 dB
+5.06× · 21.2 dB
+5.05× · 21.0 dB
+5.19× · 21.1 dB
+3.91× · 25.6 dB
+2.74× · 32.6 dB
+ps human
+1.00×
+5.03× · 29.0 dB
+5.00× · 24.3 dB
+5.03× · 24.1 dB
+5.16× · 21.8 dB
+3.93× · 27.0 dB
+2.70× · 36.4 dB
+Fig. 6. Split B, about 5×; rows chosen by the rule above (crops of the edited region below each row). Labels: speed-up · PSNR to the 40-step output.
+
+
+cup → cake
+Input
+1.00×
+Dense (40 steps)
+5.11× · 28.5 dB
+FreezePlan (ours)
+5.04× · 20.9 dB
+TaylorSeer
+5.04× · 20.8 dB
+DBCache
+4.62× · 26.7 dB
+7 steps
+3.85× · 27.8 dB
+SpotEdit+TS
+2.72× · 29.5 dB
+RegionE+TS
+hair → silver
+1.00×
+5.10× · 27.4 dB
+5.03× · 19.3 dB
+5.04× · 19.1 dB
+4.61× · 27.6 dB
+3.87× · 24.2 dB
+2.72× · 32.3 dB
+sign → "FREEZE"
+1.00×
+4.84× · 27.8 dB
+5.05× · 17.9 dB
+5.04× · 17.8 dB
+4.62× · 27.1 dB
+3.82× · 25.4 dB
+2.73× · 31.8 dB
+headphones → cap
+1.00×
+5.10× · 32.5 dB
+5.02× · 22.3 dB
+5.04× · 22.1 dB
+4.63× · 27.4 dB
+3.86× · 25.6 dB
+2.72× · 32.1 dB
++ bird
+1.00×
+5.23× · 32.4 dB
+5.05× · 22.1 dB
+5.04× · 21.9 dB
+4.62× · 31.0 dB
+3.82× · 30.9 dB
+2.73× · 35.4 dB
+Fig. 7. All five original anime illustrations, about 5×, same configurations as split B.

@@ -1,0 +1,1355 @@
+MorphSIG: Subject-Driven Image Generation via
+Decoupled Anchoring and Feature Transport
+Hailong Yan1∗
+Yongrui Zhang1
+Xiangtao Zhang1
+Le Zhang2,1†
+1 UESTC
+2 Hohai University
+yanhailong@std.uestc.edu.cn, lezhang@uestc.edu.cn
+Prompt: …leans forward slightly, looking helpless…
+Prompt: …looks at the rose...rose nods slightly... 
+Prompt: …staring at the computer screen, frowning…
+Prompt: …Spirit hovers over the water at the center...
+Prompt:…Aladdin's expression shocked…
+…
+Prompt: …holding a steaming horse heart…
+Prompt: …jumps on the bed, shouting loudly…
+Prompt: …looking sorrowful with tears in her eyes…
+(a) Ref. Image          (b) FLUX.2-4B   
+(c) FLUX.2-4B+Ours
+              
+(A). Copy-Paste Pattern
+(a) Ref. Image          (b) FLUX.2-4B   
+(c) FLUX.2-4B+Ours
+                
+(B). Subject Consistency
+(a) Ref. Image          (b) FLUX.2-4B   
+(c) FLUX.2-4B+Ours
+                
+(C). Prompt Alignment
+Prompt: …a middle-aged man with short dark...
+}
+Figure 1: Qualitative comparison between MorphSIG and the baseline.
+Abstract
+We propose MorphSIG, a training-free framework that reformulates subject-driven
+image generation (SIG) as pseudo-video feature transport. MorphSIG contains two
+core modules: Progressive Decoupled Anchoring, which uses frequency-domain
+decoupling and structural scrambling during early denoising to break structural
+locking and enable a gradual transition from free composition to identity alignment;
+and Pseudo-flow Guided Feature Transport, which constructs a latent-space pseudo-
+flow field to mimic Image-to-Video temporal coherence and transport subject
+semantics precisely. To address stylistic homogeneity and the lack of ground truth
+in existing benchmarks, we further introduce a benchmark with diverse stylized
+subjects. Extensive experiments show that MorphSIG significantly improves pose
+diversity and subject fidelity over baselines without additional training. Overall,
+MorphSIG bridges static generation and dynamic propagation, providing a cost-
+effective paradigm for high-fidelity subject consistency. The Code and benchmark
+will be available here.
+∗Project Leader.
+†Corresponding author.
+40th Conference on Neural Information Processing Systems (NeurIPS 2026).
+arXiv:2610.39530v1  [cs.CV]  29 Oct 2026
+
+
+1
+Introduction
+Subject-driven image generation (SIG) aims to synthesize images that follow text prompts while pre-
+serving the details of reference subjects [27, 38, 16, 54, 12]. By enabling user-defined customization,
+SIG has broad applications in film production [60] and advertising [20].
+In practical applications, SIG faces two major challenges: ❶the "copy-paste pattern," where generated
+results inherit the reference pose and lack compositional freedom; and ❷"subject inconsistency,"
+where subject features degrade during diffusion, reducing identity stability.
+As illustrated in Fig. 2, existing training-based SIG methods anchor identity through large-scale
+paired datasets [38, 15, 57, 54, 12] or the introduction of auxiliary encoding networks [62, 32, 49],
+yet these incur significant computational costs and are prone to overfitting. Training-free approaches
+[64, 31, 17, 7] typically inject subject features via attention-sharing mechanisms after inverting the
+reference image; however, they struggle to preserve identity due to the lack of consistency constraints.
+Another research [60, 52, 30, 66, 46, 10] attempts to leverage the dynamic priors of video models for
+image-level SIG, but suffers from low efficiency due to the generation of redundant transition frames.
+(a) Inversion-based
+Inversion
+Ref. 
+Images
+T2I
+Noise
+Prompt
+Static：
+SC：
+Cost：
+(b) Adapter-based
+Adapter
+Ref. 
+Images
+T2I
+Noise
+Prompt
+Gen. 
+Image
+Noise
+(c) Video-based
+I2V
+Ref. 
+Images
+Prompt
+Gen. 
+Image
+... 
+Times
+First Frame
+(d) Ours
+Noise
+T2I
+Ref. 
+Images
+Prompt
+Gen. 
+Image
+Last Frame
+Ref. Image
+As First Frame
+Gen. Image
+As Last Frame
+1.Matching
+2.Opital Flow 3.  Feature
+    Transport
+Gen. 
+Image
+Static：
+SC：
+Cost：
+Dynamic：
+SC：
+Cost：
+Dynamic：
+SC：
+Cost：
+Figure 2: Comparison of different SIG paradigms. SC (Sub-
+ject Consistency), and Cost (computational complexity).
+To address these challenges,
+we
+analyze the underlying feature repre-
+sentations and inference paradigms.
+The
+"copy-paste
+pattern"
+arises
+from a pronounced "high-frequency
+shortcut
+effect"
+in
+Text&Image-
+to-Image (T&I2I) models,
+where
+high-frequency
+components
+from
+the reference image dominate early
+denoising
+and
+prematurely
+lock
+pose evolution.
+Meanwhile, the
+superior consistency of video models
+comes from temporally coherent
+feature transport, characterized by
+displacement mapping and semantic
+propagation across adjacent frames.
+To balance fidelity and diversity, we propose MorphSIG, a training-free SIG framework. First, to
+alleviate the "copy-paste" pattern, we introduce Progressive Decoupled Anchoring. By applying
+low-pass filtering and high-frequency structural permutation to reference Keys in joint self-attention,
+it removes global geometric bias while preserving essential feature statistics. Combined with time-
+dependent anchoring strength, this strategy unlocks compositional flexibility during early diffusion.
+Second, to improve consistency, we reformulate T&I2I as a "two-frame video generation" paradigm,
+treating the reference and target images as pseudo-first and pseudo-last frames. Based on this
+view, we propose Pseudo-flow Guided Warped Feature Transport, which simulates temporal
+coherence by warping reference features with pseudo-flow. Combining low-frequency Spherical
+Linear Interpolation and high-frequency Winner-Take-All enables effective transport of warped
+reference features, improving detail generation while preserving structural consistency.
+We further introduce a benchmark with diverse styles and high-quality Ground Truth, enabling
+rigorous evaluation of fidelity and diversity in SIG. Our contributions are summarized as follows.
+• We identify the "high-frequency shortcut" as the main cause of the "copy-paste" pattern in
+T&I2I, and redefine T&I2I as a "pseudo-video" task to simulate I2V temporal coherence
+without redundant computation.
+• We propose Progressive Decoupled Anchoring to mitigate high-frequency shortcuts, and
+Pseudo-flow Guided Feature Transport to preserve subject consistency.
+• We introduce a new SIG benchmark with diverse styles and high-quality Ground Truth,
+addressing the lack of objective metrics and stylistic diversity in existing datasets.
+• As a training-free framework, MorphSIG achieves superior fidelity-diversity balance on
+both public and our proposed benchmarks.
+2
+
+
+Prompt
+Noise
+Ref. Images
+DiT 
+Tokens
+𝑺𝒐𝒇𝒕𝒎𝒂𝒙
+𝑄!⨁𝑄"⨁𝑄# [𝐾!⨁𝐾"⨁𝐾#]!
+𝑑
+KGen.
+KTex.
+KRef.
+QTex.
+QGen.
+QRef.
+Textual
+Self-Attention
+!𝐴.→.
+Cross-Attention
+!𝐴.→0
+!𝐴.→1
+!𝐴0→.
+!𝐴0→0
+!𝐴0→1
+!𝐴1→.
+!𝐴1→0
+!𝐴1→1
+Cross-Attention
+Cross-Attention
+Cross-Attention
+Cross-Attention
+Cross-Attention
+Gen. Image
+Self-Attention
+Ref. Image
+Self-Attention
+QTex.→KGen.
+QTex.→KRef.
+QGen.→KRef.
+QRef.→KGen.
+QRef.→KTex.
+Query (Gen.)
+Key (Ref.)
+Time=0
+QGen.→KTex.
+… sits on the bed, 
+rubbing his eyes, 
+looking confused … 
+his hair is slightly 
+messy.
+Progressive Decoupled Anchoring (PDA)
+Progressive
+Low-Pass
+Original 
+High-Frequency
+Low-Frequency
+Random
+Permutation
+Dnoising Step
+New Key (Ref.)
+Time=M (PDA End)
+…
+Query (Gen.)
+Now-
+Query-to-Key
+Low-Pass
+Strength: Strong-to-Weak
+Time=M+1
+…
+…
+Ori. Key (Ref.)
+Ori. Query (Gen.)
+…
+Pseudo-Flow Guided Warping Feature Transport (WFT) 
+Dnoising Step
+Time=N
+S(QGen.,KRef.)
+Similarity 
+Matrix
+Local Consensus
+8-neighbor Shifts
+Si,j
+(i+1,j-1)
+(i+1,j) (i+1,j+1)
+(i,j+1)
+(i-1,j+1)
+(i-1,j)
+(i-1,j-1)
+(i,j-1)
+X
+Top-4 Mean
+0.72
+0.80
+0.66
+0.75
+0.21
+0.75
+0.13
+0.42
+Coordinate Mapping & Flow
+Target (Grid G)
+Reference
+(xi,yi)
+(xj,yj)
+∆i = (ui,vi)
+Value(Ref.)
+Pseudo-Flow
+Reference Feature Warping
+Warped Value (Ref.)
+Value (Gen.)
+Feature Transport
+Final Value (Gen.)
+Final Result
+Joint Multi-Modal Attention
+Mutual Nearest 
+Neighbor
+Corresponding Points
+Value
+(Ref.)
+Value
+(Gen.)
+Figure 3: Overview of the proposed framework. MorphSIG consists of two modules: Progressive
+Decoupled Anchoring (PDA) and Warping Feature Transport (WFT). PDA suppresses structural
+shortcut copying by decoupling and progressively restoring reference anchors during denoising,
+enabling flexible composition. WFT estimates pseudo-flow to warp and transport reference features
+into the generation space, improving identity consistency under large pose and geometry variations.
+2
+Related Work
+Consistent Text-to-Image Generation. While fine-tune approaches [38, 27, 22, 48, 43, 2] are
+capable of capturing visual details, they suffer from high computational overhead. To balance
+efficiency and performance, lightweight adapters [32, 65, 62, 59, 58, 61] inject external guidance into
+frozen backbone; however, these often lack sufficient representation capacity. In contrast, training-
+free methods [16, 45, 31, 47, 28, 35, 36] leverage in-context learning for "plug-and-play" flexibility,
+but struggle with complex instructions, often failing to maintain textual consistency under large-scale
+pose variations.
+Subject-driven Image Generation synthesizes reference images to precisely preserve subject
+identities [54, 12, 55]. For instance, DreamO [33] and USO [53] integrate reference images to
+generate outputs that mirror both input identity and aesthetics. While frameworks like OmniGen
+[56, 51] and others [25, 39, 13, 42] enhance identity decoupling, they often necessitate large-scale
+retraining, which limits their scalability. Conversely, training-free methods [64, 24, 11, 26] utilize
+optimized attention mechanisms to inject subject features across frames during inference.
+Image Generation and Video. Recent video models [4, 5, 9, 23] have inspired using video priors
+for image tasks [37, 60, 66, 52]. Specifically, UniReal [10] and iMontage [19] treat image generation
+as video tasks to leverage world dynamics, while RealGeneral [30] unifies tasks via conditional
+frame prediction. To handle complexity, PLACID [44] uses spatio-temporal trajectories for feature
+constancy, and CoF-T2I [46] employs "Chain-of-Frames" for progressive refinement. Despite these
+gains, video-based models suffer from high overhead and latency. Conversely, we propose achieving
+high-quality generation by endowing static diffusion models with dynamic evolutionary capabilities.
+3
+Method
+3.1
+Preliminaries
+Joint Multi-Modal Attention in T2I. Modern diffusion transformers like FLUX.2 utilizes a Joint
+Multi-Modal Attention mechanism that unifies text, latent noise, and reference images into a single 1D
+sequence. The model serializes the text prompt into Xtxt, the target noise into Xgen, and N reference
+images into a concatenated stream Xref = [X(1)
+ref ; . . . ; X(N)
+ref ]. To distinguish these "canvases," 4D
+coordinate IDs are assigned to every token, using discrete temporal offsets (T) for each reference
+3
+
+
+MQgKr 
+（Qgen-to-Kref）
+0
+24
+Prompt:…looking sorrowful with tears in her eyes…
+Ref.Image
+Canny’s result 
+MQgKr * Kref
+MQtKg 
+（Qtext-to-Kgen）
+Sampled Spectrum
+T&I2I
+T2I
+MQtKg 
+（Qtext-to-Kgen）
+Pose Diversity
+T&I2V
+Frame 1
+Frame 10
+Frame 20
+Temporal Attention
+Spatial 
+Attention
+Moving 
+Distance
+Video Model ‘s Subject Consistency
+Times
+(a):
+(b):
+(c):
+(d):
+Figure 4: Analysis of High-frequency Shortcut in T&I2I and Temporal Feature Transport in I2V.
+image to preserve instance integrity within the unified vector. In the core Single-Stream Blocks, these
+modalities are fused into a global sequence Xall = [Xtxt; Xgen; Xref], where attention is computed as:
+Output = Softmax
+QK⊤
+√dh
+
+V,
+{Q, K, V } = Linear(Xall).
+(1)
+By treating references as tokens rather than external conditions, the joint attention matrix implicitly
+facilitates simultaneous self-attention, text-guidance, and multi-source reference injection.
+3D Attention in I2V. Video DiT extend static DiTs by processing 4D video tensors V ∈Rf×c×h×w
+to capture spatiotemporal dynamics. In each layer l, video tokens zvideo and text tokens ztext are
+concatenated into an augmented sequence. The queries Qt,l are formed by merging projections
+from all f frames and the text prompt: Qt, l = Concat(Qt, l1, . . . , Qt, lf, Qt, ltext). The resulting
+global 3D attention matrix At,l = Softmax(Qt,lK⊤
+t,l/
+√
+d) facilitates four key interactions: self-
+frame attention (Ai,i
+t,l) for 2D spatial correlations, cross-frame attention (Ai,j
+t,l) for inter-frame pixel
+relevance Attn(Ii(p) →Ij(q)), and text-frame/self-text attention for semantic guidance. VDTs
+leverage inherent "world knowledge" to understand complex motion and temporal consistency [34].
+3.2
+Problems and Analysis
+We analyze two key observations in T&I2I models, as shown in Fig.1: Observation ❶: Copy-
+Paste Pattern. Generated images rigidly inherit the reference pose. Observation ❷: Subject
+Inconsistency. Subject identity or features gradually degrade during generation. We first analyze and
+formally explain these issues, then propose targeted optimizations to balance fidelity and diversity.
+Analysis for ❶: The consistency gain in T&I2I comes at the expense of generation freedom.
+As shown in Fig.1(A), T&I2I models often directly replicate reference features, reducing diversity [21,
+29, 57, 15]. We attribute this to a high-frequency shortcut effect: although diffusion models generally
+follow a coarse-to-fine generation process [63], T&I2I models capture high-frequency reference
+features too early to preserve identity consistency. This excessive coupling prematurely locks
+generation. Specifically, Fig.4(a) shows that Qgen strongly activates edge contours in Kref during
+early sampling. The spectrum in Fig.4(b) further shows that these high-frequency "anchors" constrain
+macro-scale pose evolution. As a result, the control ability of the text query Qt is significantly
+weakened by the high-frequency shortcut, as illustrated in Fig.4(c).
+Analysis for ❷: The temporal consistency via first-frame feature transport.
+In I2V modeling, the attention for the latent sequence zvideo explicitly constructs cross-frame attention
+by facilitating direct interaction between the query vectors Qi
+t,l of subsequent frames and the key
+vector K1
+t,l of the first frame, as illustrated in Fig.4(d). This architectural design establishes robust
+temporal correspondences, ensuring that visual priors from the initial frame are accurately propagated
+to subsequent frames, thereby maintaining identity stability while modeling temporal motion [41, 60].
+Inspired by this, recent image-level methods [30, 10] adopt a "non-contiguous" frame generation
+architecture. By treating input and output images as a "pseudo-frame" sequence, they leverage the
+video model’s inherent capacity for maintaining structural and feature consistency.
+4
+
+
+Step 5
+Step 7
+Step 8
+Step 9
+Only Low-Pass
+Original
+Step 10
+With Permutation 
+With Permutation 
+Only Low-Pass
+Idea Energy
+Diffusion Step
+Frobenius Norm Retention Ratio
+(b) Energy Conservation Analysis
+…
+…
+…
+(a) Attention Map（Qgen-to-Kref）
+Only Low-Pass
+Original
+With Permutation 
+(c) Visual of Kref
+Step 
+Step 
+Figure 5: Synergistic Analysis of Spectral Decoupling and Structural Permutation.
+3.3
+Progressive Decoupled Anchoring (PDA)
+Motivation. While T2I offer high compositional flexibility through noise synthesis, they struggle with
+subject consistency. Conversely, T&I2I anchor identity but often fall into "high-frequency shortcuts."
+Current solutions typically rely on computationally expensive paradigms, such as large-scale paired
+data augmentation [15, 57] or complex feedback optimization [12, 21]. We hope that an ideal T&I2I
+should balance the creative freedom of T2I with the robust consistency of T&I2I.
+Spectral Decoupling (SD). In joint multi-modal attention, Kref acts as a semantic anchor. Its
+high-frequency components often produce sharp attention peaks that lock generation to the reference
+geometry. To alleviate this pose-locking effect, we reshape the reference latent Mref ∈RH×W ×D
+and apply frequency decoupling: Mlow = G(Mref, σ),
+Mhigh = Mref −Mlow.
+Where G denotes a Gaussian low-pass filter with a kernel scale σ. While Mlow effectively circumvents
+high-frequency structural shortcuts, it also incurs a notable loss of feature energy. As illustrated in
+Fig. 5(b), an approximately 20% loss in Frobenius Norm significantly degrades the feature intensity
+of the pre-trained model, consequently compromising the fidelity of subject reconstruction.
+Structural Permutation (SP). To compensate for information loss from filtering while eliminating
+geometric bias, we apply a block-level permutation P to the high-frequency residual Mhigh:
+ˆ
+Mref = Mlow + P(Mhigh, p),
+(2)
+where p denotes the patch size. As visualized in Fig. 5(c), SP redistributes high-frequency features as
+"disassembled components" rather than merely erasing details. By disrupting global pose correlations
+while preserving original statistical properties and local details, SP avoids the identity blurring and
+feature collapse inherent in only low-pass schemes (which retain only 0.8 of the energy).
+From the perspective of attention dynamics (Fig. 5(a)), the smooth distribution of only low-pass
+features (Fig. 5(c)) triggers attention diffusion, which impairs precise alignment. In contrast, while
+SP perturbs spatial coordinates, its block structures retain local gradient transitions. his high-contrast
+distribution (Fig. 5(a)) allows the model to bypass compositional constraints while accurately
+extracting critical details from the "feature pool," ensuring high-fidelity reconstruction.
+Progressive Anchoring (PA). Leveraging the coarse-to-fine nature of diffusion denoising, we
+introduce a time-dependent coefficient t ∈(1 →0) to dynamically modulate anchoring intensity:
+Kref = Flatten (G(Mref, σ(t)) + P(Mref −G(Mref, σ(t)), p))
+(3)
+Macro-Evolution (t ≈1): Low-pass filter suppresses high-frequency spatial anchors, forcing the
+model to synthesize global motion structures from the prompt Qt within the "spectral blind zone."
+Micro-Alignment (t →0): As the global manifold stabilizes, structural signals are reintroduced as
+local guides for identity reconstruction without disrupting the established pose.
+3.4
+Pseudo-Flow Guided Warping Feature Transport (WFT)
+Motivation. The superior consistency of I2V stems from feature transport under temporal coherence
+[60, 6]. Existing methods [37, 66, 60] reformulate T2I as “video frame prediction” to inherit this
+property, but require generating redundant intermediate frames. We instead ask: “Can T&I2I
+directly simulate the ‘I2V generation logic’ within T2I to enhance subject consistency?”
+5
+
+
+Formulation: Consider a video sequence (f0, f1, . . . , fn) as a continuous function in 2D space,
+where each frame fj evolves from its predecessor fj−1 via a mapping Tj. The feature vector Φj(x)
+at coordinate x in the j-th frame is defined by the selective transport of prior features Φj−1:
+Φj(x) = R
+ Φj−1(T −1
+j
+(x)), ∆ϕj
+
+,
+(4)
+where Tj denotes the mapping function, and R represents the transport operator. It propagates
+semantic information from the reference frame to the current frame according to the spatial mapping,
+with ∆ϕj accounting for frame-specific residual updates. This formulation reveals that temporal
+coherence fundamentally arises from the combination of spatial feature transport and local updates.
+In I2V, The 3D attention implicitly realizes the above process through Query-Key matching [34]:
+A(x, y) ∝⟨Qj(x), Kj−1(y)⟩which can be interpreted as a soft correspondence distribution enabling
+cross-frame non-rigid alignment. Functionally, it resembles a probabilistic flow field [14, 41].
+Motivated by this observation, we reinterpret T&I2I architectures (e.g., FLUX.2) as a degenerate
+two-frame I2V process, where the reference and target images correspond to pseudo-first frame f0
+and pseudo-final frame f1. We then construct a pseudo-flow mapping T within T&I2I to model
+semantic correspondence: Φ1(x) = R(Φ0(T −1(x)), ∆ϕ(x)), where pseudo-flow performs semantic
+transport and the residual term injects text-conditioned novel semantics.
+Method. Unlike methods that rely on external models to establish correspondences [3], we compute
+the global pairwise similarity S ∈RLgen×Lref between object Qgen and reference Kref:
+Si,j = ⟨Qgen,i, Kref,j⟩
+∥Qgen,i∥∥Kref,j∥.
+(5)
+To suppress redundant matches and enforce spatial coherence, we introduce a two-stage constraint:
+❶Local Consensus (LC). To suppress semantic mismatches caused by repetitive textures, we intro-
+duce a neighborhood continuity assumption, i.e., correctly matched points should exhibit consistent
+local motion patterns. Specifically, we apply 8-neighbor shifts to Si,j and compute the mean of the
+Top-4 neighborhood responses as the local weight Wlocal :
+Wlocal = Top-Kmean ({S(x + ∆x, y + ∆y) | (∆x, ∆y) ∈Shifts}, k = 4)
+(6)
+Using Top-4 restricts responses to valid regions near boundaries and occlusions. The refined matrix
+ˆS = S ⊙Wlocal effectively suppresses isolated mismatches.
+❷Mutual Nearest Neighbor (MNN). To further improve matching robustness, we impose a
+bidirectional Top-K constraint. A correspondence is considered valid only when target position i and
+reference position j are mutual Top-K matches: Mvalid = Mg→r(K) ∩Mr→g(K). The optimal
+correspondence is then selected as j∗= arg maxj( ˆSi,j · Mvalid), which is mapped back to 2D
+coordinates. The offset relative to the sampling grid G yields the pseudo-flow field: F ∈R2×H×W .
+Reference Feature Warping. Given F, the reference value Vref are aligned to the object feature
+space. Specifically, the sampling coordinates are defined as Gsample = G+F. and bilinear resampling
+is performed in the normalized coordinate space [−1, 1], with out-of-bound regions zero-padded
+to avoid boundary stretching artifacts. Meanwhile, the final constraint mask is constructed from
+Mvalid and ˆS to filter mismatched and occluded regions: Vwarp = Sample(Vref, Gsample) ⊙Mfinal.
+Diffusion Step
+Energy Conservation Analysis
+Frobenius Norm Retention Ratio
+Final Blended (SLERP+WTA)
+SLERP (Low-Freq Only)
+Idea Energy
+Linear Interpolation
+Figure 6: Feature Energy Analysis.
+Warped Feature Transport. Directly injecting warped
+reference features Vwarp into Vgen causes distribution
+mismatch. Although Vwarp preserves reference seman-
+tics, non-rigid deformation and interpolation introduce
+deviations from the Vgen in local details and feature
+statistics.
+Thus, we formulate the transport process
+as R(Vgen, Vwarp), where R is a spatial frequency-
+decoupled operator that separately models structural con-
+sistency and detail fidelity.
+❶Low-Frequency SLERP. Low-frequency components
+encode global structures such as contours and color distri-
+bution. We transport V low
+warp to V low
+gen using spherical linear
+interpolation (SLERP) [1]. ❷High-Frequency Winner-Takes-All. High-frequency contain texture
+6
+
+
+Table 1: Quantitative Results of Various SIG Methods on ViStoryBench [67]. CI: Character Interac-
+tion, IA: Individual Action; The first , second , and third values are highlighted.
+Methods
+Venue
+CSD↑
+CIDS↑
+PA↑
+AES↑
+CP↓
+INC↑
+Cross
+Self
+Cross
+Self
+Scene
+Shot
+CI
+IA
+Avg.
+DreamO [33]
+SIGGA’25
+0.489
+0.584
+0.542
+0.643
+2.99
+2.21
+1.72
+1.65
+2.14
+5.31
+0.533
+9.21
+DiptychP [40]
+CVPR’25
+0.394
+0.462
+0.417
+0.536
+2.73
+2.04
+1.61
+1.50
+1.97
+4.60
+0.524
+13.18
+XVerse [8]
+NIPS’25
+0.229
+0.461
+0.342
+0.531
+2.96
+2.37
+1.89
+1.73
+2.23
+4.92
+0.519
+13.67
+UNO [54]
+ICCV’25
+0.513
+0.576
+0.528
+0.632
+3.08
+2.52
+2.07
+1.91
+2.39
+4.94
+0.542
+8.27
+OmniGen2 [51]
+arXiv’25
+0.446
+0.546
+0.460
+0.587
+3.12
+2.46
+1.80
+1.64
+2.27
+5.19
+0.531
+9.87
+Scone [50]
+CVPR’26
+0.511
+0.539
+0.501
+0.585
+3.11
+2.40
+2.18
+1.69
+2.35
+5.22
+0.517
+10.60
+UMO [12]
+CVPR’26
+0.514
+0.635
+0.555
+0.648
+3.25
+2.65
+2.13
+1.93
+2.49
+5.05
+0.536
+10.35
+MOSAIC [39]
+ICLR’26
+0.268
+0.463
+0.377
+0.531
+3.14
+2.43
+2.31
+1.96
+2.46
+5.36
+0.548
+13.56
+FLUX.2-4B
+-
+0.489
+0.531
+0.576
+0.637
+3.27
+2.54
+2.27
+1.99
+2.52
+5.42
+0.537
+10.97
+Ours(FLUX.2-4B)
+-
+0.521
+0.598
+0.605
+0.653
+3.32
+2.58
+2.35
+2.08
+2.58
+5.39
+0.516
+13.88
+details and are sensitive to alignment errors. Direct transport may introduce ghosting or blur artifacts.
+Therefore, we adopt a Winner-Takes-All (WTA) strategy. The final generated value is computed
+as:Vgen = SLERP(V low
+gen , V low
+warp) + argmaxV ∈{V high
+warp,V high
+gen } ∥V ∥.
+❸Discuss. As shown in Fig. 6, we analyze energy evolution using the Frobenius-norm retention
+ratio. Compared with linear interpolation, SLERP substantially mitigates energy attenuation, thereby
+better preserving the low-frequency information established in early denoising stages. Moreover,
+the synergy of SLERP and WTA yields a final feature energy slightly above the ideal expectation
+(ratio > 1.0), providing additional support for reconstructing high-frequency details in the mid-to-late
+denoising stages.
+4
+Experiments
+Implementation Details. We implement our method on FLUX.2-Klein-4B, a mainstream T&I2I
+framework with a DiT-based joint self-attention architecture. Progressive spectral decoupling is
+applied in the first 20% of denoising steps, while pseudo-flow-guided feature transport is injected
+during the intermediate phase, i.e., 50%–70% of steps, when semantic structures are stabilized
+but fine-grained identity details are still refined. All experiments are conducted at 1024 × 1024
+resolution on NVIDIA A100 40GB GPUs. Unless otherwise specified, hyperparameters are fixed
+across benchmarks and prompts. Detailed hyperparameters are provided in the Appendix.
+Baselines. We compare our method with recent SOTA SIG approaches covering both training-based
+and training-free paradigms: Scone [50], UMO [12], UNO [54], MOSAIC [39], OmniGen2 [51],
+DreamO [33], DiptychP [40], and XVerse [8]. These methods improve subject consistency through
+large-scale paired training, preference optimization, explicit identity supervision, or inference-time
+attention/latent feature manipulation without finetuning. For fair comparison, all baselines use official
+checkpoints and default hyperparameters.
+Evaluation Metrics. We evaluate our framework on the public VistoryBench [67] and our proposed
+SIGBench. VistoryBench includes 1,317 cases and 344 characters. VistoryBench measures subject
+consistency using Character Identification Similarity (CIDS) and Character Style Similarity (CSD),
+prompt alignment using a multimodal large language model, aesthetic quality (AES) using Aesthetic
+Predictor V2.5, and diversity using Inception Score (INC) and Copy-Paste (CP) Detection metrics. On
+SIGBench, we use CLIP-I and DreamSim [18] for subject consistency, the proposed Comprehensive
+Diversity Score (CDS) for diversity, CLIP-T and PA for prompt alignment, and Aesthetic Predictor
+V2.5 for aesthetic quality. More details are provided in the Appendix.
+Quantitative Results. Table 1 shows that our method achieves the excellent overall performance on
+VistoryBench. It ranks first on CSD-Cross, CIDS-Cross, CIDS-Self, and average PA, demonstrating
+stronger subject consistency and prompt alignment. Compared with baseline, it improves CIDS-Cross
+from 0.576 to 0.605 and average PA from 2.52 to 2.58, indicating that WFT improves identity-
+preserving feature reuse while PDA reduces reference-induced structural shortcuts. It also achieves
+the lowest Copy-Paste score of 0.516 and the highest Inception Score of 13.88, showing greater
+diversity and less reference copying.
+Table 2 reports results on SIGBench, where our method ranks first on DreamSim-GT, PA-Avg., CLIP-
+I, and CDS. Compared with FLUX.2-4B, it improves PA-Avg. from 3.06 to 3.22, CLIP-I from 0.847
+7
+
+
+Table 2: Quantitative Results of Various SIG Methods on SIGBench. VRAM: Using GPU memory
+during inference. The first , second , and third values are highlighted.
+Methods
+Venue
+DreamSim↓
+PA↑
+CLIP-T↑
+CLIP-I↑
+CDS↑
+AES↑
+VRAM↓
+GT
+Ref
+Scene
+CI
+IA
+Avg.
+DreamO [33]
+SIGGA’25
+0.273
+0.596
+3.04
+2.43
+2.07
+2.51
+0.361
+0.834
+0.373
+6.00
+9.09
+DiptychP [40]
+CVPR’25
+0.459
+0.651
+2.72
+2.16
+2.45
+2.44
+0.332
+0.696
+0.339
+5.24
+30.01
+XVerse [8]
+NIPS’25
+0.339
+0.660
+2.95
+2.53
+2.12
+2.53
+0.358
+0.767
+0.366
+6.09
+37.39
+UNO [54]
+ICCV’25
+0.315
+0.604
+3.21
+2.59
+2.28
+2.69
+0.345
+0.802
+0.366
+5.64
+35.09
+OmniGen2 [51]
+arXiv’25
+0.287
+0.607
+3.28
+2.67
+2.41
+2.78
+0.363
+0.822
+0.380
+5.47
+9.92
+Scone [50]
+CVPR’26
+0.261
+0.601
+3.51
+2.88
+2.57
+2.98
+0.362
+0.838
+0.383
+5.83
+30.43
+UMO [12]
+CVPR’26
+0.296
+0.602
+3.38
+3.01
+2.44
+2.94
+0.348
+0.815
+0.375
+5.97
+33.78
+MOSAIC [39]
+ICLR’26
+0.281
+0.621
+3.43
+2.70
+2.56
+2.89
+0.354
+0.824
+0.401
+5.82
+35.79
+FLUX.2-4B
+-
+0.225
+0.643
+3.40
+3.15
+2.63
+3.06
+0.354
+0.847
+0.412
+6.33
+12.21
+Ours (FLUX.2-4B)
+-
+0.221
+0.625
+3.47
+3.34
+2.86
+3.22
+0.362
+0.854
+0.429
+6.32
+13.44
+Ref. Images
+Ours(FLUX.2-4B)
+FLUX.2-4B
+UMO
+XVerse
+UNO
+DreamO
+Scone
+Figure 7: Qualitative Comparison on ViStoryBench Across Diverse Characters and Styles.
+to 0.854, and CDS from 0.412 to 0.429, showing better prompt alignment, subject consistency, and
+diversity. These results support our design: PDA reduces pose copying and enhances compositional
+flexibility, while WFT transports identity features via pseudo-flow alignment. With only minor
+VRAM overhead over FLUX.2-4B, our method remains more efficient than most training-based
+baselines and achieves superior overall performance.
+Qualitative Results. Fig. 7 and 8 show qualitative comparisons on ViStoryBench. Existing methods
+often exhibit identity drift, missing subjects, style inconsistency, or direct copying of the reference
+pose. In contrast, our method better preserves character identity and visual style while allowing
+prompt-driven changes in pose, interaction, and scene composition.
+In multi-character cases, our method maintains more stable identities for different subjects and
+produces more coherent interactions. These results indicate that PDA reduces reference-structure
+shortcuts, while WFT restores identity-related details through feature transport.
+Fig. 9 shows qualitative comparisons on SIGBench, where each case provides reference subjects
+and a ground-truth target image. Compared with existing methods, our method better preserves
+subject identity and fine-grained attributes while matching the target composition more closely.
+Baselines often miss objects, alter subject appearance, or over-copy the reference layout, especially
+in multi-subject and large-pose-change scenarios. Our results show more accurate subject-object
+relationships, more stable appearance preservation, and better alignment with the GT scene structure.
+Table 3: Human preference comparison among different methods.
+Method
+DreamO
+DiptychP
+XVerse
+UNO
+OmniGen2
+Scone
+UMO
+MOSAIC
+FLUX.2-4B
+Ours
+Percent (%)↑
+2.79
+1.41
+0.62
+10.19
+3.03
+12.84
+15.95
+4.48
+22.75
+26.31
+User Study. To complement automatic metrics, we conduct a human evaluation on 50 randomly
+sampled cases from the two benchmarks. For each case, all competing methods generate correspond-
+ing image sequences. We invite 20 participants, each evaluating 20 randomly selected results with
+the reference images and prompts. They are asked to select the preferred sequence based on subject
+8
+
+
+Ref. Images
+UNO
+Scone
+Ours(FLUX.2-4B)
+FLUX.2-4B
+UMO
+DreamO
+Figure 8: Qualitative Comparison on Multi-Character Story Generation in ViStoryBench.
+Ref. Images
+Ours(FLUX.2-4B)
+FLUX.2-4B
+DiptyP
+XVerse
+DreamO
+MOSAIC
+GT
+UMO
+Figure 9: Qualitative Comparison on SIGBench with Ground Truth.
+consistency, pose diversity, and overall image quality. As shown in Table 3, our method achieves the
+highest preference rate. The results further demonstrate that MorphSIG produces more consistent and
+visually appealing generations while maintaining stronger structural diversity. Details of the protocol
+and interface are provided in the Appendix.
+Table 4: The ablation study of PDA.
+CIDS↑INC↑PA↑AES↑
+w/o PDA
+0.614 13.41 2.37 5.30
+w/o SP
+0.556 13.64 2.72 5.33
+w/o SD
+0.618 13.57 2.39 5.36
+High-pass only 0.485 12.81 1.92 5.05
+Full PDA
+0.629 13.88 2.58 5.39
+Ablation Study. Tables 4 and 5 report the ablation re-
+sults of PDA and WFT. Removing PDA degrades CIDS,
+INC, and PA, indicating excessive reliance on reference
+structures and reduced flexibility in text-driven pose and
+layout generation. Specifically, removing SP weakens
+identity-preserving details, while removing SD reduces
+pose diversity, demonstrating their respective roles in iden-
+tity retention and structural decoupling. Removing WFT
+causes a significant drop in CIDS, highlighting the impor-
+tance of pseudo-flow-guided feature transport for main-
+taining subject consistency under large structural variations. Further removing MNN, LF-SLERP,
+or HF-WTA consistently lowers performance, showing that bidirectional matching, low-frequency
+fusion, and high-frequency detail selection jointly improve structural stability and texture fidelity.
+Table 5: The ablation study of WFT.
+CIDS↑INC↑PA↑AES↑
+w/o WFT
+0.541 13.47 2.64 5.25
+w/o MNN
+0.578 13.32 2.47 5.18
+w/o HF-WTA
+0.601 13.65 2.52 5.14
+w/o LF-SLERP 0.584 13.30 2.34 5.19
+ADD
+0.561 12.93 2.16 5.05
+Full WFT
+0.629 13.88 2.58 5.39
+Fig. 10 illustrates the visual differences under various
+ablation settings. Without PDA, the generated results tend
+to replicate the original pose, limiting the controllability of
+text-driven generation. Removing SP or SD further causes
+identity-detail degradation and insufficient structural dis-
+entanglement, respectively. For WFT-related ablations,
+removing WFT or MNN introduces local misalignment
+and identity drift, while removing LF-SLERP or HF-WTA
+results in unstable structures or blurred textures. In con-
+trast, the full model better preserves subject consistency
+while generating novel poses and scenes aligned with the
+9
+
+
+Ref.Image
+w/o PDA
+w/o SP
+w/o WFT
+w/o SD
+Full
+w/o SLERP
+w/o WTA
+w/o MNN
+Figure 10: Qualitative Comparison of Ablation Study.
+Figure 11: Ablation analysis. (a) Effect of neighborhood size K in Local Consensus. (b, c)
+Sensitivity of PDA and WFT scheduling ranges.
+text prompt, demonstrating the complementary effects of PDA and WFT in harmonizing identity
+retention with generative diversity.
+Local Consensus Analysis. As shown in Fig. 11(a), selecting K = 4 in Local Consensus achieves
+the best balance between identity fidelity (CIDS) and diversity (INC). A smaller K admits spurious
+matches from texture ambiguity, whereas a larger K over-suppresses valid correspondences by
+incorporating noisy boundary neighbors.
+Scheduling Sensitivity Analysis. As shown in Fig. 11(b, c), our default schedule achieves the optimal
+balance between identity fidelity and generation diversity. Terminating PDA prematurely (10%)
+locks macro-composition via high-frequency shortcuts, whereas prolonging it (>20%) impairs fine-
+grained detail alignment. Similarly, WFT requires sufficient propagation without over-intervention:
+truncating it early (<70%) hinders detail consistency, while extending it into late denoising (>80%)
+introduces distribution mismatch and artifacts. Thus, our setting (PDA: 20%, WFT: 50%–70%)
+reliably optimizes performance.
+Table 6: Comparison of computational cost on a single NVIDIA A100 GPU.
+Method
+DreamO
+DiptychP
+XVerse
+UNO
+OmniGen2
+Scone
+UMO
+MOSAIC
+FLUX.2-4B
+Ours
+Training-free
+×
+✓
+×
+×
+×
+×
+×
+×
+–
+✓
+Latency (s)
+76.9
+169.4
+126.2
+82.6
+171.7
+98.5
+84.3
+154.7
+115.6
+130.1
+VRAM (GB)
+9.09
+30.01
+37.39
+35.09
+9.92
+30.43
+33.78
+35.79
+12.21
+13.44
+Computational Cost. As shown in Table 6, MorphSIG is training-free method, incurring zero training
+cost. Compared to the native FLUX.2-4B (115.6s / 12.21GB), it introduces only marginal overhead
+in inference latency (130.1s, +12.5%) and peak VRAM (13.44GB, +10.1%), while remaining
+substantially lighter than training-based baselines exceeding 30GB (e.g., XVerse and MOSAIC).
+5
+Conclusion
+We presented MorphSIG, a training-free framework for subject-driven image generation. By iden-
+tifying high-frequency reference shortcuts as a major cause of copy-paste artifacts, we proposed
+Progressive Decoupled Anchoring to relax structural locking while preserving identity-related statis-
+tics. We further reformulated T&I2I as pseudo-video generation and introduced Pseudo-flow Guided
+Feature Transport to improve subject consistency through latent-space feature transport without
+generating intermediate frames. In addition, we built a new SIG benchmark with diverse styles and
+high-quality ground truth. Experiments on public and proposed benchmarks show that MorphSIG
+achieves a strong balance between identity fidelity and generation diversity. These results demon-
+strate the effectiveness of frequency-decoupled conditioning and pseudo-flow-guided transport for
+controllable and consistent subject-driven generation.
+10
+
+
+References
+[1] Amirhossein Alimohammadi, Aryan Mikaeili, Sauradip Nag, Negar Hassanpour, Andrea Tagliasacchi, and
+Ali Mahdavi-Amiri. Cora: Correspondence-aware image editing using few step diffusion. In Proceedings
+of the Special Interest Group on Computer Graphics and Interactive Techniques Conference Conference
+Papers, pages 1–11, 2025.
+[2] Guangrui Bai, Hailong Yan, Wenhai Liu, Yahui Deng, and Erbao Dong. Towards lightest low-light image
+enhancement architecture for mobile devices. Expert Systems with Applications, 296:129125, 2026.
+[3] Qingyan Bai, Hao Ouyang, Yinghao Xu, Qiuyu Wang, Ceyuan Yang, Ka Leong Cheng, Yujun Shen, and
+Qifeng Chen. Edicho: Consistent image editing in the wild. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pages 15277–15287, 2025.
+[4] Andreas Blattmann, Tim Dockhorn, Sumith Kulal, Daniel Mendelevitch, Maciej Kilian, Dominik Lorenz,
+Yam Levi, Zion English, Vikram Voleti, Adam Letts, et al. Stable video diffusion: Scaling latent video
+diffusion models to large datasets. arXiv preprint arXiv:2311.15127, 2023.
+[5] Andreas Blattmann, Robin Rombach, Huan Ling, Tim Dockhorn, Seung Wook Kim, Sanja Fidler, and
+Karsten Kreis. Align your latents: High-resolution video synthesis with latent diffusion models. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 22563–
+22575, 2023.
+[6] Ryan Burgert, Yuancheng Xu, Wenqi Xian, Oliver Pilarski, Pascal Clausen, Mingming He, Li Ma, Yitong
+Deng, Lingxiao Li, Mohsen Mousavi, et al. Go-with-the-flow: Motion-controllable video diffusion models
+using real-time warped noise. In Proceedings of the Computer Vision and Pattern Recognition Conference,
+pages 13–23, 2025.
+[7] Kelvin CK Chan, Yang Zhao, Xuhui Jia, Ming-Hsuan Yang, and Huisheng Wang. Improving subject-driven
+image synthesis with subject-agnostic guidance. In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 6733–6742, 2024.
+[8] Bowen Chen, Mengyi Zhao, Haomiao Sun, Li Chen, Xu Wang, Kang Du, and Xinglong Wu. Xverse:
+Consistent multi-subject control of identity and semantic attributes via dit modulation. arXiv preprint
+arXiv:2506.21416, 2025.
+[9] Haoxin Chen, Menghan Xia, Yingqing He, Yong Zhang, Xiaodong Cun, Shaoshu Yang, Jinbo Xing,
+Yaofang Liu, Qifeng Chen, Xintao Wang, et al. Videocrafter1: Open diffusion models for high-quality
+video generation. arXiv preprint arXiv:2310.19512, 2023.
+[10] Xi Chen, Zhifei Zhang, He Zhang, Yuqian Zhou, Soo Ye Kim, Qing Liu, Yijun Li, Jianming Zhang,
+Nanxuan Zhao, Yilin Wang, et al. Unireal: Universal image generation and editing via learning real-world
+dynamics. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pages 12501–12511, 2025.
+[11] Yuzhuo Chen, Zehua Ma, Jianhua Wang, Kai Kang, Shunyu Yao, and Weiming Zhang. Lamic: Layout-
+aware multi-image composition via scalability of multimodal diffusion transformer. In Proceedings of the
+AAAI Conference on Artificial Intelligence, volume 40, pages 3174–3182, 2026.
+[12] Yufeng Cheng, Wenxu Wu, Shaojin Wu, Mengqi Huang, Fei Ding, and Qian He. Umo: Scaling multi-
+identity consistency for image customization via matching reward. arXiv preprint arXiv:2509.06818,
+2025.
+[13] Yusuf Dalva, Hidir Yesiltepe, and Pinar Yanardag. Lorashop: Training-free multi-concept image generation
+and editing with rectified flow transformers. arXiv preprint arXiv:2505.23758, 2025.
+[14] Giannis Daras, Weili Nie, Karsten Kreis, Alexandros G Dimakis, Morteza Mardani, Nikola B Kovachki,
+and Arash Vahdat. Warped diffusion: Solving video inverse problems with image diffusion models.
+Advances in Neural Information Processing Systems, 37:101116–101143, 2024.
+[15] Yufan Deng, Yuanyang Yin, Xun Guo, Yizhi Wang, Jacob Zhiyuan Fang, Shenghai Yuan, Yiding Yang,
+Angtian Wang, Bo Liu, Haibin Huang, et al. Magref: Masked guidance for any-reference video generation
+with subject disentanglement. arXiv preprint arXiv:2505.23742, 2025.
+[16] Ganggui Ding, Canyu Zhao, Wen Wang, Zhen Yang, Zide Liu, Hao Chen, and Chunhua Shen. Freecustom:
+Tuning-free customized image generation for multi-concept composition. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, pages 9089–9098, 2024.
+11
+
+
+[17] Haoran Feng, Zehuan Huang, Lin Li, and Lu Sheng. Personalize anything for free with diffusion transformer.
+In Proceedings of the AAAI Conference on Artificial Intelligence, volume 40, pages 3921–3929, 2026.
+[18] Stephanie Fu, Netanel Tamir, Shobhita Sundaram, Lucy Chai, Richard Zhang, Tali Dekel, and Phillip
+Isola. Dreamsim: Learning new dimensions of human visual similarity using synthetic data. arXiv preprint
+arXiv:2306.09344, 2023.
+[19] Zhoujie Fu, Xianfang Zeng, Jinghong Lan, Xinyao Liao, Cheng Chen, Junyi Chen, Jiacheng Wei, Wei
+Cheng, Shiyu Liu, Yunuo Chen, et al. imontage: Unified, versatile, highly dynamic many-to-many image
+generation. arXiv preprint arXiv:2511.20635, 2025.
+[20] Yifan Gao, Zihang Lin, Chuanbin Liu, Min Zhou, Tiezheng Ge, Bo Zheng, and Hongtao Xie. Postermaker:
+Towards high-quality product poster generation with accurate text rendering. In Proceedings of the
+Computer Vision and Pattern Recognition Conference, pages 8083–8093, 2025.
+[21] Anujraaj Argo Goyal, Guocheng Gordon Qian, Huseyin Coskun, Aarush Gupta, Himmy Tam, Daniil
+Ostashev, Ju Hu, Dhritiman Sagar, Sergey Tulyakov, Kfir Aberman, et al. Preventing shortcuts in adapter
+training via providing the shortcuts. arXiv preprint arXiv:2510.20887, 2025.
+[22] Yuchao Gu, Xintao Wang, Jay Zhangjie Wu, Yujun Shi, Yunpeng Chen, Zihan Fan, Wuyou Xiao, Rui Zhao,
+Shuning Chang, Weijia Wu, et al. Mix-of-show: Decentralized low-rank adaptation for multi-concept
+customization of diffusion models. Advances in Neural Information Processing Systems, 36:15890–15902,
+2023.
+[23] Yuwei Guo, Ceyuan Yang, Anyi Rao, Zhengyang Liang, Yaohui Wang, Yu Qiao, Maneesh Agrawala,
+Dahua Lin, and Bo Dai. Animatediff: Animate your personalized text-to-image diffusion models without
+specific tuning. arXiv preprint arXiv:2307.04725, 2023.
+[24] Jinghao Hu, Yuhe Zhang, GuoHua Geng, Kang Li, and Han Zhang. Storytailor: A zero-shot pipeline for
+action-rich multi-subject visual narratives. arXiv preprint arXiv:2602.21273, 2026.
+[25] Xirui Hu, Jiahao Wang, Hao Chen, Weizhan Zhang, Benqi Wang, Yikun Li, and Haishun Nan. Dynamicid:
+Zero-shot multi-id image personalization with flexible facial editability. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, pages 10549–10559, 2025.
+[26] Hao Kang, Stathi Fotiadis, Liming Jiang, Qing Yan, Yumin Jia, Zichuan Liu, Min Jin Chong, and Xin
+Lu. Flux already knows–activating subject-driven image generation without training. arXiv preprint
+arXiv:2504.11478, 2025.
+[27] Nupur Kumari, Bingliang Zhang, Richard Zhang, Eli Shechtman, and Jun-Yan Zhu. Multi-concept
+customization of text-to-image diffusion. In Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 1931–1941, 2023.
+[28] Mingxiao Li, Mang Ning, and Marie-Francine Moens. Consistent story generation: Unlocking the potential
+of zigzag sampling. In The Thirty-ninth Annual Conference on Neural Information Processing Systems,
+2025.
+[29] Shuang Li, Chao Deng, Hang Chen, Liqun Liu, Zhenyu Hu, Te Cao, Mengge Xue, Yuan Chen, Peng
+Shu, Huan Yu, et al. Disentangling to re-couple: Resolving the similarity-controllability paradox in
+subject-driven text-to-image generation. arXiv preprint arXiv:2604.00849, 2026.
+[30] Yijing Lin, Mengqi Huang, Shuhan Zhuang, and Zhendong Mao. Realgeneral: Unifying visual generation
+via temporal in-context learning with video models. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pages 14994–15004, 2025.
+[31] Yohai Mazuz, Janna Bruner, and Lior Wolf. Consistyle: Style diversity in training-free consistent t2i
+generation. ACM Transactions on Graphics (TOG), 44(6):1–16, 2025.
+[32] Chong Mou, Xintao Wang, Liangbin Xie, Yanze Wu, Jian Zhang, Zhongang Qi, and Ying Shan. T2i-
+adapter: Learning adapters to dig out more controllable ability for text-to-image diffusion models. In
+Proceedings of the AAAI conference on artificial intelligence, volume 38, pages 4296–4304, 2024.
+[33] Chong Mou, Yanze Wu, Wenxu Wu, Zinan Guo, Pengze Zhang, Yufeng Cheng, Yiming Luo, Fei Ding,
+Shiwen Zhang, Xinghui Li, et al. Dreamo: A unified framework for image customization. In Proceedings
+of the SIGGRAPH Asia 2025 Conference Papers, pages 1–12, 2025.
+[34] Jisu Nam, Soowon Son, Dahyun Chung, Jiyoung Kim, Siyoon Jin, Junhwa Hur, and Seungryong Kim.
+Emergent temporal correspondences from video diffusion transformers. arXiv preprint arXiv:2506.17220,
+2025.
+12
+
+
+[35] Xinyu Pu, Hongsong Wang, Jie Gui, and Pan Zhou. Drag as evidence: Motion-grounded latent recomposi-
+tion for drag-based editing. arXiv preprint arXiv:2609.36755, 2026.
+[36] Xinyu Pu, Hongsong Wang, Jie Gui, and Pan Zhou. Dragging with geometry: From pixels to geometry-
+guided image editing. In International Conference on Learning Representations, volume 2026, pages
+151958–151984, 2026.
+[37] Noam Rotstein, Gal Yona, Daniel Silver, Roy Velich, David Bensaïd, and Ron Kimmel. Pathways on the
+image manifold: Image editing via video generation. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 7857–7866, 2025.
+[38] Nataniel Ruiz, Yuanzhen Li, Varun Jampani, Yael Pritch, Michael Rubinstein, and Kfir Aberman. Dream-
+booth: Fine tuning text-to-image diffusion models for subject-driven generation. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 22500–22510, 2023.
+[39] Dong She, Siming Fu, Mushui Liu, Qiaoqiao Jin, Hualiang Wang, Mu Liu, and Jidong Jiang. Mosaic:
+Multi-subject personalized generation via correspondence-aware alignment and disentanglement. arXiv
+preprint arXiv:2509.01977, 2025.
+[40] Chaehun Shin, Jooyoung Choi, Heeseung Kim, and Sungroh Yoon. Large-scale text-to-image model
+with inpainting is a zero-shot subject-driven image generator. In Proceedings of the Computer Vision and
+Pattern Recognition Conference, pages 7986–7996, 2025.
+[41] Yeji Song, Wonsik Shin, Junsoo Lee, Jeesoo Kim, and Nojun Kwak. Save: Protagonist diversification with
+s tructure a gnostic v ideo e diting. In European Conference on Computer Vision, pages 41–57. Springer,
+2024.
+[42] Zhenxiong Tan, Songhua Liu, Xingyi Yang, Qiaochu Xue, and Xinchao Wang. Ominicontrol: Minimal
+and universal control for diffusion transformer. In Proceedings of the IEEE/CVF International Conference
+on Computer Vision, pages 14940–14950, 2025.
+[43] Bowen Tang, Tao Wang, Miao Zhang, Xin Yu, Jinwei Chen, Bo Li, and Kaihao Zhang. Evolutionary multi-
+agent collaboration for real-world video face restoration. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 8175–8184, 2026.
+[44] Gemma Canet Tarrés, Manel Baradad, Francesc Moreno-Noguer, and Yumeng Li. Placid: Identity-
+preserving multi-object compositing via video diffusion with synthetic trajectories.
+arXiv preprint
+arXiv:2602.00267, 2026.
+[45] Yoad Tewel, Omri Kaduri, Rinon Gal, Yoni Kasten, Lior Wolf, Gal Chechik, and Yuval Atzmon. Training-
+free consistent text-to-image generation. ACM Transactions on Graphics (TOG), 43(4):1–18, 2024.
+[46] Chengzhuo Tong, Mingkun Chang, Shenglong Zhang, Yuran Wang, Cheng Liang, Zhizheng Zhao,
+Ruichuan An, Bohan Zeng, Yang Shi, Yifan Dai, et al. Cof-t2i: Video models as pure visual reasoners for
+text-to-image generation. arXiv preprint arXiv:2601.10061, 2026.
+[47] Mengyu Wang, Henghui Ding, Jianing Peng, Yao Zhao, Yunpeng Chen, and Yunchao Wei. Characonsist:
+Fine-grained consistent character generation. In Proceedings of the IEEE/CVF International Conference
+on Computer Vision, pages 16058–16067, 2025.
+[48] Tao Wang, Peiwen Xia, Bowen Tang, Jinwei Chen, Kaihao Zhang, and Bi Li. Fair and faithful: A diffusion-
+enhanced dataset and hybrid state-space mamba for face super-resolution. In European Conference on
+Computer Vision, pages 281–300, 2026.
+[49] Xierui Wang, Siming Fu, Qihan Huang, Wanggui He, and Hao Jiang. Ms-diffusion: Multi-subject zero-shot
+image personalization with layout guidance. arXiv preprint arXiv:2406.07209, 2024.
+[50] Yuran Wang, Bohan Zeng, Chengzhuo Tong, Wenxuan Liu, Yang Shi, Xiaochen Ma, Hao Liang, Yuanxing
+Zhang, and Wentao Zhang. Scone: Bridging composition and distinction in subject-driven image generation
+via unified understanding-generation modeling. arXiv preprint arXiv:2512.12675, 2025.
+[51] Chenyuan Wu, Pengfei Zheng, Ruiran Yan, Shitao Xiao, Xin Luo, Yueze Wang, Wanli Li, Xiyan Jiang,
+Yexin Liu, Junjie Zhou, et al. Omnigen2: Exploration to advanced multimodal generation. arXiv preprint
+arXiv:2506.18871, 2025.
+[52] Jay Zhangjie Wu, Xuanchi Ren, Tianchang Shen, Tianshi Cao, Kai He, Yifan Lu, Ruiyuan Gao, Enze Xie,
+Shiyi Lan, Jose M Alvarez, et al. Chronoedit: Towards temporal reasoning for image editing and world
+simulation. arXiv preprint arXiv:2510.04290, 2025.
+13
+
+
+[53] Shaojin Wu, Mengqi Huang, Yufeng Cheng, Wenxu Wu, Jiahe Tian, Yiming Luo, Fei Ding, and Qian He.
+Uso: Unified style and subject-driven generation via disentangled and reward learning. arXiv preprint
+arXiv:2508.18966, 2025.
+[54] Shaojin Wu, Mengqi Huang, Wenxu Wu, Yufeng Cheng, Fei Ding, and Qian He. Less-to-more gener-
+alization: Unlocking more controllability by in-context generation. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, pages 18682–18692, 2025.
+[55] Tao Wu, Yibo Jiang, Yehao Lu, Zhizhong Wang, Zeyi Huang, Zequn Qin, and Xi Li. Multicrafter: High-
+fidelity multi-subject generation via disentangled attention and identity-aware preference alignment. arXiv
+preprint arXiv:2509.21953, 2025.
+[56] Shitao Xiao, Yueze Wang, Junjie Zhou, Huaying Yuan, Xingrun Xing, Ruiran Yan, Chaofan Li, Shuting
+Wang, Tiejun Huang, and Zheng Liu. Omnigen: Unified image generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, pages 13294–13304, 2025.
+[57] Hengyuan Xu, Wei Cheng, Peng Xing, Yixiao Fang, Shuhan Wu, Rui Wang, Xianfang Zeng, Daxin Jiang,
+Gang Yu, Xingjun Ma, et al. Withanyone: Towards controllable and id consistent image generation. arXiv
+preprint arXiv:2510.14975, 2025.
+[58] Hailong Yan, Junjian Huang, and Tingwen Huang. Igdnet: Zero-shot robust underexposed image enhance-
+ment via illumination-guided and denoising. IEEE Transactions on Artificial Intelligence, 2025.
+[59] Hailong Yan, Ao Li, Xiangtao Zhang, Zhe Liu, Zenglin Shi, Ce Zhu, and Le Zhang. Mobileie: An
+extremely lightweight and effective convnet for real-time image enhancement on mobile devices. In 2025
+IEEE/CVF International Conference on Computer Vision (ICCV), pages 21949–21960. IEEE, 2025.
+[60] Hailong Yan, Shice Liu, Tao Wang, Xiangtao Zhang, Yijie Zhong, Jinwei Chen, Le Zhang, and Bo Li.
+Animeagent: Is the multi-agent via image-to-video models a good disney storytelling artist? arXiv preprint
+arXiv:2602.20664, 2026.
+[61] Hailong Yan, Shice Liu, Xiangtao Zhang, Lujian Yao, Fengxiang Yang, Jinwei Chen, and Bo Li. Re-
+visiting lightweight low-light image enhancement: From a yuv color space perspective. arXiv preprint
+arXiv:2601.17349, 2026.
+[62] Hu Ye, Jun Zhang, Sibo Liu, Xiao Han, and Wei Yang. Ip-adapter: Text compatible image prompt adapter
+for text-to-image diffusion models. arXiv preprint arXiv:2308.06721, 2023.
+[63] Mingyang Yi, Aoxue Li, Yi Xin, and Zhenguo Li. Towards understanding the working mechanism of
+text-to-image diffusion model. Advances in Neural Information Processing Systems, 37:55342–55369,
+2024.
+[64] Yanbing Zhang, Zhe Wang, Qin Zhou, and Mengping Yang. Freecus: Free lunch subject-driven customiza-
+tion in diffusion transformers. In Proceedings of the IEEE/CVF International Conference on Computer
+Vision, pages 15521–15531, 2025.
+[65] Yuxin Zhang, Minyan Luo, Weiming Dong, Xiao Yang, Haibin Huang, Chongyang Ma, Oliver Deussen,
+Tong-Yee Lee, and Changsheng Xu. Ip-prompter: Training-free theme-specific image generation via
+dynamic visual prompting. In Proceedings of the Special Interest Group on Computer Graphics and
+Interactive Techniques Conference Conference Papers, pages 1–12, 2025.
+[66] Zechuan Zhang, Zhenyuan Chen, Zongxin Yang, and Yi Yang. Are image-to-video models good zero-shot
+image editors? arXiv preprint arXiv:2511.19435, 2025.
+[67] Cailin Zhuang, Ailin Huang, Yaoqi Hu, Jingwei Wu, Wei Cheng, Jiaqi Liao, Hongyuan Wang, Xinyao Liao,
+Weiwei Cai, Hengyuan Xu, et al. Vistorybench: Comprehensive benchmark suite for story visualization.
+arXiv preprint arXiv:2505.24862, 2025.
+14
